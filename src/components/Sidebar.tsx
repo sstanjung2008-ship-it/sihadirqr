@@ -23,8 +23,12 @@ import {
   CheckCircle2,
   LogOut,
   User,
-  Scale
+  Scale,
+  Cloud,
+  CloudCheck,
+  RefreshCw
 } from 'lucide-react';
+import { getCloudSyncStatus, CloudSyncStatus } from '../lib/storage';
 
 
 interface SidebarProps {
@@ -50,6 +54,17 @@ export const Sidebar: React.FC<SidebarProps> = ({
 }) => {
   const [timeStr, setTimeStr] = useState('');
   const [isMobileOpen, setIsMobileOpen] = useState(false);
+  const [syncStatus, setSyncStatus] = useState<CloudSyncStatus>(() => getCloudSyncStatus());
+
+  useEffect(() => {
+    const handleStatus = (e: any) => {
+      if (e.detail?.status) {
+        setSyncStatus(e.detail.status);
+      }
+    };
+    window.addEventListener('sihadir_cloud_status_changed', handleStatus);
+    return () => window.removeEventListener('sihadir_cloud_status_changed', handleStatus);
+  }, []);
 
   useEffect(() => {
     const updateTime = () => {
@@ -354,6 +369,28 @@ export const Sidebar: React.FC<SidebarProps> = ({
             </div>
             <span className="text-[10px] font-semibold text-slate-400 bg-slate-900 px-2 py-0.5 rounded-md border border-slate-700">
               Masuk: {schoolProfile.startTime}
+            </span>
+          </div>
+
+          {/* Cloud Database Sync Indicator */}
+          <div className="flex items-center justify-between text-[11px] bg-sky-950/40 border border-sky-800/50 p-2 rounded-xl text-sky-300">
+            <div className="flex items-center space-x-2">
+              {syncStatus === 'syncing' ? (
+                <RefreshCw className="w-3.5 h-3.5 text-amber-400 animate-spin" />
+              ) : syncStatus === 'connected' ? (
+                <span className="relative flex h-2 w-2">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-400"></span>
+                </span>
+              ) : (
+                <Cloud className="w-3.5 h-3.5 text-slate-400" />
+              )}
+              <span className="font-bold text-[11px]">
+                {syncStatus === 'connected' ? 'Cloud Database: Terhubung' : syncStatus === 'syncing' ? 'Menyinkronkan Cloud...' : 'Database: Mode Offline'}
+              </span>
+            </div>
+            <span className={`text-[10px] font-bold ${syncStatus === 'connected' ? 'text-emerald-400' : syncStatus === 'syncing' ? 'text-amber-400' : 'text-slate-400'}`}>
+              {syncStatus === 'connected' ? 'Real-time' : syncStatus === 'syncing' ? 'Sync' : 'Lokal'}
             </span>
           </div>
 

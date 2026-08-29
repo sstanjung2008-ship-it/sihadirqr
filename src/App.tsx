@@ -39,7 +39,8 @@ import {
   getCharacterPredicateSettings,
   saveCharacterPredicateSettings,
   getUserSession,
-  saveUserSession
+  saveUserSession,
+  initFirestoreRealtimeSync
 } from './lib/storage';
 import { sendWhatsAppGatewayMessage } from './lib/exportUtils';
 
@@ -105,6 +106,7 @@ export default function App() {
 
 
   useEffect(() => {
+    initFirestoreRealtimeSync();
     window.addEventListener('sihadir_storage_updated', refreshDataFromStorage);
     return () => {
       window.removeEventListener('sihadir_storage_updated', refreshDataFromStorage);

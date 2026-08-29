@@ -11,6 +11,7 @@ import {
   INITIAL_STUDENT_CHARACTER_LOGS,
   INITIAL_LEARNING_JOURNALS
 } from '../data/mockData';
+import { db, doc, setDoc, onSnapshot } from './firebase';
 
 const KEYS = {
   PROFILE: 'sihadir_school_profile_v2',
@@ -28,19 +29,97 @@ const KEYS = {
   SESSION: 'sihadir_user_session_v2',
 };
 
+export type CloudSyncStatus = 'connected' | 'syncing' | 'offline' | 'error';
+let currentSyncStatus: CloudSyncStatus = 'syncing';
+let isFirestoreInitialized = false;
+
+export function getCloudSyncStatus(): CloudSyncStatus {
+  return currentSyncStatus;
+}
+
+const setCloudSyncStatus = (status: CloudSyncStatus) => {
+  currentSyncStatus = status;
+  window.dispatchEvent(new CustomEvent('sihadir_cloud_status_changed', { detail: { status } }));
+};
+
+const notifyStorageUpdated = () => {
+  setTimeout(() => {
+    window.dispatchEvent(new Event('sihadir_storage_updated'));
+  }, 0);
+};
+
+// Push local data update to Firestore
+async function syncToCloud(key: string, data: any) {
+  try {
+    setCloudSyncStatus('syncing');
+    const docRef = doc(db, 'sihadir_app_data', key);
+    await setDoc(docRef, { 
+      data: JSON.stringify(data), 
+      updatedAt: Date.now() 
+    });
+    setCloudSyncStatus('connected');
+  } catch (err) {
+    console.warn('[Firestore Sync] Cloud save error, using offline local storage:', err);
+    setCloudSyncStatus('offline');
+  }
+}
+
+// Initialize Realtime Sync from Firestore
+export function initFirestoreRealtimeSync() {
+  if (isFirestoreInitialized || typeof window === 'undefined') return;
+  isFirestoreInitialized = true;
+
+  const SYNC_KEYS: Array<{ key: string; getDefault: () => any }> = [
+    { key: KEYS.PROFILE, getDefault: () => INITIAL_SCHOOL_PROFILE },
+    { key: KEYS.CLASSES, getDefault: () => INITIAL_CLASSES },
+    { key: KEYS.STUDENTS, getDefault: () => INITIAL_STUDENTS },
+    { key: KEYS.ATTENDANCE, getDefault: () => generateInitialAttendanceHistory(INITIAL_STUDENTS) },
+    { key: KEYS.LEAVES, getDefault: () => INITIAL_LEAVE_REQUESTS },
+    { key: KEYS.WA_LOGS, getDefault: () => INITIAL_WA_LOGS },
+    { key: KEYS.TEACHERS, getDefault: () => INITIAL_TEACHERS },
+    { key: KEYS.LEARNING_JOURNALS, getDefault: () => INITIAL_LEARNING_JOURNALS },
+    { key: KEYS.CHARACTER_TRAITS, getDefault: () => INITIAL_CHARACTER_TRAITS },
+    { key: KEYS.CHARACTER_LOGS, getDefault: () => INITIAL_STUDENT_CHARACTER_LOGS },
+    { key: KEYS.CHARACTER_PREDICATES, getDefault: () => INITIAL_CHARACTER_PREDICATES },
+  ];
+
+  SYNC_KEYS.forEach(({ key, getDefault }) => {
+    try {
+      const docRef = doc(db, 'sihadir_app_data', key);
+      onSnapshot(docRef, (docSnap) => {
+        if (docSnap.exists()) {
+          const payload = docSnap.data();
+          if (payload && payload.data) {
+            const currentLocal = localStorage.getItem(key);
+            if (currentLocal !== payload.data) {
+              localStorage.setItem(key, payload.data);
+              notifyStorageUpdated();
+            }
+          }
+          setCloudSyncStatus('connected');
+        } else {
+          // Document does not exist in cloud yet, seed with current local data or default
+          const currentLocal = localStorage.getItem(key);
+          const initialValue = currentLocal ? JSON.parse(currentLocal) : getDefault();
+          syncToCloud(key, initialValue);
+        }
+      }, (err) => {
+        console.warn(`[Firestore Listen] Error on key ${key}:`, err);
+        setCloudSyncStatus('offline');
+      });
+    } catch (e) {
+      console.warn(`[Firestore Init] Exception on key ${key}:`, e);
+      setCloudSyncStatus('offline');
+    }
+  });
+}
+
 export const INITIAL_CHARACTER_PREDICATES: CharacterPredicateSettings = {
   minA: 30,
   minB: 10,
   minC: 0,
   minD: -20,
   minE: -50,
-};
-
-
-const notifyStorageUpdated = () => {
-  setTimeout(() => {
-    window.dispatchEvent(new Event('sihadir_storage_updated'));
-  }, 0);
 };
 
 // Storage Helpers
@@ -69,6 +148,7 @@ export function saveSchoolProfile(profile: SchoolProfile): void {
     console.error('Error saving school profile to localStorage:', err);
   }
   notifyStorageUpdated();
+  syncToCloud(KEYS.PROFILE, profile);
 }
 
 export function getSchoolClasses(): SchoolClass[] {
@@ -89,6 +169,7 @@ export function getSchoolClasses(): SchoolClass[] {
 export function saveSchoolClasses(classes: SchoolClass[]): void {
   localStorage.setItem(KEYS.CLASSES, JSON.stringify(classes));
   notifyStorageUpdated();
+  syncToCloud(KEYS.CLASSES, classes);
 }
 
 export function getStudents(): Student[] {
@@ -107,6 +188,7 @@ export function getStudents(): Student[] {
 export function saveStudents(students: Student[]): void {
   localStorage.setItem(KEYS.STUDENTS, JSON.stringify(students));
   notifyStorageUpdated();
+  syncToCloud(KEYS.STUDENTS, students);
 }
 
 export function getAttendanceRecords(): AttendanceRecord[] {
@@ -127,6 +209,7 @@ export function getAttendanceRecords(): AttendanceRecord[] {
 export function saveAttendanceRecords(records: AttendanceRecord[]): void {
   localStorage.setItem(KEYS.ATTENDANCE, JSON.stringify(records));
   notifyStorageUpdated();
+  syncToCloud(KEYS.ATTENDANCE, records);
 }
 
 export function getLeaveRequests(): LeaveRequest[] {
@@ -145,6 +228,7 @@ export function getLeaveRequests(): LeaveRequest[] {
 export function saveLeaveRequests(requests: LeaveRequest[]): void {
   localStorage.setItem(KEYS.LEAVES, JSON.stringify(requests));
   notifyStorageUpdated();
+  syncToCloud(KEYS.LEAVES, requests);
 }
 
 export function getWaLogs(): WhatsAppLog[] {
@@ -163,6 +247,7 @@ export function getWaLogs(): WhatsAppLog[] {
 export function saveWaLogs(logs: WhatsAppLog[]): void {
   localStorage.setItem(KEYS.WA_LOGS, JSON.stringify(logs));
   notifyStorageUpdated();
+  syncToCloud(KEYS.WA_LOGS, logs);
 }
 
 export function getTeachers(): Teacher[] {
@@ -181,6 +266,7 @@ export function getTeachers(): Teacher[] {
 export function saveTeachers(teachers: Teacher[]): void {
   localStorage.setItem(KEYS.TEACHERS, JSON.stringify(teachers));
   notifyStorageUpdated();
+  syncToCloud(KEYS.TEACHERS, teachers);
 }
 
 export function getLearningJournals(): LearningJournal[] {
@@ -199,6 +285,7 @@ export function getLearningJournals(): LearningJournal[] {
 export function saveLearningJournals(journals: LearningJournal[]): void {
   localStorage.setItem(KEYS.LEARNING_JOURNALS, JSON.stringify(journals));
   notifyStorageUpdated();
+  syncToCloud(KEYS.LEARNING_JOURNALS, journals);
 }
 
 export function getCharacterTraits(): CharacterTrait[] {
@@ -217,6 +304,7 @@ export function getCharacterTraits(): CharacterTrait[] {
 export function saveCharacterTraits(traits: CharacterTrait[]): void {
   localStorage.setItem(KEYS.CHARACTER_TRAITS, JSON.stringify(traits));
   notifyStorageUpdated();
+  syncToCloud(KEYS.CHARACTER_TRAITS, traits);
 }
 
 export function getStudentCharacterLogs(): StudentCharacterLog[] {
@@ -235,6 +323,7 @@ export function getStudentCharacterLogs(): StudentCharacterLog[] {
 export function saveStudentCharacterLogs(logs: StudentCharacterLog[]): void {
   localStorage.setItem(KEYS.CHARACTER_LOGS, JSON.stringify(logs));
   notifyStorageUpdated();
+  syncToCloud(KEYS.CHARACTER_LOGS, logs);
 }
 
 export function getCharacterPredicateSettings(): CharacterPredicateSettings {
@@ -260,6 +349,7 @@ export function getCharacterPredicateSettings(): CharacterPredicateSettings {
 export function saveCharacterPredicateSettings(settings: CharacterPredicateSettings): void {
   localStorage.setItem(KEYS.CHARACTER_PREDICATES, JSON.stringify(settings));
   notifyStorageUpdated();
+  syncToCloud(KEYS.CHARACTER_PREDICATES, settings);
 }
 
 export function getStudentGradeAssessments(): StudentGradeAssessment[] {
@@ -275,6 +365,7 @@ export function getStudentGradeAssessments(): StudentGradeAssessment[] {
 export function saveStudentGradeAssessments(assessments: StudentGradeAssessment[]): void {
   localStorage.setItem(KEYS.GRADES, JSON.stringify(assessments));
   notifyStorageUpdated();
+  syncToCloud(KEYS.GRADES, assessments);
 }
 
 export function getUserSession(): UserSession | null {

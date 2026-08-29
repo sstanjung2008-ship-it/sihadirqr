@@ -28,8 +28,8 @@ import {
   CloudCheck,
   RefreshCw
 } from 'lucide-react';
-import { getCloudSyncStatus, CloudSyncStatus } from '../lib/storage';
-
+import { getCloudSyncStatus, CloudSyncStatus, getStudents } from '../lib/storage';
+import { MultiDeviceSyncModal } from './MultiDeviceSyncModal';
 
 interface SidebarProps {
   currentRole: UserRole;
@@ -40,6 +40,7 @@ interface SidebarProps {
   unreadLeavesCount: number;
   userSession?: UserSession | null;
   onLogout?: () => void;
+  studentCount?: number;
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({
@@ -51,10 +52,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
   unreadLeavesCount,
   userSession,
   onLogout,
+  studentCount,
 }) => {
   const [timeStr, setTimeStr] = useState('');
   const [isMobileOpen, setIsMobileOpen] = useState(false);
   const [syncStatus, setSyncStatus] = useState<CloudSyncStatus>(() => getCloudSyncStatus());
+  const [showSyncModal, setShowSyncModal] = useState(false);
+  const currentStudentCount = studentCount !== undefined ? studentCount : getStudents().length;
 
   useEffect(() => {
     const handleStatus = (e: any) => {
@@ -372,8 +376,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
             </span>
           </div>
 
-          {/* Cloud Database Sync Indicator */}
-          <div className="flex items-center justify-between text-[11px] bg-sky-950/40 border border-sky-800/50 p-2 rounded-xl text-sky-300">
+          {/* Cloud Database Sync Indicator (Clickable to open Sync Modal) */}
+          <button
+            type="button"
+            onClick={() => setShowSyncModal(true)}
+            className="w-full flex items-center justify-between text-[11px] bg-sky-950/50 hover:bg-sky-900/60 border border-sky-800/60 p-2 rounded-xl text-sky-300 transition-all cursor-pointer text-left shadow-2xs group"
+            title="Klik untuk menyamakan data antar-perangkat"
+          >
             <div className="flex items-center space-x-2">
               {syncStatus === 'syncing' ? (
                 <RefreshCw className="w-3.5 h-3.5 text-amber-400 animate-spin" />
@@ -385,14 +394,14 @@ export const Sidebar: React.FC<SidebarProps> = ({
               ) : (
                 <Cloud className="w-3.5 h-3.5 text-slate-400" />
               )}
-              <span className="font-bold text-[11px]">
-                {syncStatus === 'connected' ? 'Cloud Database: Terhubung' : syncStatus === 'syncing' ? 'Menyinkronkan Cloud...' : 'Database: Mode Offline'}
+              <span className="font-bold text-[11px] group-hover:text-white transition-colors">
+                {syncStatus === 'connected' ? 'Cloud: Terhubung' : syncStatus === 'syncing' ? 'Menyinkronkan...' : 'Database: Mode Offline'}
               </span>
             </div>
-            <span className={`text-[10px] font-bold ${syncStatus === 'connected' ? 'text-emerald-400' : syncStatus === 'syncing' ? 'text-amber-400' : 'text-slate-400'}`}>
-              {syncStatus === 'connected' ? 'Real-time' : syncStatus === 'syncing' ? 'Sync' : 'Lokal'}
+            <span className="text-[10px] font-extrabold text-sky-400 bg-sky-900/60 px-1.5 py-0.5 rounded-md border border-sky-700/60 group-hover:bg-sky-600 group-hover:text-white transition-colors">
+              Sinkron ↗
             </span>
-          </div>
+          </button>
 
           {/* WhatsApp Status Indicator */}
           <div className="flex items-center justify-between text-[11px] bg-emerald-950/40 border border-emerald-800/50 p-2 rounded-xl text-emerald-300">
@@ -408,6 +417,14 @@ export const Sidebar: React.FC<SidebarProps> = ({
         </div>
 
       </aside>
+
+      {/* Multi-Device Cloud Sync Modal */}
+      <MultiDeviceSyncModal
+        isOpen={showSyncModal}
+        onClose={() => setShowSyncModal(false)}
+        currentStudentCount={currentStudentCount}
+        syncStatus={syncStatus}
+      />
     </>
   );
 };

@@ -646,6 +646,7 @@ export default function App() {
         unreadLeavesCount={unreadLeavesCount}
         userSession={userSession}
         onLogout={handleLogout}
+        studentCount={students.length}
       />
 
       {/* Right Content Area */}

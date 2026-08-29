@@ -49,7 +49,7 @@ const notifyStorageUpdated = () => {
 };
 
 // Push local data update to Firestore
-async function syncToCloud(key: string, data: any) {
+export async function syncToCloud(key: string, data: any) {
   try {
     setCloudSyncStatus('syncing');
     const docRef = doc(db, 'sihadir_app_data', key);
@@ -64,35 +64,313 @@ async function syncToCloud(key: string, data: any) {
   }
 }
 
+// Intelligent entity mergers to ensure no data is lost across multiple devices
+export function mergeStudentLists(local: Student[], cloud: Student[]): Student[] {
+  const map = new Map<string, Student>();
+  // 1. Index cloud items
+  cloud.forEach(s => {
+    const key = (s.nisn && s.nisn.trim()) || (s.nis && s.nis.trim()) || s.id;
+    if (key) map.set(key, s);
+  });
+  // 2. Merge local items (local takes priority if updated or new)
+  local.forEach(s => {
+    const key = (s.nisn && s.nisn.trim()) || (s.nis && s.nis.trim()) || s.id;
+    if (key) {
+      if (map.has(key)) {
+        map.set(key, { ...map.get(key)!, ...s });
+      } else {
+        map.set(key, s);
+      }
+    }
+  });
+  return Array.from(map.values());
+}
+
+export function mergeClassLists(local: SchoolClass[], cloud: SchoolClass[]): SchoolClass[] {
+  const map = new Map<string, SchoolClass>();
+  cloud.forEach(c => map.set(c.id || c.name.toLowerCase().trim(), c));
+  local.forEach(c => map.set(c.id || c.name.toLowerCase().trim(), c));
+  return Array.from(map.values());
+}
+
+export function mergeTeacherLists(local: Teacher[], cloud: Teacher[]): Teacher[] {
+  const map = new Map<string, Teacher>();
+  cloud.forEach(t => map.set(t.nip || t.id, t));
+  local.forEach(t => map.set(t.nip || t.id, t));
+  return Array.from(map.values());
+}
+
+export function mergeAttendanceLists(local: AttendanceRecord[], cloud: AttendanceRecord[]): AttendanceRecord[] {
+  const map = new Map<string, AttendanceRecord>();
+  cloud.forEach(a => map.set(`${a.studentId}_${a.date}`, a));
+  local.forEach(a => map.set(`${a.studentId}_${a.date}`, a));
+  return Array.from(map.values()).sort((a, b) => (b.date + (b.time || '')).localeCompare(a.date + (a.time || '')));
+}
+
+export function mergeGenericListsById<T extends { id: string }>(local: T[], cloud: T[]): T[] {
+  const map = new Map<string, T>();
+  cloud.forEach(item => map.set(item.id, item));
+  local.forEach(item => map.set(item.id, item));
+  return Array.from(map.values());
+}
+
+// Comprehensive multi-device smart synchronization
+export async function smartSyncAndMergeAllWithCloud(): Promise<{ success: boolean; studentCount: number; message: string }> {
+  try {
+    setCloudSyncStatus('syncing');
+    const { getDoc } = await import('./firebase');
+
+    // 1. Sync Students
+    const studentDocRef = doc(db, 'sihadir_app_data', KEYS.STUDENTS);
+    const studentSnap = await getDoc(studentDocRef);
+    let currentLocalStudents = getStudents();
+    let cloudStudents: Student[] = [];
+
+    if (studentSnap.exists() && studentSnap.data()?.data) {
+      try {
+        cloudStudents = JSON.parse(studentSnap.data().data);
+      } catch (e) {
+        console.warn('Error parsing cloud students:', e);
+      }
+    }
+
+    const mergedStudents = mergeStudentLists(currentLocalStudents, cloudStudents);
+    localStorage.setItem(KEYS.STUDENTS, JSON.stringify(mergedStudents));
+    await setDoc(studentDocRef, {
+      data: JSON.stringify(mergedStudents),
+      updatedAt: Date.now(),
+    });
+
+    // 2. Sync Classes
+    const classDocRef = doc(db, 'sihadir_app_data', KEYS.CLASSES);
+    const classSnap = await getDoc(classDocRef);
+    let currentLocalClasses = getSchoolClasses();
+    let cloudClasses: SchoolClass[] = [];
+    if (classSnap.exists() && classSnap.data()?.data) {
+      try {
+        cloudClasses = JSON.parse(classSnap.data().data);
+      } catch {}
+    }
+    const mergedClasses = mergeClassLists(currentLocalClasses, cloudClasses);
+    localStorage.setItem(KEYS.CLASSES, JSON.stringify(mergedClasses));
+    await setDoc(classDocRef, {
+      data: JSON.stringify(mergedClasses),
+      updatedAt: Date.now(),
+    });
+
+    // 3. Sync Teachers
+    const teacherDocRef = doc(db, 'sihadir_app_data', KEYS.TEACHERS);
+    const teacherSnap = await getDoc(teacherDocRef);
+    let currentLocalTeachers = getTeachers();
+    let cloudTeachers: Teacher[] = [];
+    if (teacherSnap.exists() && teacherSnap.data()?.data) {
+      try {
+        cloudTeachers = JSON.parse(teacherSnap.data().data);
+      } catch {}
+    }
+    const mergedTeachers = mergeTeacherLists(currentLocalTeachers, cloudTeachers);
+    localStorage.setItem(KEYS.TEACHERS, JSON.stringify(mergedTeachers));
+    await setDoc(teacherDocRef, {
+      data: JSON.stringify(mergedTeachers),
+      updatedAt: Date.now(),
+    });
+
+    // 4. Sync Attendance Records
+    const attDocRef = doc(db, 'sihadir_app_data', KEYS.ATTENDANCE);
+    const attSnap = await getDoc(attDocRef);
+    let currentLocalAtt = getAttendanceRecords();
+    let cloudAtt: AttendanceRecord[] = [];
+    if (attSnap.exists() && attSnap.data()?.data) {
+      try {
+        cloudAtt = JSON.parse(attSnap.data().data);
+      } catch {}
+    }
+    const mergedAtt = mergeAttendanceLists(currentLocalAtt, cloudAtt);
+    localStorage.setItem(KEYS.ATTENDANCE, JSON.stringify(mergedAtt));
+    await setDoc(attDocRef, {
+      data: JSON.stringify(mergedAtt),
+      updatedAt: Date.now(),
+    });
+
+    // 5. Sync Leave Requests, Journals, Traits, Logs, Grades
+    const syncGeneric = async <T extends { id: string }>(
+      key: string,
+      getLocal: () => T[]
+    ) => {
+      const dRef = doc(db, 'sihadir_app_data', key);
+      const snap = await getDoc(dRef);
+      let localItems = getLocal();
+      let cItems: T[] = [];
+      if (snap.exists() && snap.data()?.data) {
+        try {
+          cItems = JSON.parse(snap.data().data);
+        } catch {}
+      }
+      const merged = mergeGenericListsById(localItems, cItems);
+      localStorage.setItem(key, JSON.stringify(merged));
+      await setDoc(dRef, { data: JSON.stringify(merged), updatedAt: Date.now() });
+    };
+
+    await syncGeneric(KEYS.LEAVES, getLeaveRequests);
+    await syncGeneric(KEYS.LEARNING_JOURNALS, getLearningJournals);
+    await syncGeneric(KEYS.CHARACTER_TRAITS, getCharacterTraits);
+    await syncGeneric(KEYS.CHARACTER_LOGS, getStudentCharacterLogs);
+    await syncGeneric(KEYS.GRADES, getStudentGradeAssessments);
+
+    notifyStorageUpdated();
+    setCloudSyncStatus('connected');
+
+    return {
+      success: true,
+      studentCount: mergedStudents.length,
+      message: `Berhasil menyinkronkan! Total ${mergedStudents.length} siswa sekarang tersinkron di Cloud dan semua perangkat.`
+    };
+  } catch (err: any) {
+    console.error('[Smart Sync Error]:', err);
+    setCloudSyncStatus('offline');
+    return {
+      success: false,
+      studentCount: getStudents().length,
+      message: `Gagal sinkronisasi: ${err?.message || 'Periksa koneksi internet.'}`
+    };
+  }
+}
+
+// Upload all local data to Cloud database
+export async function forceUploadAllToCloud(): Promise<{ success: boolean; error?: string }> {
+  try {
+    setCloudSyncStatus('syncing');
+    const ALL_KEYS = [
+      KEYS.PROFILE,
+      KEYS.CLASSES,
+      KEYS.STUDENTS,
+      KEYS.ATTENDANCE,
+      KEYS.LEAVES,
+      KEYS.WA_LOGS,
+      KEYS.TEACHERS,
+      KEYS.LEARNING_JOURNALS,
+      KEYS.CHARACTER_TRAITS,
+      KEYS.CHARACTER_LOGS,
+      KEYS.CHARACTER_PREDICATES,
+      KEYS.GRADES,
+    ];
+
+    for (const key of ALL_KEYS) {
+      const raw = localStorage.getItem(key);
+      if (raw) {
+        const docRef = doc(db, 'sihadir_app_data', key);
+        await setDoc(docRef, {
+          data: raw,
+          updatedAt: Date.now(),
+        });
+      }
+    }
+    setCloudSyncStatus('connected');
+    return { success: true };
+  } catch (err: any) {
+    console.error('[Force Upload Cloud Error]', err);
+    setCloudSyncStatus('offline');
+    return { success: false, error: err?.message || 'Gagal mengunggah ke Cloud' };
+  }
+}
+
+// Download latest data from Cloud database
+export async function forceDownloadAllFromCloud(): Promise<{ success: boolean; error?: string }> {
+  try {
+    setCloudSyncStatus('syncing');
+    const { getDoc } = await import('./firebase');
+    const ALL_KEYS = [
+      KEYS.PROFILE,
+      KEYS.CLASSES,
+      KEYS.STUDENTS,
+      KEYS.ATTENDANCE,
+      KEYS.LEAVES,
+      KEYS.WA_LOGS,
+      KEYS.TEACHERS,
+      KEYS.LEARNING_JOURNALS,
+      KEYS.CHARACTER_TRAITS,
+      KEYS.CHARACTER_LOGS,
+      KEYS.CHARACTER_PREDICATES,
+      KEYS.GRADES,
+    ];
+
+    let updatedCount = 0;
+    for (const key of ALL_KEYS) {
+      const docRef = doc(db, 'sihadir_app_data', key);
+      const snap = await getDoc(docRef);
+      if (snap.exists()) {
+        const payload = snap.data();
+        if (payload && payload.data) {
+          localStorage.setItem(key, payload.data);
+          updatedCount++;
+        }
+      }
+    }
+    if (updatedCount > 0) {
+      notifyStorageUpdated();
+    }
+    setCloudSyncStatus('connected');
+    return { success: true };
+  } catch (err: any) {
+    console.error('[Force Download Cloud Error]', err);
+    setCloudSyncStatus('offline');
+    return { success: false, error: err?.message || 'Gagal mengunduh dari Cloud' };
+  }
+}
+
 // Initialize Realtime Sync from Firestore
 export function initFirestoreRealtimeSync() {
   if (isFirestoreInitialized || typeof window === 'undefined') return;
   isFirestoreInitialized = true;
 
-  const SYNC_KEYS: Array<{ key: string; getDefault: () => any }> = [
+  const SYNC_KEYS: Array<{ 
+    key: string; 
+    getDefault: () => any;
+    mergeFn?: (local: any, cloud: any) => any;
+  }> = [
     { key: KEYS.PROFILE, getDefault: () => INITIAL_SCHOOL_PROFILE },
-    { key: KEYS.CLASSES, getDefault: () => INITIAL_CLASSES },
-    { key: KEYS.STUDENTS, getDefault: () => INITIAL_STUDENTS },
-    { key: KEYS.ATTENDANCE, getDefault: () => generateInitialAttendanceHistory(INITIAL_STUDENTS) },
-    { key: KEYS.LEAVES, getDefault: () => INITIAL_LEAVE_REQUESTS },
-    { key: KEYS.WA_LOGS, getDefault: () => INITIAL_WA_LOGS },
-    { key: KEYS.TEACHERS, getDefault: () => INITIAL_TEACHERS },
-    { key: KEYS.LEARNING_JOURNALS, getDefault: () => INITIAL_LEARNING_JOURNALS },
-    { key: KEYS.CHARACTER_TRAITS, getDefault: () => INITIAL_CHARACTER_TRAITS },
-    { key: KEYS.CHARACTER_LOGS, getDefault: () => INITIAL_STUDENT_CHARACTER_LOGS },
+    { key: KEYS.CLASSES, getDefault: () => INITIAL_CLASSES, mergeFn: (l, c) => mergeClassLists(l, c) },
+    { key: KEYS.STUDENTS, getDefault: () => INITIAL_STUDENTS, mergeFn: (l, c) => mergeStudentLists(l, c) },
+    { key: KEYS.ATTENDANCE, getDefault: () => generateInitialAttendanceHistory(INITIAL_STUDENTS), mergeFn: (l, c) => mergeAttendanceLists(l, c) },
+    { key: KEYS.LEAVES, getDefault: () => INITIAL_LEAVE_REQUESTS, mergeFn: (l, c) => mergeGenericListsById(l, c) },
+    { key: KEYS.WA_LOGS, getDefault: () => INITIAL_WA_LOGS, mergeFn: (l, c) => mergeGenericListsById(l, c) },
+    { key: KEYS.TEACHERS, getDefault: () => INITIAL_TEACHERS, mergeFn: (l, c) => mergeTeacherLists(l, c) },
+    { key: KEYS.LEARNING_JOURNALS, getDefault: () => INITIAL_LEARNING_JOURNALS, mergeFn: (l, c) => mergeGenericListsById(l, c) },
+    { key: KEYS.CHARACTER_TRAITS, getDefault: () => INITIAL_CHARACTER_TRAITS, mergeFn: (l, c) => mergeGenericListsById(l, c) },
+    { key: KEYS.CHARACTER_LOGS, getDefault: () => INITIAL_STUDENT_CHARACTER_LOGS, mergeFn: (l, c) => mergeGenericListsById(l, c) },
     { key: KEYS.CHARACTER_PREDICATES, getDefault: () => INITIAL_CHARACTER_PREDICATES },
+    { key: KEYS.GRADES, getDefault: () => [], mergeFn: (l, c) => mergeGenericListsById(l, c) },
   ];
 
-  SYNC_KEYS.forEach(({ key, getDefault }) => {
+  SYNC_KEYS.forEach(({ key, getDefault, mergeFn }) => {
     try {
       const docRef = doc(db, 'sihadir_app_data', key);
       onSnapshot(docRef, (docSnap) => {
         if (docSnap.exists()) {
           const payload = docSnap.data();
           if (payload && payload.data) {
-            const currentLocal = localStorage.getItem(key);
-            if (currentLocal !== payload.data) {
-              localStorage.setItem(key, payload.data);
+            const currentLocalStr = localStorage.getItem(key);
+            let finalDataToSave = payload.data;
+
+            if (mergeFn && currentLocalStr) {
+              try {
+                const localParsed = JSON.parse(currentLocalStr);
+                const cloudParsed = JSON.parse(payload.data);
+                if (Array.isArray(localParsed) && Array.isArray(cloudParsed)) {
+                  const merged = mergeFn(localParsed, cloudParsed);
+                  finalDataToSave = JSON.stringify(merged);
+                  // If local has extra records not in cloud yet, push merged back to cloud
+                  if (merged.length > cloudParsed.length) {
+                    syncToCloud(key, merged);
+                  }
+                }
+              } catch (e) {
+                console.warn(`[Merge Parse Error on ${key}]`, e);
+              }
+            }
+
+            if (currentLocalStr !== finalDataToSave) {
+              localStorage.setItem(key, finalDataToSave);
               notifyStorageUpdated();
             }
           }

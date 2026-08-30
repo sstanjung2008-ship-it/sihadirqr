@@ -243,6 +243,37 @@ export async function smartSyncAndMergeAllWithCloud(): Promise<{ success: boolea
     setCloudSyncStatus('syncing');
     const { getDoc } = await import('./firebase');
 
+    // 0. Sync School Profile (Jam Masuk, Jam Pulang, Batas Alpa, dll)
+    try {
+      const profileDocRef = doc(db, 'sihadir_app_data', KEYS.PROFILE);
+      const profileSnap = await getDoc(profileDocRef);
+      const currentLocalProfile = getSchoolProfile();
+      const localUpdatedAt = Number(localStorage.getItem(KEYS.PROFILE + '_updatedAt') || '0');
+
+      if (profileSnap.exists() && profileSnap.data()?.data) {
+        const cloudProfileData = typeof profileSnap.data().data === 'string' ? JSON.parse(profileSnap.data().data) : profileSnap.data().data;
+        const cloudUpdatedAt = Number(profileSnap.data().updatedAt) || 0;
+        
+        if (cloudUpdatedAt >= localUpdatedAt) {
+          const mergedProfile = { ...currentLocalProfile, ...cloudProfileData };
+          localStorage.setItem(KEYS.PROFILE, JSON.stringify(mergedProfile));
+          localStorage.setItem(KEYS.PROFILE + '_updatedAt', String(cloudUpdatedAt || Date.now()));
+        } else {
+          await setDoc(profileDocRef, {
+            data: JSON.stringify(currentLocalProfile),
+            updatedAt: localUpdatedAt || Date.now(),
+          });
+        }
+      } else {
+        await setDoc(profileDocRef, {
+          data: JSON.stringify(currentLocalProfile),
+          updatedAt: localUpdatedAt || Date.now(),
+        });
+      }
+    } catch (e) {
+      console.warn('Error syncing profile with cloud:', e);
+    }
+
     // 1. Sync Students
     const studentDocRef = doc(db, 'sihadir_app_data', KEYS.STUDENTS);
     const studentSnap = await getDoc(studentDocRef);
@@ -484,7 +515,7 @@ export function initFirestoreRealtimeSync() {
                 console.log(`[Firestore Sync] Data lokal untuk ${key} lebih baru (${localUpdatedAt} > ${cloudUpdatedAt}). Mengabaikan snapshot lama dari Cloud.`);
                 return;
               }
-              if (cloudUpdatedAt === 0) {
+              if (cloudUpdatedAt === 0 && localUpdatedAt > 1) {
                 return;
               }
             }
@@ -535,6 +566,11 @@ export function getSchoolProfile(): SchoolProfile {
     return {
       ...INITIAL_SCHOOL_PROFILE,
       ...parsed,
+      startTime: parsed.startTime || INITIAL_SCHOOL_PROFILE.startTime || '07:00',
+      endTime: parsed.endTime || INITIAL_SCHOOL_PROFILE.endTime || '15:00',
+      autoAlpaTime: parsed.autoAlpaTime || INITIAL_SCHOOL_PROFILE.autoAlpaTime || '08:30',
+      lateToleranceMinutes: typeof parsed.lateToleranceMinutes === 'number' ? parsed.lateToleranceMinutes : (INITIAL_SCHOOL_PROFILE.lateToleranceMinutes ?? 15),
+      activeDays: parsed.activeDays && Array.isArray(parsed.activeDays) && parsed.activeDays.length > 0 ? parsed.activeDays : (INITIAL_SCHOOL_PROFILE.activeDays || ['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu']),
       holidays: parsed.holidays && Array.isArray(parsed.holidays) ? parsed.holidays : (INITIAL_SCHOOL_PROFILE.holidays || [])
     };
   } catch {
@@ -548,12 +584,11 @@ export function saveSchoolProfile(profile: SchoolProfile): void {
   try {
     localStorage.setItem(KEYS.PROFILE, dataStr);
     localStorage.setItem(KEYS.PROFILE + '_updatedAt', String(now));
-    lastSavedStringCache[KEYS.PROFILE] = dataStr;
   } catch (err) {
     console.error('Error saving school profile to localStorage:', err);
   }
   notifyStorageUpdated();
-  syncToCloud(KEYS.PROFILE, profile, false, now);
+  syncToCloud(KEYS.PROFILE, profile, true, now);
 }
 
 export function getSchoolClasses(): SchoolClass[] {
@@ -577,7 +612,6 @@ export function saveSchoolClasses(classes: SchoolClass[]): void {
   const dataStr = JSON.stringify(classes);
   localStorage.setItem(KEYS.CLASSES, dataStr);
   localStorage.setItem(KEYS.CLASSES + '_updatedAt', String(now));
-  lastSavedStringCache[KEYS.CLASSES] = dataStr;
   notifyStorageUpdated();
   syncToCloud(KEYS.CLASSES, classes, false, now);
 }
@@ -602,7 +636,6 @@ export function saveStudents(students: Student[], instant: boolean = false): voi
   const dataStr = JSON.stringify(students);
   localStorage.setItem(KEYS.STUDENTS, dataStr);
   localStorage.setItem(KEYS.STUDENTS + '_updatedAt', String(now));
-  lastSavedStringCache[KEYS.STUDENTS] = dataStr;
   notifyStorageUpdated();
   syncToCloud(KEYS.STUDENTS, students, instant || students.length === 0, now);
 }
@@ -632,7 +665,6 @@ export function saveAttendanceRecords(records: AttendanceRecord[]): void {
   const dataStr = JSON.stringify(records);
   localStorage.setItem(KEYS.ATTENDANCE, dataStr);
   localStorage.setItem(KEYS.ATTENDANCE + '_updatedAt', String(now));
-  lastSavedStringCache[KEYS.ATTENDANCE] = dataStr;
   notifyStorageUpdated();
   syncToCloud(KEYS.ATTENDANCE, records, records.length === 0, now);
 }
@@ -657,7 +689,6 @@ export function saveLeaveRequests(requests: LeaveRequest[]): void {
   const dataStr = JSON.stringify(requests);
   localStorage.setItem(KEYS.LEAVES, dataStr);
   localStorage.setItem(KEYS.LEAVES + '_updatedAt', String(now));
-  lastSavedStringCache[KEYS.LEAVES] = dataStr;
   notifyStorageUpdated();
   syncToCloud(KEYS.LEAVES, requests, requests.length === 0, now);
 }
@@ -682,7 +713,6 @@ export function saveWaLogs(logs: WhatsAppLog[]): void {
   const dataStr = JSON.stringify(logs);
   localStorage.setItem(KEYS.WA_LOGS, dataStr);
   localStorage.setItem(KEYS.WA_LOGS + '_updatedAt', String(now));
-  lastSavedStringCache[KEYS.WA_LOGS] = dataStr;
   notifyStorageUpdated();
   syncToCloud(KEYS.WA_LOGS, logs, false, now);
 }
@@ -707,7 +737,6 @@ export function saveTeachers(teachers: Teacher[]): void {
   const dataStr = JSON.stringify(teachers);
   localStorage.setItem(KEYS.TEACHERS, dataStr);
   localStorage.setItem(KEYS.TEACHERS + '_updatedAt', String(now));
-  lastSavedStringCache[KEYS.TEACHERS] = dataStr;
   notifyStorageUpdated();
   syncToCloud(KEYS.TEACHERS, teachers, false, now);
 }
@@ -732,7 +761,6 @@ export function saveLearningJournals(journals: LearningJournal[]): void {
   const dataStr = JSON.stringify(journals);
   localStorage.setItem(KEYS.LEARNING_JOURNALS, dataStr);
   localStorage.setItem(KEYS.LEARNING_JOURNALS + '_updatedAt', String(now));
-  lastSavedStringCache[KEYS.LEARNING_JOURNALS] = dataStr;
   notifyStorageUpdated();
   syncToCloud(KEYS.LEARNING_JOURNALS, journals, false, now);
 }
@@ -757,7 +785,6 @@ export function saveCharacterTraits(traits: CharacterTrait[]): void {
   const dataStr = JSON.stringify(traits);
   localStorage.setItem(KEYS.CHARACTER_TRAITS, dataStr);
   localStorage.setItem(KEYS.CHARACTER_TRAITS + '_updatedAt', String(now));
-  lastSavedStringCache[KEYS.CHARACTER_TRAITS] = dataStr;
   notifyStorageUpdated();
   syncToCloud(KEYS.CHARACTER_TRAITS, traits, false, now);
 }
@@ -782,7 +809,6 @@ export function saveStudentCharacterLogs(logs: StudentCharacterLog[]): void {
   const dataStr = JSON.stringify(logs);
   localStorage.setItem(KEYS.CHARACTER_LOGS, dataStr);
   localStorage.setItem(KEYS.CHARACTER_LOGS + '_updatedAt', String(now));
-  lastSavedStringCache[KEYS.CHARACTER_LOGS] = dataStr;
   notifyStorageUpdated();
   syncToCloud(KEYS.CHARACTER_LOGS, logs, false, now);
 }
@@ -813,7 +839,6 @@ export function saveCharacterPredicateSettings(settings: CharacterPredicateSetti
   const dataStr = JSON.stringify(settings);
   localStorage.setItem(KEYS.CHARACTER_PREDICATES, dataStr);
   localStorage.setItem(KEYS.CHARACTER_PREDICATES + '_updatedAt', String(now));
-  lastSavedStringCache[KEYS.CHARACTER_PREDICATES] = dataStr;
   notifyStorageUpdated();
   syncToCloud(KEYS.CHARACTER_PREDICATES, settings, false, now);
 }
@@ -833,7 +858,6 @@ export function saveStudentGradeAssessments(assessments: StudentGradeAssessment[
   const dataStr = JSON.stringify(assessments);
   localStorage.setItem(KEYS.GRADES, dataStr);
   localStorage.setItem(KEYS.GRADES + '_updatedAt', String(now));
-  lastSavedStringCache[KEYS.GRADES] = dataStr;
   notifyStorageUpdated();
   syncToCloud(KEYS.GRADES, assessments, false, now);
 }

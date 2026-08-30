@@ -29,6 +29,7 @@ import { StudentIdCardModal } from './StudentIdCardModal';
 import { BatchPrintModal } from './BatchPrintModal';
 import { ImportStudentsModal } from './ImportStudentsModal';
 import { downloadStudentImportTemplate } from '../lib/exportUtils';
+import { resetToDefaultData } from '../lib/storage';
 import { QRCodeSVG } from 'qrcode.react';
 
 interface StudentDirectoryViewProps {
@@ -504,7 +505,47 @@ export const StudentDirectoryView: React.FC<StudentDirectoryViewProps> = ({
       </div>
 
       {/* Student Cards Grid */}
-      {filteredStudents.length === 0 ? (
+      {students.length === 0 ? (
+        <div className="bg-white border border-slate-200/80 rounded-3xl p-10 text-center space-y-4 shadow-sm">
+          <div className="w-16 h-16 rounded-3xl bg-slate-100 text-slate-400 flex items-center justify-center mx-auto">
+            <Users className="w-8 h-8" />
+          </div>
+          <div>
+            <h3 className="text-base font-extrabold text-slate-800">Database Siswa Saat Ini Kosong</h3>
+            <p className="text-xs text-slate-500 max-w-md mx-auto mt-1">
+              Seluruh data siswa telah berhasil dihapus. Anda dapat mengimpor data baru via file Excel / CSV, menambah siswa secara manual, atau memuat ulang data sampel jika diperlukan.
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center justify-center gap-3 pt-2">
+            <button
+              onClick={() => setIsImportModalOpen(true)}
+              className="bg-teal-600 hover:bg-teal-700 text-white font-bold px-4 py-2.5 rounded-xl shadow-sm flex items-center gap-2 text-xs transition-all cursor-pointer"
+            >
+              <FileSpreadsheet className="w-4 h-4" />
+              Import Data Excel / CSV
+            </button>
+            <button
+              onClick={handleOpenAdd}
+              className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold px-4 py-2.5 rounded-xl shadow-sm flex items-center gap-2 text-xs transition-all cursor-pointer"
+            >
+              <UserPlus className="w-4 h-4" />
+              Tambah Siswa Manual
+            </button>
+            <button
+              onClick={() => {
+                if (window.confirm('Muat ulang 154 data siswa contoh bawaan aplikasi?')) {
+                  resetToDefaultData();
+                  window.location.reload();
+                }
+              }}
+              className="bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold px-4 py-2.5 rounded-xl flex items-center gap-2 text-xs transition-all cursor-pointer"
+            >
+              <RotateCcw className="w-4 h-4" />
+              Muat Ulang Sampel Demo
+            </button>
+          </div>
+        </div>
+      ) : filteredStudents.length === 0 ? (
         <div className="bg-white border border-slate-200/80 rounded-3xl p-12 text-center text-slate-400 font-semibold text-xs">
           Tidak ada data siswa yang ditemukan untuk kata kunci "{searchQuery}" atau filter kelas yang dipilih.
         </div>

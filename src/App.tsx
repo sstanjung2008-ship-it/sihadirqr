@@ -378,7 +378,7 @@ export default function App() {
     // Filter students
     setStudentsState(prev => {
       const updated = prev.filter(s => s.id !== id);
-      saveStudents(updated);
+      saveStudents(updated, true);
       return updated;
     });
 
@@ -395,13 +395,20 @@ export default function App() {
       saveLeaveRequests(updated);
       return updated;
     });
+
+    // Clean up related character logs
+    setCharacterLogsState(prev => {
+      const updated = prev.filter(l => l.studentId !== id);
+      saveStudentCharacterLogs(updated);
+      return updated;
+    });
   };
 
   const handleBatchDeleteStudents = (ids: string[]) => {
     const idSet = new Set(ids);
     setStudentsState(prev => {
       const updated = prev.filter(s => !idSet.has(s.id));
-      saveStudents(updated);
+      saveStudents(updated, true);
       return updated;
     });
 
@@ -414,6 +421,12 @@ export default function App() {
     setLeaveRequestsState(prev => {
       const updated = prev.filter(l => !idSet.has(l.studentId));
       saveLeaveRequests(updated);
+      return updated;
+    });
+
+    setCharacterLogsState(prev => {
+      const updated = prev.filter(l => !idSet.has(l.studentId));
+      saveStudentCharacterLogs(updated);
       return updated;
     });
   };

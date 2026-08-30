@@ -391,15 +391,19 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
                   <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-400"></span>
                 </span>
+              ) : syncStatus === 'quota_exceeded' ? (
+                <span className="relative flex h-2 w-2">
+                  <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-400"></span>
+                </span>
               ) : (
                 <Cloud className="w-3.5 h-3.5 text-slate-400" />
               )}
-              <span className="font-bold text-[11px] group-hover:text-white transition-colors">
-                {syncStatus === 'connected' ? 'Cloud: Terhubung' : syncStatus === 'syncing' ? 'Menyinkronkan...' : 'Database: Mode Offline'}
+              <span className="font-bold text-[11px] group-hover:text-white transition-colors truncate">
+                {syncStatus === 'connected' ? 'Cloud: Terhubung' : syncStatus === 'quota_exceeded' ? 'Cloud: Kuota Habis' : syncStatus === 'syncing' ? 'Menyinkronkan...' : 'Database: Offline'}
               </span>
             </div>
-            <span className="text-[10px] font-extrabold text-sky-400 bg-sky-900/60 px-1.5 py-0.5 rounded-md border border-sky-700/60 group-hover:bg-sky-600 group-hover:text-white transition-colors">
-              Sinkron ↗
+            <span className={`text-[10px] font-extrabold px-1.5 py-0.5 rounded-md border transition-colors ${syncStatus === 'quota_exceeded' ? 'text-amber-400 bg-amber-950/60 border-amber-800/60 group-hover:bg-amber-600 group-hover:text-white' : 'text-sky-400 bg-sky-900/60 border-sky-700/60 group-hover:bg-sky-600 group-hover:text-white'}`}>
+              {syncStatus === 'quota_exceeded' ? 'File ↗' : 'Sinkron ↗'}
             </span>
           </button>
 

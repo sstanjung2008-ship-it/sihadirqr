@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { SchoolProfile, Teacher, Student, SchoolHoliday } from '../types';
-import { Settings, Save, School, Clock, MessageSquare, RotateCcw, CreditCard, CheckCircle2, Upload, Image as ImageIcon, Link, BookOpen, Plus, X, KeyRound, Lock, Eye, EyeOff, User, GraduationCap, Search, Check, RefreshCw, Users, ShieldAlert, Send, Smartphone, ShieldCheck, Zap, AlertCircle, Calendar, Trash2, Edit3, Tag, Flag, AlertTriangle, Sparkles, Filter, Cloud, CloudDownload, CloudUpload } from 'lucide-react';
-import { resetToDefaultData, forceUploadAllToCloud, forceDownloadAllFromCloud, getCloudSyncStatus, CloudSyncStatus } from '../lib/storage';
+import { Settings, Save, School, Clock, MessageSquare, RotateCcw, CreditCard, CheckCircle2, Upload, Image as ImageIcon, Link, BookOpen, Plus, X, KeyRound, Lock, Eye, EyeOff, User, GraduationCap, Search, Check, RefreshCw, Users, ShieldAlert, Send, Smartphone, ShieldCheck, Zap, AlertCircle, Calendar, Trash2, Edit3, Tag, Flag, AlertTriangle, Sparkles, Filter, Cloud, CloudDownload, CloudUpload, FileJson, Download } from 'lucide-react';
+import { resetToDefaultData, forceUploadAllToCloud, forceDownloadAllFromCloud, getCloudSyncStatus, CloudSyncStatus, downloadDatabaseBackupFile } from '../lib/storage';
 import { sendWhatsAppGatewayMessage } from '../lib/exportUtils';
+import { MultiDeviceSyncModal } from './MultiDeviceSyncModal';
 
 interface SchoolSettingsViewProps {
   schoolProfile: SchoolProfile;
@@ -35,6 +36,7 @@ export const SchoolSettingsView: React.FC<SchoolSettingsViewProps> = ({
   const [cloudStatus, setCloudStatus] = useState<CloudSyncStatus>(() => getCloudSyncStatus());
   const [isCloudSyncing, setIsCloudSyncing] = useState<boolean>(false);
   const [cloudSyncFeedback, setCloudSyncFeedback] = useState<{ type: 'success' | 'error'; msg: string } | null>(null);
+  const [showMultiSyncModal, setShowMultiSyncModal] = useState(false);
 
   useEffect(() => {
     const handleStatus = (e: any) => {
@@ -2058,7 +2060,7 @@ export const SchoolSettingsView: React.FC<SchoolSettingsViewProps> = ({
           )}
         </div>
 
-        {/* Cloud Database Synchronization Manager */}
+        {/* Cloud Database Synchronization & Direct Transfer Manager */}
         <div className="bg-gradient-to-br from-slate-900 to-sky-950 border border-sky-800/60 rounded-3xl p-6 shadow-md text-white space-y-4">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-sky-800/40 pb-4">
             <div className="flex items-center gap-3">
@@ -2067,16 +2069,25 @@ export const SchoolSettingsView: React.FC<SchoolSettingsViewProps> = ({
               </div>
               <div>
                 <h2 className="text-sm font-extrabold text-white flex items-center gap-2">
-                  Sinkronisasi Database Multi-Perangkat (Cloud Firestore)
-                  <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${cloudStatus === 'connected' ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30' : cloudStatus === 'syncing' ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30' : 'bg-slate-700 text-slate-300'}`}>
-                    {cloudStatus === 'connected' ? '● Terhubung Real-Time' : cloudStatus === 'syncing' ? 'Menyinkronkan...' : 'Mode Offline'}
+                  Sinkronisasi Database Multi-Perangkat
+                  <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${cloudStatus === 'connected' ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30' : cloudStatus === 'quota_exceeded' ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30' : cloudStatus === 'syncing' ? 'bg-sky-500/20 text-sky-300 border border-sky-500/30' : 'bg-slate-700 text-slate-300'}`}>
+                    {cloudStatus === 'connected' ? '● Terhubung Real-Time' : cloudStatus === 'quota_exceeded' ? 'Batas Kuota Cloud (Gunakan Transfer File)' : cloudStatus === 'syncing' ? 'Menyinkronkan...' : 'Mode Offline'}
                   </span>
                 </h2>
                 <p className="text-xs text-sky-200/70">
-                  Data siswa, guru, kelas, dan absensi otomatis terhubung ke seluruh HP, laptop, dan tablet sekolah.
+                  Penyelarasan seluruh 425 data siswa, guru, kelas, dan riwayat absensi antar HP dan Laptop sekolah.
                 </p>
               </div>
             </div>
+
+            <button
+              type="button"
+              onClick={() => setShowMultiSyncModal(true)}
+              className="bg-gradient-to-r from-sky-500 to-indigo-600 hover:from-sky-400 hover:to-indigo-500 text-white font-extrabold px-4 py-2.5 rounded-xl text-xs flex items-center gap-2 shadow-md shadow-sky-950 transition-all cursor-pointer shrink-0"
+            >
+              <Sparkles className="w-4 h-4 text-amber-300" />
+              Buka Panel Sinkronisasi Lengkap
+            </button>
           </div>
 
           {cloudSyncFeedback && (
@@ -2086,42 +2097,72 @@ export const SchoolSettingsView: React.FC<SchoolSettingsViewProps> = ({
             </div>
           )}
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
-            <div className="bg-sky-950/40 border border-sky-800/40 p-4 rounded-2xl space-y-2">
-              <span className="font-extrabold text-sky-300 flex items-center gap-1.5">
-                <CloudUpload className="w-4 h-4 text-sky-400" />
-                Unggah Data Lokal ke Cloud
-              </span>
-              <p className="text-[11px] text-sky-200/60 leading-relaxed">
-                Gunakan ini jika Anda baru saja memasukkan data siswa di perangkat ini dan ingin memastikannya langsung masuk ke Cloud agar bisa dibuka di perangkat lain.
-              </p>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+            <div className="bg-sky-950/40 border border-sky-800/40 p-4 rounded-2xl space-y-2 flex flex-col justify-between">
+              <div>
+                <span className="font-extrabold text-sky-300 flex items-center gap-1.5">
+                  <CloudUpload className="w-4 h-4 text-sky-400" />
+                  1. Upload ke Cloud
+                </span>
+                <p className="text-[11px] text-sky-200/60 leading-relaxed mt-1">
+                  Kirim data dari laptop ini ke Cloud agar bisa diakses perangkat lain.
+                </p>
+              </div>
               <button
                 type="button"
                 disabled={isCloudSyncing}
                 onClick={handleManualUploadToCloud}
-                className="w-full mt-2 bg-sky-600 hover:bg-sky-500 disabled:opacity-50 text-white font-extrabold py-2.5 px-4 rounded-xl flex items-center justify-center gap-2 transition-all cursor-pointer shadow-sm"
+                className="w-full mt-2 bg-sky-600 hover:bg-sky-500 disabled:opacity-50 text-white font-extrabold py-2 px-3 rounded-xl flex items-center justify-center gap-2 transition-all cursor-pointer shadow-sm text-xs"
               >
-                {isCloudSyncing ? <RefreshCw className="w-4 h-4 animate-spin" /> : <CloudUpload className="w-4 h-4" />}
-                Unggah Semua Data ke Cloud Sekarang
+                {isCloudSyncing ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <CloudUpload className="w-3.5 h-3.5" />}
+                Upload ke Cloud
               </button>
             </div>
 
-            <div className="bg-sky-950/40 border border-sky-800/40 p-4 rounded-2xl space-y-2">
-              <span className="font-extrabold text-emerald-300 flex items-center gap-1.5">
-                <CloudDownload className="w-4 h-4 text-emerald-400" />
-                Tarik / Unduh Data dari Cloud
-              </span>
-              <p className="text-[11px] text-sky-200/60 leading-relaxed">
-                Gunakan ini pada perangkat lain (misal HP kedua atau laptop admin) jika data siswa belum muncul secara otomatis.
-              </p>
+            <div className="bg-sky-950/40 border border-sky-800/40 p-4 rounded-2xl space-y-2 flex flex-col justify-between">
+              <div>
+                <span className="font-extrabold text-emerald-300 flex items-center gap-1.5">
+                  <CloudDownload className="w-4 h-4 text-emerald-400" />
+                  2. Unduh dari Cloud
+                </span>
+                <p className="text-[11px] text-sky-200/60 leading-relaxed mt-1">
+                  Tarik data terbaru dari Cloud ke perangkat ini.
+                </p>
+              </div>
               <button
                 type="button"
                 disabled={isCloudSyncing}
                 onClick={handleManualDownloadFromCloud}
-                className="w-full mt-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white font-extrabold py-2.5 px-4 rounded-xl flex items-center justify-center gap-2 transition-all cursor-pointer shadow-sm"
+                className="w-full mt-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white font-extrabold py-2 px-3 rounded-xl flex items-center justify-center gap-2 transition-all cursor-pointer shadow-sm text-xs"
               >
-                {isCloudSyncing ? <RefreshCw className="w-4 h-4 animate-spin" /> : <CloudDownload className="w-4 h-4" />}
-                Tarik Data Terbaru dari Cloud Sekarang
+                {isCloudSyncing ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <CloudDownload className="w-3.5 h-3.5" />}
+                Unduh dari Cloud
+              </button>
+            </div>
+
+            <div className="bg-sky-950/40 border border-sky-800/40 p-4 rounded-2xl space-y-2 flex flex-col justify-between">
+              <div>
+                <span className="font-extrabold text-amber-300 flex items-center gap-1.5">
+                  <FileJson className="w-4 h-4 text-amber-400" />
+                  3. Backup File Instan
+                </span>
+                <p className="text-[11px] text-sky-200/60 leading-relaxed mt-1">
+                  Unduh file cadangan .json (bebas kuota & transfer instan 1 detik).
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  try {
+                    downloadDatabaseBackupFile();
+                  } catch (e: any) {
+                    alert('Gagal mengunduh: ' + e?.message);
+                  }
+                }}
+                className="w-full mt-2 bg-amber-600 hover:bg-amber-500 text-white font-extrabold py-2 px-3 rounded-xl flex items-center justify-center gap-2 transition-all cursor-pointer shadow-sm text-xs"
+              >
+                <Download className="w-3.5 h-3.5" />
+                Unduh File .JSON
               </button>
             </div>
           </div>
@@ -2257,6 +2298,14 @@ export const SchoolSettingsView: React.FC<SchoolSettingsViewProps> = ({
           </div>
         </div>
       )}
+
+      {/* Multi-Device Cloud & Direct Sync Modal */}
+      <MultiDeviceSyncModal
+        isOpen={showMultiSyncModal}
+        onClose={() => setShowMultiSyncModal(false)}
+        currentStudentCount={students.length}
+        syncStatus={cloudStatus}
+      />
 
     </div>
   );

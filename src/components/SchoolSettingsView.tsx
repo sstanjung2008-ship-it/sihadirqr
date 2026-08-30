@@ -1032,7 +1032,7 @@ export const SchoolSettingsView: React.FC<SchoolSettingsViewProps> = ({
             )}
 
             {/* Form Input Tanggal Libur */}
-            <form onSubmit={handleAddOrUpdateHoliday} className="bg-white border border-slate-200 rounded-xl p-3.5 sm:p-4 shadow-xs space-y-3">
+            <div className="bg-white border border-slate-200 rounded-xl p-3.5 sm:p-4 shadow-xs space-y-3">
               <div className="flex items-center justify-between gap-2 border-b border-slate-100 pb-2">
                 <div className="flex items-center gap-2">
                   <Tag className="w-4 h-4 text-rose-600" />
@@ -1062,6 +1062,12 @@ export const SchoolSettingsView: React.FC<SchoolSettingsViewProps> = ({
                     required
                     value={holidayNameInput}
                     onChange={(e) => setHolidayNameInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        handleAddOrUpdateHoliday();
+                      }
+                    }}
                     placeholder="Contoh: Tahun Baru Masehi, Libur Semester Ganjil, dll."
                     className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs text-slate-800 focus:bg-white focus:ring-2 focus:ring-rose-500 focus:border-rose-500 transition-all"
                   />
@@ -1140,6 +1146,12 @@ export const SchoolSettingsView: React.FC<SchoolSettingsViewProps> = ({
                     type="text"
                     value={holidayDescInput}
                     onChange={(e) => setHolidayDescInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        handleAddOrUpdateHoliday();
+                      }
+                    }}
                     placeholder="Contoh: Surat Edaran Dinas No. 12/2026"
                     className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs text-slate-800 focus:bg-white focus:ring-2 focus:ring-rose-500 focus:border-rose-500 transition-all"
                   />
@@ -1158,7 +1170,8 @@ export const SchoolSettingsView: React.FC<SchoolSettingsViewProps> = ({
                   </button>
                 )}
                 <button
-                  type="submit"
+                  type="button"
+                  onClick={() => handleAddOrUpdateHoliday()}
                   className="px-4 py-2 rounded-xl text-xs font-extrabold bg-rose-600 hover:bg-rose-700 text-white shadow-sm transition-all flex items-center gap-1.5 cursor-pointer"
                 >
                   {editingHolidayId ? (
@@ -1174,7 +1187,7 @@ export const SchoolSettingsView: React.FC<SchoolSettingsViewProps> = ({
                   )}
                 </button>
               </div>
-            </form>
+            </div>
 
             {/* List of Holidays with Search & Filter */}
             <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-xs">

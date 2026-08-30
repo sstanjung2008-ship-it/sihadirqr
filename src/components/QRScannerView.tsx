@@ -118,13 +118,55 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
   const lastScanDebounceRef = useRef<{ code: string; timestamp: number }>({ code: '', timestamp: 0 });
   const qrRegionId = "html5qr-code-full-region";
 
-  // Check available cameras
+  // Check available cameras and set default to Camera 0, Facing Back
   useEffect(() => {
     Html5Qrcode.getCameras()
       .then((devices) => {
         if (devices && devices.length > 0) {
-          setCameras(devices.map(d => ({ id: d.id, label: d.label || `Kamera ${d.id}` })));
-          setActiveCameraId(devices[0].id);
+          // Filter out secondary front cameras (such as 'camera 2, facing front')
+          const filtered = devices.filter(d => {
+            const labelLower = (d.label || '').toLowerCase();
+            // Specifically exclude 'camera 2' if it is front facing
+            if (labelLower.includes('camera 2') && (labelLower.includes('front') || labelLower.includes('depan'))) {
+              return false;
+            }
+            return true;
+          });
+
+          // Prioritize back camera ("camera 0, facing back", or any back/environment/rear camera)
+          const backCam = filtered.find(d => {
+            const labelLower = (d.label || '').toLowerCase();
+            return (
+              (labelLower.includes('camera 0') && (labelLower.includes('back') || labelLower.includes('rear') || labelLower.includes('belakang'))) ||
+              labelLower.includes('back') ||
+              labelLower.includes('belakang') ||
+              labelLower.includes('rear') ||
+              labelLower.includes('environment') ||
+              labelLower.includes('camera 0')
+            );
+          }) || filtered.find(d => {
+            const labelLower = (d.label || '').toLowerCase();
+            return !labelLower.includes('front') && !labelLower.includes('depan') && !labelLower.includes('user');
+          }) || filtered[0];
+
+          const formattedCameras = filtered.map(d => {
+            const labelLower = (d.label || '').toLowerCase();
+            let displayLabel = d.label || `Kamera ${d.id}`;
+            if (labelLower.includes('camera 0') || labelLower.includes('back') || labelLower.includes('rear') || labelLower.includes('environment') || labelLower.includes('belakang')) {
+              displayLabel = `📷 Kamera Belakang (Camera 0, Facing Back)`;
+            } else if (labelLower.includes('front') || labelLower.includes('depan') || labelLower.includes('user') || labelLower.includes('camera 1')) {
+              displayLabel = `🤳 Kamera Depan (Camera 1, Facing Front)`;
+            }
+            return {
+              id: d.id,
+              label: displayLabel
+            };
+          });
+
+          setCameras(formattedCameras);
+          if (backCam) {
+            setActiveCameraId(backCam.id);
+          }
         }
       })
       .catch((err) => {
@@ -148,8 +190,15 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
 
   const startCamera = async (cameraId?: string, overrideFacingMode?: 'environment' | 'user') => {
     setCameraError(null);
-    const targetCam = cameraId !== undefined ? cameraId : activeCameraId;
-    const currentFacing = overrideFacingMode || facingMode;
+    let targetCam = cameraId !== undefined ? cameraId : activeCameraId;
+    const currentFacing = overrideFacingMode || facingMode || 'environment';
+
+    // If targetCam is not specified and we have camera list, default to back camera
+    if (!targetCam && cameras.length > 0) {
+      const backCam = cameras.find(c => c.label.toLowerCase().includes('belakang') || c.label.toLowerCase().includes('back') || c.label.toLowerCase().includes('camera 0'));
+      targetCam = backCam ? backCam.id : cameras[0].id;
+      setActiveCameraId(targetCam);
+    }
 
     try {
       if (html5QrCodeRef.current && html5QrCodeRef.current.isScanning) {
@@ -178,6 +227,26 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
       setIsScanning(true);
     } catch (err: any) {
       console.error("Camera start failure:", err);
+      // Fallback: try starting with environment facingMode if exact deviceId failed
+      if (targetCam) {
+        try {
+          const fallbackQrCode = new Html5Qrcode(qrRegionId);
+          html5QrCodeRef.current = fallbackQrCode;
+          await fallbackQrCode.start(
+            { facingMode: 'environment' },
+            {
+              fps: 10,
+              qrbox: { width: 250, height: 250 },
+            },
+            (decodedText) => handleQrCodeDecoded(decodedText),
+            () => {}
+          );
+          setIsScanning(true);
+          return;
+        } catch (fallbackErr) {
+          console.error("Fallback camera start error:", fallbackErr);
+        }
+      }
       setCameraError("Gagal membuka kamera. Pastikan izin kamera telah diberikan di browser atau gunakan fitur cari manual.");
       setIsScanning(false);
     }

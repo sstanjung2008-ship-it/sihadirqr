@@ -2,7 +2,7 @@ import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import * as XLSX from 'xlsx';
 import QRCode from 'qrcode';
-import { SchoolProfile, Student, AttendanceRecord, LearningJournal, SchoolClass, CharacterTrait, StudentCharacterLog, CharacterPredicateSettings, StudentGradeAssessment } from '../types';
+import { SchoolProfile, Student, AttendanceRecord, LearningJournal, SchoolClass, CharacterTrait, StudentCharacterLog, CharacterPredicateSettings, StudentGradeAssessment, LessonPeriod, ClassScheduleSlot, Teacher } from '../types';
 
 /**
  * Convert any Google Drive sharing link (or standard URL) into a direct image embed URL.
@@ -3567,6 +3567,438 @@ export function exportStudentFullIdentityExcel(
   const fileName = `Data_Identitas_Lengkap_Siswa_${sanitizedClass}_${Date.now()}.xlsx`;
   saveExcelWorkbook(workbook, fileName);
 }
+
+/**
+ * Helper to get lesson periods for a specific day
+ */
+export function getPeriodsForDay(periods: LessonPeriod[], day: string): LessonPeriod[] {
+  const daySpecific = periods.filter(p => p.day === day || p.daySpecific === day);
+  if (daySpecific.length > 0) {
+    return [...daySpecific].sort((a, b) => {
+      if (a.periodNumber !== b.periodNumber) {
+        if (a.periodNumber === 0) return -1;
+        if (b.periodNumber === 0) return 1;
+        return a.periodNumber - b.periodNumber;
+      }
+      return (a.startTime || '').localeCompare(b.startTime || '');
+    });
+  }
+  const defaultPeriods = periods.filter(p => !p.day || p.day === 'SEMUA');
+  if (defaultPeriods.length > 0) {
+    return [...defaultPeriods].sort((a, b) => {
+      if (a.periodNumber !== b.periodNumber) {
+        if (a.periodNumber === 0) return -1;
+        if (b.periodNumber === 0) return 1;
+        return a.periodNumber - b.periodNumber;
+      }
+      return (a.startTime || '').localeCompare(b.startTime || '');
+    });
+  }
+  return [...periods].sort((a, b) => a.periodNumber - b.periodNumber);
+}
+
+/**
+ * Ekspor Jadwal Pelajaran Kelas ke PDF (Format Standar Sekolah Resmi)
+ */
+export async function exportClassSchedulePdf(
+  schoolClass: SchoolClass,
+  scheduleSlots: ClassScheduleSlot[],
+  periods: LessonPeriod[],
+  schoolProfile: SchoolProfile
+) {
+  const doc = new jsPDF({
+    orientation: 'landscape',
+    unit: 'mm',
+    format: 'a4'
+  });
+
+  const pageWidth = doc.internal.pageSize.getWidth();
+  const pageHeight = doc.internal.pageSize.getHeight();
+
+  // Load logos
+  const schoolLogo = await loadImageAsDataUrl(schoolProfile.schoolLogo);
+  const regencyLogo = await loadImageAsDataUrl(schoolProfile.regencyLogo);
+
+  if (regencyLogo) {
+    doc.addImage(regencyLogo, 'PNG', 14, 8, 18, 18);
+  }
+  if (schoolLogo) {
+    doc.addImage(schoolLogo, 'PNG', pageWidth - 32, 8, 18, 18);
+  }
+
+  // Header Text Kop Surat
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(13);
+  doc.text((schoolProfile.regency || 'PEMERINTAH KABUPATEN / KOTA').toUpperCase(), pageWidth / 2, 12, { align: 'center' });
+  doc.setFontSize(15);
+  doc.text((schoolProfile.name || 'SMP NEGERI 1 CERDAS BERSAMA').toUpperCase(), pageWidth / 2, 18, { align: 'center' });
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(9);
+  doc.text(`${schoolProfile.address || ''} ${schoolProfile.district ? ' - ' + schoolProfile.district : ''} | NPSN: ${schoolProfile.npsn || '-'}`, pageWidth / 2, 23, { align: 'center' });
+
+  // Double border line
+  doc.setLineWidth(0.8);
+  doc.line(14, 27, pageWidth - 14, 27);
+  doc.setLineWidth(0.2);
+  doc.line(14, 28, pageWidth - 14, 28);
+
+  // Title Banner
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(13);
+  doc.setTextColor(30, 41, 59);
+  doc.text(`JADWAL PELAJARAN KELAS ${schoolClass.name}`, pageWidth / 2, 35, { align: 'center' });
+  doc.setFontSize(10);
+  doc.setFont('helvetica', 'normal');
+  doc.setTextColor(71, 85, 105);
+  doc.text(`Tahun Ajaran: ${schoolProfile.academicYear || '2025/2026'} | Semester: ${schoolProfile.semester || 'Ganjil'} | Wali Kelas: ${schoolClass.homeroomTeacher || '-'}`, pageWidth / 2, 40, { align: 'center' });
+
+  const activeDays = schoolProfile.activeDays && schoolProfile.activeDays.length > 0
+    ? schoolProfile.activeDays
+    : ['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
+
+  // Table columns: JP, Waktu, ...Days
+  const tableHeaders = [
+    'JP',
+    'WAKTU STANDAR',
+    ...activeDays.map(d => {
+      const dPeriods = getPeriodsForDay(periods, d);
+      const kbmCount = dPeriods.filter(p => p.type === 'KBM').length;
+      return `${d.toUpperCase()}\n(${kbmCount} JP)`;
+    })
+  ];
+
+  const standardPeriods = getPeriodsForDay(periods, 'SEMUA');
+  const allPeriodNumbers = Array.from(new Set(periods.filter(p => p.type === 'KBM').map(p => p.periodNumber))).sort((a, b) => a - b);
+  const maxJP = allPeriodNumbers.length > 0 ? Math.max(...allPeriodNumbers) : 8;
+
+  const tableRows: any[][] = [];
+
+  // 1. Apel / Upacara / Literasi Pagi jika ada
+  const morningNonKbm = periods.find(p => p.periodNumber === 0 && (p.type === 'UPACARA' || p.type === 'LITERASI' || (p.startTime || '') < '07:30'));
+  if (morningNonKbm) {
+    const row = [
+      '-',
+      `${morningNonKbm.startTime} - ${morningNonKbm.endTime}`,
+      ...activeDays.map(d => {
+        const dPeriods = getPeriodsForDay(periods, d);
+        const morningSlot = dPeriods.find(p => p.periodNumber === 0 && (p.type === 'UPACARA' || p.type === 'LITERASI' || (p.startTime || '') < '07:30'));
+        return morningSlot ? `[ ${morningSlot.label} ]` : `[ ${morningNonKbm.label} ]`;
+      })
+    ];
+    tableRows.push(row);
+  }
+
+  // Iterate each JP
+  for (let jp = 1; jp <= maxJP; jp++) {
+    const stdPeriod = standardPeriods.find(p => p.periodNumber === jp && p.type === 'KBM');
+    const row: string[] = [];
+
+    row.push(`JP ${jp}`);
+    row.push(stdPeriod ? `${stdPeriod.startTime} - ${stdPeriod.endTime}` : '-');
+
+    activeDays.forEach(day => {
+      const dayPeriods = getPeriodsForDay(periods, day);
+      const dayJP = dayPeriods.find(p => p.periodNumber === jp && p.type === 'KBM');
+
+      if (!dayJP && dayPeriods.some(p => p.type === 'KBM')) {
+        row.push('-\n(Non KBM / Pulang)');
+        return;
+      }
+
+      const slot = scheduleSlots.find(s => s.classId === schoolClass.id && s.day === day && s.periodNumber === jp);
+      if (slot) {
+        const teacherShort = slot.teacherName ? slot.teacherName.split(',')[0] : '';
+        const roomStr = slot.room ? `\n(${slot.room})` : '';
+        const timeBadge = dayJP ? `\n[${dayJP.startTime}-${dayJP.endTime}]` : '';
+        row.push(`${slot.subject}\n${teacherShort}${roomStr}${timeBadge}`);
+      } else {
+        const timeBadge = dayJP ? `\n[${dayJP.startTime}-${dayJP.endTime}]` : '';
+        row.push(`-${timeBadge}`);
+      }
+    });
+
+    tableRows.push(row);
+
+    // Midday Break check
+    if (jp === 4) {
+      const brk = standardPeriods.find(p => p.type === 'ISTIRAHAT');
+      if (brk) {
+        tableRows.push([
+          'IST',
+          `${brk.startTime} - ${brk.endTime}`,
+          ...activeDays.map(d => {
+            const dPeriods = getPeriodsForDay(periods, d);
+            const dBrk = dPeriods.find(p => p.type === 'ISTIRAHAT');
+            return dBrk ? `[ ${dBrk.label} (${dBrk.startTime}-${dBrk.endTime}) ]` : `[ ${brk.label} ]`;
+          })
+        ]);
+      }
+    }
+  }
+
+  autoTable(doc, {
+    startY: 44,
+    head: [tableHeaders],
+    body: tableRows,
+    theme: 'grid',
+    styles: {
+      fontSize: 7.5,
+      cellPadding: 2,
+      halign: 'center',
+      valign: 'middle',
+      lineColor: [203, 213, 225],
+      lineWidth: 0.1,
+    },
+    headStyles: {
+      fillColor: [30, 58, 138],
+      textColor: 255,
+      fontStyle: 'bold',
+      halign: 'center',
+    },
+    columnStyles: {
+      0: { cellWidth: 16, fontStyle: 'bold', fillColor: [241, 245, 249] },
+      1: { cellWidth: 26, fontStyle: 'normal', fillColor: [248, 250, 252] },
+    },
+    didParseCell: (data) => {
+      if (data.row.raw && Array.isArray(data.row.raw)) {
+        const firstCol = data.row.raw[0];
+        if (firstCol === '-' || firstCol === 'IST') {
+          data.cell.styles.fillColor = [241, 245, 249];
+          data.cell.styles.textColor = [100, 116, 139];
+          data.cell.styles.fontStyle = 'italic';
+        }
+      }
+    }
+  });
+
+  const finalY = (doc as any).lastAutoTable?.finalY || 150;
+  const sigY = Math.min(finalY + 10, pageHeight - 34);
+
+  // Signatures
+  doc.setTextColor(30, 41, 59);
+  doc.setFontSize(9);
+  doc.setFont('helvetica', 'normal');
+
+  // Left: Wali Kelas
+  doc.text('Mengetahui,', 25, sigY);
+  doc.text('Wali Kelas,', 25, sigY + 4);
+  doc.setFont('helvetica', 'bold');
+  doc.text(schoolClass.homeroomTeacher || '...........................................', 25, sigY + 18);
+
+  // Right: Kepala Sekolah
+  const regencyName = schoolProfile.regency || 'Jakarta';
+  const todayStr = new Date().toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' });
+  doc.setFont('helvetica', 'normal');
+  doc.text(`${regencyName}, ${todayStr}`, pageWidth - 70, sigY);
+  doc.text('Kepala Sekolah,', pageWidth - 70, sigY + 4);
+  doc.setFont('helvetica', 'bold');
+  doc.text(schoolProfile.principalName || '...........................................', pageWidth - 70, sigY + 18);
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(8);
+  doc.text(`NIP. ${schoolProfile.principalNip || '-'}`, pageWidth - 70, sigY + 22);
+
+  doc.save(`Jadwal_Pelajaran_Kelas_${schoolClass.name.replace(/[^a-zA-Z0-9]/g, '_')}_${Date.now()}.pdf`);
+}
+
+/**
+ * Ekspor Jadwal Mengajar Guru ke PDF
+ */
+export async function exportTeacherSchedulePdf(
+  teacher: Teacher,
+  scheduleSlots: ClassScheduleSlot[],
+  periods: LessonPeriod[],
+  schoolProfile: SchoolProfile
+) {
+  const doc = new jsPDF({
+    orientation: 'landscape',
+    unit: 'mm',
+    format: 'a4'
+  });
+
+  const pageWidth = doc.internal.pageSize.getWidth();
+  const pageHeight = doc.internal.pageSize.getHeight();
+
+  const schoolLogo = await loadImageAsDataUrl(schoolProfile.schoolLogo);
+  const regencyLogo = await loadImageAsDataUrl(schoolProfile.regencyLogo);
+
+  if (regencyLogo) doc.addImage(regencyLogo, 'PNG', 14, 8, 18, 18);
+  if (schoolLogo) doc.addImage(schoolLogo, 'PNG', pageWidth - 32, 8, 18, 18);
+
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(13);
+  doc.text((schoolProfile.regency || 'PEMERINTAH KABUPATEN / KOTA').toUpperCase(), pageWidth / 2, 12, { align: 'center' });
+  doc.setFontSize(15);
+  doc.text((schoolProfile.name || 'SMP NEGERI 1 CERDAS BERSAMA').toUpperCase(), pageWidth / 2, 18, { align: 'center' });
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(9);
+  doc.text(`${schoolProfile.address || ''} | NPSN: ${schoolProfile.npsn || '-'}`, pageWidth / 2, 23, { align: 'center' });
+
+  doc.setLineWidth(0.8);
+  doc.line(14, 27, pageWidth - 14, 27);
+  doc.setLineWidth(0.2);
+  doc.line(14, 28, pageWidth - 14, 28);
+
+  // Title
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(13);
+  doc.setTextColor(30, 41, 59);
+  doc.text(`JADWAL MENGAJAR GURU: ${teacher.name}`, pageWidth / 2, 35, { align: 'center' });
+  doc.setFontSize(10);
+  doc.setFont('helvetica', 'normal');
+  doc.setTextColor(71, 85, 105);
+  doc.text(`NIP: ${teacher.nip || '-'} | Mapel Utama: ${teacher.subject1 || '-'} | Total Beban: ${scheduleSlots.filter(s => s.teacherId === teacher.id).length} JP / Minggu`, pageWidth / 2, 40, { align: 'center' });
+
+  const activeDays = schoolProfile.activeDays && schoolProfile.activeDays.length > 0
+    ? schoolProfile.activeDays
+    : ['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
+
+  const tableHeaders = ['JP', 'WAKTU', ...activeDays.map(d => d.toUpperCase())];
+
+  const standardPeriods = getPeriodsForDay(periods, 'SEMUA');
+  const allPeriodNumbers = Array.from(new Set(periods.filter(p => p.type === 'KBM').map(p => p.periodNumber))).sort((a, b) => a - b);
+  const maxJP = allPeriodNumbers.length > 0 ? Math.max(...allPeriodNumbers) : 8;
+
+  const tableRows: any[][] = [];
+
+  for (let jp = 1; jp <= maxJP; jp++) {
+    const stdPeriod = standardPeriods.find(p => p.periodNumber === jp && p.type === 'KBM');
+    const row: string[] = [];
+    row.push(`JP ${jp}`);
+    row.push(stdPeriod ? `${stdPeriod.startTime} - ${stdPeriod.endTime}` : '-');
+
+    activeDays.forEach(day => {
+      const dayPeriods = getPeriodsForDay(periods, day);
+      const dayJP = dayPeriods.find(p => p.periodNumber === jp && p.type === 'KBM');
+
+      if (!dayJP && dayPeriods.some(p => p.type === 'KBM')) {
+        row.push('-');
+        return;
+      }
+
+      const mySlots = scheduleSlots.filter(s => s.teacherId === teacher.id && s.day === day && s.periodNumber === jp);
+      const timeStr = dayJP ? `\n[${dayJP.startTime}-${dayJP.endTime}]` : '';
+      if (mySlots.length > 1) {
+        // Bentrok!
+        row.push(`⚠️ BENTROK:\n${mySlots.map(s => `${s.className} (${s.subject})`).join('\n')}${timeStr}`);
+      } else if (mySlots.length === 1) {
+        const slot = mySlots[0];
+        row.push(`Kelas ${slot.className}\n${slot.subject}${slot.room ? ` (${slot.room})` : ''}${timeStr}`);
+      } else {
+        row.push('-');
+      }
+    });
+
+    tableRows.push(row);
+  }
+
+  autoTable(doc, {
+    startY: 44,
+    head: [tableHeaders],
+    body: tableRows,
+    theme: 'grid',
+    styles: {
+      fontSize: 8,
+      cellPadding: 2.5,
+      halign: 'center',
+      valign: 'middle',
+    },
+    headStyles: {
+      fillColor: [67, 56, 202],
+      textColor: 255,
+      fontStyle: 'bold',
+    },
+    columnStyles: {
+      0: { cellWidth: 20, fontStyle: 'bold', fillColor: [241, 245, 249] },
+      1: { cellWidth: 24, fillColor: [248, 250, 252] },
+    },
+  });
+
+  const finalY = (doc as any).lastAutoTable?.finalY || 150;
+  const sigY = Math.min(finalY + 12, pageHeight - 35);
+
+  doc.setFontSize(9);
+  doc.setFont('helvetica', 'normal');
+  doc.text('Guru yang Bersangkutan,', 25, sigY + 5);
+  doc.setFont('helvetica', 'bold');
+  doc.text(teacher.name, 25, sigY + 22);
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(8);
+  doc.text(`NIP. ${teacher.nip || '-'}`, 25, sigY + 26);
+
+  const regencyName = schoolProfile.regency || 'Jakarta';
+  const todayStr = new Date().toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' });
+  doc.text(`${regencyName}, ${todayStr}`, pageWidth - 70, sigY);
+  doc.text('Kepala Sekolah,', pageWidth - 70, sigY + 5);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(9);
+  doc.text(schoolProfile.principalName || '...........................................', pageWidth - 70, sigY + 22);
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(8);
+  doc.text(`NIP. ${schoolProfile.principalNip || '-'}`, pageWidth - 70, sigY + 26);
+
+  doc.save(`Jadwal_Mengajar_${teacher.name.replace(/[^a-zA-Z0-9]/g, '_')}_${Date.now()}.pdf`);
+}
+
+/**
+ * Ekspor Jadwal Pelajaran ke Format XLSX Excel
+ */
+export function exportClassScheduleExcel(
+  schoolClass: SchoolClass,
+  scheduleSlots: ClassScheduleSlot[],
+  periods: LessonPeriod[],
+  schoolProfile: SchoolProfile
+) {
+  const workbook = XLSX.utils.book_new();
+
+  const activeDays = schoolProfile.activeDays && schoolProfile.activeDays.length > 0
+    ? schoolProfile.activeDays
+    : ['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
+
+  const sortedPeriods = [...periods].sort((a, b) => a.periodNumber - b.periodNumber);
+
+  // 1. Sheet Matriks Mingguan
+  const matrixRows: any[] = [];
+  sortedPeriods.forEach(p => {
+    const rowObj: any = {
+      'JP': p.type === 'KBM' ? `JP ${p.periodNumber}` : (p.label || 'Sesi'),
+      'Waktu': `${p.startTime || ''} - ${p.endTime || ''}`,
+    };
+
+    activeDays.forEach(day => {
+      if (p.type !== 'KBM') {
+        rowObj[day] = p.label;
+      } else {
+        const slot = scheduleSlots.find(s => s.classId === schoolClass.id && s.day === day && s.periodNumber === p.periodNumber);
+        rowObj[day] = slot ? `${slot.subject} (${slot.teacherName || '-'})` : '-';
+      }
+    });
+
+    matrixRows.push(rowObj);
+  });
+
+  const wsMatrix = XLSX.utils.json_to_sheet(matrixRows);
+  XLSX.utils.book_append_sheet(workbook, wsMatrix, `Jadwal ${schoolClass.name}`);
+
+  // 2. Sheet Rincian Detail Slot
+  const classSlots = scheduleSlots.filter(s => s.classId === schoolClass.id);
+  const detailRows = classSlots.map((s, idx) => ({
+    'No': idx + 1,
+    'Hari': s.day,
+    'JP': `JP ${s.periodNumber}`,
+    'Mata Pelajaran': s.subject,
+    'Guru Pengajar': s.teacherName,
+    'NIP Guru': s.teacherNip || '-',
+    'Ruangan': s.room || `Ruang ${schoolClass.name}`,
+    'Catatan': s.notes || '-'
+  }));
+
+  const wsDetail = XLSX.utils.json_to_sheet(detailRows);
+  XLSX.utils.book_append_sheet(workbook, wsDetail, 'Daftar Slot Mengajar');
+
+  const fileName = `Jadwal_Pelajaran_Kelas_${schoolClass.name.replace(/[^a-zA-Z0-9]/g, '_')}_${Date.now()}.xlsx`;
+  saveExcelWorkbook(workbook, fileName);
+}
+
 
 
 

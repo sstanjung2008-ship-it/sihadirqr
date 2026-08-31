@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { WhatsAppLog } from '../types';
-import { Bell, Send, CheckCircle2, Search, ExternalLink, LogOut, LogIn, AlertTriangle, Filter } from 'lucide-react';
+import { Bell, Send, CheckCircle2, Search, ExternalLink, LogOut, LogIn, AlertTriangle, Filter, BookOpen, User, GraduationCap, Clock } from 'lucide-react';
 import { createWhatsAppUrl } from '../lib/exportUtils';
 
 interface WhatsAppLogViewProps {
@@ -9,14 +9,15 @@ interface WhatsAppLogViewProps {
 
 export const WhatsAppLogView: React.FC<WhatsAppLogViewProps> = ({ waLogs }) => {
   const [searchQuery, setSearchQuery] = useState('');
-  const [selectedTypeFilter, setSelectedTypeFilter] = useState<'ALL' | 'MASUK' | 'PULANG' | 'ALPA'>('ALL');
+  const [selectedTypeFilter, setSelectedTypeFilter] = useState<'ALL' | 'MASUK' | 'PULANG' | 'ALPA' | 'GURU'>('ALL');
 
   const filteredLogs = waLogs.filter(l => {
+    const studentOrTeacherName = (l.studentName || l.teacherName || '').toLowerCase();
     const matchesSearch = 
-      l.studentName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      l.phone.includes(searchQuery) ||
-      l.className.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      l.message.toLowerCase().includes(searchQuery.toLowerCase());
+      studentOrTeacherName.includes(searchQuery.toLowerCase()) ||
+      (l.phone && l.phone.includes(searchQuery)) ||
+      (l.className && l.className.toLowerCase().includes(searchQuery.toLowerCase())) ||
+      (l.message && l.message.toLowerCase().includes(searchQuery.toLowerCase()));
 
     if (!matchesSearch) return false;
 
@@ -26,6 +27,8 @@ export const WhatsAppLogView: React.FC<WhatsAppLogViewProps> = ({ waLogs }) => {
       return l.type === 'PULANG' || l.message.toLowerCase().includes('pulang');
     } else if (selectedTypeFilter === 'ALPA') {
       return l.type === 'ALPA' || l.message.toLowerCase().includes('alpa');
+    } else if (selectedTypeFilter === 'GURU') {
+      return l.type === 'JADWAL_GURU' || l.recipientRole === 'TEACHER' || l.message.toLowerCase().includes('mengajar');
     }
 
     return true;
@@ -34,6 +37,7 @@ export const WhatsAppLogView: React.FC<WhatsAppLogViewProps> = ({ waLogs }) => {
   const countMasuk = waLogs.filter(l => l.type === 'HADIR' || l.type === 'TERLAMBAT').length;
   const countPulang = waLogs.filter(l => l.type === 'PULANG' || l.message.toLowerCase().includes('pulang')).length;
   const countAlpa = waLogs.filter(l => l.type === 'ALPA' || l.message.toLowerCase().includes('alpa')).length;
+  const countGuru = waLogs.filter(l => l.type === 'JADWAL_GURU' || l.recipientRole === 'TEACHER' || l.message.toLowerCase().includes('mengajar')).length;
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
@@ -43,10 +47,10 @@ export const WhatsAppLogView: React.FC<WhatsAppLogViewProps> = ({ waLogs }) => {
         <div>
           <h1 className="text-2xl font-extrabold text-slate-800 tracking-tight flex items-center gap-2">
             <Bell className="w-6 h-6 text-emerald-600" />
-            Riwayat Log Notifikasi WhatsApp Orang Tua
+            Riwayat Log Notifikasi WhatsApp
           </h1>
           <p className="text-xs text-slate-500 mt-1">
-            Daftar notifikasi presensi otomatis (Masuk, Pulang, dan Alpa) yang terkirim ke WhatsApp wali murid.
+            Daftar notifikasi otomatis presensi siswa (Masuk, Pulang, Alpa) dan pengingat jadwal mengajar KBM guru yang terkirim.
           </p>
         </div>
 
@@ -57,8 +61,8 @@ export const WhatsAppLogView: React.FC<WhatsAppLogViewProps> = ({ waLogs }) => {
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Cari Log WA Siswa..."
-              className="bg-slate-50 border border-slate-200 text-slate-800 placeholder-slate-400 text-xs rounded-xl pl-9 pr-3 py-2 w-56 focus:outline-none focus:ring-2 focus:ring-emerald-500 font-medium"
+              placeholder="Cari Log Siswa / Guru..."
+              className="bg-slate-50 border border-slate-200 text-slate-800 placeholder-slate-400 text-xs rounded-xl pl-9 pr-3 py-2 w-60 focus:outline-none focus:ring-2 focus:ring-emerald-500 font-medium"
             />
           </div>
         </div>
@@ -117,6 +121,19 @@ export const WhatsAppLogView: React.FC<WhatsAppLogViewProps> = ({ waLogs }) => {
           <AlertTriangle className="w-3.5 h-3.5" />
           <span>Otomatis Alpa ({countAlpa})</span>
         </button>
+
+        <button
+          type="button"
+          onClick={() => setSelectedTypeFilter('GURU')}
+          className={`px-3.5 py-1.5 rounded-xl text-xs font-extrabold flex items-center gap-1.5 transition-all cursor-pointer ${
+            selectedTypeFilter === 'GURU'
+              ? 'bg-indigo-600 text-white shadow-xs'
+              : 'text-indigo-700 bg-indigo-50 hover:bg-indigo-100'
+          }`}
+        >
+          <BookOpen className="w-3.5 h-3.5" />
+          <span>Pengingat Jadwal Guru ({countGuru})</span>
+        </button>
       </div>
 
       {/* Log Table */}
@@ -137,7 +154,7 @@ export const WhatsAppLogView: React.FC<WhatsAppLogViewProps> = ({ waLogs }) => {
               <tr>
                 <th className="py-3.5 px-4">Waktu Terkirim</th>
                 <th className="py-3.5 px-4">Tipe Notifikasi</th>
-                <th className="py-3.5 px-4">Siswa</th>
+                <th className="py-3.5 px-4">Penerima (Nama & Kelas/Peran)</th>
                 <th className="py-3.5 px-4">No. WA Tujuan</th>
                 <th className="py-3.5 px-4">Isi Pesan Notifikasi</th>
                 <th className="py-3.5 px-4">Status</th>
@@ -153,6 +170,7 @@ export const WhatsAppLogView: React.FC<WhatsAppLogViewProps> = ({ waLogs }) => {
                 </tr>
               ) : (
                 filteredLogs.map((log) => {
+                  const isTeacherReminder = log.type === 'JADWAL_GURU' || log.recipientRole === 'TEACHER' || log.message.toLowerCase().includes('mengajar');
                   const isPulang = log.type === 'PULANG' || log.message.toLowerCase().includes('pulang');
                   const isAlpa = log.type === 'ALPA' || log.message.toLowerCase().includes('alpa');
                   const isLate = log.type === 'TERLAMBAT' || log.message.toLowerCase().includes('terlambat');
@@ -169,7 +187,12 @@ export const WhatsAppLogView: React.FC<WhatsAppLogViewProps> = ({ waLogs }) => {
                       </td>
 
                       <td className="py-3.5 px-4 whitespace-nowrap">
-                        {isPulang ? (
+                        {isTeacherReminder ? (
+                          <span className="bg-indigo-100 text-indigo-800 border border-indigo-200 px-2.5 py-1 rounded-full font-extrabold text-[10px] inline-flex items-center gap-1">
+                            <BookOpen className="w-3 h-3 text-indigo-600" />
+                            Pengingat KBM Guru
+                          </span>
+                        ) : isPulang ? (
                           <span className="bg-purple-100 text-purple-800 border border-purple-200 px-2.5 py-1 rounded-full font-extrabold text-[10px] inline-flex items-center gap-1">
                             <LogOut className="w-3 h-3 text-purple-600" />
                             Scan Pulang
@@ -193,8 +216,19 @@ export const WhatsAppLogView: React.FC<WhatsAppLogViewProps> = ({ waLogs }) => {
                       </td>
 
                       <td className="py-3.5 px-4 whitespace-nowrap">
-                        <p className="font-extrabold text-slate-900">{log.studentName}</p>
-                        <p className="text-[10px] text-indigo-600 font-bold">{log.className}</p>
+                        <div className="flex items-center gap-1.5">
+                          {isTeacherReminder ? (
+                            <User className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
+                          ) : (
+                            <GraduationCap className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                          )}
+                          <div>
+                            <p className="font-extrabold text-slate-900">{log.studentName || log.teacherName || 'Pengguna'}</p>
+                            <p className="text-[10px] text-indigo-600 font-bold">
+                              {isTeacherReminder ? (log.className ? `Kelas ${log.className}` : 'Guru Mata Pelajaran') : log.className}
+                            </p>
+                          </div>
+                        </div>
                       </td>
 
                       <td className="py-3.5 px-4 font-mono text-emerald-700 font-bold whitespace-nowrap">

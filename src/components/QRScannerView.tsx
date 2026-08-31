@@ -404,6 +404,8 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
       const returnWaLogId = `wa-pulang-${Date.now()}`;
       const returnStatus = isBeforeEndTime ? 'PULANG_CEPAT' : 'PULANG';
 
+      const isParentWaEnabled = schoolProfile.waParentNotificationEnabled !== false;
+
       const record: AttendanceRecord = {
         id: existingRecord ? existingRecord.id : `att-${Date.now()}-${student.id}`,
         studentId: student.id,
@@ -415,14 +417,14 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
         status: existingRecord ? existingRecord.status : 'HADIR',
         method: existingRecord ? existingRecord.method : 'QR_SCAN',
         scannedBy: existingRecord ? existingRecord.scannedBy : 'Pos Scanner Utama',
-        parentNotified: true,
+        parentNotified: isParentWaEnabled,
         waLogId: existingRecord?.waLogId,
         returnTime: timeStr,
         returnStatus,
         returnScannedBy: isBeforeEndTime 
           ? `Pos Scanner Utama (Pulang Cepat sebelum ${endTimeStr})` 
           : 'Pos Scanner Utama (Pulang)',
-        returnWaLogId: returnWaLogId
+        returnWaLogId: isParentWaEnabled ? returnWaLogId : undefined
       };
 
       const departureTemplate = schoolProfile.waTemplateDeparture || 
@@ -436,8 +438,8 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
 
       const waUrl = createWhatsAppUrl(student.parentPhone, waMsg);
 
-      // Kirim via WhatsApp API Gateway secara otomatis jika API Key terisi
-      if (schoolProfile.waApiKey && schoolProfile.waApiKey.trim() && schoolProfile.waGatewayEnabled !== false) {
+      // Kirim via WhatsApp API Gateway secara otomatis jika diaktifkan dan API Key terisi
+      if (isParentWaEnabled && schoolProfile.waApiKey && schoolProfile.waApiKey.trim() && schoolProfile.waGatewayEnabled !== false) {
         sendWhatsAppGatewayMessage(
           student.parentPhone, 
           waMsg, 
@@ -452,7 +454,7 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
         });
       }
 
-      const waLog: WhatsAppLog = {
+      const waLog: WhatsAppLog | undefined = isParentWaEnabled ? {
         id: returnWaLogId,
         studentId: student.id,
         studentName: student.name,
@@ -462,7 +464,7 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
         status: (schoolProfile.waApiKey && schoolProfile.waApiKey.trim()) ? 'TERKIRIM' : 'TERKIRIM',
         timestamp: now.toISOString(),
         type: 'PULANG'
-      };
+      } : undefined;
 
       onAddAttendance(record, waLog);
 
@@ -572,6 +574,9 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
 
       playScanSound(isLate ? 'LATE' : 'SUCCESS');
 
+      const isParentWaEnabled = schoolProfile.waParentNotificationEnabled !== false;
+      const waLogId = isParentWaEnabled ? `wa-${Date.now()}` : undefined;
+
       const record: AttendanceRecord = {
         id: existingRecord ? existingRecord.id : `att-${Date.now()}-${student.id}`,
         studentId: student.id,
@@ -583,8 +588,8 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
         status,
         method: 'QR_SCAN',
         scannedBy: 'Pos Scanner Utama',
-        parentNotified: true,
-        waLogId: `wa-${Date.now()}`,
+        parentNotified: isParentWaEnabled,
+        waLogId: waLogId || existingRecord?.waLogId,
         returnTime: existingRecord?.returnTime,
         returnStatus: existingRecord?.returnStatus,
         returnScannedBy: existingRecord?.returnScannedBy,
@@ -600,8 +605,8 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
 
       const waUrl = createWhatsAppUrl(student.parentPhone, waMsg);
 
-      // Kirim via WhatsApp API Gateway secara otomatis jika API Key terisi
-      if (schoolProfile.waApiKey && schoolProfile.waApiKey.trim() && schoolProfile.waGatewayEnabled !== false) {
+      // Kirim via WhatsApp API Gateway secara otomatis jika diaktifkan dan API Key terisi
+      if (isParentWaEnabled && schoolProfile.waApiKey && schoolProfile.waApiKey.trim() && schoolProfile.waGatewayEnabled !== false) {
         sendWhatsAppGatewayMessage(
           student.parentPhone, 
           waMsg, 
@@ -616,8 +621,8 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
         });
       }
 
-      const waLog: WhatsAppLog = {
-        id: record.waLogId!,
+      const waLog: WhatsAppLog | undefined = isParentWaEnabled && waLogId ? {
+        id: waLogId,
         studentId: student.id,
         studentName: student.name,
         className: student.className,
@@ -626,7 +631,7 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
         status: (schoolProfile.waApiKey && schoolProfile.waApiKey.trim()) ? 'TERKIRIM' : 'TERKIRIM',
         timestamp: now.toISOString(),
         type: status
-      };
+      } : undefined;
 
       onAddAttendance(record, waLog);
 

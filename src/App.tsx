@@ -13,7 +13,9 @@ import {
   CharacterTrait,
   StudentCharacterLog,
   CharacterPredicateSettings,
-  UserSession
+  UserSession,
+  LessonPeriod,
+  ClassScheduleSlot
 } from './types';
 import { 
   getSchoolProfile, 
@@ -38,6 +40,10 @@ import {
   saveStudentCharacterLogs,
   getCharacterPredicateSettings,
   saveCharacterPredicateSettings,
+  getLessonPeriods,
+  saveLessonPeriods,
+  getClassSchedules,
+  saveClassSchedules,
   getUserSession,
   saveUserSession,
   initFirestoreRealtimeSync
@@ -59,6 +65,7 @@ import { LearningJournalView } from './components/LearningJournalView';
 import { DisciplineRulesView } from './components/DisciplineRulesView';
 import { CharacterInputView } from './components/CharacterInputView';
 import { CharacterPointsView } from './components/CharacterPointsView';
+import { ScheduleManagementView } from './components/ScheduleManagementView';
 import { ParentChatView } from './components/ParentChatView';
 import { LoginView } from './components/LoginView';
 
@@ -79,6 +86,8 @@ export default function App() {
   const [traits, setTraitsState] = useState<CharacterTrait[]>(getCharacterTraits());
   const [characterLogs, setCharacterLogsState] = useState<StudentCharacterLog[]>(getStudentCharacterLogs());
   const [predicateSettings, setPredicateSettingsState] = useState<CharacterPredicateSettings>(getCharacterPredicateSettings());
+  const [periods, setPeriodsState] = useState<LessonPeriod[]>(getLessonPeriods());
+  const [schedules, setSchedulesState] = useState<ClassScheduleSlot[]>(getClassSchedules());
 
   // Parent Child Selector State
   const [selectedChildId, setSelectedChildId] = useState<string>(() => {
@@ -101,6 +110,8 @@ export default function App() {
     setTraitsState(getCharacterTraits());
     setCharacterLogsState(getStudentCharacterLogs());
     setPredicateSettingsState(getCharacterPredicateSettings());
+    setPeriodsState(getLessonPeriods());
+    setSchedulesState(getClassSchedules());
     setUserSessionState(getUserSession());
   };
 
@@ -176,6 +187,8 @@ export default function App() {
 
         // Auto assign ALPA
         const waLogId = `wa-autoalpa-${Date.now()}-${student.id}`;
+        const isParentWaEnabled = schoolProfile.waParentNotificationEnabled !== false;
+
         const record: AttendanceRecord = {
           id: `att-autoalpa-${dateStr}-${student.id}`,
           studentId: student.id,
@@ -188,14 +201,14 @@ export default function App() {
           method: 'MANUAL',
           scannedBy: 'Sistem Otomatis (Batas Alpa)',
           notes: `Otomatis Alpa (Melewati batas jam ${autoAlpaTime} WITA)`,
-          parentNotified: true,
-          waLogId
+          parentNotified: isParentWaEnabled,
+          waLogId: isParentWaEnabled ? waLogId : undefined
         };
 
         updatedAttendance.push(record);
         hasChanges = true;
 
-        if (schoolProfile.waTemplateAbsent) {
+        if (isParentWaEnabled && schoolProfile.waTemplateAbsent) {
           const waMsg = schoolProfile.waTemplateAbsent
             .replace('[ParentName]', student.parentName)
             .replace('[StudentName]', student.name)
@@ -240,7 +253,167 @@ export default function App() {
     checkAndApplyAutoAlpa();
     const interval = setInterval(checkAndApplyAutoAlpa, 30000);
     return () => clearInterval(interval);
-  }, [schoolProfile.autoAlpaTime, schoolProfile.activeDays, schoolProfile.holidays, students, attendanceRecords, leaveRequests, waLogs]);
+  }, [
+    schoolProfile.autoAlpaTime, 
+    schoolProfile.activeDays, 
+    schoolProfile.holidays, 
+    schoolProfile.waParentNotificationEnabled,
+    schoolProfile.waTemplateAbsent,
+    schoolProfile.waApiKey,
+    schoolProfile.waGatewayProvider,
+    schoolProfile.waGatewayEnabled,
+    students, 
+    attendanceRecords, 
+    leaveRequests, 
+    waLogs
+  ]);
+
+  // Automatic WhatsApp Reminder for Teachers based on KBM Schedule
+  useEffect(() => {
+    // Check if feature is enabled in settings
+    if (schoolProfile.waTeacherReminderEnabled === false) return;
+
+    const checkAndSendTeacherScheduleReminders = () => {
+      const now = new Date();
+      const dayNames = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
+      const currentDayName = dayNames[now.getDay()];
+
+      // 1. Check if today is an active learning day
+      const activeDays = schoolProfile.activeDays || ['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
+      if (!activeDays.includes(currentDayName)) return;
+
+      // 2. Check if today is a registered holiday
+      const year = now.getFullYear();
+      const month = String(now.getMonth() + 1).padStart(2, '0');
+      const day = String(now.getDate()).padStart(2, '0');
+      const dateStr = `${year}-${month}-${day}`;
+
+      const holidays = schoolProfile.holidays || [];
+      const isTodayHoliday = holidays.some(h => {
+        if (h.endDate) {
+          return dateStr >= h.date && dateStr <= h.endDate;
+        }
+        return h.date === dateStr;
+      });
+      if (isTodayHoliday) return;
+
+      // 3. Get periods for today
+      const daySpecificPeriods = periods.filter(p => p.day === currentDayName || p.daySpecific === currentDayName);
+      const todayPeriods = (daySpecificPeriods.length > 0 
+        ? daySpecificPeriods 
+        : periods.filter(p => !p.day || p.day === 'SEMUA')
+      ).filter(p => p.type === 'KBM');
+
+      if (todayPeriods.length === 0) return;
+
+      const currentMinutes = now.getHours() * 60 + now.getMinutes();
+      const minutesBefore = schoolProfile.waTeacherReminderMinutesBefore || 0;
+
+      // Schedules for today
+      const todaySchedules = schedules.filter(s => s.day === currentDayName);
+      if (todaySchedules.length === 0) return;
+
+      const currentWaLogs = getWaLogs();
+      const newWaLogs: WhatsAppLog[] = [];
+
+      todayPeriods.forEach(period => {
+        if (!period.startTime) return;
+        const [pH, pM] = period.startTime.split(':').map(Number);
+        if (isNaN(pH) || isNaN(pM)) return;
+
+        const periodStartMinutes = pH * 60 + pM;
+        const triggerMinutes = periodStartMinutes - minutesBefore;
+
+        // Trigger window: within 20 minutes from target trigger time
+        if (currentMinutes >= triggerMinutes && currentMinutes <= triggerMinutes + 20) {
+          const matchingSlots = todaySchedules.filter(s => s.periodNumber === period.periodNumber);
+
+          matchingSlots.forEach(slot => {
+            if (!slot.teacherId && !slot.teacherName) return;
+
+            // Unique log ID for today's reminder per slot
+            const reminderLogId = `wa-teacher-kbm-${dateStr}-${slot.id || `${slot.classId}-${slot.periodNumber}-${slot.teacherId}`}`;
+
+            // Check if reminder was already sent today
+            const alreadySent = currentWaLogs.some(l => l.id === reminderLogId) || newWaLogs.some(l => l.id === reminderLogId);
+            if (alreadySent) return;
+
+            // Find teacher
+            const teacher = teachers.find(t => t.id === slot.teacherId || t.name.toLowerCase() === (slot.teacherName || '').toLowerCase());
+            if (!teacher || !teacher.phone || !teacher.phone.trim()) return;
+
+            // Build reminder message
+            const template = schoolProfile.waTemplateTeacherReminder || 
+              "PENGINGAT MENGAJAR: Yth. Bpk/Ibu [TeacherName], mengingatkan bahwa jadwal mengajar mata pelajaran [Subject] di Kelas [ClassName] ([Room]) akan dimulai pada pukul [Time] WITA ([PeriodLabel]). Selamat menjalankan KBM!";
+
+            const periodLabel = period.label || `JP ${slot.periodNumber}`;
+            const roomLabel = slot.room ? `Ruang ${slot.room}` : `Kelas ${slot.className}`;
+
+            const waMsg = template
+              .replace(/\[TeacherName\]/g, teacher.name)
+              .replace(/\[Subject\]/g, slot.subject)
+              .replace(/\[ClassName\]/g, slot.className)
+              .replace(/\[Room\]/g, roomLabel)
+              .replace(/\[Time\]/g, period.startTime)
+              .replace(/\[PeriodLabel\]/g, periodLabel)
+              .replace(/\[Period\]/g, String(slot.periodNumber))
+              .replace(/\[SchoolName\]/g, schoolProfile.name);
+
+            // Send via WhatsApp Gateway if configured & enabled
+            if (schoolProfile.waApiKey && schoolProfile.waApiKey.trim() && schoolProfile.waGatewayEnabled !== false) {
+              sendWhatsAppGatewayMessage(
+                teacher.phone,
+                waMsg,
+                schoolProfile.waApiKey,
+                schoolProfile.waGatewayProvider || 'Fonnte'
+              );
+            }
+
+            const waLog: WhatsAppLog = {
+              id: reminderLogId,
+              studentId: '',
+              studentName: teacher.name,
+              className: slot.className,
+              phone: teacher.phone,
+              message: waMsg,
+              status: 'TERKIRIM',
+              timestamp: now.toISOString(),
+              type: 'JADWAL_GURU',
+              recipientRole: 'TEACHER',
+              teacherId: teacher.id,
+              teacherName: teacher.name,
+              slotId: slot.id,
+              periodNumber: slot.periodNumber
+            };
+
+            newWaLogs.push(waLog);
+          });
+        }
+      });
+
+      if (newWaLogs.length > 0) {
+        const updated = [...newWaLogs, ...currentWaLogs];
+        setWaLogsState(updated);
+        saveWaLogs(updated);
+      }
+    };
+
+    checkAndSendTeacherScheduleReminders();
+    const interval = setInterval(checkAndSendTeacherScheduleReminders, 25000);
+    return () => clearInterval(interval);
+  }, [
+    schoolProfile.waTeacherReminderEnabled,
+    schoolProfile.waTeacherReminderMinutesBefore,
+    schoolProfile.waTemplateTeacherReminder,
+    schoolProfile.activeDays,
+    schoolProfile.holidays,
+    schoolProfile.waApiKey,
+    schoolProfile.waGatewayProvider,
+    schoolProfile.waGatewayEnabled,
+    periods,
+    schedules,
+    teachers
+  ]);
 
   // Update session role changes
   const handleRoleChange = (role: UserRole) => {
@@ -632,6 +805,17 @@ export default function App() {
     saveSchoolProfile(profile);
   };
 
+  // Schedule & Period Handlers
+  const handleSavePeriods = (newPeriods: LessonPeriod[]) => {
+    setPeriodsState(newPeriods);
+    saveLessonPeriods(newPeriods);
+  };
+
+  const handleSaveSchedules = (newSchedules: ClassScheduleSlot[]) => {
+    setSchedulesState(newSchedules);
+    saveClassSchedules(newSchedules);
+  };
+
 
   const unreadLeavesCount = leaveRequests.filter(r => r.status === 'PENDING').length;
 
@@ -710,6 +894,20 @@ export default function App() {
               traits={traits}
               characterLogs={characterLogs}
               predicateSettings={predicateSettings}
+              userSession={userSession}
+            />
+          )}
+
+          {activeTab === 'schedule' && (
+            <ScheduleManagementView
+              schoolProfile={schoolProfile}
+              classes={classes}
+              teachers={teachers}
+              periods={periods}
+              schedules={schedules}
+              onSavePeriods={handleSavePeriods}
+              onSaveSchedules={handleSaveSchedules}
+              currentRole={currentRole}
               userSession={userSession}
             />
           )}

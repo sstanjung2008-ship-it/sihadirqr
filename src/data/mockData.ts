@@ -1,4 +1,4 @@
-import { SchoolProfile, SchoolClass, Student, AttendanceRecord, LeaveRequest, WhatsAppLog, Teacher } from '../types';
+import { SchoolProfile, SchoolClass, Student, AttendanceRecord, LeaveRequest, WhatsAppLog, Teacher, LessonPeriod, ClassScheduleSlot } from '../types';
 
 export const INITIAL_SCHOOL_PROFILE: SchoolProfile = {
   name: "SMP NEGERI 1 CERDAS BERSAMA",
@@ -23,6 +23,10 @@ export const INITIAL_SCHOOL_PROFILE: SchoolProfile = {
   waTemplateLate: "PEMBERITAHUAN TERLAMBAT: Yth. Bpk/Ibu [ParentName], siswa [StudentName] ([ClassName]) Tiba di Sekolah pukul [Time] WITA (Terlambat). Mohon perhatiannya.",
   waTemplateAbsent: "PERHATIAN: Yth. Bpk/Ibu [ParentName], siswa [StudentName] ([ClassName]) Belum Absen hingga pukul 08:30 WITA hari ini tanpa keterangan. Mohon konfirmasi.",
   waTemplateDeparture: "PEMBERITAHUAN PULANG: Yth. Bpk/Ibu [ParentName], memberitahukan bahwa siswa [StudentName] ([ClassName]) telah Pulang dari Sekolah pada pukul [Time] WITA. Terima kasih.",
+  waParentNotificationEnabled: true,
+  waTemplateTeacherReminder: "PENGINGAT MENGAJAR: Yth. Bpk/Ibu [TeacherName], mengingatkan bahwa jadwal mengajar mata pelajaran [Subject] di Kelas [ClassName] ([Room]) akan dimulai pada pukul [Time] WITA ([PeriodLabel]). Selamat menjalankan KBM!",
+  waTeacherReminderEnabled: true,
+  waTeacherReminderMinutesBefore: 0,
   waApiKey: "",
   waGatewayProvider: "Fonnte",
   waGatewayEnabled: true,
@@ -761,4 +765,78 @@ export const INITIAL_LEARNING_JOURNALS: any[] = [
     createdAt: new Date(Date.now() - 86400000 * 2).toISOString()
   }
 ];
+
+export const INITIAL_LESSON_PERIODS: LessonPeriod[] = [
+  { id: 'lp-01', periodNumber: 1, label: 'JP 1', startTime: '07:00', endTime: '07:40', type: 'KBM' },
+  { id: 'lp-02', periodNumber: 2, label: 'JP 2', startTime: '07:40', endTime: '08:20', type: 'KBM' },
+  { id: 'lp-03', periodNumber: 3, label: 'JP 3', startTime: '08:20', endTime: '09:00', type: 'KBM' },
+  { id: 'lp-04', periodNumber: 4, label: 'JP 4', startTime: '09:00', endTime: '09:40', type: 'KBM' },
+  { id: 'lp-05', periodNumber: 0, label: 'Istirahat 1', startTime: '09:40', endTime: '10:10', type: 'ISTIRAHAT', notes: 'Snack & Istirahat Pagi' },
+  { id: 'lp-06', periodNumber: 5, label: 'JP 5', startTime: '10:10', endTime: '10:50', type: 'KBM' },
+  { id: 'lp-07', periodNumber: 6, label: 'JP 6', startTime: '10:50', endTime: '11:30', type: 'KBM' },
+  { id: 'lp-08', periodNumber: 7, label: 'JP 7', startTime: '11:30', endTime: '12:10', type: 'KBM' },
+  { id: 'lp-09', periodNumber: 0, label: 'Istirahat 2 / Sholat Dzuhur', startTime: '12:10', endTime: '12:50', type: 'IBADAH', notes: 'Sholat Dzuhur Berjamaah & Makan Siang' },
+  { id: 'lp-10', periodNumber: 8, label: 'JP 8', startTime: '12:50', endTime: '13:30', type: 'KBM' },
+  { id: 'lp-11', periodNumber: 9, label: 'JP 9', startTime: '13:30', endTime: '14:10', type: 'KBM' },
+];
+
+export const INITIAL_CLASS_SCHEDULES: ClassScheduleSlot[] = [
+  // Kelas 7-A
+  { id: 'sch-7a-sen-1', classId: 'c7a', className: '7-A', day: 'Senin', periodNumber: 1, subject: 'Matematika', teacherId: 'tch-001', teacherName: 'Siti Rahmawati, S.Pd.', teacherNip: '19850312 201001 2 015', room: 'Ruang 7-A', color: 'indigo' },
+  { id: 'sch-7a-sen-2', classId: 'c7a', className: '7-A', day: 'Senin', periodNumber: 2, subject: 'Matematika', teacherId: 'tch-001', teacherName: 'Siti Rahmawati, S.Pd.', teacherNip: '19850312 201001 2 015', room: 'Ruang 7-A', color: 'indigo' },
+  { id: 'sch-7a-sen-3', classId: 'c7a', className: '7-A', day: 'Senin', periodNumber: 3, subject: 'Bahasa Indonesia', teacherId: 'tch-002', teacherName: 'Budi Santoso, M.Pd.', teacherNip: '19790820 200501 1 008', room: 'Ruang 7-A', color: 'blue' },
+  { id: 'sch-7a-sen-4', classId: 'c7a', className: '7-A', day: 'Senin', periodNumber: 4, subject: 'Bahasa Indonesia', teacherId: 'tch-002', teacherName: 'Budi Santoso, M.Pd.', teacherNip: '19790820 200501 1 008', room: 'Ruang 7-A', color: 'blue' },
+  { id: 'sch-7a-sen-5', classId: 'c7a', className: '7-A', day: 'Senin', periodNumber: 5, subject: 'IPA', teacherId: 'tch-003', teacherName: 'Dewi Lestari, S.Si.', teacherNip: '19881105 201402 2 009', room: 'Lab IPA', color: 'emerald' },
+  { id: 'sch-7a-sen-6', classId: 'c7a', className: '7-A', day: 'Senin', periodNumber: 6, subject: 'IPA', teacherId: 'tch-003', teacherName: 'Dewi Lestari, S.Si.', teacherNip: '19881105 201402 2 009', room: 'Lab IPA', color: 'emerald' },
+  { id: 'sch-7a-sen-7', classId: 'c7a', className: '7-A', day: 'Senin', periodNumber: 7, subject: 'PPKn', teacherId: 'tch-005', teacherName: 'Nurul Hidayah, S.Ag.', teacherNip: '19820614 200902 2 007', room: 'Ruang 7-A', color: 'rose' },
+
+  { id: 'sch-7a-sel-1', classId: 'c7a', className: '7-A', day: 'Selasa', periodNumber: 1, subject: 'Bahasa Inggris', teacherId: 'tch-007', teacherName: 'Rina Marlina, M.Pd.', teacherNip: '19860719 201101 2 012', room: 'Ruang 7-A', color: 'amber' },
+  { id: 'sch-7a-sel-2', classId: 'c7a', className: '7-A', day: 'Selasa', periodNumber: 2, subject: 'Bahasa Inggris', teacherId: 'tch-007', teacherName: 'Rina Marlina, M.Pd.', teacherNip: '19860719 201101 2 012', room: 'Ruang 7-A', color: 'amber' },
+  { id: 'sch-7a-sel-3', classId: 'c7a', className: '7-A', day: 'Selasa', periodNumber: 3, subject: 'Informatika', teacherId: 'tch-004', teacherName: 'Agus Pratama, S.Kom.', teacherNip: '19910403 201903 1 011', room: 'Lab Komputer', color: 'cyan' },
+  { id: 'sch-7a-sel-4', classId: 'c7a', className: '7-A', day: 'Selasa', periodNumber: 4, subject: 'Informatika', teacherId: 'tch-004', teacherName: 'Agus Pratama, S.Kom.', teacherNip: '19910403 201903 1 011', room: 'Lab Komputer', color: 'cyan' },
+  { id: 'sch-7a-sel-5', classId: 'c7a', className: '7-A', day: 'Selasa', periodNumber: 5, subject: 'Pendidikan Agama', teacherId: 'tch-005', teacherName: 'Nurul Hidayah, S.Ag.', teacherNip: '19820614 200902 2 007', room: 'Ruang 7-A', color: 'emerald' },
+  { id: 'sch-7a-sel-6', classId: 'c7a', className: '7-A', day: 'Selasa', periodNumber: 6, subject: 'Pendidikan Agama', teacherId: 'tch-005', teacherName: 'Nurul Hidayah, S.Ag.', teacherNip: '19820614 200902 2 007', room: 'Ruang 7-A', color: 'emerald' },
+
+  { id: 'sch-7a-rab-1', classId: 'c7a', className: '7-A', day: 'Rabu', periodNumber: 1, subject: 'PJOK', teacherId: 'tch-006', teacherName: 'Eko Prasetyo, M.T.', teacherNip: '19800512 200801 1 014', room: 'Lapangan Olahraga', color: 'orange' },
+  { id: 'sch-7a-rab-2', classId: 'c7a', className: '7-A', day: 'Rabu', periodNumber: 2, subject: 'PJOK', teacherId: 'tch-006', teacherName: 'Eko Prasetyo, M.T.', teacherNip: '19800512 200801 1 014', room: 'Lapangan Olahraga', color: 'orange' },
+  { id: 'sch-7a-rab-3', classId: 'c7a', className: '7-A', day: 'Rabu', periodNumber: 3, subject: 'PJOK', teacherId: 'tch-006', teacherName: 'Eko Prasetyo, M.T.', teacherNip: '19800512 200801 1 014', room: 'Lapangan Olahraga', color: 'orange' },
+  { id: 'sch-7a-rab-4', classId: 'c7a', className: '7-A', day: 'Rabu', periodNumber: 4, subject: 'IPS', teacherId: 'tch-008', teacherName: 'Dra. Endang Sulastri', teacherNip: '19750910 200003 2 004', room: 'Ruang 7-A', color: 'violet' },
+  { id: 'sch-7a-rab-5', classId: 'c7a', className: '7-A', day: 'Rabu', periodNumber: 5, subject: 'IPS', teacherId: 'tch-008', teacherName: 'Dra. Endang Sulastri', teacherNip: '19750910 200003 2 004', room: 'Ruang 7-A', color: 'violet' },
+  { id: 'sch-7a-rab-6', classId: 'c7a', className: '7-A', day: 'Rabu', periodNumber: 6, subject: 'Seni Budaya', teacherId: 'tch-002', teacherName: 'Budi Santoso, M.Pd.', teacherNip: '19790820 200501 1 008', room: 'Ruang Seni', color: 'purple' },
+
+  { id: 'sch-7a-kam-1', classId: 'c7a', className: '7-A', day: 'Kamis', periodNumber: 1, subject: 'Matematika', teacherId: 'tch-001', teacherName: 'Siti Rahmawati, S.Pd.', teacherNip: '19850312 201001 2 015', room: 'Ruang 7-A', color: 'indigo' },
+  { id: 'sch-7a-kam-2', classId: 'c7a', className: '7-A', day: 'Kamis', periodNumber: 2, subject: 'Matematika', teacherId: 'tch-001', teacherName: 'Siti Rahmawati, S.Pd.', teacherNip: '19850312 201001 2 015', room: 'Ruang 7-A', color: 'indigo' },
+  { id: 'sch-7a-kam-3', classId: 'c7a', className: '7-A', day: 'Kamis', periodNumber: 3, subject: 'IPA', teacherId: 'tch-003', teacherName: 'Dewi Lestari, S.Si.', teacherNip: '19881105 201402 2 009', room: 'Lab IPA', color: 'emerald' },
+  { id: 'sch-7a-kam-4', classId: 'c7a', className: '7-A', day: 'Kamis', periodNumber: 4, subject: 'IPA', teacherId: 'tch-003', teacherName: 'Dewi Lestari, S.Si.', teacherNip: '19881105 201402 2 009', room: 'Lab IPA', color: 'emerald' },
+  { id: 'sch-7a-kam-5', classId: 'c7a', className: '7-A', day: 'Kamis', periodNumber: 5, subject: 'Bahasa Indonesia', teacherId: 'tch-002', teacherName: 'Budi Santoso, M.Pd.', teacherNip: '19790820 200501 1 008', room: 'Ruang 7-A', color: 'blue' },
+
+  { id: 'sch-7a-jum-1', classId: 'c7a', className: '7-A', day: 'Jumat', periodNumber: 1, subject: 'Pendidikan Agama', teacherId: 'tch-005', teacherName: 'Nurul Hidayah, S.Ag.', teacherNip: '19820614 200902 2 007', room: 'Ruang 7-A', color: 'emerald' },
+  { id: 'sch-7a-jum-2', classId: 'c7a', className: '7-A', day: 'Jumat', periodNumber: 2, subject: 'PPKn', teacherId: 'tch-005', teacherName: 'Nurul Hidayah, S.Ag.', teacherNip: '19820614 200902 2 007', room: 'Ruang 7-A', color: 'rose' },
+  { id: 'sch-7a-jum-3', classId: 'c7a', className: '7-A', day: 'Jumat', periodNumber: 3, subject: 'Bahasa Inggris', teacherId: 'tch-007', teacherName: 'Rina Marlina, M.Pd.', teacherNip: '19860719 201101 2 012', room: 'Ruang 7-A', color: 'amber' },
+  { id: 'sch-7a-jum-4', classId: 'c7a', className: '7-A', day: 'Jumat', periodNumber: 4, subject: 'Bahasa Inggris', teacherId: 'tch-007', teacherName: 'Rina Marlina, M.Pd.', teacherNip: '19860719 201101 2 012', room: 'Ruang 7-A', color: 'amber' },
+
+  { id: 'sch-7a-sab-1', classId: 'c7a', className: '7-A', day: 'Sabtu', periodNumber: 1, subject: 'Seni Budaya', teacherId: 'tch-002', teacherName: 'Budi Santoso, M.Pd.', teacherNip: '19790820 200501 1 008', room: 'Ruang Seni', color: 'purple' },
+  { id: 'sch-7a-sab-2', classId: 'c7a', className: '7-A', day: 'Sabtu', periodNumber: 2, subject: 'Informatika', teacherId: 'tch-004', teacherName: 'Agus Pratama, S.Kom.', teacherNip: '19910403 201903 1 011', room: 'Lab Komputer', color: 'cyan' },
+  { id: 'sch-7a-sab-3', classId: 'c7a', className: '7-A', day: 'Sabtu', periodNumber: 3, subject: 'Bimbingan Konseling', teacherId: 'tch-005', teacherName: 'Nurul Hidayah, S.Ag.', teacherNip: '19820614 200902 2 007', room: 'Ruang 7-A', color: 'teal' },
+
+  // Kelas 7-B
+  { id: 'sch-7b-sen-1', classId: 'c7b', className: '7-B', day: 'Senin', periodNumber: 1, subject: 'Informatika', teacherId: 'tch-004', teacherName: 'Agus Pratama, S.Kom.', teacherNip: '19910403 201903 1 011', room: 'Lab Komputer', color: 'cyan' },
+  { id: 'sch-7b-sen-2', classId: 'c7b', className: '7-B', day: 'Senin', periodNumber: 2, subject: 'Informatika', teacherId: 'tch-004', teacherName: 'Agus Pratama, S.Kom.', teacherNip: '19910403 201903 1 011', room: 'Lab Komputer', color: 'cyan' },
+  { id: 'sch-7b-sen-3', classId: 'c7b', className: '7-B', day: 'Senin', periodNumber: 3, subject: 'Matematika', teacherId: 'tch-001', teacherName: 'Siti Rahmawati, S.Pd.', teacherNip: '19850312 201001 2 015', room: 'Ruang 7-B', color: 'indigo' },
+  { id: 'sch-7b-sen-4', classId: 'c7b', className: '7-B', day: 'Senin', periodNumber: 4, subject: 'Matematika', teacherId: 'tch-001', teacherName: 'Siti Rahmawati, S.Pd.', teacherNip: '19850312 201001 2 015', room: 'Ruang 7-B', color: 'indigo' },
+  { id: 'sch-7b-sen-5', classId: 'c7b', className: '7-B', day: 'Senin', periodNumber: 5, subject: 'Bahasa Indonesia', teacherId: 'tch-002', teacherName: 'Budi Santoso, M.Pd.', teacherNip: '19790820 200501 1 008', room: 'Ruang 7-B', color: 'blue' },
+  { id: 'sch-7b-sen-6', classId: 'c7b', className: '7-B', day: 'Senin', periodNumber: 6, subject: 'Bahasa Indonesia', teacherId: 'tch-002', teacherName: 'Budi Santoso, M.Pd.', teacherNip: '19790820 200501 1 008', room: 'Ruang 7-B', color: 'blue' },
+
+  // Kelas 8-A
+  { id: 'sch-8a-sen-1', classId: 'c8a', className: '8-A', day: 'Senin', periodNumber: 1, subject: 'IPA', teacherId: 'tch-003', teacherName: 'Dewi Lestari, S.Si.', teacherNip: '19881105 201402 2 009', room: 'Lab IPA', color: 'emerald' },
+  { id: 'sch-8a-sen-2', classId: 'c8a', className: '8-A', day: 'Senin', periodNumber: 2, subject: 'IPA', teacherId: 'tch-003', teacherName: 'Dewi Lestari, S.Si.', teacherNip: '19881105 201402 2 009', room: 'Lab IPA', color: 'emerald' },
+  { id: 'sch-8a-sen-3', classId: 'c8a', className: '8-A', day: 'Senin', periodNumber: 3, subject: 'PJOK', teacherId: 'tch-006', teacherName: 'Eko Prasetyo, M.T.', teacherNip: '19800512 200801 1 014', room: 'Lapangan Olahraga', color: 'orange' },
+  { id: 'sch-8a-sen-4', classId: 'c8a', className: '8-A', day: 'Senin', periodNumber: 4, subject: 'PJOK', teacherId: 'tch-006', teacherName: 'Eko Prasetyo, M.T.', teacherNip: '19800512 200801 1 014', room: 'Lapangan Olahraga', color: 'orange' },
+  
+  // Kelas 9-A
+  { id: 'sch-9a-sen-1', classId: 'c9a', className: '9-A', day: 'Senin', periodNumber: 1, subject: 'Bahasa Indonesia', teacherId: 'tch-002', teacherName: 'Budi Santoso, M.Pd.', teacherNip: '19790820 200501 1 008', room: 'Ruang 9-A', color: 'blue' },
+  { id: 'sch-9a-sen-2', classId: 'c9a', className: '9-A', day: 'Senin', periodNumber: 2, subject: 'Bahasa Indonesia', teacherId: 'tch-002', teacherName: 'Budi Santoso, M.Pd.', teacherNip: '19790820 200501 1 008', room: 'Ruang 9-A', color: 'blue' },
+  { id: 'sch-9a-sen-3', classId: 'c9a', className: '9-A', day: 'Senin', periodNumber: 3, subject: 'Matematika', teacherId: 'tch-003', teacherName: 'Dewi Lestari, S.Si.', teacherNip: '19881105 201402 2 009', room: 'Ruang 9-A', color: 'indigo' },
+];
+
 

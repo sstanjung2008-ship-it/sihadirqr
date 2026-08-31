@@ -126,6 +126,10 @@ export interface SchoolProfile {
   waTemplateLate: string;
   waTemplateAbsent: string;
   waTemplateDeparture?: string;
+  waParentNotificationEnabled?: boolean; // Saklar aktif/non-aktif pengiriman notifikasi WhatsApp ke orang tua (Masuk, Pulang, Alpa)
+  waTemplateTeacherReminder?: string; // Template pengingat jam mengajar KBM guru
+  waTeacherReminderEnabled?: boolean; // Saklar aktif/non-aktif pengingat jam mengajar guru otomatis
+  waTeacherReminderMinutesBefore?: number; // Menit sebelum JP dimulai (0 = saat JP mulai, 5 = 5 menit sebelum, dsb)
   waApiKey?: string; // Kode API Key / Token Device Gateway WhatsApp (Fonnte/Lainnya)
   waGatewayProvider?: string; // e.g., 'Fonnte' | 'Wablas' | 'Lainnya'
   waGatewayEnabled?: boolean; // Status aktif pengiriman WhatsApp via API Gateway
@@ -163,7 +167,12 @@ export interface WhatsAppLog {
   message: string;
   status: 'TERKIRIM' | 'PENDING' | 'GAGAL';
   timestamp: string;
-  type: 'HADIR' | 'TERLAMBAT' | 'ALPA' | 'IZIN' | 'SAKIT' | 'PULANG';
+  type: 'HADIR' | 'TERLAMBAT' | 'ALPA' | 'IZIN' | 'SAKIT' | 'PULANG' | 'JADWAL_GURU';
+  recipientRole?: 'PARENT' | 'TEACHER';
+  teacherId?: string;
+  teacherName?: string;
+  slotId?: string;
+  periodNumber?: number;
 }
 
 export type LearningParticipationStatus = 
@@ -262,5 +271,49 @@ export interface StudentGradeAssessment {
   createdAt: string;
   updatedAt?: string;
 }
+
+export type LessonPeriodType = 'KBM' | 'ISTIRAHAT' | 'UPACARA' | 'LITERASI' | 'IBADAH' | 'LAINNYA';
+
+export interface LessonPeriod {
+  id: string;
+  periodNumber: number; // 1, 2, 3... (0 untuk kegiatan non-JP seperti Upacara)
+  label: string; // "JP 1", "JP 2", "Istirahat 1", "Upacara Bendera"
+  startTime: string; // "07:00"
+  endTime: string; // "07:40"
+  type: LessonPeriodType;
+  day?: string; // Optional if this period timing is specific to e.g. "Jumat", "Senin", or "SEMUA"
+  daySpecific?: string; // Backward compatibility alias
+  notes?: string;
+}
+
+export interface ClassScheduleSlot {
+  id: string;
+  classId: string;
+  className: string;
+  day: string; // "Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu"
+  periodNumber: number; // 1, 2, 3...
+  periodId?: string; // Link to LessonPeriod
+  subject: string; // e.g. "Matematika", "Bahasa Indonesia"
+  teacherId: string; // e.g. "tch-001"
+  teacherName: string; // e.g. "Siti Rahmawati, S.Pd."
+  teacherNip?: string;
+  room?: string; // e.g. "Ruang 7-A", "Lab Komputer"
+  color?: string; // visual accent color tag
+  notes?: string;
+}
+
+export interface ScheduleConflict {
+  teacherId: string;
+  teacherName: string;
+  day: string;
+  periodNumber: number;
+  conflictingSlots: {
+    slotId: string;
+    classId: string;
+    className: string;
+    subject: string;
+  }[];
+}
+
 
 

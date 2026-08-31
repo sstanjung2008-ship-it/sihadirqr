@@ -152,9 +152,9 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
             const labelLower = (d.label || '').toLowerCase();
             let displayLabel = d.label || `Kamera ${d.id}`;
             if (labelLower.includes('camera 0') || labelLower.includes('back') || labelLower.includes('rear') || labelLower.includes('environment') || labelLower.includes('belakang')) {
-              displayLabel = `📷 Kamera Belakang (Camera 0, Facing Back)`;
-            } else if (labelLower.includes('front') || labelLower.includes('depan') || labelLower.includes('user') || labelLower.includes('camera 1')) {
-              displayLabel = `🤳 Kamera Depan (Camera 1, Facing Front)`;
+              displayLabel = `📷 Kamera Belakang`;
+            } else if (labelLower.includes('front') || labelLower.includes('depan') || labelLower.includes('user') || labelLower.includes('camera 1') || labelLower.includes('camera 2')) {
+              displayLabel = `🤳 Kamera Depan`;
             }
             return {
               id: d.id,

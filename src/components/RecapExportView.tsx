@@ -14,6 +14,8 @@ import {
 import { 
   exportAttendancePdf, 
   exportAttendanceExcel,
+  exportMonthlyAttendanceMatrixPdf,
+  exportMonthlyAttendanceMatrixExcel,
   exportKeaktifanPdf,
   exportKeaktifanExcel,
   exportCharacterPointsPdf,
@@ -116,49 +118,96 @@ export const RecapExportView: React.FC<RecapExportViewProps> = ({
     );
   }, [classes]);
 
-  const today = new Date();
-  const monthAgo = new Date();
-  monthAgo.setMonth(monthAgo.getMonth() - 1);
+  const MONTH_NAMES = [
+    { value: 0, label: 'Januari' },
+    { value: 1, label: 'Februari' },
+    { value: 2, label: 'Maret' },
+    { value: 3, label: 'April' },
+    { value: 4, label: 'Mei' },
+    { value: 5, label: 'Juni' },
+    { value: 6, label: 'Juli' },
+    { value: 7, label: 'Agustus' },
+    { value: 8, label: 'September' },
+    { value: 9, label: 'Oktober' },
+    { value: 10, label: 'November' },
+    { value: 11, label: 'Desember' }
+  ];
 
-  const [startDate, setStartDate] = useState(monthAgo.toISOString().split('T')[0]);
-  const [endDate, setEndDate] = useState(today.toISOString().split('T')[0]);
-
-  // Adjust dates when period preset changes
-  const handlePeriodChange = (p: 'WEEKLY' | 'MONTHLY' | 'YEARLY' | 'CUSTOM') => {
-    setFilterPeriod(p);
-    const now = new Date();
-    const start = new Date();
-
-    if (p === 'WEEKLY') {
-      start.setDate(now.getDate() - 7);
-    } else if (p === 'MONTHLY') {
-      start.setMonth(now.getMonth() - 1);
-    } else if (p === 'YEARLY') {
-      start.setFullYear(now.getFullYear() - 1);
-    }
-
-    setStartDate(start.toISOString().split('T')[0]);
-    setEndDate(now.toISOString().split('T')[0]);
+  const getMonthDateRange = (year: number, month: number) => {
+    const pad = (n: number) => String(n).padStart(2, '0');
+    const lastDay = new Date(year, month + 1, 0).getDate();
+    return {
+      startStr: `${year}-${pad(month + 1)}-01`,
+      endStr: `${year}-${pad(month + 1)}-${pad(lastDay)}`
+    };
   };
 
-  // Available subjects for filter
-  const availableSubjects = useMemo(() => {
-    const defaultList = schoolProfile?.subjects || [
-      "Matematika", "Bahasa Indonesia", "Bahasa Inggris", "IPA", "IPS", 
-      "Pendidikan Agama", "PJOK", "Seni Budaya", "Informatika", "PPKn"
-    ];
-    const subjectsFromAssessments = assessmentsList.map(a => a.subject).filter(Boolean);
-    return Array.from(new Set([...defaultList, ...subjectsFromAssessments]));
-  }, [schoolProfile?.subjects, assessmentsList]);
+  const today = new Date();
+  const [selectedMonth, setSelectedMonth] = useState<number>(today.getMonth());
+  const [selectedYear, setSelectedYear] = useState<number>(today.getFullYear());
 
-  // Keep selectedSubject valid if available subjects change
-  useEffect(() => {
-    if (availableSubjects.length > 0) {
-      if (!selectedSubject || selectedSubject === 'ALL' || !availableSubjects.includes(selectedSubject)) {
-        setSelectedSubject(availableSubjects[0]);
-      }
+  const initialRange = useMemo(() => {
+    return getMonthDateRange(today.getFullYear(), today.getMonth());
+  }, []);
+
+  const [startDate, setStartDate] = useState(initialRange.startStr);
+  const [endDate, setEndDate] = useState(initialRange.endStr);
+
+  const availableYears = useMemo(() => {
+    const currentY = new Date().getFullYear();
+    return [currentY - 2, currentY - 1, currentY, currentY + 1, currentY + 2];
+  }, []);
+
+  const [attendanceViewMode, setAttendanceViewMode] = useState<'MATRIX' | 'SUMMARY'>('MATRIX');
+
+  // Days in selected month for Daily Attendance Matrix
+  const monthlyCalendarDays = useMemo(() => {
+    if (filterPeriod !== 'MONTHLY') return [];
+    const totalDays = new Date(selectedYear, selectedMonth + 1, 0).getDate();
+    const days: {
+      day: number;
+      dateStr: string;
+      dayShort: string;
+      fullDay: string;
+      isSunday: boolean;
+      isNonActive: boolean;
+      isHoliday: boolean;
+      holidayName?: string;
+    }[] = [];
+
+    const dayNames = ['Min', 'Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab'];
+    const fullDayNames = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
+    const activeDays = schoolProfile?.activeDays || ['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
+
+    for (let d = 1; d <= totalDays; d++) {
+      const pad = (n: number) => String(n).padStart(2, '0');
+      const dateStr = `${selectedYear}-${pad(selectedMonth + 1)}-${pad(d)}`;
+      const dateObj = new Date(selectedYear, selectedMonth, d);
+      const dayOfWeek = dateObj.getDay();
+      const dayShort = dayNames[dayOfWeek];
+      const fullDay = fullDayNames[dayOfWeek];
+      const isNonActive = !activeDays.includes(fullDay);
+      const isSunday = dayOfWeek === 0;
+
+      const holidayMatch = (schoolProfile?.holidays || []).find(h => {
+        if (h.endDate) return dateStr >= h.date && dateStr <= h.endDate;
+        return h.date === dateStr;
+      });
+
+      days.push({
+        day: d,
+        dateStr,
+        dayShort,
+        fullDay,
+        isSunday,
+        isNonActive,
+        isHoliday: isSunday || isNonActive || !!holidayMatch,
+        holidayName: holidayMatch?.name
+      });
     }
-  }, [availableSubjects, selectedSubject]);
+
+    return days;
+  }, [filterPeriod, selectedYear, selectedMonth, schoolProfile?.activeDays, schoolProfile?.holidays]);
 
   // Filter students by class and search query (sorted Ascending by student name)
   const filteredStudents = useMemo(() => {
@@ -181,6 +230,97 @@ export const RecapExportView: React.FC<RecapExportViewProps> = ({
       return r.date >= startDate && r.date <= endDate;
     });
   }, [attendanceRecords, startDate, endDate]);
+
+  // Overall monthly statistics
+  const monthlyOverallSummary = useMemo(() => {
+    let totalHadir = 0;
+    let totalTerlambat = 0;
+    let totalPulang = 0;
+    let totalIzin = 0;
+    let totalSakit = 0;
+    let totalAlpa = 0;
+
+    filteredStudents.forEach(std => {
+      const stdRecords = filteredRecords.filter(r => r.studentId === std.id || (std.nisn && r.nisn === std.nisn));
+      totalHadir += stdRecords.filter(r => r.status === 'HADIR').length;
+      totalTerlambat += stdRecords.filter(r => r.status === 'TERLAMBAT').length;
+      totalPulang += stdRecords.filter(r => r.returnTime || r.returnStatus === 'PULANG' || r.returnStatus === 'PULANG_TEPAT' || r.returnStatus === 'PULANG_CEPAT').length;
+      totalIzin += stdRecords.filter(r => r.status === 'IZIN').length;
+      totalSakit += stdRecords.filter(r => r.status === 'SAKIT').length;
+      totalAlpa += stdRecords.filter(r => r.status === 'ALPA').length;
+    });
+
+    const totalDaysRecorded = totalHadir + totalTerlambat + totalIzin + totalSakit + totalAlpa;
+    const avgAttendancePct = totalDaysRecorded > 0 
+      ? Math.round(((totalHadir + totalTerlambat) / totalDaysRecorded) * 100) 
+      : 0;
+
+    return {
+      totalHadir,
+      totalTerlambat,
+      totalPulang,
+      totalIzin,
+      totalSakit,
+      totalAlpa,
+      avgAttendancePct,
+      totalStudents: filteredStudents.length
+    };
+  }, [filteredStudents, filteredRecords]);
+
+  // Adjust dates when period preset changes
+  const handlePeriodChange = (p: 'WEEKLY' | 'MONTHLY' | 'YEARLY' | 'CUSTOM') => {
+    setFilterPeriod(p);
+    const now = new Date();
+
+    if (p === 'MONTHLY') {
+      const { startStr, endStr } = getMonthDateRange(selectedYear, selectedMonth);
+      setStartDate(startStr);
+      setEndDate(endStr);
+    } else if (p === 'WEEKLY') {
+      const start = new Date();
+      start.setDate(now.getDate() - 7);
+      setStartDate(start.toISOString().split('T')[0]);
+      setEndDate(now.toISOString().split('T')[0]);
+    } else if (p === 'YEARLY') {
+      const start = new Date();
+      start.setFullYear(now.getFullYear() - 1);
+      setStartDate(start.toISOString().split('T')[0]);
+      setEndDate(now.toISOString().split('T')[0]);
+    }
+  };
+
+  const handleMonthChange = (monthIdx: number) => {
+    setSelectedMonth(monthIdx);
+    const { startStr, endStr } = getMonthDateRange(selectedYear, monthIdx);
+    setStartDate(startStr);
+    setEndDate(endStr);
+  };
+
+  const handleYearChange = (yearNum: number) => {
+    setSelectedYear(yearNum);
+    const { startStr, endStr } = getMonthDateRange(yearNum, selectedMonth);
+    setStartDate(startStr);
+    setEndDate(endStr);
+  };
+
+  // Available subjects for filter
+  const availableSubjects = useMemo(() => {
+    const defaultList = schoolProfile?.subjects || [
+      "Matematika", "Bahasa Indonesia", "Bahasa Inggris", "IPA", "IPS", 
+      "Pendidikan Agama", "PJOK", "Seni Budaya", "Informatika", "PPKn"
+    ];
+    const subjectsFromAssessments = assessmentsList.map(a => a.subject).filter(Boolean);
+    return Array.from(new Set([...defaultList, ...subjectsFromAssessments]));
+  }, [schoolProfile?.subjects, assessmentsList]);
+
+  // Keep selectedSubject valid if available subjects change
+  useEffect(() => {
+    if (availableSubjects.length > 0) {
+      if (!selectedSubject || selectedSubject === 'ALL' || !availableSubjects.includes(selectedSubject)) {
+        setSelectedSubject(availableSubjects[0]);
+      }
+    }
+  }, [availableSubjects, selectedSubject]);
 
   // Filter journals by date range
   const filteredJournals = useMemo(() => {
@@ -468,20 +608,52 @@ export const RecapExportView: React.FC<RecapExportViewProps> = ({
     };
   }, [detailedGradeRows, filteredAssessments]);
 
-  const filterTitle = selectedClass === 'ALL' 
-    ? `Semua Kelas (${filterPeriod})` 
-    : `Kelas ${selectedClass} (${filterPeriod})`;
+  const filterTitle = useMemo(() => {
+    let periodStr = '';
+    if (filterPeriod === 'MONTHLY') {
+      const mLabel = MONTH_NAMES[selectedMonth]?.label || 'Bulan';
+      periodStr = `Bulan ${mLabel} ${selectedYear}`;
+    } else if (filterPeriod === 'WEEKLY') {
+      periodStr = '7 Hari Terakhir';
+    } else if (filterPeriod === 'YEARLY') {
+      periodStr = `1 Tahun Terakhir`;
+    } else {
+      periodStr = `${startDate} s/d ${endDate}`;
+    }
+
+    return selectedClass === 'ALL' 
+      ? `Semua Kelas (${periodStr})` 
+      : `Kelas ${selectedClass} (${periodStr})`;
+  }, [selectedClass, filterPeriod, selectedMonth, selectedYear, startDate, endDate]);
+
+  const selectedHomeroomTeacher = useMemo(() => {
+    if (selectedClass === 'ALL') return null;
+    const cls = classes.find(c => c.name === selectedClass);
+    return cls?.homeroomTeacher ? { name: cls.homeroomTeacher } : null;
+  }, [classes, selectedClass]);
 
   const handleExportExcel = () => {
     if (activeMenu === 'PRESENSI') {
-      exportAttendanceExcel(
-        schoolProfile,
-        filteredRecords,
-        filteredStudents,
-        filterTitle,
-        startDate,
-        endDate
-      );
+      if (filterPeriod === 'MONTHLY') {
+        exportMonthlyAttendanceMatrixExcel(
+          schoolProfile,
+          filteredRecords,
+          filteredStudents,
+          selectedClass === 'ALL' ? 'Semua Kelas' : selectedClass,
+          selectedYear,
+          selectedMonth + 1,
+          selectedHomeroomTeacher
+        );
+      } else {
+        exportAttendanceExcel(
+          schoolProfile,
+          filteredRecords,
+          filteredStudents,
+          filterTitle,
+          startDate,
+          endDate
+        );
+      }
     } else if (activeMenu === 'KEAKTIFAN') {
       exportKeaktifanExcel(
         schoolProfile,
@@ -518,14 +690,26 @@ export const RecapExportView: React.FC<RecapExportViewProps> = ({
     setIsExporting(true);
     try {
       if (activeMenu === 'PRESENSI') {
-        await exportAttendancePdf(
-          schoolProfile,
-          filteredRecords,
-          filteredStudents,
-          filterTitle,
-          startDate,
-          endDate
-        );
+        if (filterPeriod === 'MONTHLY') {
+          await exportMonthlyAttendanceMatrixPdf(
+            schoolProfile,
+            filteredRecords,
+            filteredStudents,
+            selectedClass === 'ALL' ? 'Semua Kelas' : selectedClass,
+            selectedYear,
+            selectedMonth + 1,
+            selectedHomeroomTeacher
+          );
+        } else {
+          await exportAttendancePdf(
+            schoolProfile,
+            filteredRecords,
+            filteredStudents,
+            filterTitle,
+            startDate,
+            endDate
+          );
+        }
       } else if (activeMenu === 'KEAKTIFAN') {
         await exportKeaktifanPdf(
           schoolProfile,
@@ -704,10 +888,10 @@ export const RecapExportView: React.FC<RecapExportViewProps> = ({
           }
         </h2>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 text-xs">
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3.5 text-xs">
           
           {/* Search Filter */}
-          <div className={activeMenu === 'NILAI' ? "lg:col-span-1" : "sm:col-span-2 lg:col-span-1"}>
+          <div className={activeMenu === 'NILAI' ? "sm:col-span-2 md:col-span-1 lg:col-span-1" : "sm:col-span-2 md:col-span-1 lg:col-span-2"}>
             <label className="block text-slate-700 font-semibold mb-1">
               {activeMenu === 'NILAI' ? 'Cari Siswa / Mapel / Materi' : 'Cari Nama / NIS / NISN'}
             </label>
@@ -724,7 +908,7 @@ export const RecapExportView: React.FC<RecapExportViewProps> = ({
           </div>
 
           {/* Class Filter */}
-          <div>
+          <div className="col-span-1">
             <label className="block text-slate-700 font-semibold mb-1">Pilih Kelas</label>
             <select
               value={selectedClass}
@@ -740,7 +924,7 @@ export const RecapExportView: React.FC<RecapExportViewProps> = ({
 
           {/* Subject Filter (For NILAI) */}
           {activeMenu === 'NILAI' && (
-            <div>
+            <div className="col-span-1">
               <label className="block text-slate-700 font-semibold mb-1">Mata Pelajaran</label>
               <select
                 value={selectedSubject}
@@ -755,121 +939,489 @@ export const RecapExportView: React.FC<RecapExportViewProps> = ({
           )}
 
           {/* Period Preset */}
-          <div className={activeMenu !== 'NILAI' ? "lg:col-span-1" : ""}>
+          <div className="col-span-1">
             <label className="block text-slate-700 font-semibold mb-1">Periode Waktu</label>
             <select
               value={filterPeriod}
               onChange={(e) => handlePeriodChange(e.target.value as any)}
               className="w-full bg-slate-50 border border-slate-200 text-slate-800 rounded-xl p-2.5 font-semibold focus:ring-2 focus:ring-indigo-500 cursor-pointer"
             >
+              <option value="MONTHLY">Bulanan (Pilih Bulan)</option>
+              <option value="CUSTOM">Rentang Waktu Custom</option>
               <option value="WEEKLY">Mingguan (7 Hari Terakhir)</option>
-              <option value="MONTHLY">Bulanan (30 Hari Terakhir)</option>
               <option value="YEARLY">Tahunan (1 Tahun Terakhir)</option>
-              <option value="CUSTOM">Rentang Waktu Kustom</option>
             </select>
           </div>
 
-          {/* Start Date */}
-          <div>
-            <label className="block text-slate-700 font-semibold mb-1">Tanggal Mulai</label>
-            <input
-              type="date"
-              value={startDate}
-              onChange={(e) => {
-                setStartDate(e.target.value);
-                setFilterPeriod('CUSTOM');
-              }}
-              className="w-full bg-slate-50 border border-slate-200 text-slate-800 rounded-xl p-2.5 font-semibold focus:ring-2 focus:ring-indigo-500 cursor-pointer"
-            />
-          </div>
+          {/* DYNAMIC PERIOD CONTROLS */}
+          {filterPeriod === 'MONTHLY' && (
+            <>
+              {/* Month Dropdown (12 Months in 1 Year) */}
+              <div className="col-span-1">
+                <label className="block text-slate-700 font-semibold mb-1">Pilih Bulan</label>
+                <select
+                  value={selectedMonth}
+                  onChange={(e) => handleMonthChange(Number(e.target.value))}
+                  className="w-full bg-slate-50 border border-slate-200 text-slate-800 rounded-xl p-2.5 font-semibold focus:ring-2 focus:ring-indigo-500 cursor-pointer"
+                >
+                  {MONTH_NAMES.map(m => (
+                    <option key={m.value} value={m.value}>{m.label}</option>
+                  ))}
+                </select>
+              </div>
 
-          {/* End Date */}
-          <div>
-            <label className="block text-slate-700 font-semibold mb-1">Tanggal Selesai</label>
-            <input
-              type="date"
-              value={endDate}
-              onChange={(e) => {
-                setEndDate(e.target.value);
-                setFilterPeriod('CUSTOM');
-              }}
-              className="w-full bg-slate-50 border border-slate-200 text-slate-800 rounded-xl p-2.5 font-semibold focus:ring-2 focus:ring-indigo-500 cursor-pointer"
-            />
-          </div>
+              {/* Year Dropdown */}
+              <div className="col-span-1">
+                <label className="block text-slate-700 font-semibold mb-1">Tahun</label>
+                <select
+                  value={selectedYear}
+                  onChange={(e) => handleYearChange(Number(e.target.value))}
+                  className="w-full bg-slate-50 border border-slate-200 text-slate-800 rounded-xl p-2.5 font-semibold focus:ring-2 focus:ring-indigo-500 cursor-pointer"
+                >
+                  {availableYears.map(y => (
+                    <option key={y} value={y}>{y}</option>
+                  ))}
+                </select>
+              </div>
+            </>
+          )}
+
+          {filterPeriod === 'CUSTOM' && (
+            <>
+              {/* Start Date */}
+              <div className="col-span-1">
+                <label className="block text-slate-700 font-semibold mb-1">Tanggal Mulai</label>
+                <input
+                  type="date"
+                  value={startDate}
+                  onChange={(e) => setStartDate(e.target.value)}
+                  className="w-full bg-slate-50 border border-slate-200 text-slate-800 rounded-xl p-2.5 font-semibold focus:ring-2 focus:ring-indigo-500 cursor-pointer"
+                />
+              </div>
+
+              {/* End Date */}
+              <div className="col-span-1">
+                <label className="block text-slate-700 font-semibold mb-1">Tanggal Selesai</label>
+                <input
+                  type="date"
+                  value={endDate}
+                  onChange={(e) => setEndDate(e.target.value)}
+                  className="w-full bg-slate-50 border border-slate-200 text-slate-800 rounded-xl p-2.5 font-semibold focus:ring-2 focus:ring-indigo-500 cursor-pointer"
+                />
+              </div>
+            </>
+          )}
+
+          {(filterPeriod === 'WEEKLY' || filterPeriod === 'YEARLY') && (
+            <div className="sm:col-span-2 md:col-span-2 lg:col-span-2">
+              <label className="block text-slate-700 font-semibold mb-1">Rentang Tanggal Aktif</label>
+              <div className="w-full bg-slate-50 border border-slate-200 text-slate-700 rounded-xl p-2.5 font-semibold font-mono text-center flex items-center justify-center gap-2">
+                <Calendar className="w-4 h-4 text-indigo-600 shrink-0" />
+                <span>{startDate} s/d {endDate}</span>
+              </div>
+            </div>
+          )}
 
         </div>
       </div>
 
       {/* SUB MENU 1: TABEL REKAP PRESENSI */}
       {activeMenu === 'PRESENSI' && (
-        <div className="bg-white border border-slate-200/80 rounded-3xl shadow-sm overflow-hidden">
-          <div className="p-4 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-2 bg-slate-50/50">
-            <h2 className="text-sm font-extrabold text-slate-800 flex items-center gap-2">
-              <UserCheck className="w-4 h-4 text-indigo-600" />
-              Tabel Rekapitulasi Presensi: {filterTitle} {searchQuery && `(Filter: "${searchQuery}")`}
-            </h2>
-            <span className="text-xs text-slate-500 font-mono font-semibold">
-              Hasil: {filteredStudents.length} Siswa | Periode: {startDate} s/d {endDate}
-            </span>
-          </div>
+        <div className="space-y-4">
+          
+          {/* Monthly Overall Summary Stat Cards (When MONTHLY period is active) */}
+          {filterPeriod === 'MONTHLY' && (
+            <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3">
+              <div className="bg-white border border-emerald-200/80 p-3.5 rounded-2xl shadow-xs">
+                <div className="text-[11px] font-bold text-emerald-700 uppercase tracking-wider flex items-center gap-1.5">
+                  <span className="w-2 h-2 rounded-full bg-emerald-500"></span> Hadir (H)
+                </div>
+                <div className="text-xl font-black text-emerald-900 mt-1 font-mono">{monthlyOverallSummary.totalHadir}</div>
+                <div className="text-[10px] text-emerald-600 mt-0.5">Total presensi tepat</div>
+              </div>
 
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs text-slate-700">
-              <thead className="bg-slate-50 text-slate-600 font-extrabold uppercase tracking-wider border-b border-slate-200/80">
-                <tr>
-                  <th className="py-3.5 px-4">No</th>
-                  <th className="py-3.5 px-4">NISN</th>
-                  <th className="py-3.5 px-4">Nama Siswa</th>
-                  <th className="py-3.5 px-4">Kelas</th>
-                  <th className="py-3.5 px-4 text-center">Hadir</th>
-                  <th className="py-3.5 px-4 text-center">Terlambat</th>
-                  <th className="py-3.5 px-4 text-center">Pulang</th>
-                  <th className="py-3.5 px-4 text-center">Izin</th>
-                  <th className="py-3.5 px-4 text-center">Sakit</th>
-                  <th className="py-3.5 px-4 text-center">Alpa</th>
-                  <th className="py-3.5 px-4 text-right">% Kehadiran</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100 font-mono">
-                {filteredStudents.length === 0 ? (
-                  <tr>
-                    <td colSpan={11} className="py-12 text-center text-slate-400 font-sans font-medium">
-                      Tidak ada siswa yang sesuai dengan filter pencarian "{searchQuery}" atau kelas yang dipilih.
-                    </td>
-                  </tr>
-                ) : (
-                  filteredStudents.map((std, idx) => {
-                    const stdRecords = filteredRecords.filter(r => r.studentId === std.id);
-                    const hadir = stdRecords.filter(r => r.status === 'HADIR').length;
-                    const terlambat = stdRecords.filter(r => r.status === 'TERLAMBAT').length;
-                    const pulang = stdRecords.filter(r => r.returnTime || r.returnStatus === 'PULANG' || r.returnStatus === 'PULANG_TEPAT' || r.returnStatus === 'PULANG_CEPAT').length;
-                    const izin = stdRecords.filter(r => r.status === 'IZIN').length;
-                    const sakit = stdRecords.filter(r => r.status === 'SAKIT').length;
-                    const alpa = stdRecords.filter(r => r.status === 'ALPA').length;
+              <div className="bg-white border border-amber-200/80 p-3.5 rounded-2xl shadow-xs">
+                <div className="text-[11px] font-bold text-amber-700 uppercase tracking-wider flex items-center gap-1.5">
+                  <span className="w-2 h-2 rounded-full bg-amber-500"></span> Terlambat (T)
+                </div>
+                <div className="text-xl font-black text-amber-900 mt-1 font-mono">{monthlyOverallSummary.totalTerlambat}</div>
+                <div className="text-[10px] text-amber-600 mt-0.5">Total terlambat hadir</div>
+              </div>
 
-                    const totalDays = stdRecords.length || 1;
-                    const presentCount = hadir + terlambat;
-                    const pct = Math.round((presentCount / totalDays) * 100);
+              <div className="bg-white border border-teal-200/80 p-3.5 rounded-2xl shadow-xs">
+                <div className="text-[11px] font-bold text-teal-700 uppercase tracking-wider flex items-center gap-1.5">
+                  <span className="w-2 h-2 rounded-full bg-teal-500"></span> Pulang (P)
+                </div>
+                <div className="text-xl font-black text-teal-900 mt-1 font-mono">{monthlyOverallSummary.totalPulang}</div>
+                <div className="text-[10px] text-teal-600 mt-0.5">Scan kepulangan terdata</div>
+              </div>
 
-                    return (
-                      <tr key={std.id} className="hover:bg-slate-50/80 transition-colors">
-                        <td className="py-3.5 px-4 text-slate-400 font-semibold">{idx + 1}</td>
-                        <td className="py-3.5 px-4 text-slate-600 font-semibold">{std.nisn || '-'}</td>
-                        <td className="py-3.5 px-4 font-sans font-extrabold text-slate-900">{std.name}</td>
-                        <td className="py-3.5 px-4 text-indigo-600 font-bold">{std.className}</td>
-                        <td className="py-3.5 px-4 text-center text-emerald-600 font-extrabold">{hadir}</td>
-                        <td className="py-3.5 px-4 text-center text-amber-600 font-extrabold">{terlambat}</td>
-                        <td className="py-3.5 px-4 text-center text-teal-600 font-extrabold">{pulang}</td>
-                        <td className="py-3.5 px-4 text-center text-sky-600 font-bold">{izin}</td>
-                        <td className="py-3.5 px-4 text-center text-rose-600 font-bold">{sakit}</td>
-                        <td className="py-3.5 px-4 text-center text-slate-400 font-bold">{alpa}</td>
-                        <td className="py-3.5 px-4 text-right font-extrabold text-indigo-600">{pct}%</td>
+              <div className="bg-white border border-sky-200/80 p-3.5 rounded-2xl shadow-xs">
+                <div className="text-[11px] font-bold text-sky-700 uppercase tracking-wider flex items-center gap-1.5">
+                  <span className="w-2 h-2 rounded-full bg-sky-500"></span> Izin (I)
+                </div>
+                <div className="text-xl font-black text-sky-900 mt-1 font-mono">{monthlyOverallSummary.totalIzin}</div>
+                <div className="text-[10px] text-sky-600 mt-0.5">Disetujui / surat</div>
+              </div>
+
+              <div className="bg-white border border-purple-200/80 p-3.5 rounded-2xl shadow-xs">
+                <div className="text-[11px] font-bold text-purple-700 uppercase tracking-wider flex items-center gap-1.5">
+                  <span className="w-2 h-2 rounded-full bg-purple-500"></span> Sakit (S)
+                </div>
+                <div className="text-xl font-black text-purple-900 mt-1 font-mono">{monthlyOverallSummary.totalSakit}</div>
+                <div className="text-[10px] text-purple-600 mt-0.5">Keterangan sakit</div>
+              </div>
+
+              <div className="bg-white border border-rose-200/80 p-3.5 rounded-2xl shadow-xs">
+                <div className="text-[11px] font-bold text-rose-700 uppercase tracking-wider flex items-center gap-1.5">
+                  <span className="w-2 h-2 rounded-full bg-rose-500"></span> Alpa (A)
+                </div>
+                <div className="text-xl font-black text-rose-900 mt-1 font-mono">{monthlyOverallSummary.totalAlpa}</div>
+                <div className="text-[10px] text-rose-600 mt-0.5">Tanpa keterangan</div>
+              </div>
+
+              <div className="bg-white border border-indigo-200/80 p-3.5 rounded-2xl shadow-xs col-span-2 sm:col-span-4 lg:col-span-1">
+                <div className="text-[11px] font-bold text-indigo-700 uppercase tracking-wider flex items-center gap-1.5">
+                  <TrendingUp className="w-3.5 h-3.5 text-indigo-600" /> % Kehadiran
+                </div>
+                <div className="text-xl font-black text-indigo-900 mt-1 font-mono">{monthlyOverallSummary.avgAttendancePct}%</div>
+                <div className="text-[10px] text-indigo-600 mt-0.5">Rata-rata kelas</div>
+              </div>
+            </div>
+          )}
+
+          <div className="bg-white border border-slate-200/80 rounded-3xl shadow-sm overflow-hidden">
+            <div className="p-4 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-slate-50/50">
+              <div>
+                <h2 className="text-sm font-extrabold text-slate-800 flex items-center gap-2">
+                  <UserCheck className="w-4 h-4 text-indigo-600" />
+                  Tabel Rekapitulasi Presensi: {filterTitle} {searchQuery && `(Filter: "${searchQuery}")`}
+                </h2>
+                <div className="text-xs text-slate-500 font-mono font-semibold mt-0.5">
+                  Hasil: {filteredStudents.length} Siswa | Periode: {startDate} s/d {endDate}
+                </div>
+              </div>
+
+              {/* View Mode Toggle when MONTHLY period is active */}
+              {filterPeriod === 'MONTHLY' && (
+                <div className="inline-flex bg-slate-200/80 p-1 rounded-xl shrink-0 self-start sm:self-auto">
+                  <button
+                    onClick={() => setAttendanceViewMode('MATRIX')}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                      attendanceViewMode === 'MATRIX'
+                        ? 'bg-indigo-600 text-white shadow-xs'
+                        : 'text-slate-700 hover:text-slate-900'
+                    }`}
+                  >
+                    Matriks Harian (1 - {monthlyCalendarDays.length}) & Total
+                  </button>
+                  <button
+                    onClick={() => setAttendanceViewMode('SUMMARY')}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                      attendanceViewMode === 'SUMMARY'
+                        ? 'bg-indigo-600 text-white shadow-xs'
+                        : 'text-slate-700 hover:text-slate-900'
+                    }`}
+                  >
+                    Ringkasan Total Saja
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {/* VIEW MODE 1: MATRIX HARIAN + TOTAL BULANAN */}
+            {filterPeriod === 'MONTHLY' && attendanceViewMode === 'MATRIX' ? (
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs text-slate-700 border-collapse">
+                  <thead className="bg-slate-50 text-slate-700 font-extrabold uppercase tracking-wider border-b border-slate-200">
+                    {/* Header Top Row */}
+                    <tr className="border-b border-slate-200/60 bg-slate-100/70 text-[11px]">
+                      <th rowSpan={2} className="py-2.5 px-3 border-r border-slate-200 text-center w-10">No</th>
+                      <th rowSpan={2} className="py-2.5 px-3 border-r border-slate-200 text-center min-w-[100px]">NISN</th>
+                      <th rowSpan={2} className="py-2.5 px-4 border-r border-slate-200 min-w-[180px]">Nama Siswa</th>
+                      <th rowSpan={2} className="py-2.5 px-3 border-r border-slate-200 text-center w-16">Kelas</th>
+                      <th 
+                        colSpan={monthlyCalendarDays.length} 
+                        className="py-1.5 px-2 text-center bg-indigo-50/70 text-indigo-900 border-r border-slate-200 font-black tracking-normal"
+                      >
+                        Presensi Harian Bulan {MONTH_NAMES[selectedMonth]?.label} {selectedYear} (Tanggal 1 s/d {monthlyCalendarDays.length})
+                      </th>
+                      <th 
+                        colSpan={7} 
+                        className="py-1.5 px-2 text-center bg-slate-200/80 text-slate-900 font-black tracking-normal"
+                      >
+                        Total Presensi Bulan Ini
+                      </th>
+                    </tr>
+
+                    {/* Header Bottom Row (Daily columns + Summary columns) */}
+                    <tr className="text-[10px] text-slate-600 bg-slate-50">
+                      {monthlyCalendarDays.map((d) => (
+                        <th 
+                          key={d.day} 
+                          className={`py-1.5 px-1 text-center font-mono border-r border-slate-200/70 min-w-[28px] ${
+                            d.isHoliday ? 'bg-rose-50/80 text-rose-700 font-bold' : ''
+                          }`}
+                          title={`${d.fullDay}, ${d.day} ${MONTH_NAMES[selectedMonth]?.label} ${selectedYear}${d.holidayName ? ` (${d.holidayName})` : ''}`}
+                        >
+                          <div className="font-extrabold">{d.day}</div>
+                          <div className="text-[9px] font-sans font-medium text-slate-400">{d.dayShort}</div>
+                        </th>
+                      ))}
+                      
+                      {/* Summary Columns */}
+                      <th className="py-1.5 px-2 text-center bg-emerald-50/80 text-emerald-800 font-extrabold border-r border-slate-200 w-9" title="Total Hadir (H)">H</th>
+                      <th className="py-1.5 px-2 text-center bg-amber-50/80 text-amber-800 font-extrabold border-r border-slate-200 w-9" title="Total Terlambat (T)">T</th>
+                      <th className="py-1.5 px-2 text-center bg-teal-50/80 text-teal-800 font-extrabold border-r border-slate-200 w-9" title="Total Pulang (P)">P</th>
+                      <th className="py-1.5 px-2 text-center bg-sky-50/80 text-sky-800 font-extrabold border-r border-slate-200 w-9" title="Total Izin (I)">I</th>
+                      <th className="py-1.5 px-2 text-center bg-purple-50/80 text-purple-800 font-extrabold border-r border-slate-200 w-9" title="Total Sakit (S)">S</th>
+                      <th className="py-1.5 px-2 text-center bg-rose-50/80 text-rose-800 font-extrabold border-r border-slate-200 w-9" title="Total Alpa (A)">A</th>
+                      <th className="py-1.5 px-2.5 text-center bg-indigo-50/80 text-indigo-900 font-extrabold w-14" title="Persentase Kehadiran">%</th>
+                    </tr>
+                  </thead>
+
+                  <tbody className="divide-y divide-slate-100 font-mono text-xs">
+                    {filteredStudents.length === 0 ? (
+                      <tr>
+                        <td colSpan={4 + monthlyCalendarDays.length + 7} className="py-12 text-center text-slate-400 font-sans font-medium">
+                          Tidak ada siswa yang sesuai dengan filter pencarian "{searchQuery}" atau kelas yang dipilih.
+                        </td>
                       </tr>
-                    );
-                  })
-                )}
-              </tbody>
-            </table>
+                    ) : (
+                      filteredStudents.map((std, idx) => {
+                        const stdRecords = filteredRecords.filter(r => r.studentId === std.id || (std.nisn && r.nisn === std.nisn));
+                        
+                        let hadirCount = 0;
+                        let terlambatCount = 0;
+                        let pulangCount = 0;
+                        let izinCount = 0;
+                        let sakitCount = 0;
+                        let alpaCount = 0;
+
+                        return (
+                          <tr key={std.id} className="hover:bg-indigo-50/30 transition-colors">
+                            <td className="py-2.5 px-3 text-center text-slate-400 font-semibold border-r border-slate-100">{idx + 1}</td>
+                            <td className="py-2.5 px-3 text-center text-slate-600 font-semibold border-r border-slate-100">{std.nisn || '-'}</td>
+                            <td className="py-2.5 px-4 font-sans font-extrabold text-slate-900 border-r border-slate-100 whitespace-nowrap">{std.name}</td>
+                            <td className="py-2.5 px-3 text-center text-indigo-600 font-bold border-r border-slate-100">{std.className}</td>
+                            
+                            {/* Day Cells */}
+                            {monthlyCalendarDays.map((d) => {
+                              const rec = stdRecords.find(r => r.date === d.dateStr);
+
+                              if (rec) {
+                                if (rec.status === 'HADIR') {
+                                  hadirCount++;
+                                  if (rec.returnTime || rec.returnStatus === 'PULANG' || rec.returnStatus === 'PULANG_TEPAT' || rec.returnStatus === 'PULANG_CEPAT') pulangCount++;
+                                  return (
+                                    <td key={d.day} className="py-2 px-1 text-center border-r border-slate-100">
+                                      <span 
+                                        className="inline-flex items-center justify-center w-5 h-5 rounded-md text-[10px] font-extrabold bg-emerald-100 text-emerald-800 border border-emerald-300 cursor-help"
+                                        title={`HADIR (${rec.time || '-'})${rec.returnTime ? ` | Pulang: ${rec.returnTime}` : ''}`}
+                                      >
+                                        H
+                                      </span>
+                                    </td>
+                                  );
+                                } else if (rec.status === 'TERLAMBAT') {
+                                  terlambatCount++;
+                                  if (rec.returnTime || rec.returnStatus === 'PULANG' || rec.returnStatus === 'PULANG_TEPAT' || rec.returnStatus === 'PULANG_CEPAT') pulangCount++;
+                                  return (
+                                    <td key={d.day} className="py-2 px-1 text-center border-r border-slate-100">
+                                      <span 
+                                        className="inline-flex items-center justify-center w-5 h-5 rounded-md text-[10px] font-extrabold bg-amber-100 text-amber-800 border border-amber-300 cursor-help"
+                                        title={`TERLAMBAT (${rec.time || '-'})${rec.returnTime ? ` | Pulang: ${rec.returnTime}` : ''}`}
+                                      >
+                                        T
+                                      </span>
+                                    </td>
+                                  );
+                                } else if (rec.status === 'IZIN') {
+                                  izinCount++;
+                                  return (
+                                    <td key={d.day} className="py-2 px-1 text-center border-r border-slate-100">
+                                      <span 
+                                        className="inline-flex items-center justify-center w-5 h-5 rounded-md text-[10px] font-extrabold bg-sky-100 text-sky-800 border border-sky-300 cursor-help"
+                                        title={`IZIN${rec.notes ? `: ${rec.notes}` : ''}`}
+                                      >
+                                        I
+                                      </span>
+                                    </td>
+                                  );
+                                } else if (rec.status === 'SAKIT') {
+                                  sakitCount++;
+                                  return (
+                                    <td key={d.day} className="py-2 px-1 text-center border-r border-slate-100">
+                                      <span 
+                                        className="inline-flex items-center justify-center w-5 h-5 rounded-md text-[10px] font-extrabold bg-purple-100 text-purple-800 border border-purple-300 cursor-help"
+                                        title={`SAKIT${rec.notes ? `: ${rec.notes}` : ''}`}
+                                      >
+                                        S
+                                      </span>
+                                    </td>
+                                  );
+                                } else if (rec.status === 'ALPA') {
+                                  alpaCount++;
+                                  return (
+                                    <td key={d.day} className="py-2 px-1 text-center border-r border-slate-100">
+                                      <span 
+                                        className="inline-flex items-center justify-center w-5 h-5 rounded-md text-[10px] font-extrabold bg-rose-100 text-rose-800 border border-rose-300 cursor-help"
+                                        title="ALPA (Tanpa Keterangan)"
+                                      >
+                                        A
+                                      </span>
+                                    </td>
+                                  );
+                                }
+                              }
+
+                              // No Record on this date
+                              if (d.isHoliday) {
+                                return (
+                                  <td key={d.day} className="py-2 px-1 text-center border-r border-slate-100 bg-slate-50/70">
+                                    <span 
+                                      className="inline-flex items-center justify-center w-5 h-5 rounded-md text-[10px] font-medium bg-slate-200/80 text-slate-500 cursor-help"
+                                      title={d.holidayName || `${d.fullDay} (Hari Libur)`}
+                                    >
+                                      L
+                                    </span>
+                                  </td>
+                                );
+                              }
+
+                              return (
+                                <td key={d.day} className="py-2 px-1 text-center border-r border-slate-100">
+                                  <span className="text-slate-300 font-mono text-[11px]">-</span>
+                                </td>
+                              );
+                            })}
+
+                            {/* Total Presensi Bulan Ini */}
+                            {(() => {
+                              const totalDaysRecorded = hadirCount + terlambatCount + izinCount + sakitCount + alpaCount;
+                              const pct = totalDaysRecorded > 0 ? Math.round(((hadirCount + terlambatCount) / totalDaysRecorded) * 100) : 0;
+                              return (
+                                <>
+                                  <td className="py-2.5 px-2 text-center text-emerald-600 font-extrabold border-r border-slate-100 bg-emerald-50/30">{hadirCount}</td>
+                                  <td className="py-2.5 px-2 text-center text-amber-600 font-extrabold border-r border-slate-100 bg-amber-50/30">{terlambatCount}</td>
+                                  <td className="py-2.5 px-2 text-center text-teal-600 font-extrabold border-r border-slate-100 bg-teal-50/30">{pulangCount}</td>
+                                  <td className="py-2.5 px-2 text-center text-sky-600 font-bold border-r border-slate-100 bg-sky-50/30">{izinCount}</td>
+                                  <td className="py-2.5 px-2 text-center text-purple-600 font-bold border-r border-slate-100 bg-purple-50/30">{sakitCount}</td>
+                                  <td className="py-2.5 px-2 text-center text-rose-600 font-bold border-r border-slate-100 bg-rose-50/30">{alpaCount}</td>
+                                  <td className="py-2.5 px-2.5 text-center font-extrabold text-indigo-600 bg-indigo-50/40">{pct}%</td>
+                                </>
+                              );
+                            })()}
+                          </tr>
+                        );
+                      })
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              /* VIEW MODE 2: RINGKASAN REKAP STANDAR */
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs text-slate-700">
+                  <thead className="bg-slate-50 text-slate-600 font-extrabold uppercase tracking-wider border-b border-slate-200/80">
+                    <tr>
+                      <th className="py-3.5 px-4">No</th>
+                      <th className="py-3.5 px-4">NISN</th>
+                      <th className="py-3.5 px-4">Nama Siswa</th>
+                      <th className="py-3.5 px-4">Kelas</th>
+                      <th className="py-3.5 px-4 text-center">Hadir (H)</th>
+                      <th className="py-3.5 px-4 text-center">Terlambat (T)</th>
+                      <th className="py-3.5 px-4 text-center">Pulang (P)</th>
+                      <th className="py-3.5 px-4 text-center">Izin (I)</th>
+                      <th className="py-3.5 px-4 text-center">Sakit (S)</th>
+                      <th className="py-3.5 px-4 text-center">Alpa (A)</th>
+                      <th className="py-3.5 px-4 text-right">% Kehadiran</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 font-mono">
+                    {filteredStudents.length === 0 ? (
+                      <tr>
+                        <td colSpan={11} className="py-12 text-center text-slate-400 font-sans font-medium">
+                          Tidak ada siswa yang sesuai dengan filter pencarian "{searchQuery}" atau kelas yang dipilih.
+                        </td>
+                      </tr>
+                    ) : (
+                      filteredStudents.map((std, idx) => {
+                        const stdRecords = filteredRecords.filter(r => r.studentId === std.id || (std.nisn && r.nisn === std.nisn));
+                        const hadir = stdRecords.filter(r => r.status === 'HADIR').length;
+                        const terlambat = stdRecords.filter(r => r.status === 'TERLAMBAT').length;
+                        const pulang = stdRecords.filter(r => r.returnTime || r.returnStatus === 'PULANG' || r.returnStatus === 'PULANG_TEPAT' || r.returnStatus === 'PULANG_CEPAT').length;
+                        const izin = stdRecords.filter(r => r.status === 'IZIN').length;
+                        const sakit = stdRecords.filter(r => r.status === 'SAKIT').length;
+                        const alpa = stdRecords.filter(r => r.status === 'ALPA').length;
+
+                        const totalDaysRecorded = hadir + terlambat + izin + sakit + alpa;
+                        const presentCount = hadir + terlambat;
+                        const pct = totalDaysRecorded > 0 ? Math.round((presentCount / totalDaysRecorded) * 100) : 0;
+
+                        return (
+                          <tr key={std.id} className="hover:bg-slate-50/80 transition-colors">
+                            <td className="py-3.5 px-4 text-slate-400 font-semibold">{idx + 1}</td>
+                            <td className="py-3.5 px-4 text-slate-600 font-semibold">{std.nisn || '-'}</td>
+                            <td className="py-3.5 px-4 font-sans font-extrabold text-slate-900">{std.name}</td>
+                            <td className="py-3.5 px-4 text-indigo-600 font-bold">{std.className}</td>
+                            <td className="py-3.5 px-4 text-center text-emerald-600 font-extrabold">{hadir}</td>
+                            <td className="py-3.5 px-4 text-center text-amber-600 font-extrabold">{terlambat}</td>
+                            <td className="py-3.5 px-4 text-center text-teal-600 font-extrabold">{pulang}</td>
+                            <td className="py-3.5 px-4 text-center text-sky-600 font-bold">{izin}</td>
+                            <td className="py-3.5 px-4 text-center text-purple-600 font-bold">{sakit}</td>
+                            <td className="py-3.5 px-4 text-center text-rose-600 font-bold">{alpa}</td>
+                            <td className="py-3.5 px-4 text-right font-extrabold text-indigo-600">{pct}%</td>
+                          </tr>
+                        );
+                      })
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            {/* Legend / Keterangan Kode Matriks */}
+            {filterPeriod === 'MONTHLY' && attendanceViewMode === 'MATRIX' && (
+              <div className="p-3.5 bg-slate-50 border-t border-slate-200/80 text-xs text-slate-600 flex flex-wrap items-center justify-between gap-3">
+                <div className="flex flex-wrap items-center gap-3">
+                  <span className="font-extrabold text-slate-800">Keterangan Kode:</span>
+                  <span className="inline-flex items-center gap-1.5">
+                    <span className="w-5 h-5 rounded-md bg-emerald-100 text-emerald-800 border border-emerald-300 font-extrabold inline-flex items-center justify-center text-[10px]">H</span>
+                    <span>Hadir Tepat</span>
+                  </span>
+                  <span className="inline-flex items-center gap-1.5">
+                    <span className="w-5 h-5 rounded-md bg-amber-100 text-amber-800 border border-amber-300 font-extrabold inline-flex items-center justify-center text-[10px]">T</span>
+                    <span>Terlambat</span>
+                  </span>
+                  <span className="inline-flex items-center gap-1.5">
+                    <span className="w-5 h-5 rounded-md bg-teal-100 text-teal-800 border border-teal-300 font-extrabold inline-flex items-center justify-center text-[10px]">P</span>
+                    <span>Scan Pulang</span>
+                  </span>
+                  <span className="inline-flex items-center gap-1.5">
+                    <span className="w-5 h-5 rounded-md bg-sky-100 text-sky-800 border border-sky-300 font-extrabold inline-flex items-center justify-center text-[10px]">I</span>
+                    <span>Izin</span>
+                  </span>
+                  <span className="inline-flex items-center gap-1.5">
+                    <span className="w-5 h-5 rounded-md bg-purple-100 text-purple-800 border border-purple-300 font-extrabold inline-flex items-center justify-center text-[10px]">S</span>
+                    <span>Sakit</span>
+                  </span>
+                  <span className="inline-flex items-center gap-1.5">
+                    <span className="w-5 h-5 rounded-md bg-rose-100 text-rose-800 border border-rose-300 font-extrabold inline-flex items-center justify-center text-[10px]">A</span>
+                    <span>Alpa</span>
+                  </span>
+                  <span className="inline-flex items-center gap-1.5">
+                    <span className="w-5 h-5 rounded-md bg-slate-200 text-slate-600 font-medium inline-flex items-center justify-center text-[10px]">L</span>
+                    <span>Libur / Akhir Pekan</span>
+                  </span>
+                </div>
+
+                <div className="text-slate-400 font-mono text-[11px]">
+                  * Sorot badge huruf untuk melihat jam presensi & catatan
+                </div>
+              </div>
+            )}
+
           </div>
         </div>
       )}

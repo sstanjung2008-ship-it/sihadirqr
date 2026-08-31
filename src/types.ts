@@ -109,6 +109,7 @@ export interface SchoolProfile {
   province: string;
   phone: string;
   email: string;
+  website?: string;
   principalName: string;
   principalNip: string;
   principalSignatureUrl?: string;

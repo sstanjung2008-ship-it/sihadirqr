@@ -4,10 +4,52 @@ import * as XLSX from 'xlsx';
 import QRCode from 'qrcode';
 import { SchoolProfile, Student, AttendanceRecord, LearningJournal, SchoolClass, CharacterTrait, StudentCharacterLog, CharacterPredicateSettings, StudentGradeAssessment } from '../types';
 
+/**
+ * Convert any Google Drive sharing link (or standard URL) into a direct image embed URL.
+ * Handles:
+ * - https://drive.google.com/file/d/FILE_ID/view?usp=sharing
+ * - https://drive.google.com/open?id=FILE_ID
+ * - https://drive.google.com/uc?id=FILE_ID
+ * - https://drive.google.com/uc?export=view&id=FILE_ID
+ * - https://lh3.googleusercontent.com/d/FILE_ID
+ */
+export function convertGoogleDriveUrl(rawUrl: string): string {
+  if (!rawUrl || typeof rawUrl !== 'string') return '';
+  const trimmed = rawUrl.trim();
+
+  // If it's already a direct data URL or lh3 direct Google image
+  if (trimmed.startsWith('data:image/') || trimmed.includes('lh3.googleusercontent.com/d/')) {
+    return trimmed;
+  }
+
+  // Regex patterns to extract Google Drive File ID
+  const driveFileRegex = /(?:drive\.google\.com\/(?:file\/d\/|open\?id=|uc\?(?:export=view&)?id=)|docs\.google\.com\/file\/d\/)([a-zA-Z0-9_-]{25,})/;
+  const match = trimmed.match(driveFileRegex);
+
+  if (match && match[1]) {
+    const fileId = match[1];
+    return `https://lh3.googleusercontent.com/d/${fileId}`;
+  }
+
+  // Fallback: If user passed an ID-only string (alphanumeric with length 28-44)
+  const idOnlyMatch = trimmed.match(/^([a-zA-Z0-9_-]{28,45})$/);
+  if (idOnlyMatch && idOnlyMatch[1] && !trimmed.includes('/') && !trimmed.includes('.')) {
+    return `https://lh3.googleusercontent.com/d/${idOnlyMatch[1]}`;
+  }
+
+  return trimmed;
+}
+
+export function isGoogleDriveUrl(rawUrl: string): boolean {
+  if (!rawUrl || typeof rawUrl !== 'string') return false;
+  return rawUrl.includes('drive.google.com') || rawUrl.includes('docs.google.com') || rawUrl.includes('lh3.googleusercontent.com/d/');
+}
+
 // Helper to convert Image URL to Base64 Data URL for jsPDF
 async function loadImageAsDataUrl(url: string): Promise<string | null> {
   if (!url) return null;
-  if (url.startsWith('data:image/')) return url;
+  const processedUrl = convertGoogleDriveUrl(url);
+  if (processedUrl.startsWith('data:image/')) return processedUrl;
 
   return new Promise((resolve) => {
     const img = new Image();
@@ -30,7 +72,7 @@ async function loadImageAsDataUrl(url: string): Promise<string | null> {
       }
     };
     img.onerror = () => resolve(null);
-    img.src = url;
+    img.src = processedUrl;
   });
 }
 
@@ -838,7 +880,7 @@ export function exportMonthlyAttendanceMatrixExcel(
   const workbook = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(workbook, worksheet, `Presensi ${monthName} ${year}`);
 
-  XLSX.writeFile(workbook, `Rincian_Presensi_Bulanan_${className.replace(/\s+/g, '_')}_${monthName}_${year}.xlsx`);
+  saveExcelWorkbook(workbook, `Rincian_Presensi_Bulanan_${className.replace(/\s+/g, '_')}_${monthName}_${year}.xlsx`);
 }
 
 // Excel Export for Attendance Recap
@@ -883,7 +925,7 @@ export function exportAttendanceExcel(
   const workbook = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(workbook, worksheet, 'Rekap Presensi');
 
-  XLSX.writeFile(workbook, `Rekap_Presensi_${filterTitle.replace(/\s+/g, '_')}_${startDateStr}.xlsx`);
+  saveExcelWorkbook(workbook, `Rekap_Presensi_${filterTitle.replace(/\s+/g, '_')}_${startDateStr}.xlsx`);
 }
 
 // Download Template Excel for Batch Importing New Students
@@ -941,7 +983,7 @@ export function downloadStudentImportTemplate() {
   const workbook = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(workbook, worksheet, 'Template Siswa');
 
-  XLSX.writeFile(workbook, 'Format_Import_Data_Siswa_SiHadirQR.xlsx');
+  saveExcelWorkbook(workbook, 'Format_Import_Data_Siswa_SiHadirQR.xlsx');
 }
 
 // Download Template Excel for Batch Importing Teachers
@@ -999,7 +1041,7 @@ export function downloadTeacherImportTemplate() {
   const workbook = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(workbook, worksheet, 'Template Guru');
 
-  XLSX.writeFile(workbook, 'Format_Import_Data_Guru_SiHadirQR.xlsx');
+  saveExcelWorkbook(workbook, 'Format_Import_Data_Guru_SiHadirQR.xlsx');
 }
 
 // Generate WhatsApp Deep Link
@@ -2745,8 +2787,787 @@ export function exportRecapStudentGradesExcel(
 
   const sanitizedClass = selectedClass.replace(/[^a-zA-Z0-9]/g, '_');
   const typeSuffix = gradeType !== 'ALL' ? `_${gradeType}` : '';
-  XLSX.writeFile(workbook, `Rekap_Nilai_Siswa_${sanitizedClass}${typeSuffix}_${startDate}_sd_${endDate}.xlsx`);
+  saveExcelWorkbook(workbook, `Rekap_Nilai_Siswa_${sanitizedClass}${typeSuffix}_${startDate}_sd_${endDate}.xlsx`);
 }
+
+// Export Complete Student Identity Report with Photos in Landscape Table Format (PDF)
+export async function exportStudentFullIdentityPdf(
+  schoolProfile: SchoolProfile,
+  students: Student[],
+  className: string,
+  homeroomTeacher?: { name: string; nip?: string } | null
+) {
+  const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+
+  // Pre-load school logos
+  const regencyLogoData = await loadImageAsDataUrl(schoolProfile.regencyLogo);
+  const schoolLogoData = await loadImageAsDataUrl(schoolProfile.schoolLogo);
+
+  // Pre-load all student photos and QR codes in parallel
+  const studentPhotos: { [id: string]: string | null } = {};
+  const studentQrs: { [id: string]: string } = {};
+
+  await Promise.all(
+    students.map(async (std) => {
+      const [photo, qr] = await Promise.all([
+        loadImageAsDataUrl(std.photoUrl),
+        generateQrDataUrl(std.qrCode)
+      ]);
+      studentPhotos[std.id] = photo;
+      studentQrs[std.id] = qr;
+    })
+  );
+
+  // Helper to draw Kop on first and subsequent pages if needed
+  const drawKop = () => {
+    // Regency Logo (Top Left)
+    if (regencyLogoData) {
+      try { doc.addImage(regencyLogoData, 'PNG', 14, 8, 17, 17); } catch {}
+    }
+
+    // School Logo (Top Right)
+    if (schoolLogoData) {
+      try { doc.addImage(schoolLogoData, 'PNG', 266, 8, 17, 17); } catch {}
+    }
+
+    // Kop Text
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(10);
+    doc.setTextColor(30, 41, 59);
+    doc.text(schoolProfile.regency ? schoolProfile.regency.toUpperCase() : 'PEMERINTAH KABUPATEN', 148.5, 11, { align: 'center' });
+
+    doc.setFontSize(13);
+    doc.setTextColor(15, 23, 42);
+    doc.text(schoolProfile.name.toUpperCase(), 148.5, 16, { align: 'center' });
+
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(8.5);
+    doc.setTextColor(71, 85, 105);
+    doc.text(schoolProfile.address, 148.5, 20.5, { align: 'center' });
+    doc.text(`Telp: ${schoolProfile.phone || '-'} | Email: ${schoolProfile.email || '-'} | Website: ${schoolProfile.website || '-'}`, 148.5, 24.5, { align: 'center' });
+
+    // Double Line Separator
+    doc.setLineWidth(0.75);
+    doc.setDrawColor(30, 41, 59);
+    doc.line(14, 27, 283, 27);
+    doc.setLineWidth(0.25);
+    doc.line(14, 28, 283, 28);
+  };
+
+  drawKop();
+
+  // Document Title & Metadata
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(11);
+  doc.setTextColor(30, 27, 75);
+  doc.text('DAFTAR IDENTITAS LENGKAP PESERTA DIDIK (BUKU INDUK)', 148.5, 34, { align: 'center' });
+
+  const todayFormatted = new Date().toLocaleDateString('id-ID', {
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric'
+  });
+
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(8.5);
+  doc.setTextColor(51, 65, 85);
+  doc.text(`Kelas: ${className}   |   Tahun Ajaran: ${schoolProfile.academicYear || '2025/2026'}   |   Total: ${students.length} Siswa   |   Tanggal Cetak: ${todayFormatted}`, 148.5, 39, { align: 'center' });
+
+  // Prepare table data
+  const tableData = students.map((std, idx) => {
+    const genderLabel = std.gender === 'L' ? 'Laki-laki (L)' : std.gender === 'P' ? 'Perempuan (P)' : '-';
+    return [
+      (idx + 1).toString(),
+      '', // Photo Placeholder for didDrawCell
+      `NISN: ${std.nisn || '-'}\nNIS: ${std.nis || '-'}`,
+      `${std.name.toUpperCase()}\nJK: ${genderLabel}`,
+      `Kelas: ${std.className}\nTTL: ${std.birthPlaceDate || '-'}`,
+      `Wali: ${std.parentName || '-'}\nHP/WA: ${std.parentPhone || '-'}\nEmail: ${std.parentEmail || '-'}`,
+      `${std.address || '-'}`,
+      '' // QR Code Placeholder for didDrawCell
+    ];
+  });
+
+  autoTable(doc, {
+    startY: 43,
+    head: [[
+      'No',
+      'Pas Foto',
+      'NISN / NIS',
+      'Nama Siswa & JK',
+      'Kelas & TTL',
+      'Data Orang Tua / Kontak',
+      'Alamat Lengkap',
+      'QR Presensi'
+    ]],
+    body: tableData,
+    theme: 'grid',
+    headStyles: {
+      fillColor: [30, 27, 75],
+      textColor: 255,
+      fontSize: 8,
+      fontStyle: 'bold',
+      halign: 'center',
+      valign: 'middle'
+    },
+    bodyStyles: {
+      fontSize: 7.5,
+      textColor: [15, 23, 42],
+      valign: 'middle',
+      minCellHeight: 22,
+      cellPadding: 1.5
+    },
+    columnStyles: {
+      0: { halign: 'center', cellWidth: 8 },
+      1: { halign: 'center', cellWidth: 18 }, // Foto
+      2: { fontStyle: 'bold', cellWidth: 24 },
+      3: { fontStyle: 'bold', cellWidth: 42 },
+      4: { cellWidth: 40 },
+      5: { cellWidth: 46 },
+      6: { cellWidth: 55 },
+      7: { halign: 'center', cellWidth: 22 }  // QR
+    },
+    didDrawCell: (data) => {
+      // Draw Student Photo in Column 1 (Pas Foto)
+      if (data.column.index === 1 && data.section === 'body') {
+        const student = students[data.row.index];
+        if (student) {
+          const photoUrl = studentPhotos[student.id];
+          const cellX = data.cell.x;
+          const cellY = data.cell.y;
+          const cellW = data.cell.width;
+          const cellH = data.cell.height;
+
+          const photoW = 14;
+          const photoH = 18;
+          const photoX = cellX + (cellW - photoW) / 2;
+          const photoY = cellY + (cellH - photoH) / 2;
+
+          if (photoUrl) {
+            try {
+              doc.setDrawColor(203, 213, 225);
+              doc.setLineWidth(0.3);
+              doc.rect(photoX - 0.5, photoY - 0.5, photoW + 1, photoH + 1, 'S');
+              doc.addImage(photoUrl, 'JPEG', photoX, photoY, photoW, photoH);
+            } catch {
+              drawPlaceholderPhoto(doc, photoX, photoY, photoW, photoH, student.name);
+            }
+          } else {
+            drawPlaceholderPhoto(doc, photoX, photoY, photoW, photoH, student.name);
+          }
+        }
+      }
+
+      // Draw QR Code in Column 7
+      if (data.column.index === 7 && data.section === 'body') {
+        const student = students[data.row.index];
+        if (student) {
+          const qrUrl = studentQrs[student.id];
+          const cellX = data.cell.x;
+          const cellY = data.cell.y;
+          const cellW = data.cell.width;
+          const cellH = data.cell.height;
+
+          const qrSize = 17;
+          const qrX = cellX + (cellW - qrSize) / 2;
+          const qrY = cellY + (cellH - qrSize) / 2;
+
+          if (qrUrl) {
+            try {
+              doc.addImage(qrUrl, 'PNG', qrX, qrY, qrSize, qrSize);
+            } catch {}
+          }
+        }
+      }
+    }
+  });
+
+  function drawPlaceholderPhoto(d: jsPDF, x: number, y: number, w: number, h: number, name: string) {
+    d.setFillColor(241, 245, 249);
+    d.setDrawColor(203, 213, 225);
+    d.rect(x, y, w, h, 'FD');
+    d.setFontSize(6);
+    d.setTextColor(148, 163, 184);
+    const initials = name.split(' ').map(n => n[0]).slice(0, 2).join('').toUpperCase();
+    d.text(initials, x + w / 2, y + h / 2 + 1, { align: 'center' });
+  }
+
+  const finalY = (doc as any).lastAutoTable?.finalY || 160;
+
+  // Add Signatures
+  const pageHeight = 210;
+  if (finalY + 35 > pageHeight) {
+    doc.addPage();
+    drawKop();
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(8.5);
+  }
+
+  const sigY = (finalY + 35 > pageHeight ? 40 : finalY + 10);
+
+  // Left Signature: Wali Kelas
+  if (homeroomTeacher?.name) {
+    doc.setFontSize(8.5);
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(30, 41, 59);
+    doc.text('Mengetahui,', 40, sigY);
+    doc.text(`Wali Kelas ${className}`, 40, sigY + 4.5);
+
+    doc.setFont('helvetica', 'bold');
+    doc.text(homeroomTeacher.name, 40, sigY + 22);
+    doc.setFont('helvetica', 'normal');
+    doc.text(`NIP. ${homeroomTeacher.nip || '-'}`, 40, sigY + 26);
+  }
+
+  // Right Signature: Kepala Sekolah
+  doc.setFontSize(8.5);
+  doc.setFont('helvetica', 'normal');
+  doc.setTextColor(30, 41, 59);
+  doc.text(`${schoolProfile.district || 'Kota'}, ${todayFormatted}`, 220, sigY);
+  doc.text('Kepala Sekolah,', 220, sigY + 4.5);
+
+  doc.setFont('helvetica', 'bold');
+  doc.text(schoolProfile.principalName, 220, sigY + 22);
+  doc.setFont('helvetica', 'normal');
+  doc.text(`NIP. ${schoolProfile.principalNip || '-'}`, 220, sigY + 26);
+
+  const sanitizedClass = className.replace(/[^a-zA-Z0-9]/g, '_');
+  doc.save(`Identitas_Lengkap_Siswa_${sanitizedClass}_${Date.now()}.pdf`);
+}
+
+// Single Student Detailed Biodata / Buku Induk Sheet (A4 Portrait PDF)
+export async function exportSingleStudentBiodataPdf(
+  student: Student,
+  schoolProfile: SchoolProfile
+) {
+  const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+
+  const regencyLogo = await loadImageAsDataUrl(schoolProfile.regencyLogo);
+  const schoolLogo = await loadImageAsDataUrl(schoolProfile.schoolLogo);
+  const studentPhoto = await loadImageAsDataUrl(student.photoUrl);
+  const qrDataUrl = await generateQrDataUrl(student.qrCode);
+
+  // Kop Surat
+  if (regencyLogo) {
+    try { doc.addImage(regencyLogo, 'PNG', 15, 9, 18, 18); } catch {}
+  }
+  if (schoolLogo) {
+    try { doc.addImage(schoolLogo, 'PNG', 177, 9, 18, 18); } catch {}
+  }
+
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(10);
+  doc.setTextColor(30, 41, 59);
+  doc.text(schoolProfile.regency ? schoolProfile.regency.toUpperCase() : 'PEMERINTAH KABUPATEN', 105, 12, { align: 'center' });
+
+  doc.setFontSize(13);
+  doc.setTextColor(15, 23, 42);
+  doc.text(schoolProfile.name.toUpperCase(), 105, 17, { align: 'center' });
+
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(9);
+  doc.setTextColor(71, 85, 105);
+  doc.text(schoolProfile.address, 105, 22, { align: 'center' });
+  doc.text(`Telp: ${schoolProfile.phone || '-'} | Email: ${schoolProfile.email || '-'}`, 105, 26, { align: 'center' });
+
+  doc.setLineWidth(0.8);
+  doc.setDrawColor(30, 41, 59);
+  doc.line(15, 29, 195, 29);
+  doc.setLineWidth(0.2);
+  doc.line(15, 30, 195, 30);
+
+  // Title
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(12);
+  doc.setTextColor(30, 27, 75);
+  doc.text('LEMBAR BUKU INDUK / BIODATA PESERTA DIDIK', 105, 38, { align: 'center' });
+
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(9);
+  doc.setTextColor(100, 116, 139);
+  doc.text(`Tahun Ajaran: ${schoolProfile.academicYear || '2025/2026'} | Terdaftar di Kelas: ${student.className}`, 105, 43, { align: 'center' });
+
+  // Photo Box (Top Left Card Box)
+  const photoW = 28;
+  const photoH = 36;
+  const photoX = 18;
+  const photoY = 50;
+
+  doc.setFillColor(248, 250, 252);
+  doc.setDrawColor(203, 213, 225);
+  doc.rect(photoX, photoY, photoW, photoH, 'FD');
+
+  if (studentPhoto) {
+    try {
+      doc.addImage(studentPhoto, 'JPEG', photoX, photoY, photoW, photoH);
+    } catch {}
+  } else {
+    doc.setFontSize(8);
+    doc.setTextColor(148, 163, 184);
+    doc.text('Pas Foto\n3 x 4', photoX + photoW / 2, photoY + photoH / 2 - 2, { align: 'center' });
+  }
+
+  // QR Code Box (Top Right Card Box)
+  const qrSize = 32;
+  const qrX = 160;
+  const qrY = 52;
+
+  if (qrDataUrl) {
+    try {
+      doc.addImage(qrDataUrl, 'PNG', qrX, qrY, qrSize, qrSize);
+    } catch {}
+    doc.setFontSize(6.5);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(71, 85, 105);
+    doc.text(`ID: ${student.qrCode}`, qrX + qrSize / 2, qrY + qrSize + 3.5, { align: 'center' });
+  }
+
+  // Summary Badge in Header Box
+  doc.setFillColor(241, 245, 249);
+  doc.roundedRect(50, 50, 104, 36, 2, 2, 'F');
+
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(11);
+  doc.setTextColor(15, 23, 42);
+  doc.text(student.name.toUpperCase(), 54, 57);
+
+  doc.setFontSize(8.5);
+  doc.setFont('helvetica', 'normal');
+  doc.setTextColor(51, 65, 85);
+  doc.text(`NISN              :  ${student.nisn || '-'}`, 54, 63);
+  doc.text(`NIS                 :  ${student.nis || '-'}`, 54, 68);
+  doc.text(`Kelas              :  ${student.className}`, 54, 73);
+  doc.text(`Jenis Kelamin :  ${student.gender === 'L' ? 'Laki-laki (L)' : student.gender === 'P' ? 'Perempuan (P)' : '-'}`, 54, 78);
+  doc.text(`TTL                :  ${student.birthPlaceDate || '-'}`, 54, 83);
+
+  // Section A: DATA PRIBADI PESERTA DIDIK
+  let curY = 94;
+  doc.setFillColor(30, 27, 75);
+  doc.rect(15, curY, 180, 6, 'F');
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(8.5);
+  doc.setTextColor(255, 255, 255);
+  doc.text('A. DATA PRIBADI PESERTA DIDIK', 18, curY + 4.2);
+
+  curY += 10;
+  const personalDetails = [
+    ['1.', 'Nama Lengkap Siswa', `: ${student.name}`],
+    ['2.', 'Nomor Induk Siswa Nasional (NISN)', `: ${student.nisn || '-'}`],
+    ['3.', 'Nomor Induk Sekolah (NIS)', `: ${student.nis || '-'}`],
+    ['4.', 'Jenis Kelamin', `: ${student.gender === 'L' ? 'Laki-laki (L)' : 'Perempuan (P)'}`],
+    ['5.', 'Tempat, Tanggal Lahir', `: ${student.birthPlaceDate || '-'}`],
+    ['6.', 'Tingkat / Rombongan Belajar (Kelas)', `: Kelas ${student.className}`],
+    ['7.', 'Alamat Domisili Siswa', `: ${student.address || '-'}`],
+    ['8.', 'Kode QR Presensi Siswa', `: ${student.qrCode || '-'}`]
+  ];
+
+  doc.setFontSize(8.5);
+  personalDetails.forEach(([num, label, val]) => {
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(71, 85, 105);
+    doc.text(num, 18, curY);
+    doc.text(label, 24, curY);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(15, 23, 42);
+
+    const splitVal = doc.splitTextToSize(val, 95);
+    doc.text(splitVal, 88, curY);
+    curY += Math.max(splitVal.length * 4.5, 6);
+  });
+
+  // Section B: DATA ORANG TUA / WALI
+  curY += 2;
+  doc.setFillColor(30, 27, 75);
+  doc.rect(15, curY, 180, 6, 'F');
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(8.5);
+  doc.setTextColor(255, 255, 255);
+  doc.text('B. DATA ORANG TUA / WALI MURID', 18, curY + 4.2);
+
+  curY += 10;
+  const parentDetails = [
+    ['1.', 'Nama Orang Tua / Wali', `: ${student.parentName || '-'}`],
+    ['2.', 'Nomor Telepon / WhatsApp', `: ${student.parentPhone || '-'}`],
+    ['3.', 'Alamat Email Orang Tua', `: ${student.parentEmail || '-'}`],
+    ['4.', 'Alamat Rumah Orang Tua / Wali', `: ${student.address || '-'}`],
+    ['5.', 'Keterangan Notifikasi WA Presensi', ': Aktif / Terhubung Otomatis']
+  ];
+
+  parentDetails.forEach(([num, label, val]) => {
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(71, 85, 105);
+    doc.text(num, 18, curY);
+    doc.text(label, 24, curY);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(15, 23, 42);
+
+    const splitVal = doc.splitTextToSize(val, 95);
+    doc.text(splitVal, 88, curY);
+    curY += Math.max(splitVal.length * 4.5, 6);
+  });
+
+  // Signatures
+  const todayFormatted = new Date().toLocaleDateString('id-ID', {
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric'
+  });
+
+  const sigY = 230;
+  doc.setFontSize(8.5);
+  doc.setFont('helvetica', 'normal');
+  doc.setTextColor(30, 41, 59);
+
+  // Left: Orang Tua / Wali
+  doc.text('Mengetahui,', 25, sigY);
+  doc.text('Orang Tua / Wali Siswa,', 25, sigY + 4.5);
+  doc.setFont('helvetica', 'bold');
+  doc.text(student.parentName || '( ......................................... )', 25, sigY + 24);
+
+  // Right: Kepala Sekolah
+  doc.setFont('helvetica', 'normal');
+  doc.text(`${schoolProfile.district || 'Kota'}, ${todayFormatted}`, 135, sigY);
+  doc.text('Kepala Sekolah,', 135, sigY + 4.5);
+  doc.setFont('helvetica', 'bold');
+  doc.text(schoolProfile.principalName, 135, sigY + 24);
+  doc.setFont('helvetica', 'normal');
+  doc.text(`NIP. ${schoolProfile.principalNip || '-'}`, 135, sigY + 28);
+
+  const sanitizedName = student.name.replace(/[^a-zA-Z0-9]/g, '_');
+  doc.save(`Biodata_Lengkap_${sanitizedName}_${student.nisn || student.id}.pdf`);
+}
+
+// Batch Student Detailed Biodata Sheets (1 Page per Student in 1 PDF document)
+export async function exportBatchStudentBiodataSheetsPdf(
+  students: Student[],
+  schoolProfile: SchoolProfile
+) {
+  const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+
+  const regencyLogo = await loadImageAsDataUrl(schoolProfile.regencyLogo);
+  const schoolLogo = await loadImageAsDataUrl(schoolProfile.schoolLogo);
+
+  for (let i = 0; i < students.length; i++) {
+    const student = students[i];
+    if (i > 0) {
+      doc.addPage();
+    }
+
+    const studentPhoto = await loadImageAsDataUrl(student.photoUrl);
+    const qrDataUrl = await generateQrDataUrl(student.qrCode);
+
+    // Kop Surat
+    if (regencyLogo) {
+      try { doc.addImage(regencyLogo, 'PNG', 15, 9, 18, 18); } catch {}
+    }
+    if (schoolLogo) {
+      try { doc.addImage(schoolLogo, 'PNG', 177, 9, 18, 18); } catch {}
+    }
+
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(10);
+    doc.setTextColor(30, 41, 59);
+    doc.text(schoolProfile.regency ? schoolProfile.regency.toUpperCase() : 'PEMERINTAH KABUPATEN', 105, 12, { align: 'center' });
+
+    doc.setFontSize(13);
+    doc.setTextColor(15, 23, 42);
+    doc.text(schoolProfile.name.toUpperCase(), 105, 17, { align: 'center' });
+
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(9);
+    doc.setTextColor(71, 85, 105);
+    doc.text(schoolProfile.address, 105, 22, { align: 'center' });
+    doc.text(`Telp: ${schoolProfile.phone || '-'} | Email: ${schoolProfile.email || '-'}`, 105, 26, { align: 'center' });
+
+    doc.setLineWidth(0.8);
+    doc.setDrawColor(30, 41, 59);
+    doc.line(15, 29, 195, 29);
+    doc.setLineWidth(0.2);
+    doc.line(15, 30, 195, 30);
+
+    // Title
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(12);
+    doc.setTextColor(30, 27, 75);
+    doc.text('LEMBAR BUKU INDUK / BIODATA PESERTA DIDIK', 105, 38, { align: 'center' });
+
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(9);
+    doc.setTextColor(100, 116, 139);
+    doc.text(`Tahun Ajaran: ${schoolProfile.academicYear || '2025/2026'} | Terdaftar di Kelas: ${student.className}`, 105, 43, { align: 'center' });
+
+    // Photo Box
+    const photoW = 28;
+    const photoH = 36;
+    const photoX = 18;
+    const photoY = 50;
+
+    doc.setFillColor(248, 250, 252);
+    doc.setDrawColor(203, 213, 225);
+    doc.rect(photoX, photoY, photoW, photoH, 'FD');
+
+    if (studentPhoto) {
+      try {
+        doc.addImage(studentPhoto, 'JPEG', photoX, photoY, photoW, photoH);
+      } catch {}
+    } else {
+      doc.setFontSize(8);
+      doc.setTextColor(148, 163, 184);
+      doc.text('Pas Foto\n3 x 4', photoX + photoW / 2, photoY + photoH / 2 - 2, { align: 'center' });
+    }
+
+    // QR Code Box
+    const qrSize = 32;
+    const qrX = 160;
+    const qrY = 52;
+
+    if (qrDataUrl) {
+      try {
+        doc.addImage(qrDataUrl, 'PNG', qrX, qrY, qrSize, qrSize);
+      } catch {}
+      doc.setFontSize(6.5);
+      doc.setFont('helvetica', 'bold');
+      doc.setTextColor(71, 85, 105);
+      doc.text(`ID: ${student.qrCode}`, qrX + qrSize / 2, qrY + qrSize + 3.5, { align: 'center' });
+    }
+
+    // Header Summary Box
+    doc.setFillColor(241, 245, 249);
+    doc.roundedRect(50, 50, 104, 36, 2, 2, 'F');
+
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(11);
+    doc.setTextColor(15, 23, 42);
+    doc.text(student.name.toUpperCase(), 54, 57);
+
+    doc.setFontSize(8.5);
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(51, 65, 85);
+    doc.text(`NISN              :  ${student.nisn || '-'}`, 54, 63);
+    doc.text(`NIS                 :  ${student.nis || '-'}`, 54, 68);
+    doc.text(`Kelas              :  ${student.className}`, 54, 73);
+    doc.text(`Jenis Kelamin :  ${student.gender === 'L' ? 'Laki-laki (L)' : 'Perempuan (P)'}`, 54, 78);
+    doc.text(`TTL                :  ${student.birthPlaceDate || '-'}`, 54, 83);
+
+    // Section A: DATA PRIBADI PESERTA DIDIK
+    let curY = 94;
+    doc.setFillColor(30, 27, 75);
+    doc.rect(15, curY, 180, 6, 'F');
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(8.5);
+    doc.setTextColor(255, 255, 255);
+    doc.text('A. DATA PRIBADI PESERTA DIDIK', 18, curY + 4.2);
+
+    curY += 10;
+    const personalDetails = [
+      ['1.', 'Nama Lengkap Siswa', `: ${student.name}`],
+      ['2.', 'Nomor Induk Siswa Nasional (NISN)', `: ${student.nisn || '-'}`],
+      ['3.', 'Nomor Induk Sekolah (NIS)', `: ${student.nis || '-'}`],
+      ['4.', 'Jenis Kelamin', `: ${student.gender === 'L' ? 'Laki-laki (L)' : 'Perempuan (P)'}`],
+      ['5.', 'Tempat, Tanggal Lahir', `: ${student.birthPlaceDate || '-'}`],
+      ['6.', 'Tingkat / Rombongan Belajar (Kelas)', `: Kelas ${student.className}`],
+      ['7.', 'Alamat Domisili Siswa', `: ${student.address || '-'}`],
+      ['8.', 'Kode QR Presensi Siswa', `: ${student.qrCode || '-'}`]
+    ];
+
+    doc.setFontSize(8.5);
+    personalDetails.forEach(([num, label, val]) => {
+      doc.setFont('helvetica', 'normal');
+      doc.setTextColor(71, 85, 105);
+      doc.text(num, 18, curY);
+      doc.text(label, 24, curY);
+      doc.setFont('helvetica', 'bold');
+      doc.setTextColor(15, 23, 42);
+
+      const splitVal = doc.splitTextToSize(val, 95);
+      doc.text(splitVal, 88, curY);
+      curY += Math.max(splitVal.length * 4.5, 6);
+    });
+
+    // Section B: DATA ORANG TUA / WALI
+    curY += 2;
+    doc.setFillColor(30, 27, 75);
+    doc.rect(15, curY, 180, 6, 'F');
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(8.5);
+    doc.setTextColor(255, 255, 255);
+    doc.text('B. DATA ORANG TUA / WALI MURID', 18, curY + 4.2);
+
+    curY += 10;
+    const parentDetails = [
+      ['1.', 'Nama Orang Tua / Wali', `: ${student.parentName || '-'}`],
+      ['2.', 'Nomor Telepon / WhatsApp', `: ${student.parentPhone || '-'}`],
+      ['3.', 'Alamat Email Orang Tua', `: ${student.parentEmail || '-'}`],
+      ['4.', 'Alamat Rumah Orang Tua / Wali', `: ${student.address || '-'}`],
+      ['5.', 'Keterangan Notifikasi WA Presensi', ': Aktif / Terhubung Otomatis']
+    ];
+
+    parentDetails.forEach(([num, label, val]) => {
+      doc.setFont('helvetica', 'normal');
+      doc.setTextColor(71, 85, 105);
+      doc.text(num, 18, curY);
+      doc.text(label, 24, curY);
+      doc.setFont('helvetica', 'bold');
+      doc.setTextColor(15, 23, 42);
+
+      const splitVal = doc.splitTextToSize(val, 95);
+      doc.text(splitVal, 88, curY);
+      curY += Math.max(splitVal.length * 4.5, 6);
+    });
+
+    // Signatures
+    const todayFormatted = new Date().toLocaleDateString('id-ID', {
+      day: 'numeric',
+      month: 'long',
+      year: 'numeric'
+    });
+
+    const sigY = 230;
+    doc.setFontSize(8.5);
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(30, 41, 59);
+
+    // Left: Orang Tua / Wali
+    doc.text('Mengetahui,', 25, sigY);
+    doc.text('Orang Tua / Wali Siswa,', 25, sigY + 4.5);
+    doc.setFont('helvetica', 'bold');
+    doc.text(student.parentName || '( ......................................... )', 25, sigY + 24);
+
+    // Right: Kepala Sekolah
+    doc.setFont('helvetica', 'normal');
+    doc.text(`${schoolProfile.district || 'Kota'}, ${todayFormatted}`, 135, sigY);
+    doc.text('Kepala Sekolah,', 135, sigY + 4.5);
+    doc.setFont('helvetica', 'bold');
+    doc.text(schoolProfile.principalName, 135, sigY + 24);
+    doc.setFont('helvetica', 'normal');
+    doc.text(`NIP. ${schoolProfile.principalNip || '-'}`, 135, sigY + 28);
+  }
+
+  doc.save(`Kolektif_Lembar_Biodata_${students.length}_Siswa.pdf`);
+}
+
+// Universal Safe Helper to download XLSX workbooks in web, mobile, and sandboxed iframe environments
+export function saveExcelWorkbook(workbook: XLSX.WorkBook, fileName: string) {
+  const safeFileName = fileName.endsWith('.xlsx') ? fileName : `${fileName}.xlsx`;
+  try {
+    const wbout = XLSX.write(workbook, { bookType: 'xlsx', type: 'array' });
+    const blob = new Blob([wbout], {
+      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;charset=UTF-8'
+    });
+
+    const url = window.URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = safeFileName;
+    link.style.display = 'none';
+    document.body.appendChild(link);
+    link.click();
+
+    setTimeout(() => {
+      if (document.body.contains(link)) {
+        document.body.removeChild(link);
+      }
+      window.URL.revokeObjectURL(url);
+    }, 500);
+  } catch (err) {
+    console.warn('Direct Blob download failed, attempting XLSX.writeFile fallback:', err);
+    try {
+      XLSX.writeFile(workbook, safeFileName);
+    } catch (writeErr) {
+      console.error('All XLSX download methods failed:', writeErr);
+      throw new Error('Gagal mengunduh berkas Excel. Pastikan browser mengizinkan unduhan berkas.');
+    }
+  }
+}
+
+// Export Complete Student Identity with Photos to Excel (XLSX)
+export function exportStudentFullIdentityExcel(
+  schoolProfile: SchoolProfile,
+  students: Student[],
+  className: string = 'Semua_Kelas'
+) {
+  if (!students || students.length === 0) {
+    throw new Error('Tidak ada data siswa untuk diekspor ke Excel.');
+  }
+
+  // Sort students alphabetically by name
+  const sortedStudents = [...students].sort((a, b) => 
+    a.name.localeCompare(b.name, 'id', { numeric: true, sensitivity: 'base' })
+  );
+
+  // Sheet 1: Master Data Siswa Lengkap
+  const rows = sortedStudents.map((std, idx) => ({
+    'No': idx + 1,
+    'Nama Lengkap Siswa': std.name || '',
+    'NISN': std.nisn || '',
+    'NIS': std.nis || '',
+    'Jenis Kelamin': std.gender === 'L' ? 'Laki-laki' : std.gender === 'P' ? 'Perempuan' : (std.gender || '-'),
+    'Kelas': std.className || '',
+    'Tempat, Tanggal Lahir': std.birthPlaceDate || '',
+    'Alamat Lengkap': std.address || '',
+    'Nama Orang Tua / Wali': std.parentName || '',
+    'No. WhatsApp / HP Orang Tua': std.parentPhone || '',
+    'Email Orang Tua': std.parentEmail || '',
+    'Status Pas Foto': std.photoUrl ? 'Sudah Ada Foto' : 'Belum Ada Foto',
+    'URL / Data Pas Foto': std.photoUrl ? (std.photoUrl.startsWith('data:') ? '[Foto Base64 Tersimpan]' : std.photoUrl) : '',
+    'Kode QR Presensi': std.qrCode || `STUDENT-${std.nisn || std.id}`,
+  }));
+
+  const workbook = XLSX.utils.book_new();
+  const wsMaster = XLSX.utils.json_to_sheet(rows);
+
+  // Auto column widths for Sheet 1
+  wsMaster['!cols'] = [
+    { wch: 6 },  // No
+    { wch: 32 }, // Nama Lengkap
+    { wch: 16 }, // NISN
+    { wch: 14 }, // NIS
+    { wch: 16 }, // JK
+    { wch: 12 }, // Kelas
+    { wch: 30 }, // TTL
+    { wch: 42 }, // Alamat
+    { wch: 28 }, // Ortu
+    { wch: 20 }, // No HP
+    { wch: 28 }, // Email
+    { wch: 18 }, // Status Foto
+    { wch: 35 }, // URL Foto
+    { wch: 24 }  // Kode QR
+  ];
+
+  // Sanitized sheet name (max 31 characters, no invalid chars : \ / ? * [ ])
+  const rawSheetName = `Data Siswa ${className}`.replace(/[:\\/?*\[\]]/g, '_');
+  const safeSheetName = rawSheetName.substring(0, 31);
+  XLSX.utils.book_append_sheet(workbook, wsMaster, safeSheetName);
+
+  // Sheet 2: Profil Sekolah & Statistik
+  const lCount = sortedStudents.filter(s => s.gender === 'L').length;
+  const pCount = sortedStudents.filter(s => s.gender === 'P').length;
+  const photoCount = sortedStudents.filter(s => !!s.photoUrl).length;
+
+  const schoolSummaryRows = [
+    { 'Kategori': 'Nama Satuan Pendidikan', 'Keterangan': schoolProfile.name || '-' },
+    { 'Kategori': 'NPSN', 'Keterangan': schoolProfile.npsn || '-' },
+    { 'Kategori': 'Alamat Sekolah', 'Keterangan': schoolProfile.address || '-' },
+    { 'Kategori': 'Kecamatan / Kabupaten', 'Keterangan': `${schoolProfile.district || ''}, ${schoolProfile.regency || ''}` },
+    { 'Kategori': 'Kepala Sekolah', 'Keterangan': schoolProfile.principalName || '-' },
+    { 'Kategori': 'NIP Kepala Sekolah', 'Keterangan': schoolProfile.principalNip || '-' },
+    { 'Kategori': 'Target Rombel / Kelas', 'Keterangan': className === 'Semua_Kelas' ? 'Semua Kelas' : className },
+    { 'Kategori': 'Total Peserta Didik', 'Keterangan': `${sortedStudents.length} Siswa` },
+    { 'Kategori': 'Siswa Laki-laki (L)', 'Keterangan': `${lCount} Siswa` },
+    { 'Kategori': 'Siswa Perempuan (P)', 'Keterangan': `${pCount} Siswa` },
+    { 'Kategori': 'Siswa dengan Pas Foto', 'Keterangan': `${photoCount} dari ${sortedStudents.length} Siswa (${Math.round((photoCount / (sortedStudents.length || 1)) * 100)}%)` },
+    { 'Kategori': 'Waktu Ekspor Berkas', 'Keterangan': new Date().toLocaleString('id-ID') }
+  ];
+
+  const wsSummary = XLSX.utils.json_to_sheet(schoolSummaryRows);
+  wsSummary['!cols'] = [{ wch: 28 }, { wch: 45 }];
+  XLSX.utils.book_append_sheet(workbook, wsSummary, 'Info Sekolah & Statistik');
+
+  const sanitizedClass = className.replace(/[^a-zA-Z0-9]/g, '_');
+  const fileName = `Data_Identitas_Lengkap_Siswa_${sanitizedClass}_${Date.now()}.xlsx`;
+  saveExcelWorkbook(workbook, fileName);
+}
+
 
 
 

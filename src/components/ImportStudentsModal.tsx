@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import * as XLSX from 'xlsx';
 import { Student, SchoolClass } from '../types';
-import { downloadStudentImportTemplate } from '../lib/exportUtils';
+import { downloadStudentImportTemplate, convertGoogleDriveUrl } from '../lib/exportUtils';
 import { 
   X, 
   FileSpreadsheet, 
@@ -10,10 +10,10 @@ import {
   CheckCircle2, 
   AlertTriangle, 
   Users, 
-  FileCheck,
-  Trash2,
-  HelpCircle,
-  Loader2
+  FileCheck, 
+  Trash2, 
+  HelpCircle, 
+  Loader2 
 } from 'lucide-react';
 
 interface ParsedStudentRow {
@@ -26,6 +26,7 @@ interface ParsedStudentRow {
   address: string;
   parentPhone: string;
   parentName: string;
+  photoUrl?: string;
   isDuplicate: boolean;
   isValid: boolean;
   validationError?: string;
@@ -103,6 +104,7 @@ export const ImportStudentsModal: React.FC<ImportStudentsModalProps> = ({
           const address = findVal(['alamat', 'alamat rumah', 'address']);
           const parentPhone = findVal(['no hp ortu', 'no hp', 'no whatsapp', 'no wa ortu', 'no hp orang tua', 'parent phone']);
           const parentName = findVal(['nama orang tua / wali', 'nama orang tua', 'nama ortu', 'nama wali', 'parent name']);
+          const rawPhoto = findVal(['url pas foto', 'foto', 'photo', 'url foto', 'link foto', 'foto profil', 'google drive', 'link google drive', 'link foto google drive', 'link foto gdrive']);
 
           // Determine gender
           let gender: 'L' | 'P' = 'L';
@@ -138,6 +140,7 @@ export const ImportStudentsModal: React.FC<ImportStudentsModalProps> = ({
             address: address || '-',
             parentPhone: parentPhone || '081234567890',
             parentName: parentName || 'Orang Tua Siswa',
+            photoUrl: rawPhoto ? convertGoogleDriveUrl(rawPhoto) : undefined,
             isDuplicate,
             isValid,
             validationError,
@@ -197,10 +200,10 @@ export const ImportStudentsModal: React.FC<ImportStudentsModalProps> = ({
         matchedClass = newClassesMap.get(classNameLower);
       }
 
-      // Avatar photo default based on gender
-      const photoUrl = r.gender === 'P'
+      // Avatar photo default based on gender or parsed photoUrl
+      const photoUrl = r.photoUrl || (r.gender === 'P'
         ? 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=300&auto=format&fit=crop&q=80'
-        : 'https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?w=300&auto=format&fit=crop&q=80';
+        : 'https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?w=300&auto=format&fit=crop&q=80');
 
       return {
         id: `std-${Date.now()}-${idx}`,

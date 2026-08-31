@@ -754,6 +754,8 @@ export default function App() {
             <StudentDirectoryView
               students={students}
               classes={classes}
+              schoolProfile={schoolProfile}
+              teachers={teachers}
               onAddStudent={handleAddStudent}
               onBatchAddStudents={handleBatchAddStudents}
               onUpdateStudent={handleUpdateStudent}

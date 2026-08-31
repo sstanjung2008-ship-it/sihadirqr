@@ -118,7 +118,7 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
   const lastScanDebounceRef = useRef<{ code: string; timestamp: number }>({ code: '', timestamp: 0 });
   const qrRegionId = "html5qr-code-full-region";
 
-  // Check available cameras and set default to Camera 0, Facing Back
+  // Check available cameras and configure default
   useEffect(() => {
     Html5Qrcode.getCameras()
       .then((devices) => {
@@ -126,7 +126,6 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
           // Filter out secondary front cameras (such as 'camera 2, facing front')
           const filtered = devices.filter(d => {
             const labelLower = (d.label || '').toLowerCase();
-            // Specifically exclude 'camera 2' if it is front facing
             if (labelLower.includes('camera 2') && (labelLower.includes('front') || labelLower.includes('depan'))) {
               return false;
             }
@@ -170,7 +169,7 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
         }
       })
       .catch((err) => {
-        console.warn("Camera access error:", err);
+        console.warn("Camera device detection info:", err);
       });
 
     return () => {
@@ -190,64 +189,102 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
 
   const startCamera = async (cameraId?: string, overrideFacingMode?: 'environment' | 'user') => {
     setCameraError(null);
-    let targetCam = cameraId !== undefined ? cameraId : activeCameraId;
-    const currentFacing = overrideFacingMode || facingMode || 'environment';
-
-    // If targetCam is not specified and we have camera list, default to back camera
-    if (!targetCam && cameras.length > 0) {
-      const backCam = cameras.find(c => c.label.toLowerCase().includes('belakang') || c.label.toLowerCase().includes('back') || c.label.toLowerCase().includes('camera 0'));
-      targetCam = backCam ? backCam.id : cameras[0].id;
-      setActiveCameraId(targetCam);
-    }
 
     try {
-      if (html5QrCodeRef.current && html5QrCodeRef.current.isScanning) {
-        await html5QrCodeRef.current.stop();
+      // 1. Safely stop and clear any existing scanner instance
+      if (html5QrCodeRef.current) {
+        try {
+          if (html5QrCodeRef.current.isScanning) {
+            await html5QrCodeRef.current.stop();
+          }
+          html5QrCodeRef.current.clear();
+        } catch (e) {
+          console.warn("Cleanup previous scanner instance:", e);
+        }
+        html5QrCodeRef.current = null;
+      }
+
+      // Ensure DOM element is present
+      const qrElement = document.getElementById(qrRegionId);
+      if (!qrElement) {
+        throw new Error("Elemen scanner tidak ditemukan di halaman");
       }
 
       const html5QrCode = new Html5Qrcode(qrRegionId);
       html5QrCodeRef.current = html5QrCode;
 
-      const cameraConfig = targetCam ? { deviceId: { exact: targetCam } } : { facingMode: currentFacing };
+      const targetFacing = overrideFacingMode || facingMode || 'environment';
 
-      await html5QrCode.start(
-        cameraConfig,
-        {
-          fps: 10,
-          qrbox: { width: 250, height: 250 },
-        },
-        (decodedText) => {
-          handleQrCodeDecoded(decodedText);
-        },
-        (_errorMessage) => {
-          // ignore scan error frames
-        }
-      );
+      // On mobile phones, using { facingMode: 'environment' } is the most resilient
+      // and avoids OverconstrainedError from raw device IDs.
+      let cameraConfig: any = { facingMode: targetFacing };
 
-      setIsScanning(true);
-    } catch (err: any) {
-      console.error("Camera start failure:", err);
-      // Fallback: try starting with environment facingMode if exact deviceId failed
-      if (targetCam) {
+      // If a specific device was explicitly selected from dropdown and not using standard facingMode
+      if (cameraId && cameraId !== 'environment' && cameraId !== 'user') {
+        cameraConfig = { deviceId: cameraId };
+      }
+
+      const qrConfig = {
+        fps: 10,
+        qrbox: { width: 250, height: 250 },
+        aspectRatio: 1.0,
+      };
+
+      try {
+        await html5QrCode.start(
+          cameraConfig,
+          qrConfig,
+          (decodedText) => handleQrCodeDecoded(decodedText),
+          () => {}
+        );
+        setIsScanning(true);
+        setFacingMode(targetFacing);
+        return;
+      } catch (firstErr) {
+        console.warn("Primary camera start failed, attempting facingMode: environment fallback...", firstErr);
+        
+        // Fallback 1: Try pure { facingMode: 'environment' } (Rear Camera)
         try {
-          const fallbackQrCode = new Html5Qrcode(qrRegionId);
-          html5QrCodeRef.current = fallbackQrCode;
-          await fallbackQrCode.start(
+          await html5QrCode.start(
             { facingMode: 'environment' },
-            {
-              fps: 10,
-              qrbox: { width: 250, height: 250 },
-            },
+            qrConfig,
             (decodedText) => handleQrCodeDecoded(decodedText),
             () => {}
           );
           setIsScanning(true);
+          setFacingMode('environment');
           return;
-        } catch (fallbackErr) {
-          console.error("Fallback camera start error:", fallbackErr);
+        } catch (envErr) {
+          console.warn("Environment camera failed, attempting facingMode: user fallback...", envErr);
+          
+          // Fallback 2: Try pure { facingMode: 'user' } (Front Camera)
+          try {
+            await html5QrCode.start(
+              { facingMode: 'user' },
+              qrConfig,
+              (decodedText) => handleQrCodeDecoded(decodedText),
+              () => {}
+            );
+            setIsScanning(true);
+            setFacingMode('user');
+            return;
+          } catch (userErr) {
+            console.error("All camera constraints failed:", userErr);
+            throw userErr;
+          }
         }
       }
-      setCameraError("Gagal membuka kamera. Pastikan izin kamera telah diberikan di browser atau gunakan fitur cari manual.");
+    } catch (err: any) {
+      console.error("Camera start failure:", err);
+      let errMsg = "Gagal membuka kamera. Pastikan izin kamera telah diberikan di browser HP Anda.";
+      if (err?.name === 'NotAllowedError' || err?.message?.includes('Permission')) {
+        errMsg = "Izin akses kamera ditolak. Silakan izinkan akses kamera di pengaturan browser HP Anda.";
+      } else if (err?.name === 'NotFoundError' || err?.name === 'DevicesNotFoundError') {
+        errMsg = "Tidak ada perangkat kamera yang terdeteksi di HP ini.";
+      } else if (err?.name === 'NotReadableError') {
+        errMsg = "Kamera sedang digunakan oleh aplikasi lain. Tutup aplikasi kamera lain lalu coba lagi.";
+      }
+      setCameraError(errMsg);
       setIsScanning(false);
     }
   };
@@ -855,9 +892,37 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
               )}
 
               {cameraError && (
-                <div className="absolute inset-0 flex flex-col items-center justify-center p-6 text-center bg-rose-950/90">
-                  <AlertTriangle className="w-10 h-10 text-rose-400 mb-2 animate-bounce" />
-                  <p className="text-rose-200 text-xs font-medium max-w-xs">{cameraError}</p>
+                <div className="absolute inset-0 flex flex-col items-center justify-center p-5 text-center bg-slate-900/95 z-10 overflow-y-auto">
+                  <div className="w-12 h-12 rounded-2xl bg-rose-500/20 text-rose-400 flex items-center justify-center mb-2.5 ring-2 ring-rose-500/30">
+                    <AlertTriangle className="w-6 h-6" />
+                  </div>
+                  <h4 className="text-white font-bold text-sm">Gagal Mengakses Kamera</h4>
+                  <p className="text-rose-200 text-xs font-medium max-w-xs mt-1 leading-relaxed">{cameraError}</p>
+
+                  {/* Actions to recover */}
+                  <div className="flex flex-col sm:flex-row items-center gap-2 mt-4 w-full max-w-xs">
+                    <button
+                      onClick={() => startCamera(undefined, 'environment')}
+                      className="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-bold px-3 py-2 rounded-xl text-xs flex items-center justify-center gap-1.5 shadow-md cursor-pointer transition-all"
+                    >
+                      <Camera className="w-3.5 h-3.5" />
+                      Coba Buka Kamera Belakang
+                    </button>
+                    <button
+                      onClick={() => startCamera(undefined, 'user')}
+                      className="w-full bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-semibold px-3 py-2 rounded-xl text-xs flex items-center justify-center gap-1.5 cursor-pointer transition-all"
+                    >
+                      <SwitchCamera className="w-3.5 h-3.5" />
+                      Coba Kamera Depan
+                    </button>
+                  </div>
+
+                  <div className="mt-3 bg-slate-800/80 border border-slate-700/60 rounded-xl p-2.5 text-[11px] text-slate-300 max-w-xs text-left">
+                    <p className="font-semibold text-amber-400 mb-0.5">💡 Tips Izin Kamera HP:</p>
+                    <p className="leading-snug text-slate-300">
+                      Jika muncul dialog browser, pilih <strong>"Izinkan" (Allow)</strong>. Jika terblokir, klik ikon gembok/pengaturan di samping alamat web di atas untuk mengaktifkan izin Kamera.
+                    </p>
+                  </div>
                 </div>
               )}
             </div>

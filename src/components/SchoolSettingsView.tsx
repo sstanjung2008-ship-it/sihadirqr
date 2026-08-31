@@ -38,6 +38,27 @@ export const SchoolSettingsView: React.FC<SchoolSettingsViewProps> = ({
   const [cloudSyncFeedback, setCloudSyncFeedback] = useState<{ type: 'success' | 'error'; msg: string } | null>(null);
   const [showMultiSyncModal, setShowMultiSyncModal] = useState(false);
 
+  // Top Section Navigation State
+  const [activeNavTab, setActiveNavTab] = useState<string>('profil');
+
+  const navItems = [
+    { id: 'section-profil-sekolah', key: 'profil', label: 'Profil Sekolah', icon: School, color: 'text-indigo-600', activeBg: 'bg-indigo-600 text-white shadow-indigo-100' },
+    { id: 'section-jam-libur', key: 'jam-libur', label: 'Jam Masuk & Libur', icon: Clock, color: 'text-amber-600', activeBg: 'bg-amber-600 text-white shadow-amber-100' },
+    { id: 'section-akademik', key: 'akademik', label: 'Akademik', icon: GraduationCap, color: 'text-blue-600', activeBg: 'bg-blue-600 text-white shadow-blue-100' },
+    { id: 'section-whatsapp', key: 'whatsapp', label: 'WhatsApp', icon: MessageSquare, color: 'text-emerald-600', activeBg: 'bg-emerald-600 text-white shadow-emerald-100' },
+    { id: 'section-password', key: 'password', label: 'Password', icon: KeyRound, color: 'text-purple-600', activeBg: 'bg-purple-600 text-white shadow-purple-100' },
+  ];
+
+  const handleJumpToSection = (sectionId: string, key: string) => {
+    setActiveNavTab(key);
+    const element = document.getElementById(sectionId);
+    if (element) {
+      const yOffset = -80;
+      const y = element.getBoundingClientRect().top + window.pageYOffset + yOffset;
+      window.scrollTo({ top: y, behavior: 'smooth' });
+    }
+  };
+
   useEffect(() => {
     const handleStatus = (e: any) => {
       if (e.detail?.status) {
@@ -200,16 +221,10 @@ export const SchoolSettingsView: React.FC<SchoolSettingsViewProps> = ({
 
   const handleAddOrUpdateHoliday = (e?: React.FormEvent) => {
     if (e) e.preventDefault();
-    if (!holidayNameInput.trim()) {
-      setHolidayNotice({ type: 'error', msg: 'Nama hari libur wajib diisi!' });
-      return;
-    }
-    if (!holidayDateInput) {
-      setHolidayNotice({ type: 'error', msg: 'Tanggal mulai libur wajib dipilih!' });
-      return;
-    }
+    const effectiveName = holidayNameInput.trim() || 'Hari Libur Sekolah';
+    const effectiveDate = holidayDateInput || new Date().toISOString().split('T')[0];
 
-    if (isMultiDayHoliday && holidayEndDateInput && holidayEndDateInput < holidayDateInput) {
+    if (isMultiDayHoliday && holidayEndDateInput && holidayEndDateInput < effectiveDate) {
       setHolidayNotice({ type: 'error', msg: 'Tanggal selesai libur tidak boleh lebih awal dari tanggal mulai!' });
       return;
     }
@@ -220,8 +235,8 @@ export const SchoolSettingsView: React.FC<SchoolSettingsViewProps> = ({
         if (h.id === editingHolidayId) {
           return {
             ...h,
-            name: holidayNameInput.trim(),
-            date: holidayDateInput,
+            name: effectiveName,
+            date: effectiveDate,
             endDate: isMultiDayHoliday && holidayEndDateInput ? holidayEndDateInput : undefined,
             type: holidayTypeInput,
             description: holidayDescInput.trim() || undefined
@@ -236,13 +251,13 @@ export const SchoolSettingsView: React.FC<SchoolSettingsViewProps> = ({
       setHolidayEndDateInput('');
       setIsMultiDayHoliday(false);
       setHolidayDescInput('');
-      setHolidayNotice({ type: 'success', msg: `Hari libur "${holidayNameInput.trim()}" berhasil diperbarui!` });
+      setHolidayNotice({ type: 'success', msg: `Hari libur "${effectiveName}" berhasil diperbarui!` });
     } else {
       // Add new holiday
       const newHoliday: SchoolHoliday = {
         id: `hol-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
-        name: holidayNameInput.trim(),
-        date: holidayDateInput,
+        name: effectiveName,
+        date: effectiveDate,
         endDate: isMultiDayHoliday && holidayEndDateInput ? holidayEndDateInput : undefined,
         type: holidayTypeInput,
         description: holidayDescInput.trim() || undefined
@@ -569,10 +584,35 @@ export const SchoolSettingsView: React.FC<SchoolSettingsViewProps> = ({
         </div>
       )}
 
+      {/* Navigasi Cepat Pengaturan (Tombol Bagian Atas) */}
+      <div className="bg-white/95 backdrop-blur-md border border-slate-200/90 rounded-2xl p-2 shadow-xs sticky top-2 z-20">
+        <div className="flex items-center gap-1.5 sm:gap-2 overflow-x-auto pb-1 sm:pb-0 scrollbar-none no-scrollbar">
+          {navItems.map((item) => {
+            const Icon = item.icon;
+            const isActive = activeNavTab === item.key;
+            return (
+              <button
+                key={item.key}
+                type="button"
+                onClick={() => handleJumpToSection(item.id, item.key)}
+                className={`flex items-center gap-2 px-3.5 sm:px-4 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap shrink-0 cursor-pointer ${
+                  isActive
+                    ? `${item.activeBg} shadow-sm scale-[1.02]`
+                    : 'bg-slate-50 hover:bg-slate-100 text-slate-700 hover:text-slate-900 border border-slate-200/70 hover:border-slate-300'
+                }`}
+              >
+                <Icon className={`w-4 h-4 ${isActive ? 'text-white' : item.color}`} />
+                <span>{item.label}</span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
       <form onSubmit={handleSubmit} className="space-y-6">
         
         {/* Identitas Utama Sekolah */}
-        <div className="bg-white border border-slate-200/80 rounded-3xl p-6 shadow-sm space-y-4">
+        <div id="section-profil-sekolah" className="bg-white border border-slate-200/80 rounded-3xl p-6 shadow-sm space-y-4 scroll-mt-24">
           <h2 className="text-sm font-bold text-slate-800 flex items-center gap-2 border-b border-slate-100 pb-3">
             <School className="w-4 h-4 text-indigo-600" />
             Identitas & Logo Sekolah (Muncul di Kartu Pelajar Digital)
@@ -871,7 +911,7 @@ export const SchoolSettingsView: React.FC<SchoolSettingsViewProps> = ({
         </div>
 
         {/* Aturan Jam Masuk, Jam Pulang & Otomatis Alpa */}
-        <div className="bg-white border border-slate-200/80 rounded-3xl p-6 shadow-sm space-y-5">
+        <div id="section-jam-libur" className="bg-white border border-slate-200/80 rounded-3xl p-6 shadow-sm space-y-5 scroll-mt-24">
           <div className="border-b border-slate-100 pb-3">
             <h2 className="text-sm font-bold text-slate-800 flex items-center gap-2">
               <Clock className="w-4 h-4 text-amber-500" />
@@ -1055,11 +1095,10 @@ export const SchoolSettingsView: React.FC<SchoolSettingsViewProps> = ({
                 {/* Nama Libur */}
                 <div className="lg:col-span-2">
                   <label className="block text-slate-700 font-bold mb-1">
-                    Nama Hari Libur <span className="text-rose-600">*</span>
+                    Nama Hari Libur <span className="text-slate-400 font-normal text-[11px]">(Opsional)</span>
                   </label>
                   <input
                     type="text"
-                    required
                     value={holidayNameInput}
                     onChange={(e) => setHolidayNameInput(e.target.value)}
                     onKeyDown={(e) => {
@@ -1092,11 +1131,10 @@ export const SchoolSettingsView: React.FC<SchoolSettingsViewProps> = ({
                 {/* Tanggal Mulai Libur */}
                 <div>
                   <label className="block text-slate-700 font-bold mb-1">
-                    Tanggal Mulai Libur <span className="text-rose-600">*</span>
+                    Tanggal Mulai Libur <span className="text-slate-400 font-normal text-[11px]">(Opsional)</span>
                   </label>
                   <input
                     type="date"
-                    required
                     value={holidayDateInput}
                     onChange={(e) => setHolidayDateInput(e.target.value)}
                     className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2 text-xs font-mono font-bold text-slate-800 focus:bg-white focus:ring-2 focus:ring-rose-500 focus:border-rose-500 transition-all"
@@ -1414,7 +1452,7 @@ export const SchoolSettingsView: React.FC<SchoolSettingsViewProps> = ({
         </div>
 
         {/* Pengaturan Daftar Mata Pelajaran & Periode Akademik Sekolah */}
-        <div className="bg-white border border-slate-200/80 rounded-3xl p-6 shadow-sm space-y-5">
+        <div id="section-akademik" className="bg-white border border-slate-200/80 rounded-3xl p-6 shadow-sm space-y-5 scroll-mt-24">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 pb-3">
             <div>
               <h2 className="text-sm font-bold text-slate-800 flex items-center gap-2">
@@ -1584,7 +1622,7 @@ export const SchoolSettingsView: React.FC<SchoolSettingsViewProps> = ({
         </div>
 
         {/* Templates & Gateway WhatsApp */}
-        <div className="bg-white border border-slate-200/80 rounded-3xl p-6 shadow-sm space-y-6">
+        <div id="section-whatsapp" className="bg-white border border-slate-200/80 rounded-3xl p-6 shadow-sm space-y-6 scroll-mt-24">
           
           {/* Header */}
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-4">
@@ -1830,7 +1868,7 @@ export const SchoolSettingsView: React.FC<SchoolSettingsViewProps> = ({
         </div>
 
         {/* Reset Password Akun Guru & Siswa */}
-        <div className="bg-white border border-slate-200/80 rounded-3xl p-6 shadow-sm space-y-5">
+        <div id="section-password" className="bg-white border border-slate-200/80 rounded-3xl p-6 shadow-sm space-y-5 scroll-mt-24">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-4">
             <div>
               <h2 className="text-sm font-bold text-slate-800 flex items-center gap-2">

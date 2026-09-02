@@ -126,6 +126,9 @@ export default function App() {
 
   // Automatic ALPA status assignment when autoAlpaTime is reached
   useEffect(() => {
+    // Check if auto ALPA is disabled by admin in settings
+    if (schoolProfile.autoAlpaEnabled === false) return;
+
     const autoAlpaTime = schoolProfile.autoAlpaTime || '08:30';
     const [targetH, targetM] = autoAlpaTime.split(':').map(Number);
     if (isNaN(targetH) || isNaN(targetM)) return;
@@ -254,6 +257,7 @@ export default function App() {
     const interval = setInterval(checkAndApplyAutoAlpa, 30000);
     return () => clearInterval(interval);
   }, [
+    schoolProfile.autoAlpaEnabled,
     schoolProfile.autoAlpaTime, 
     schoolProfile.activeDays, 
     schoolProfile.holidays, 

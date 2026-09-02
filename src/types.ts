@@ -117,6 +117,7 @@ export interface SchoolProfile {
   startTime: string; // "07:00"
   endTime?: string; // e.g. "15:00" Waktu Pulang Sekolah (Scan QR Pulang Aktif)
   autoAlpaTime?: string; // e.g. "08:30" Waktu Batas Otomatis Alpa
+  autoAlpaEnabled?: boolean; // Saklar aktif/non-aktif penentuan otomatis status ALPA
   lateToleranceMinutes: number; // e.g. 15 -> after 07:15 is TERLAMBAT
   educationLevel: string; // e.g. "SMP / MTs"
   gradeLevels: string[]; // e.g. ["Kelas 7", "Kelas 8", "Kelas 9"]

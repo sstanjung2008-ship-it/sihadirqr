@@ -16,6 +16,7 @@ export const INITIAL_SCHOOL_PROFILE: SchoolProfile = {
   startTime: "07:00",
   endTime: "15:00",
   autoAlpaTime: "08:30",
+  autoAlpaEnabled: true,
   lateToleranceMinutes: 15,
   educationLevel: "SMP / MTs",
   gradeLevels: ["Kelas 7", "Kelas 8", "Kelas 9"],

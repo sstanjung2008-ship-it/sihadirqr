@@ -1547,21 +1547,66 @@ export const SchoolSettingsView: React.FC<SchoolSettingsViewProps> = ({
             </div>
 
             {/* Waktu Batas Otomatis Alpa */}
-            <div className="bg-rose-50/60 border border-rose-200/80 rounded-2xl p-3.5 space-y-1">
-              <label className="block text-rose-950 font-extrabold mb-1 flex items-center gap-1.5">
-                <Clock className="w-3.5 h-3.5 text-rose-600" />
-                Waktu Batas Otomatis Alpa (WITA)
-              </label>
+            <div className={`border rounded-2xl p-3.5 space-y-2 transition-all ${
+              formData.autoAlpaEnabled !== false
+                ? 'bg-rose-50/60 border-rose-200/80'
+                : 'bg-slate-50 border-slate-200 opacity-90'
+            }`}>
+              <div className="flex items-center justify-between gap-2 flex-wrap">
+                <div className="flex items-center gap-1.5">
+                  <label className="block text-slate-900 font-extrabold flex items-center gap-1.5 text-xs">
+                    <Clock className={`w-3.5 h-3.5 ${formData.autoAlpaEnabled !== false ? 'text-rose-600' : 'text-slate-400'}`} />
+                    Waktu Batas Otomatis Alpa (WITA)
+                  </label>
+                  <span className={`px-2 py-0.5 rounded-full text-[10px] font-extrabold border ${
+                    formData.autoAlpaEnabled !== false
+                      ? 'bg-rose-100 text-rose-800 border-rose-300'
+                      : 'bg-slate-200 text-slate-700 border-slate-300'
+                  }`}>
+                    {formData.autoAlpaEnabled !== false ? 'AKTIF' : 'NON-AKTIF'}
+                  </span>
+                </div>
+
+                {/* Saklar / Toggle Switch Menonaktifkan / Mengaktifkan Otomatis Alpa */}
+                <label className="relative inline-flex items-center cursor-pointer shrink-0">
+                  <input
+                    type="checkbox"
+                    checked={formData.autoAlpaEnabled !== false}
+                    onChange={(e) => setFormData({ ...formData, autoAlpaEnabled: e.target.checked })}
+                    className="sr-only peer"
+                  />
+                  <div className="w-11 h-5.5 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4.5 after:w-4.5 after:transition-all peer-checked:bg-rose-600"></div>
+                  <span className="ml-2 text-xs font-bold text-slate-800">
+                    {formData.autoAlpaEnabled !== false ? 'Aktif' : 'Non-aktif'}
+                  </span>
+                </label>
+              </div>
+
               <input
                 type="text"
+                disabled={formData.autoAlpaEnabled === false}
                 value={formData.autoAlpaTime || '08:30'}
                 onChange={(e) => setFormData({ ...formData, autoAlpaTime: e.target.value })}
-                className="w-full bg-white border border-rose-300 text-slate-900 rounded-xl p-2.5 font-mono font-bold focus:ring-2 focus:ring-rose-500 shadow-xs text-xs"
+                className={`w-full rounded-xl p-2.5 font-mono font-bold focus:ring-2 shadow-xs text-xs transition-all ${
+                  formData.autoAlpaEnabled !== false
+                    ? 'bg-white border border-rose-300 text-slate-900 focus:ring-rose-500'
+                    : 'bg-slate-100 border border-slate-300 text-slate-400 cursor-not-allowed'
+                }`}
                 placeholder="08:30"
               />
-              <p className="text-[11px] text-rose-900 font-medium leading-relaxed">
-                ⚠️ Pada hari aktif belajar, siswa yang belum presensi atau izin hingga jam ini secara otomatis diubah menjadi <strong>ALPA</strong>. Jam ini juga menjadi <strong>BATAS MODE SCAN MASUK DITUTUP (TIDAK BEKERJA)</strong> dan akan dibuka kembali pada jam masuk sekolah ({formData.startTime || '07:00'} WITA).
-              </p>
+
+              {formData.autoAlpaEnabled !== false ? (
+                <p className="text-[11px] text-rose-900 font-medium leading-relaxed">
+                  ⚠️ Pada hari aktif belajar, siswa yang belum presensi atau izin hingga jam ini secara otomatis diubah menjadi <strong>ALPA</strong>. Jam ini juga menjadi <strong>BATAS MODE SCAN MASUK DITUTUP (TIDAK BEKERJA)</strong> dan akan dibuka kembali pada jam masuk sekolah ({formData.startTime || '07:00'} WITA).
+                </p>
+              ) : (
+                <div className="bg-amber-50 border border-amber-200 text-amber-900 rounded-xl p-2.5 text-[11px] font-medium flex items-start gap-1.5">
+                  <AlertCircle className="w-3.5 h-3.5 text-amber-600 shrink-0 mt-0.5" />
+                  <span>
+                    <strong>Otomatis Alpa Dinonaktifkan.</strong> Siswa yang belum hadir tidak akan diubah menjadi ALPA secara otomatis oleh sistem, dan mode scan masuk tidak akan ditutup oleh batas jam alpa.
+                  </span>
+                </div>
+              )}
             </div>
           </div>
         </div>

@@ -79,14 +79,24 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
     return h.date === todayDateStr;
   });
 
+  const isAutoAlpaActive = schoolProfile.autoAlpaEnabled !== false;
+
   const checkIsMasukScanClosed = (checkTime: Date = new Date()) => {
     const [sH, sM] = startTimeStr.split(':').map(Number);
-    const [aH, aM] = autoAlpaTimeStr.split(':').map(Number);
     const startMinutes = (sH || 7) * 60 + (sM || 0);
-    const autoAlpaMinutes = (aH || 8) * 60 + (aM || 30);
     const currentMinutes = checkTime.getHours() * 60 + checkTime.getMinutes();
 
-    return currentMinutes >= autoAlpaMinutes || currentMinutes < startMinutes;
+    if (currentMinutes < startMinutes) {
+      return true;
+    }
+
+    if (isAutoAlpaActive) {
+      const [aH, aM] = autoAlpaTimeStr.split(':').map(Number);
+      const autoAlpaMinutes = (aH || 8) * 60 + (aM || 30);
+      return currentMinutes >= autoAlpaMinutes;
+    }
+
+    return false;
   };
 
   const isMasukClosedNow = checkIsMasukScanClosed(now);

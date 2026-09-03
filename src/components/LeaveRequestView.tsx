@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { LeaveRequest, Student, UserRole, ChatMessage } from '../types';
 import { 
   MessageSquare, 
@@ -50,6 +50,13 @@ export const LeaveRequestView: React.FC<LeaveRequestViewProps> = ({
   const [formReason, setFormReason] = useState('');
   const [formPhotoUrl, setFormPhotoUrl] = useState('');
 
+  // Synchronize formStudentId strictly when parent role is active
+  useEffect(() => {
+    if (currentRole === 'PARENT' && selectedChildId) {
+      setFormStudentId(selectedChildId);
+    }
+  }, [currentRole, selectedChildId]);
+
   // Filter list
   let visibleRequests = leaveRequests;
   if (currentRole === 'PARENT' && selectedChildId) {
@@ -72,7 +79,8 @@ export const LeaveRequestView: React.FC<LeaveRequestViewProps> = ({
 
   const handleCreateRequest = (e: React.FormEvent) => {
     e.preventDefault();
-    const student = students.find(s => s.id === formStudentId) || students[0];
+    const targetStudentId = currentRole === 'PARENT' && selectedChildId ? selectedChildId : formStudentId;
+    const student = students.find(s => s.id === targetStudentId) || students[0];
 
     const defaultPhoto = formPhotoUrl || "https://images.unsplash.com/photo-1584515979956-d9f6e5d09982?w=500&auto=format&fit=crop&q=80";
 
@@ -374,20 +382,45 @@ export const LeaveRequestView: React.FC<LeaveRequestViewProps> = ({
 
             <form onSubmit={handleCreateRequest} className="space-y-3 text-xs">
               
-              <div>
-                <label className="block text-slate-700 font-semibold mb-1">Pilih Siswa</label>
-                <select
-                  value={formStudentId}
-                  onChange={(e) => setFormStudentId(e.target.value)}
-                  className="w-full bg-slate-50 border border-slate-200 text-slate-800 rounded-xl p-2.5 font-semibold"
-                >
-                  {[...students]
-                    .sort((a, b) => a.name.localeCompare(b.name, 'id', { numeric: true, sensitivity: 'base' }))
-                    .map(s => (
-                      <option key={s.id} value={s.id}>{s.name} ({s.className})</option>
-                    ))}
-                </select>
-              </div>
+              {currentRole === 'PARENT' ? (
+                <div>
+                  <label className="block text-slate-700 font-semibold mb-1">Nama Siswa</label>
+                  {(() => {
+                    const matched = students.find(s => s.id === (selectedChildId || formStudentId)) || students[0];
+                    return (
+                      <div className="w-full bg-slate-100 border border-slate-200 text-slate-800 rounded-xl p-3 flex items-center justify-between">
+                        <div className="flex items-center gap-2.5">
+                          <div className="w-8 h-8 rounded-lg bg-indigo-100 text-indigo-700 font-bold flex items-center justify-center text-xs">
+                            {matched?.name?.slice(0, 2).toUpperCase() || 'SW'}
+                          </div>
+                          <div>
+                            <p className="font-bold text-slate-900 text-xs">{matched?.name}</p>
+                            <p className="text-[11px] text-slate-500">Kelas {matched?.className} • NISN: {matched?.nisn}</p>
+                          </div>
+                        </div>
+                        <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2.5 py-1 rounded-full">
+                          Sesuai Akun Login
+                        </span>
+                      </div>
+                    );
+                  })()}
+                </div>
+              ) : (
+                <div>
+                  <label className="block text-slate-700 font-semibold mb-1">Pilih Siswa</label>
+                  <select
+                    value={formStudentId}
+                    onChange={(e) => setFormStudentId(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-200 text-slate-800 rounded-xl p-2.5 font-semibold"
+                  >
+                    {[...students]
+                      .sort((a, b) => a.name.localeCompare(b.name, 'id', { numeric: true, sensitivity: 'base' }))
+                      .map(s => (
+                        <option key={s.id} value={s.id}>{s.name} ({s.className})</option>
+                      ))}
+                  </select>
+                </div>
+              )}
 
               <div>
                 <label className="block text-slate-700 font-semibold mb-1">Kategori Izin</label>

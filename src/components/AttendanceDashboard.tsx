@@ -351,16 +351,18 @@ export const AttendanceDashboard: React.FC<AttendanceDashboardProps> = ({
         {/* Search & Multi Filters Bar */}
         <div className="flex flex-wrap items-center gap-2.5">
           {/* Search Box */}
-          <div className="relative">
-            <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
-            <input
-              type="text"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Cari siswa / NISN..."
-              className="bg-white border border-slate-200 text-slate-800 text-xs rounded-xl pl-9 pr-3 py-2 w-36 sm:w-44 focus:outline-none focus:ring-2 focus:ring-indigo-500 shadow-sm font-medium"
-            />
-          </div>
+          {currentRole !== 'PARENT' && (
+            <div className="relative">
+              <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Cari siswa / NISN..."
+                className="bg-white border border-slate-200 text-slate-800 text-xs rounded-xl pl-9 pr-3 py-2 w-36 sm:w-44 focus:outline-none focus:ring-2 focus:ring-indigo-500 shadow-sm font-medium"
+              />
+            </div>
+          )}
 
           {/* Date Picker Filter */}
           <div className="flex items-center gap-1.5 bg-white border border-slate-200 rounded-xl px-3 py-1.5 text-xs shadow-sm">

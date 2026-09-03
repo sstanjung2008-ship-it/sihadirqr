@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { 
   UserRole, 
   SchoolProfile, 
@@ -49,6 +49,7 @@ import {
   initFirestoreRealtimeSync
 } from './lib/storage';
 import { sendWhatsAppGatewayMessage } from './lib/exportUtils';
+import { ShieldCheck, CheckCircle2 } from 'lucide-react';
 
 import { Sidebar } from './components/Sidebar';
 import { QRScannerView } from './components/QRScannerView';
@@ -67,6 +68,7 @@ import { CharacterInputView } from './components/CharacterInputView';
 import { CharacterPointsView } from './components/CharacterPointsView';
 import { ScheduleManagementView } from './components/ScheduleManagementView';
 import { ParentChatView } from './components/ParentChatView';
+import { ParentAccountView } from './components/ParentAccountView';
 import { LoginView } from './components/LoginView';
 
 export default function App() {
@@ -89,13 +91,62 @@ export default function App() {
   const [periods, setPeriodsState] = useState<LessonPeriod[]>(getLessonPeriods());
   const [schedules, setSchedulesState] = useState<ClassScheduleSlot[]>(getClassSchedules());
 
-  // Parent Child Selector State
+  // Parent Child Identification (Strictly Bound to Logged-in NISN, studentId, or username)
+  const parentStudent = useMemo(() => {
+    if (currentRole !== 'PARENT') return null;
+
+    // 1. By studentId from session
+    if (userSession?.studentId) {
+      const found = students.find(s => s.id === userSession.studentId);
+      if (found) return found;
+    }
+
+    // 2. By nipOrNisn from session (exact match, trimming spaces)
+    if (userSession?.nipOrNisn) {
+      const cleanNisn = userSession.nipOrNisn.replace(/\s+/g, '').toLowerCase();
+      const found = students.find(s => 
+        s.nisn.replace(/\s+/g, '').toLowerCase() === cleanNisn ||
+        s.nis.toLowerCase() === cleanNisn
+      );
+      if (found) return found;
+    }
+
+    // 3. By username from session
+    if (userSession?.username) {
+      const cleanUser = userSession.username.replace(/\s+/g, '').toLowerCase();
+      const found = students.find(s => 
+        s.nisn.replace(/\s+/g, '').toLowerCase() === cleanUser ||
+        s.nis.toLowerCase() === cleanUser
+      );
+      if (found) return found;
+    }
+
+    // Fallback if role switched in demo
+    return students[0] || null;
+  }, [currentRole, userSession, students]);
+
+  // Selected Child ID state (for Parent role, automatically locked to parentStudent)
   const [selectedChildId, setSelectedChildId] = useState<string>(() => {
-    if (userSession?.role === 'PARENT' && userSession.studentId) {
-      return userSession.studentId;
+    if (userSession?.role === 'PARENT') {
+      if (userSession.studentId) return userSession.studentId;
+      if (userSession.nipOrNisn) {
+        const cleanNisn = userSession.nipOrNisn.replace(/\s+/g, '').toLowerCase();
+        const found = students.find(s => s.nisn.replace(/\s+/g, '').toLowerCase() === cleanNisn || s.nis.toLowerCase() === cleanNisn);
+        if (found) return found.id;
+      }
     }
     return students[0]?.id || '';
   });
+
+  // Keep selectedChildId locked strictly to parentStudent whenever in PARENT role
+  useEffect(() => {
+    if (currentRole === 'PARENT' && parentStudent && selectedChildId !== parentStudent.id) {
+      setSelectedChildId(parentStudent.id);
+    }
+  }, [currentRole, parentStudent, selectedChildId]);
+
+  // Effective child ID passed down to views
+  const effectiveChildId = (currentRole === 'PARENT' && parentStudent) ? parentStudent.id : (selectedChildId || students[0]?.id || '');
 
   // Sync state on local storage events
   const refreshDataFromStorage = () => {
@@ -853,23 +904,51 @@ export default function App() {
       {/* Right Content Area */}
       <div className="flex-1 flex flex-col min-w-0">
         
-        {/* Parent Child Selector Header Banner */}
-        {currentRole === 'PARENT' && (
-          <div className="bg-indigo-900/5 border-b border-indigo-100 py-3 px-4 lg:px-8">
-            <div className="max-w-7xl mx-auto flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 text-xs">
-              <span className="text-indigo-900 font-bold flex items-center gap-2">
-                <span className="w-2 h-2 rounded-full bg-indigo-600"></span>
-                Pilih Siswa (Putra/Putri Anda):
-              </span>
-              <select
-                value={selectedChildId}
-                onChange={(e) => setSelectedChildId(e.target.value)}
-                className="bg-white border border-indigo-200 text-indigo-900 font-bold rounded-xl px-3.5 py-1.5 text-xs focus:ring-2 focus:ring-indigo-500 shadow-sm cursor-pointer w-full sm:w-auto"
-              >
-                {students.map(s => (
-                  <option key={s.id} value={s.id}>{s.name} - Kelas {s.className} ({s.nisn})</option>
-                ))}
-              </select>
+        {/* Parent Student Info Banner (Automatic by Logged-in NISN, No Selection) */}
+        {currentRole === 'PARENT' && parentStudent && (
+          <div className="bg-gradient-to-r from-indigo-950 via-indigo-900 to-slate-900 text-white border-b border-indigo-800/80 py-3 px-4 lg:px-8 shadow-xs">
+            <div className="max-w-7xl mx-auto flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs">
+              <div className="flex items-center gap-3">
+                {/* Student Avatar / Photo */}
+                <div className="relative shrink-0">
+                  {parentStudent.photoUrl ? (
+                    <img
+                      src={parentStudent.photoUrl}
+                      alt={parentStudent.name}
+                      className="w-10 h-10 rounded-xl object-cover border-2 border-emerald-400 shadow-sm"
+                      onError={(e) => {
+                        (e.target as HTMLElement).style.display = 'none';
+                      }}
+                    />
+                  ) : (
+                    <div className="w-10 h-10 rounded-xl bg-indigo-700 border-2 border-emerald-400 flex items-center justify-center font-bold text-white shadow-sm text-xs">
+                      {parentStudent.name.slice(0, 2).toUpperCase()}
+                    </div>
+                  )}
+                  <span className="absolute -bottom-1 -right-1 w-3.5 h-3.5 bg-emerald-500 border-2 border-indigo-950 rounded-full" title="Akun Terverifikasi"></span>
+                </div>
+
+                {/* Student Details */}
+                <div>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-white font-extrabold text-sm tracking-tight">{parentStudent.name}</span>
+                    <span className="bg-emerald-500/20 text-emerald-300 border border-emerald-400/30 px-2 py-0.5 rounded-full text-[10px] font-bold">
+                      Kelas {parentStudent.className}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2 text-indigo-200 text-[11px] mt-0.5 flex-wrap">
+                    <span>NISN: <strong className="text-amber-300 font-mono">{parentStudent.nisn}</strong></span>
+                    <span>•</span>
+                    <span>Wali: <strong className="text-white">{parentStudent.parentName || 'Orang Tua Siswa'}</strong></span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Automatic Binding Badge (No choices/selection) */}
+              <div className="flex items-center gap-2 bg-white/10 backdrop-blur-xs border border-white/15 px-3 py-1.5 rounded-xl text-[11px] font-semibold text-indigo-100 self-stretch sm:self-auto justify-center">
+                <ShieldCheck className="w-4 h-4 text-emerald-400 shrink-0" />
+                <span>Akun NISN Terhubung Otomatis</span>
+              </div>
             </div>
           </div>
         )}
@@ -893,7 +972,7 @@ export default function App() {
               attendanceRecords={attendanceRecords}
               onUpdateStatus={handleUpdateAttendanceStatus}
               currentRole={currentRole}
-              selectedChildId={selectedChildId}
+              selectedChildId={effectiveChildId}
               learningJournals={journals}
               traits={traits}
               characterLogs={characterLogs}
@@ -988,7 +1067,7 @@ export default function App() {
               students={students}
               teachers={teachers}
               classes={classes}
-              selectedChildId={selectedChildId}
+              selectedChildId={effectiveChildId}
               schoolProfile={schoolProfile}
               userRole={currentRole}
               userSession={userSession}
@@ -1000,10 +1079,20 @@ export default function App() {
               leaveRequests={leaveRequests}
               students={students}
               currentRole={currentRole}
-              selectedChildId={selectedChildId}
+              selectedChildId={effectiveChildId}
               onAddLeaveRequest={handleAddLeaveRequest}
               onUpdateLeaveStatus={handleUpdateLeaveStatus}
               onSendChatMessage={handleSendChatMessage}
+            />
+          )}
+
+          {(activeTab === 'account' || activeTab === 'idcard') && (
+            <ParentAccountView
+              student={parentStudent}
+              schoolProfile={schoolProfile}
+              userSession={userSession}
+              onUpdateStudent={handleUpdateStudent}
+              onLogout={handleLogout}
             />
           )}
 

@@ -27,7 +27,8 @@ import {
   Cloud,
   CloudCheck,
   RefreshCw,
-  CalendarDays
+  CalendarDays,
+  UserCircle
 } from 'lucide-react';
 import { getCloudSyncStatus, CloudSyncStatus, getStudents } from '../lib/storage';
 import { MultiDeviceSyncModal } from './MultiDeviceSyncModal';
@@ -96,6 +97,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         { id: 'discipline_rules', label: 'Tata Tertib', icon: Scale, desc: 'Aturan & poin karakter sekolah' },
         { id: 'chat', label: 'Fitur Chat Sekolah', icon: MessageSquare, desc: 'Hubungi Humas, Wali Kelas & BK' },
         { id: 'leaves', label: 'Izin / Sakit', icon: FileText, desc: 'Ajukan permohonan izin/sakit', badge: unreadLeavesCount },
+        { id: 'account', label: 'Akun', icon: UserCircle, desc: 'Lihat Kartu Pelajar & Ganti Password' },
       ];
     }
     if (currentRole === 'TEACHER') {
@@ -270,6 +272,21 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 <p className="text-xs font-black text-white truncate mt-0.5">{userSession?.displayName || 'Guru'}</p>
                 {userSession?.nipOrNisn && (
                   <p className="text-[10px] text-amber-400 font-mono font-bold mt-0.5">NIP: {userSession.nipOrNisn}</p>
+                )}
+              </div>
+            </div>
+          )}
+
+          {currentRole === 'PARENT' && (
+            <div className="mx-1 mb-2.5 p-3 bg-indigo-950/80 border border-indigo-800/80 rounded-2xl flex items-center gap-2.5 shadow-md">
+              <div className="w-8 h-8 rounded-xl bg-emerald-600/30 border border-emerald-500/40 flex items-center justify-center shrink-0 text-emerald-300">
+                <UserCheck className="w-4 h-4 text-emerald-400" />
+              </div>
+              <div className="min-w-0">
+                <p className="text-[10px] text-emerald-300 font-bold uppercase tracking-wider leading-none">Wali Murid Terhubung:</p>
+                <p className="text-xs font-black text-white truncate mt-0.5">{userSession?.displayName || 'Orang Tua Siswa'}</p>
+                {userSession?.nipOrNisn && (
+                  <p className="text-[10px] text-amber-300 font-mono font-bold mt-0.5">NISN: {userSession.nipOrNisn}</p>
                 )}
               </div>
             </div>

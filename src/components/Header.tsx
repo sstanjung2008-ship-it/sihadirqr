@@ -13,7 +13,8 @@ import {
   Settings, 
   MessageSquare, 
   BarChart3,
-  Clock
+  Clock,
+  UserCircle
 } from 'lucide-react';
 
 interface HeaderProps {
@@ -56,7 +57,7 @@ export const Header: React.FC<HeaderProps> = ({
     if (currentRole === 'PARENT') {
       return [
         { id: 'dashboard', label: 'Kehadiran Anak', icon: UserCheck },
-        { id: 'idcard', label: 'Kartu Pelajar Digital', icon: GraduationCap },
+        { id: 'account', label: 'Akun', icon: UserCircle },
         { id: 'leaves', label: 'Izin / Sakit & Chat', icon: MessageSquare, badge: unreadLeavesCount },
       ];
     }

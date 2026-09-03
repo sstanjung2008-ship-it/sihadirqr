@@ -195,6 +195,76 @@ export function importAllDatabaseFromJson(jsonString: string): { success: boolea
   }
 }
 
+// High-efficiency Image Compressor for Student Photos & Cross-Device Cloud Sync
+export function compressBase64Image(
+  dataUrl: string,
+  maxWidth = 240,
+  maxHeight = 320,
+  quality = 0.70
+): Promise<string> {
+  return new Promise((resolve) => {
+    if (!dataUrl || !dataUrl.startsWith('data:image/') || dataUrl.length < 25000) {
+      return resolve(dataUrl);
+    }
+    if (typeof window === 'undefined' || typeof document === 'undefined') {
+      return resolve(dataUrl);
+    }
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => {
+      try {
+        let w = img.width;
+        let h = img.height;
+        if (w <= 0 || h <= 0) return resolve(dataUrl);
+
+        if (w > maxWidth || h > maxHeight) {
+          const ratio = Math.min(maxWidth / w, maxHeight / h);
+          w = Math.max(1, Math.round(w * ratio));
+          h = Math.max(1, Math.round(h * ratio));
+        }
+
+        const canvas = document.createElement('canvas');
+        canvas.width = w;
+        canvas.height = h;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) return resolve(dataUrl);
+
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, w, h);
+        ctx.drawImage(img, 0, 0, w, h);
+        const compressed = canvas.toDataURL('image/jpeg', quality);
+        resolve(compressed.length < dataUrl.length ? compressed : dataUrl);
+      } catch {
+        resolve(dataUrl);
+      }
+    };
+    img.onerror = () => resolve(dataUrl);
+    img.src = dataUrl;
+  });
+}
+
+// Background sanitizer to auto-compress any oversized student photos (>25KB)
+export async function sanitizeAndCompressStudentPhotos(students: Student[]): Promise<Student[]> {
+  let hasChanges = false;
+  const updated = await Promise.all(
+    students.map(async (std) => {
+      if (std.photoUrl && std.photoUrl.startsWith('data:image/') && std.photoUrl.length > 25000) {
+        try {
+          const compressed = await compressBase64Image(std.photoUrl, 240, 320, 0.70);
+          if (compressed.length < std.photoUrl.length) {
+            hasChanges = true;
+            return { ...std, photoUrl: compressed };
+          }
+        } catch (e) {
+          console.warn('[Photo Compress Error]:', e);
+        }
+      }
+      return std;
+    })
+  );
+  return hasChanges ? updated : students;
+}
+
 // Intelligent entity mergers to ensure no data is lost across multiple devices
 export function mergeStudentLists(local: Student[], cloud: Student[]): Student[] {
   const map = new Map<string, Student>();
@@ -208,7 +278,17 @@ export function mergeStudentLists(local: Student[], cloud: Student[]): Student[]
     const key = (s.nisn && s.nisn.trim()) || (s.nis && s.nis.trim()) || s.id;
     if (key) {
       if (map.has(key)) {
-        map.set(key, { ...map.get(key)!, ...s });
+        const cloudItem = map.get(key)!;
+        // Check photo: If cloud has a custom photo (base64 or custom URL)
+        // and local has empty or default mock photo, retain the cloud photo!
+        let photoUrl = s.photoUrl || cloudItem.photoUrl;
+        const isCloudPhotoReal = cloudItem.photoUrl && (cloudItem.photoUrl.startsWith('data:image/') || !cloudItem.photoUrl.includes('unsplash.com'));
+        const isLocalPhotoDefault = !s.photoUrl || s.photoUrl.includes('unsplash.com');
+        if (isCloudPhotoReal && isLocalPhotoDefault) {
+          photoUrl = cloudItem.photoUrl;
+        }
+
+        map.set(key, { ...cloudItem, ...s, photoUrl });
       } else {
         map.set(key, s);
       }
@@ -559,6 +639,20 @@ export function initFirestoreRealtimeSync() {
       setCloudSyncStatus('offline');
     }
   });
+
+  // Startup repair check: if any student photo was previously saved uncompressed (>25KB),
+  // automatically compress it in the background and push clean data to Firestore.
+  try {
+    const existingStudents = getStudents();
+    const hasOversized = existingStudents.some(s => s.photoUrl?.startsWith('data:image/') && s.photoUrl.length > 25000);
+    if (hasOversized) {
+      sanitizeAndCompressStudentPhotos(existingStudents).then(optimized => {
+        if (optimized !== existingStudents) {
+          saveStudents(optimized, true);
+        }
+      }).catch(() => {});
+    }
+  } catch {}
 }
 
 export const INITIAL_CHARACTER_PREDICATES: CharacterPredicateSettings = {
@@ -654,6 +748,22 @@ export function saveStudents(students: Student[], instant: boolean = false): voi
   localStorage.setItem(KEYS.STUDENTS + '_updatedAt', String(now));
   notifyStorageUpdated();
   syncToCloud(KEYS.STUDENTS, students, instant || students.length === 0, now);
+
+  // Background auto-optimization: if any student has an oversized photo (>25KB Base64),
+  // automatically compress it and update Firestore so cross-device sync never hits 1MB document limit.
+  const hasOversizedPhoto = students.some(s => s.photoUrl?.startsWith('data:image/') && s.photoUrl.length > 25000);
+  if (hasOversizedPhoto) {
+    sanitizeAndCompressStudentPhotos(students).then(optimizedStudents => {
+      if (optimizedStudents !== students) {
+        const optNow = Date.now();
+        const optStr = JSON.stringify(optimizedStudents);
+        localStorage.setItem(KEYS.STUDENTS, optStr);
+        localStorage.setItem(KEYS.STUDENTS + '_updatedAt', String(optNow));
+        notifyStorageUpdated();
+        syncToCloud(KEYS.STUDENTS, optimizedStudents, true, optNow);
+      }
+    }).catch(() => {});
+  }
 }
 
 export function deleteAllStudents(): void {

@@ -147,13 +147,25 @@ export const CharacterPointsView: React.FC<CharacterPointsViewProps> = ({
   const handleTakeSnapshot = () => {
     if (!videoRef.current) return;
     const video = videoRef.current;
+    const maxDim = 360;
+    let w = video.videoWidth || 640;
+    let h = video.videoHeight || 480;
+    if (w > maxDim || h > maxDim) {
+      if (w > h) {
+        h = Math.round((h * maxDim) / w);
+        w = maxDim;
+      } else {
+        w = Math.round((w * maxDim) / h);
+        h = maxDim;
+      }
+    }
     const canvas = document.createElement('canvas');
-    canvas.width = video.videoWidth || 640;
-    canvas.height = video.videoHeight || 480;
+    canvas.width = w;
+    canvas.height = h;
     const ctx = canvas.getContext('2d');
     if (ctx) {
-      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-      const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+      ctx.drawImage(video, 0, 0, w, h);
+      const dataUrl = canvas.toDataURL('image/jpeg', 0.70);
       setInputPhotoUrl(dataUrl);
       setPhotoPreview(dataUrl);
     }
@@ -222,8 +234,39 @@ export const CharacterPointsView: React.FC<CharacterPointsViewProps> = ({
       const reader = new FileReader();
       reader.onloadend = () => {
         const result = reader.result as string;
-        setInputPhotoUrl(result);
-        setPhotoPreview(result);
+        const img = new Image();
+        img.onload = () => {
+          const maxDim = 360;
+          let w = img.width;
+          let h = img.height;
+          if (w > maxDim || h > maxDim) {
+            if (w > h) {
+              h = Math.round((h * maxDim) / w);
+              w = maxDim;
+            } else {
+              w = Math.round((w * maxDim) / h);
+              h = maxDim;
+            }
+          }
+          const canvas = document.createElement('canvas');
+          canvas.width = w;
+          canvas.height = h;
+          const ctx = canvas.getContext('2d');
+          if (ctx) {
+            ctx.drawImage(img, 0, 0, w, h);
+            const dataUrl = canvas.toDataURL('image/jpeg', 0.70);
+            setInputPhotoUrl(dataUrl);
+            setPhotoPreview(dataUrl);
+          } else {
+            setInputPhotoUrl(result);
+            setPhotoPreview(result);
+          }
+        };
+        img.onerror = () => {
+          setInputPhotoUrl(result);
+          setPhotoPreview(result);
+        };
+        img.src = result;
       };
       reader.readAsDataURL(file);
     }

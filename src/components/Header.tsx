@@ -67,6 +67,7 @@ export const Header: React.FC<HeaderProps> = ({
         { id: 'scanner', label: 'Scan QR', icon: ScanLine },
         { id: 'leaves', label: 'Persetujuan Izin', icon: MessageSquare, badge: unreadLeavesCount },
         { id: 'recap', label: 'Rekap Laporan', icon: FileText },
+        { id: 'account', label: 'Akun Guru', icon: UserCircle },
       ];
     }
 

@@ -111,6 +111,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         { id: 'leaves', label: 'Persetujuan Izin', icon: MessageSquare, desc: 'Persetujuan wali murid', badge: unreadLeavesCount },
         { id: 'recap', label: 'Rekap Laporan', icon: FileText, desc: 'Ekspor laporan bulanan' },
         { id: 'chat', label: 'Fitur Chat Wali Murid', icon: MessageSquare, desc: 'Obrolan Wali Kelas, Humas & BK' },
+        { id: 'account', label: 'Akun Guru', icon: UserCircle, desc: 'Identitas guru & ubah password' },
       ];
     }
 

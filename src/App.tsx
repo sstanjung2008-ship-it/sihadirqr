@@ -69,6 +69,7 @@ import { CharacterPointsView } from './components/CharacterPointsView';
 import { ScheduleManagementView } from './components/ScheduleManagementView';
 import { ParentChatView } from './components/ParentChatView';
 import { ParentAccountView } from './components/ParentAccountView';
+import { TeacherAccountView } from './components/TeacherAccountView';
 import { LoginView } from './components/LoginView';
 
 export default function App() {
@@ -124,6 +125,37 @@ export default function App() {
     // Fallback if role switched in demo
     return students[0] || null;
   }, [currentRole, userSession, students]);
+
+  // Teacher Identification (Strictly Bound to Logged-in teacherId, NIP, phone or username)
+  const currentTeacher = useMemo(() => {
+    if (currentRole !== 'TEACHER') return null;
+
+    // 1. By teacherId from session
+    if (userSession?.teacherId) {
+      const found = teachers.find(t => t.id === userSession.teacherId);
+      if (found) return found;
+    }
+
+    // 2. By nipOrNisn from session (exact match, trimming spaces)
+    if (userSession?.nipOrNisn) {
+      const cleanNip = userSession.nipOrNisn.replace(/\s+/g, '').toLowerCase();
+      const found = teachers.find(t => t.nip.replace(/\s+/g, '').toLowerCase() === cleanNip);
+      if (found) return found;
+    }
+
+    // 3. By username from session (phone or nip)
+    if (userSession?.username) {
+      const cleanUser = userSession.username.replace(/\s+/g, '').toLowerCase();
+      const found = teachers.find(t => 
+        t.nip.replace(/\s+/g, '').toLowerCase() === cleanUser ||
+        (t.phone && t.phone.replace(/\s+/g, '').toLowerCase() === cleanUser)
+      );
+      if (found) return found;
+    }
+
+    // Fallback
+    return teachers[0] || null;
+  }, [currentRole, userSession, teachers]);
 
   // Selected Child ID state (for Parent role, automatically locked to parentStudent)
   const [selectedChildId, setSelectedChildId] = useState<string>(() => {
@@ -1086,7 +1118,18 @@ export default function App() {
             />
           )}
 
-          {(activeTab === 'account' || activeTab === 'idcard') && (
+          {activeTab === 'account' && currentRole === 'TEACHER' && (
+            <TeacherAccountView
+              teacher={currentTeacher}
+              schoolProfile={schoolProfile}
+              userSession={userSession}
+              classes={classes}
+              onUpdateTeacher={handleUpdateTeacher}
+              onLogout={handleLogout}
+            />
+          )}
+
+          {(activeTab === 'account' || activeTab === 'idcard') && currentRole !== 'TEACHER' && (
             <ParentAccountView
               student={parentStudent}
               schoolProfile={schoolProfile}

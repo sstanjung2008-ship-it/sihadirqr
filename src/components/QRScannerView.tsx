@@ -23,7 +23,8 @@ import {
   SwitchCamera,
   Calendar,
   Filter,
-  XCircle
+  XCircle,
+  FlipHorizontal
 } from 'lucide-react';
 
 interface QRScannerViewProps {
@@ -122,6 +123,7 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [activeCameraId, setActiveCameraId] = useState<string>('');
   const [facingMode, setFacingMode] = useState<'environment' | 'user'>('environment');
+  const [isMirrorMode, setIsMirrorMode] = useState<boolean>(false);
   const [cameras, setCameras] = useState<Array<{ id: string; label: string }>>([]);
 
   const html5QrCodeRef = useRef<Html5Qrcode | null>(null);
@@ -225,6 +227,16 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
 
       const targetFacing = overrideFacingMode || facingMode || 'environment';
 
+      // Automatically mirror video when front camera is used (selfie mirror view)
+      const selectedCamObj = cameras.find(c => c.id === cameraId);
+      const isSelectedCamFront = selectedCamObj && (
+        selectedCamObj.label.toLowerCase().includes('depan') || 
+        selectedCamObj.label.toLowerCase().includes('front') ||
+        selectedCamObj.label.toLowerCase().includes('user')
+      );
+      const isFront = targetFacing === 'user' || Boolean(isSelectedCamFront);
+      setIsMirrorMode(isFront);
+
       // On mobile phones, using { facingMode: 'environment' } is the most resilient
       // and avoids OverconstrainedError from raw device IDs.
       let cameraConfig: any = { facingMode: targetFacing };
@@ -263,6 +275,7 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
           );
           setIsScanning(true);
           setFacingMode('environment');
+          setIsMirrorMode(false);
           return;
         } catch (envErr) {
           console.warn("Environment camera failed, attempting facingMode: user fallback...", envErr);
@@ -277,6 +290,7 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
             );
             setIsScanning(true);
             setFacingMode('user');
+            setIsMirrorMode(true);
             return;
           } catch (userErr) {
             console.error("All camera constraints failed:", userErr);
@@ -305,11 +319,16 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
       const nextIndex = (currentIndex + 1) % cameras.length;
       const nextCam = cameras[nextIndex];
       setActiveCameraId(nextCam.id);
-      await startCamera(nextCam.id);
+      const isNextCamFront = nextCam.label.toLowerCase().includes('depan') || 
+        nextCam.label.toLowerCase().includes('front') || 
+        nextCam.label.toLowerCase().includes('user');
+      setIsMirrorMode(isNextCamFront);
+      await startCamera(nextCam.id, isNextCamFront ? 'user' : 'environment');
     } else {
       const nextFacing = facingMode === 'environment' ? 'user' : 'environment';
       setFacingMode(nextFacing);
       setActiveCameraId('');
+      setIsMirrorMode(nextFacing === 'user');
       await startCamera('', nextFacing);
     }
   };
@@ -850,17 +869,57 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
           {/* Camera View Box */}
           <div className="bg-white border border-slate-200/80 rounded-3xl p-5 shadow-sm flex flex-col items-center">
             
-            <div className="w-full flex items-center justify-between mb-3 text-xs text-slate-500">
-              <span className="flex items-center gap-1.5 font-bold text-slate-800">
-                <Camera className="w-4 h-4 text-indigo-600" />
-                Video Stream Camera
-              </span>
+            {/* Header of Camera Box */}
+            <div className="w-full flex flex-wrap items-center justify-between gap-2 mb-3 text-xs text-slate-500">
               <div className="flex items-center gap-2">
+                <span className="flex items-center gap-1.5 font-bold text-slate-800">
+                  <Camera className="w-4 h-4 text-indigo-600" />
+                  Video Stream Camera
+                </span>
+                {isScanning && (
+                  <span className="inline-flex items-center gap-1 bg-emerald-50 text-emerald-700 border border-emerald-200 text-[10px] font-extrabold px-2 py-0.5 rounded-full">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                    LIVE
+                  </span>
+                )}
+              </div>
+
+              <div className="flex items-center gap-2 flex-wrap">
+                {/* Mode Cermin (Mirror Mode) Toggle */}
+                <button
+                  type="button"
+                  onClick={() => setIsMirrorMode(!isMirrorMode)}
+                  className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer border ${
+                    isMirrorMode
+                      ? 'bg-purple-600 text-white border-purple-500 shadow-xs ring-2 ring-purple-300/50'
+                      : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border-slate-200'
+                  }`}
+                  title="Aktifkan/Nonaktifkan tampilan seperti cermin (Flip horizontal kamera depan)"
+                >
+                  <FlipHorizontal className="w-3.5 h-3.5" />
+                  <span>{isMirrorMode ? '🪞 Mode Cermin: AKTIF' : '🪞 Mode Cermin: OFF'}</span>
+                </button>
+
+                {/* Flip Camera Button */}
+                {isScanning && (
+                  <button
+                    type="button"
+                    onClick={handleFlipCamera}
+                    className="inline-flex items-center gap-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold px-2.5 py-1.5 rounded-xl text-xs border border-slate-200 transition-colors cursor-pointer"
+                    title="Ganti Kamera Depan / Belakang"
+                  >
+                    <SwitchCamera className="w-3.5 h-3.5 text-indigo-600" />
+                    <span className="hidden sm:inline">Ganti Kamera</span>
+                  </button>
+                )}
+
                 {cameras.length > 1 && isScanning && (
                   <select
                     value={activeCameraId}
                     onChange={(e) => {
                       setActiveCameraId(e.target.value);
+                      const isFront = cameras.find(c => c.id === e.target.value)?.label.toLowerCase().includes('depan');
+                      if (isFront) setIsMirrorMode(true);
                       startCamera(e.target.value);
                     }}
                     className="bg-slate-50 border border-slate-200 text-slate-800 rounded-xl px-2.5 py-1 text-xs font-semibold"
@@ -870,11 +929,12 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
                     ))}
                   </select>
                 )}
+
                 {isScanning && (
                   <button
                     type="button"
                     onClick={() => stopCamera()}
-                    className="bg-rose-50 hover:bg-rose-100 text-rose-700 font-bold px-2.5 py-1 rounded-xl text-xs transition-colors cursor-pointer"
+                    className="bg-rose-50 hover:bg-rose-100 text-rose-700 font-bold px-2.5 py-1.5 rounded-xl text-xs transition-colors cursor-pointer border border-rose-200"
                   >
                     Matikan Kamera
                   </button>
@@ -882,10 +942,52 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
               </div>
             </div>
 
+            {/* CSS styles to apply mirror transform to video element */}
+            <style>{`
+              #${qrRegionId} video {
+                width: 100% !important;
+                height: 100% !important;
+                object-fit: cover !important;
+                border-radius: 1rem !important;
+                transition: transform 0.25s ease-in-out !important;
+              }
+              .qr-mirror-active #${qrRegionId} video {
+                transform: scaleX(-1) !important;
+                -webkit-transform: scaleX(-1) !important;
+              }
+            `}</style>
+
             {/* QR Scanner Container */}
-            <div className="w-full relative min-h-[280px] sm:min-h-[340px] bg-slate-900 rounded-2xl overflow-hidden border border-slate-200 flex items-center justify-center">
+            <div className={`w-full relative min-h-[280px] sm:min-h-[340px] bg-slate-900 rounded-2xl overflow-hidden border border-slate-200 flex items-center justify-center ${
+              isMirrorMode ? 'qr-mirror-active' : ''
+            }`}>
               
               <div id={qrRegionId} className="w-full h-full text-slate-300"></div>
+
+              {/* Floating Mirror Indicator Badge */}
+              {isScanning && isMirrorMode && (
+                <div className="absolute top-3 left-3 z-10 bg-purple-900/80 backdrop-blur-xs text-purple-100 text-[11px] font-bold px-3 py-1 rounded-full border border-purple-400/40 flex items-center gap-1.5 shadow-md pointer-events-none animate-fadeIn">
+                  <FlipHorizontal className="w-3.5 h-3.5 text-purple-300" />
+                  <span>🪞 Mode Cermin Aktif</span>
+                </div>
+              )}
+
+              {/* In-view Quick Mirror Toggle Button */}
+              {isScanning && (
+                <button
+                  type="button"
+                  onClick={() => setIsMirrorMode(!isMirrorMode)}
+                  className={`absolute bottom-3 right-3 z-10 text-[11px] font-bold px-3 py-1.5 rounded-xl border flex items-center gap-1.5 shadow-md backdrop-blur-md transition-all cursor-pointer ${
+                    isMirrorMode
+                      ? 'bg-purple-600/90 hover:bg-purple-600 text-white border-purple-400'
+                      : 'bg-slate-900/80 hover:bg-slate-900 text-slate-300 border-slate-700'
+                  }`}
+                  title="Klik untuk menyalakan/mematikan tampilan cermin horizontal"
+                >
+                  <FlipHorizontal className="w-3.5 h-3.5" />
+                  <span>{isMirrorMode ? '🪞 Cermin: ON' : 'Cermin: OFF'}</span>
+                </button>
+              )}
 
               {!isScanning && !cameraError && (
                 <div className="absolute inset-0 flex flex-col items-center justify-center p-6 text-center bg-slate-900/95">

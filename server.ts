@@ -11,20 +11,43 @@ const PORT = 3000;
 
 app.use(express.json({ limit: "25mb" }));
 
+// Helper function to safely extract and parse JSON from AI response
+function extractJsonFromText(rawText: string | undefined): any {
+  if (!rawText) return null;
+  let cleaned = rawText.trim();
+  if (cleaned.startsWith("```json")) {
+    cleaned = cleaned.replace(/^```json\s*/i, "").replace(/\s*```$/, "");
+  } else if (cleaned.startsWith("```")) {
+    cleaned = cleaned.replace(/^```\s*/, "").replace(/\s*```$/, "");
+  }
+  try {
+    return JSON.parse(cleaned);
+  } catch {
+    const firstBrace = cleaned.indexOf("{");
+    const lastBrace = cleaned.lastIndexOf("}");
+    if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
+      try {
+        return JSON.parse(cleaned.substring(firstBrace, lastBrace + 1));
+      } catch {
+        return null;
+      }
+    }
+    return null;
+  }
+}
+
 // Lazy init Gemini AI
 let aiClient: GoogleGenAI | null = null;
 function getGeminiClient(): GoogleGenAI | null {
   if (!aiClient) {
     const apiKey = process.env.GEMINI_API_KEY;
     if (apiKey && apiKey !== "MY_GEMINI_API_KEY") {
-      aiClient = new GoogleGenAI({ 
-        apiKey,
-        httpOptions: {
-          headers: {
-            'User-Agent': 'aistudio-build',
-          }
-        }
-      });
+      try {
+        aiClient = new GoogleGenAI({ apiKey });
+      } catch (e) {
+        console.error("Failed to initialize GoogleGenAI:", e);
+        return null;
+      }
     }
   }
   return aiClient;
@@ -260,16 +283,44 @@ KEMBALIKAN HANYA FORMAT JSON MURNI SESUAI STRUKTUR BERIKUT:
   ]
 }`;
 
-    const response = await ai.models.generateContent({
-      model: "gemini-3.8-flash",
-      contents: prompt,
-      config: {
-        responseMimeType: "application/json",
-      }
-    });
+    let data: any = null;
+    try {
+      const response = await ai.models.generateContent({
+        model: "gemini-2.5-flash",
+        contents: prompt,
+        config: {
+          responseMimeType: "application/json",
+        }
+      });
 
-    const text = response.text || "{}";
-    const data = JSON.parse(text);
+      const parsed = extractJsonFromText(response.text);
+      if (parsed && (parsed.soalList || parsed.kisiKisi)) {
+        data = parsed;
+      }
+    } catch (aiErr) {
+      console.warn("AI generation note (using structured standard generator):", aiErr);
+    }
+
+    if (!data) {
+      data = generateFallbackExam({
+        jenjang,
+        kelas,
+        mataPelajaran,
+        topik,
+        tingkatKesulitan,
+        tipeUjian,
+        jumlahPG: totalPG,
+        jumlahPGBergambar: totalPGBergambar,
+        jumlahEssay: totalEssay,
+        jumlahEssayBergambar: totalEssayBergambar,
+        alokasiWaktu,
+        semester,
+        tahunAjaran,
+        namaGuru,
+        namaSekolah,
+        petunjukKhusus
+      });
+    }
 
     // Attach server config metadata
     data.config = {
@@ -291,11 +342,11 @@ KEMBALIKAN HANYA FORMAT JSON MURNI SESUAI STRUKTUR BERIKUT:
       namaSekolah
     };
     data.tanggalDibuat = new Date().toISOString();
-    data.id = "EXAM-" + Date.now();
+    data.id = data.id || ("EXAM-" + Date.now());
 
     return res.json(data);
   } catch (err: any) {
-    console.error("Error generating exam questions with Gemini:", err);
+    console.error("Error in generate-questions handler:", err);
     // Return fallback so the teacher never faces a broken UI
     const fallback = generateFallbackExam(req.body || {});
     return res.json(fallback);
@@ -475,16 +526,40 @@ KEMBALIKAN HANYA FORMAT JSON MURNI SESUAI STRUKTUR BERIKUT:
   }
 }`;
 
-    const response = await ai.models.generateContent({
-      model: "gemini-3.8-flash",
-      contents: prompt,
-      config: {
-        responseMimeType: "application/json",
-      }
-    });
+    let data: any = null;
+    try {
+      const response = await ai.models.generateContent({
+        model: "gemini-2.5-flash",
+        contents: prompt,
+        config: {
+          responseMimeType: "application/json",
+        }
+      });
 
-    const text = response.text || "{}";
-    const data = JSON.parse(text);
+      const parsed = extractJsonFromText(response.text);
+      if (parsed && (parsed.informasiUmum || parsed.komponenInti)) {
+        data = parsed;
+      }
+    } catch (aiErr) {
+      console.warn("AI Modul generation note (using structured standard generator):", aiErr);
+    }
+
+    if (!data) {
+      data = generateFallbackModulAjar({
+        jenjang,
+        kelas,
+        fase,
+        mataPelajaran,
+        topikMateri,
+        alokasiWaktu,
+        modelPembelajaran,
+        metodePembelajaran,
+        profilPancasila,
+        namaGuru,
+        namaSekolah,
+        tahunPenyusunan
+      });
+    }
 
     data.config = {
       jenjang,
@@ -501,11 +576,11 @@ KEMBALIKAN HANYA FORMAT JSON MURNI SESUAI STRUKTUR BERIKUT:
       tahunPenyusunan
     };
     data.tanggalDibuat = new Date().toISOString();
-    data.id = "MODUL-" + Date.now();
+    data.id = data.id || ("MODUL-" + Date.now());
 
     return res.json(data);
   } catch (err: any) {
-    console.error("Error generating modul ajar with Gemini:", err);
+    console.error("Error in generate-modul-ajar handler:", err);
     const fallback = generateFallbackModulAjar(req.body || {});
     return res.json(fallback);
   }

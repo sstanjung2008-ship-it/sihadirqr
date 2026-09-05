@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   Sparkles, 
   FileText, 
@@ -128,6 +128,18 @@ export function TeacherAssistantView({ schoolProfile, userSession }: TeacherAssi
   const [isGeneratingModul, setIsGeneratingModul] = useState<boolean>(false);
   const [generatedModul, setGeneratedModul] = useState<GeneratedModulAjar | null>(null);
   const [modulPreviewTab, setModulPreviewTab] = useState<'umum' | 'inti' | 'lampiran'>('inti');
+
+  // Keep subjects in sync with schoolProfile updates across devices
+  useEffect(() => {
+    if (registeredSubjects && registeredSubjects.length > 0) {
+      if (!mataPelajaran || !registeredSubjects.includes(mataPelajaran)) {
+        setMataPelajaran(registeredSubjects[0]);
+      }
+      if (!modulMapel || !registeredSubjects.includes(modulMapel)) {
+        setModulMapel(registeredSubjects[0]);
+      }
+    }
+  }, [schoolProfile?.subjects]);
 
   // Available grade options based on education level
   const getGradeOptions = (lvl: EducationLevel) => {

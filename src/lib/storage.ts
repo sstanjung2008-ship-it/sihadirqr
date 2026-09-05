@@ -344,6 +344,9 @@ export async function smartSyncAndMergeAllWithCloud(): Promise<{ success: boolea
         
         if (cloudUpdatedAt >= localUpdatedAt) {
           const mergedProfile = { ...currentLocalProfile, ...cloudProfileData };
+          if (cloudProfileData.subjects && Array.isArray(cloudProfileData.subjects) && cloudProfileData.subjects.length > 0) {
+            mergedProfile.subjects = cloudProfileData.subjects;
+          }
           localStorage.setItem(KEYS.PROFILE, JSON.stringify(mergedProfile));
           localStorage.setItem(KEYS.PROFILE + '_updatedAt', String(cloudUpdatedAt || Date.now()));
         } else {
@@ -681,7 +684,8 @@ export function getSchoolProfile(): SchoolProfile {
       autoAlpaTime: parsed.autoAlpaTime || INITIAL_SCHOOL_PROFILE.autoAlpaTime || '08:30',
       lateToleranceMinutes: typeof parsed.lateToleranceMinutes === 'number' ? parsed.lateToleranceMinutes : (INITIAL_SCHOOL_PROFILE.lateToleranceMinutes ?? 15),
       activeDays: parsed.activeDays && Array.isArray(parsed.activeDays) && parsed.activeDays.length > 0 ? parsed.activeDays : (INITIAL_SCHOOL_PROFILE.activeDays || ['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu']),
-      holidays: parsed.holidays && Array.isArray(parsed.holidays) ? parsed.holidays : (INITIAL_SCHOOL_PROFILE.holidays || [])
+      holidays: parsed.holidays && Array.isArray(parsed.holidays) ? parsed.holidays : (INITIAL_SCHOOL_PROFILE.holidays || []),
+      subjects: parsed.subjects && Array.isArray(parsed.subjects) && parsed.subjects.length > 0 ? parsed.subjects : (INITIAL_SCHOOL_PROFILE.subjects || ['Matematika', 'Bahasa Indonesia', 'Bahasa Inggris', 'IPA', 'IPS', 'Pendidikan Agama', 'PJOK', 'Seni Budaya', 'Informatika', 'PPKn'])
     };
   } catch {
     return INITIAL_SCHOOL_PROFILE;

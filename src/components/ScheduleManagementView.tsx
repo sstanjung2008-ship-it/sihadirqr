@@ -286,12 +286,17 @@ export const ScheduleManagementView: React.FC<ScheduleManagementViewProps> = ({
     return null;
   };
 
-  // Distinct subjects available from teachers' subjects or general list
+  // Distinct subjects available from school profile + teachers' subjects or general list
   const availableSubjects = useMemo(() => {
     const subs = new Set<string>();
+    if (schoolProfile.subjects && Array.isArray(schoolProfile.subjects) && schoolProfile.subjects.length > 0) {
+      schoolProfile.subjects.forEach(s => {
+        if (s && s.trim()) subs.add(s.trim());
+      });
+    }
     teachers.forEach(t => {
-      if (t.subject1) subs.add(t.subject1);
-      if (t.subject2) subs.add(t.subject2);
+      if (t.subject1 && t.subject1.trim()) subs.add(t.subject1.trim());
+      if (t.subject2 && t.subject2.trim()) subs.add(t.subject2.trim());
     });
     // Default curriculum subjects
     [
@@ -311,7 +316,7 @@ export const ScheduleManagementView: React.FC<ScheduleManagementViewProps> = ({
     ].forEach(s => subs.add(s));
 
     return Array.from(subs);
-  }, [teachers]);
+  }, [schoolProfile.subjects, teachers]);
 
   // Handle Opening Slot Modal for cell click
   const handleCellClick = (day: string, periodNumber: number) => {

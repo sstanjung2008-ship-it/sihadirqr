@@ -108,6 +108,7 @@ export const SchoolSettingsView: React.FC<SchoolSettingsViewProps> = ({
   const [showSchoolLogoUrlInput, setShowSchoolLogoUrlInput] = useState(false);
   const [showRegencyLogoUrlInput, setShowRegencyLogoUrlInput] = useState(false);
   const [newSubjectInput, setNewSubjectInput] = useState('');
+  const [subjectSavedNotice, setSubjectSavedNotice] = useState<string | null>(null);
 
   // WhatsApp Gateway API Key state
   const [showWaApiKeySecret, setShowWaApiKeySecret] = useState<boolean>(false);
@@ -580,7 +581,7 @@ export const SchoolSettingsView: React.FC<SchoolSettingsViewProps> = ({
   };
 
   const DEFAULT_SUBJECTS = ['Matematika', 'Bahasa Indonesia', 'Bahasa Inggris', 'IPA', 'IPS', 'Pendidikan Agama', 'PJOK', 'Seni Budaya', 'Informatika', 'PPKn'];
-  const currentSubjects = formData.subjects || DEFAULT_SUBJECTS;
+  const currentSubjects = (formData.subjects && formData.subjects.length > 0) ? formData.subjects : DEFAULT_SUBJECTS;
 
   const handleAddSubject = (e?: React.FormEvent) => {
     if (e) e.preventDefault();
@@ -590,18 +591,29 @@ export const SchoolSettingsView: React.FC<SchoolSettingsViewProps> = ({
       alert(`Mata pelajaran "${trimmed}" sudah ada dalam daftar.`);
       return;
     }
-    setFormData(prev => ({
-      ...prev,
-      subjects: [...(prev.subjects || DEFAULT_SUBJECTS), trimmed]
-    }));
+    const updatedSubjects = [...currentSubjects, trimmed];
+    const updatedProfile: SchoolProfile = {
+      ...formData,
+      subjects: updatedSubjects
+    };
+    setFormData(updatedProfile);
     setNewSubjectInput('');
+    // Auto-save & sync directly to Cloud Firestore so other devices get it immediately
+    onSaveProfile(updatedProfile);
+    setSubjectSavedNotice(`Mata pelajaran "${trimmed}" berhasil ditambahkan & disinkronkan ke cloud.`);
+    setTimeout(() => setSubjectSavedNotice(null), 4000);
   };
 
   const handleRemoveSubject = (subjectToRemove: string) => {
-    setFormData(prev => ({
-      ...prev,
-      subjects: (prev.subjects || DEFAULT_SUBJECTS).filter(s => s !== subjectToRemove)
-    }));
+    const updatedSubjects = currentSubjects.filter(s => s !== subjectToRemove);
+    const updatedProfile: SchoolProfile = {
+      ...formData,
+      subjects: updatedSubjects
+    };
+    setFormData(updatedProfile);
+    onSaveProfile(updatedProfile);
+    setSubjectSavedNotice(`Mata pelajaran "${subjectToRemove}" berhasil dihapus & disinkronkan.`);
+    setTimeout(() => setSubjectSavedNotice(null), 3000);
   };
 
   useEffect(() => {
@@ -1725,6 +1737,13 @@ export const SchoolSettingsView: React.FC<SchoolSettingsViewProps> = ({
           <p className="text-xs text-slate-500">
             Tambahkan mata pelajaran atau daftar kurikulum yang diajarkan di sekolah ini untuk kebutuhan akademik dan pencatatan presensi.
           </p>
+
+          {subjectSavedNotice && (
+            <div className="bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-bold px-3.5 py-2.5 rounded-xl flex items-center gap-2 animate-in fade-in duration-200">
+              <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+              <span>{subjectSavedNotice}</span>
+            </div>
+          )}
 
           {/* Form Tambah Mata Pelajaran Baru */}
           <div className="flex flex-col sm:flex-row gap-2">

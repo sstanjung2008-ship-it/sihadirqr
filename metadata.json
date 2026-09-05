@@ -1,6 +1,6 @@
 {
   "name": "Remix SiHadir QR - Presensi Sekolah",
-  "description": "Aplikasi presensi QR Code terintegrasi database sekolah, notifikasi WhatsApp real-time, kartu pelajar, chat izin \u0026 sakit, serta analitik dan ekspor laporan.",
+  "description": "Aplikasi presensi QR Code terintegrasi database sekolah, Asisten Guru AI (Generator Soal, Kunci, Kisi-kisi & Modul Ajar Word), notifikasi WhatsApp real-time, kartu pelajar, chat izin & sakit, serta analitik dan ekspor laporan.",
   "requestFramePermissions": [
     "camera"
   ],

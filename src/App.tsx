@@ -70,6 +70,7 @@ import { ScheduleManagementView } from './components/ScheduleManagementView';
 import { ParentChatView } from './components/ParentChatView';
 import { ParentAccountView } from './components/ParentAccountView';
 import { TeacherAccountView } from './components/TeacherAccountView';
+import { TeacherAssistantView } from './components/TeacherAssistantView';
 import { LoginView } from './components/LoginView';
 
 export default function App() {
@@ -1009,6 +1010,13 @@ export default function App() {
               traits={traits}
               characterLogs={characterLogs}
               predicateSettings={predicateSettings}
+              userSession={userSession}
+            />
+          )}
+
+          {activeTab === 'teacher_assistant' && (
+            <TeacherAssistantView
+              schoolProfile={schoolProfile}
               userSession={userSession}
             />
           )}

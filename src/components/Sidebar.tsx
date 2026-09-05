@@ -104,6 +104,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       return [
         { id: 'dashboard', label: 'Absensi Hari Ini', icon: UserCheck, desc: 'Dashboard presensi kelas' },
         { id: 'scanner', label: 'Scan QR Presensi', icon: ScanLine, desc: 'Scan QR manual siswa' },
+        { id: 'teacher_assistant', label: 'Asisten Guru (AI)', icon: Sparkles, desc: 'Buat Soal AI & Modul Ajar Word' },
         { id: 'schedule', label: 'Jadwal Pelajaran', icon: CalendarDays, desc: 'Jadwal KBM & jam mengajar' },
         { id: 'learning', label: 'Fitur Pembelajaran', icon: BookOpen, desc: 'Jurnal KBM & keaktifan siswa' },
         { id: 'character_points', label: 'Nilai Karakter', icon: Award, desc: 'Poin & bukti foto karakter' },
@@ -119,6 +120,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     return [
       { id: 'dashboard', label: 'Dasbor Presensi', icon: BarChart3, desc: 'Ringkasan & statistik utama' },
       { id: 'scanner', label: 'Pos Scan QR', icon: ScanLine, desc: 'Pemindai barcode/QR harian' },
+      { id: 'teacher_assistant', label: 'Asisten Guru (AI)', icon: Sparkles, desc: 'Generator Soal & Modul Ajar Word' },
       { id: 'schedule', label: 'Jadwal Pelajaran', icon: CalendarDays, desc: 'Sesi JP, guru & mapel per kelas' },
       { id: 'learning', label: 'Jurnal Pembelajaran', icon: BookOpen, desc: 'Rekap KBM & keaktifan kelas' },
       { id: 'character_input', label: 'Input Karakter Siswa', icon: Sparkles, desc: 'Master data & bobot karakter (+/-)' },

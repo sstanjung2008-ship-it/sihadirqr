@@ -312,9 +312,16 @@ export const BatchPrintModal: React.FC<BatchPrintModalProps> = ({
                   {orientation === 'LANDSCAPE' ? (
                     <div className="p-2.5 flex items-center gap-3 flex-1 bg-white text-slate-800">
                       <img
-                        src={std.photoUrl}
+                        src={std.photoUrl || (std.gender === 'P'
+                          ? 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=300&auto=format&fit=crop&q=80'
+                          : 'https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?w=300&auto=format&fit=crop&q=80')}
                         alt={std.name}
                         className="w-20 h-24 rounded-xl object-cover ring-2 ring-indigo-100 shadow-sm shrink-0"
+                        onError={(e) => {
+                          (e.target as HTMLImageElement).src = std.gender === 'P'
+                            ? 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=300&auto=format&fit=crop&q=80'
+                            : 'https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?w=300&auto=format&fit=crop&q=80';
+                        }}
                       />
                       <div className="flex-1 min-w-0 text-[10px] space-y-0.5">
                         <p className="font-black text-slate-900 uppercase truncate text-[11px]">{std.name}</p>
@@ -330,9 +337,16 @@ export const BatchPrintModal: React.FC<BatchPrintModalProps> = ({
                   ) : (
                     <div className="p-2.5 flex flex-col items-center justify-between flex-1 bg-white text-slate-800 text-center">
                       <img
-                        src={std.photoUrl}
+                        src={std.photoUrl || (std.gender === 'P'
+                          ? 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=300&auto=format&fit=crop&q=80'
+                          : 'https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?w=300&auto=format&fit=crop&q=80')}
                         alt={std.name}
                         className="w-16 h-20 rounded-xl object-cover ring-2 ring-indigo-100 shadow-sm shrink-0"
+                        onError={(e) => {
+                          (e.target as HTMLImageElement).src = std.gender === 'P'
+                            ? 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=300&auto=format&fit=crop&q=80'
+                            : 'https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?w=300&auto=format&fit=crop&q=80';
+                        }}
                       />
                       <div className="w-full text-[10px] my-1 space-y-0.5">
                         <p className="font-black text-slate-900 uppercase truncate text-[11px]">{std.name}</p>

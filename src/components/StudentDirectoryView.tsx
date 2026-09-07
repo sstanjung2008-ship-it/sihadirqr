@@ -411,8 +411,8 @@ export const StudentDirectoryView: React.FC<StudentDirectoryViewProps> = ({
       const img = new Image();
       img.onload = () => {
         const canvas = document.createElement('canvas');
-        const maxW = 260;
-        const maxH = 320;
+        const maxW = 200;
+        const maxH = 267;
         let width = img.width;
         let height = img.height;
 
@@ -427,8 +427,8 @@ export const StudentDirectoryView: React.FC<StudentDirectoryViewProps> = ({
           ctx.fillStyle = '#ffffff';
           ctx.fillRect(0, 0, width, height);
           ctx.drawImage(img, 0, 0, width, height);
-          // Compressed 0.70 JPEG ensures ~10KB - 15KB size, syncing seamlessly across devices
-          const dataUrl = canvas.toDataURL('image/jpeg', 0.70);
+          // Compressed 0.65 JPEG ensures ~5KB size, syncing seamlessly across all devices
+          const dataUrl = canvas.toDataURL('image/jpeg', 0.65);
           setFormData(prev => ({ ...prev, photoUrl: dataUrl }));
         }
       };
@@ -499,9 +499,9 @@ export const StudentDirectoryView: React.FC<StudentDirectoryViewProps> = ({
     if (!videoRef.current) return;
     const video = videoRef.current;
 
-    // Standard 3:4 student portrait dimensions (240x320)
-    const targetWidth = 240;
-    const targetHeight = 320;
+    // Standard 3:4 student portrait dimensions (200x267)
+    const targetWidth = 200;
+    const targetHeight = 267;
     const targetAspect = targetWidth / targetHeight; // 0.75
 
     const videoWidth = video.videoWidth || 640;
@@ -542,8 +542,8 @@ export const StudentDirectoryView: React.FC<StudentDirectoryViewProps> = ({
         0, 0, targetWidth, targetHeight
       );
 
-      // Highly optimized JPEG (0.70) => ~10KB - 14KB (fits perfectly in Firestore & syncs across devices)
-      const dataUrl = canvas.toDataURL('image/jpeg', 0.70);
+      // Highly optimized JPEG (0.65) => ~4KB - 7KB (fits perfectly in Firestore & syncs seamlessly across devices)
+      const dataUrl = canvas.toDataURL('image/jpeg', 0.65);
       setCapturedCameraPhoto(dataUrl);
       stopCamera();
     }

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { Teacher, SchoolClass, SchoolProfile } from '../types';
 import { downloadTeacherImportTemplate } from '../lib/exportUtils';
 import { ImportTeachersModal } from './ImportTeachersModal';
@@ -58,10 +58,13 @@ export const TeacherDirectoryView: React.FC<TeacherDirectoryViewProps> = ({
   const [editingTeacher, setEditingTeacher] = useState<Teacher | null>(null);
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
 
-  // Default subjects list
-  const availableSubjects = schoolProfile.subjects && schoolProfile.subjects.length > 0 
-    ? schoolProfile.subjects 
-    : ['Matematika', 'Bahasa Indonesia', 'Bahasa Inggris', 'IPA', 'IPS', 'Pendidikan Agama', 'PJOK', 'Seni Budaya', 'Informatika', 'PPKn'];
+  // Memoized default subjects list from School Profile (synced across devices)
+  const availableSubjects = useMemo(() => {
+    const list = schoolProfile.subjects && schoolProfile.subjects.length > 0 
+      ? schoolProfile.subjects 
+      : ['Matematika', 'Bahasa Indonesia', 'Bahasa Inggris', 'IPA', 'IPS', 'Pendidikan Agama', 'PJOK', 'Seni Budaya', 'Informatika', 'PPKn'];
+    return Array.from(new Set(list.map(s => String(s).trim()).filter(Boolean)));
+  }, [schoolProfile.subjects]);
 
   // Form State
   const emptyForm = {
@@ -82,6 +85,62 @@ export const TeacherDirectoryView: React.FC<TeacherDirectoryViewProps> = ({
 
   const [formData, setFormData] = useState(emptyForm);
 
+  // Helper to determine accurate homeroom class info directly from classes data (Kelola Kelas)
+  const getTeacherHomeroomInfo = (teacher: Teacher) => {
+    // 1. Check if this teacher is assigned as homeroom teacher in any class in classes (Kelola Kelas)
+    const matchedClass = classes.find(c => 
+      (c.homeroomTeacher && c.homeroomTeacher !== 'Belum Ditentukan' && (
+        c.homeroomTeacher === teacher.name ||
+        c.homeroomTeacher.toLowerCase().trim() === teacher.name.toLowerCase().trim() ||
+        (teacher.nip && c.homeroomTeacher.includes(teacher.nip))
+      )) ||
+      (teacher.homeroomClassId && c.id === teacher.homeroomClassId)
+    );
+
+    if (matchedClass) {
+      return {
+        isHomeroom: true,
+        classId: matchedClass.id,
+        className: matchedClass.name,
+        grade: matchedClass.grade,
+        fullLabel: `${matchedClass.grade} - ${matchedClass.name}`
+      };
+    }
+
+    // 2. Fallback to teacher's saved homeroom details if marked as WALI_KELAS
+    if (teacher.additionalDuty === 'WALI_KELAS') {
+      const fallbackClass = classes.find(c => 
+        c.id === teacher.homeroomClassId || 
+        c.name === teacher.homeroomClassName ||
+        c.name.toLowerCase() === (teacher.homeroomClassName || '').toLowerCase()
+      );
+      if (fallbackClass) {
+        return {
+          isHomeroom: true,
+          classId: fallbackClass.id,
+          className: fallbackClass.name,
+          grade: fallbackClass.grade,
+          fullLabel: `${fallbackClass.grade} - ${fallbackClass.name}`
+        };
+      }
+      return {
+        isHomeroom: true,
+        classId: teacher.homeroomClassId || '',
+        className: teacher.homeroomClassName || 'Belum Ditentukan',
+        grade: '',
+        fullLabel: teacher.homeroomClassName || 'Belum Ditentukan'
+      };
+    }
+
+    return {
+      isHomeroom: false,
+      classId: '',
+      className: '',
+      grade: '',
+      fullLabel: ''
+    };
+  };
+
   const handleOpenAddModal = () => {
     setEditingTeacher(null);
     setFormData(emptyForm);
@@ -90,6 +149,8 @@ export const TeacherDirectoryView: React.FC<TeacherDirectoryViewProps> = ({
 
   const handleOpenEditModal = (teacher: Teacher) => {
     setEditingTeacher(teacher);
+    const homeroomInfo = getTeacherHomeroomInfo(teacher);
+
     setFormData({
       nip: teacher.nip || '',
       name: teacher.name || '',
@@ -98,9 +159,9 @@ export const TeacherDirectoryView: React.FC<TeacherDirectoryViewProps> = ({
       gender: teacher.gender || 'L',
       subject1: teacher.subject1 || availableSubjects[0] || 'Matematika',
       subject2: teacher.subject2 || '',
-      additionalDuty: teacher.additionalDuty || 'TIDAK_ADA',
-      homeroomClassId: teacher.homeroomClassId || '',
-      homeroomClassName: teacher.homeroomClassName || '',
+      additionalDuty: homeroomInfo.isHomeroom ? 'WALI_KELAS' : (teacher.additionalDuty || 'TIDAK_ADA'),
+      homeroomClassId: homeroomInfo.classId || teacher.homeroomClassId || (classes[0]?.id || ''),
+      homeroomClassName: homeroomInfo.className || teacher.homeroomClassName || (classes[0]?.name || ''),
       phone: teacher.phone || '',
       email: teacher.email || '',
       status: teacher.status || 'AKTIF',
@@ -129,14 +190,20 @@ export const TeacherDirectoryView: React.FC<TeacherDirectoryViewProps> = ({
     let targetClassName = formData.homeroomClassName;
 
     if (formData.additionalDuty === 'WALI_KELAS') {
-      if (!targetClassId && classes.length > 0) {
-        targetClassId = classes[0].id;
-        targetClassName = classes[0].name;
-      } else {
+      if (targetClassId) {
         const foundClass = classes.find(c => c.id === targetClassId);
         if (foundClass) {
           targetClassName = foundClass.name;
         }
+      } else if (targetClassName) {
+        const foundClass = classes.find(c => c.name === targetClassName || c.name.toLowerCase() === targetClassName.toLowerCase());
+        if (foundClass) {
+          targetClassId = foundClass.id;
+          targetClassName = foundClass.name;
+        }
+      } else if (classes.length > 0) {
+        targetClassId = classes[0].id;
+        targetClassName = classes[0].name;
       }
     } else {
       targetClassId = '';
@@ -171,12 +238,14 @@ export const TeacherDirectoryView: React.FC<TeacherDirectoryViewProps> = ({
 
     const matchesSubject = !subjectFilter || teacher.subject1 === subjectFilter || teacher.subject2 === subjectFilter;
     
+    const homeroomInfo = getTeacherHomeroomInfo(teacher);
+
     let matchesDuty = true;
     if (dutyFilter === 'WAKIL_KEPALA_SEKOLAH') matchesDuty = teacher.additionalDuty === 'WAKIL_KEPALA_SEKOLAH';
     if (dutyFilter === 'HUMAS') matchesDuty = teacher.additionalDuty === 'HUMAS';
     if (dutyFilter === 'BK') matchesDuty = teacher.additionalDuty === 'BK';
-    if (dutyFilter === 'WALI_KELAS') matchesDuty = teacher.additionalDuty === 'WALI_KELAS';
-    if (dutyFilter === 'GURU_MAPEL') matchesDuty = teacher.additionalDuty === 'TIDAK_ADA' || !teacher.additionalDuty;
+    if (dutyFilter === 'WALI_KELAS') matchesDuty = homeroomInfo.isHomeroom || teacher.additionalDuty === 'WALI_KELAS';
+    if (dutyFilter === 'GURU_MAPEL') matchesDuty = !homeroomInfo.isHomeroom && (teacher.additionalDuty === 'TIDAK_ADA' || !teacher.additionalDuty);
 
     return matchesSearch && matchesSubject && matchesDuty;
   });
@@ -184,7 +253,7 @@ export const TeacherDirectoryView: React.FC<TeacherDirectoryViewProps> = ({
   const totalWakil = teachers.filter(t => t.additionalDuty === 'WAKIL_KEPALA_SEKOLAH').length;
   const totalHumas = teachers.filter(t => t.additionalDuty === 'HUMAS').length;
   const totalBK = teachers.filter(t => t.additionalDuty === 'BK').length;
-  const totalWali = teachers.filter(t => t.additionalDuty === 'WALI_KELAS').length;
+  const totalWali = teachers.filter(t => getTeacherHomeroomInfo(t).isHomeroom || t.additionalDuty === 'WALI_KELAS').length;
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
@@ -372,45 +441,44 @@ export const TeacherDirectoryView: React.FC<TeacherDirectoryViewProps> = ({
       ) : viewMode === 'CARD' ? (
         /* CARD VIEW */
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-          {filteredTeachers.map((teacher) => (
-            <div
-              key={teacher.id}
-              className="bg-white border border-slate-200/80 rounded-3xl p-5 shadow-xs hover:shadow-md transition-all space-y-4 relative flex flex-col justify-between group"
-            >
-              <div className="space-y-3">
-                {/* Header Badge & Action */}
-                <div className="flex items-start justify-between gap-2">
-                  <div className="flex flex-wrap gap-1.5">
-                    {teacher.additionalDuty === 'WAKIL_KEPALA_SEKOLAH' && (
-                      <span className="inline-flex items-center gap-1 bg-amber-50 text-amber-800 border border-amber-200 text-[10px] font-black px-2.5 py-1 rounded-xl shadow-2xs">
-                        <ShieldCheck className="w-3 h-3 text-amber-600" />
-                        Wakasek
-                      </span>
-                    )}
-                    {teacher.additionalDuty === 'HUMAS' && (
-                      <span className="inline-flex items-center gap-1 bg-cyan-50 text-cyan-800 border border-cyan-200 text-[10px] font-black px-2.5 py-1 rounded-xl shadow-2xs">
-                        <Megaphone className="w-3 h-3 text-cyan-600" />
-                        Humas
-                      </span>
-                    )}
-                    {teacher.additionalDuty === 'BK' && (
-                      <span className="inline-flex items-center gap-1 bg-purple-50 text-purple-800 border border-purple-200 text-[10px] font-black px-2.5 py-1 rounded-xl shadow-2xs">
-                        <HeartHandshake className="w-3 h-3 text-purple-600" />
-                        BK
-                      </span>
-                    )}
-                    {teacher.additionalDuty === 'WALI_KELAS' && (
-                      <span className="inline-flex items-center gap-1 bg-indigo-50 text-indigo-800 border border-indigo-200 text-[10px] font-black px-2.5 py-1 rounded-xl shadow-2xs">
-                        <Building2 className="w-3 h-3 text-indigo-600" />
-                        Wali Kelas {teacher.homeroomClassName || '-'}
-                      </span>
-                    )}
-                    {(teacher.additionalDuty === 'TIDAK_ADA' || !teacher.additionalDuty) && (
-                      <span className="inline-flex items-center gap-1 bg-slate-100 text-slate-600 border border-slate-200 text-[10px] font-bold px-2.5 py-1 rounded-xl">
-                        Tanpa Tugas Tambahan
-                      </span>
-                    )}
-                  </div>
+          {filteredTeachers.map((teacher) => {
+            const homeroomInfo = getTeacherHomeroomInfo(teacher);
+
+            return (
+              <div
+                key={teacher.id}
+                className="bg-white border border-slate-200/80 rounded-3xl p-5 shadow-xs hover:shadow-md transition-all space-y-4 relative flex flex-col justify-between group"
+              >
+                <div className="space-y-3">
+                  {/* Header Badge & Action */}
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="flex flex-wrap gap-1.5">
+                      {homeroomInfo.isHomeroom ? (
+                        <span className="inline-flex items-center gap-1 bg-indigo-50 text-indigo-800 border border-indigo-200 text-[10px] font-black px-2.5 py-1 rounded-xl shadow-2xs">
+                          <Building2 className="w-3 h-3 text-indigo-600" />
+                          Wali Kelas {homeroomInfo.className || homeroomInfo.fullLabel}
+                        </span>
+                      ) : teacher.additionalDuty === 'WAKIL_KEPALA_SEKOLAH' ? (
+                        <span className="inline-flex items-center gap-1 bg-amber-50 text-amber-800 border border-amber-200 text-[10px] font-black px-2.5 py-1 rounded-xl shadow-2xs">
+                          <ShieldCheck className="w-3 h-3 text-amber-600" />
+                          Wakasek
+                        </span>
+                      ) : teacher.additionalDuty === 'HUMAS' ? (
+                        <span className="inline-flex items-center gap-1 bg-cyan-50 text-cyan-800 border border-cyan-200 text-[10px] font-black px-2.5 py-1 rounded-xl shadow-2xs">
+                          <Megaphone className="w-3 h-3 text-cyan-600" />
+                          Humas
+                        </span>
+                      ) : teacher.additionalDuty === 'BK' ? (
+                        <span className="inline-flex items-center gap-1 bg-purple-50 text-purple-800 border border-purple-200 text-[10px] font-black px-2.5 py-1 rounded-xl shadow-2xs">
+                          <HeartHandshake className="w-3 h-3 text-purple-600" />
+                          BK
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1 bg-slate-100 text-slate-600 border border-slate-200 text-[10px] font-bold px-2.5 py-1 rounded-xl">
+                          Tanpa Tugas Tambahan
+                        </span>
+                      )}
+                    </div>
 
                   <div className="flex items-center gap-1 shrink-0">
                     <button
@@ -494,7 +562,8 @@ export const TeacherDirectoryView: React.FC<TeacherDirectoryViewProps> = ({
                 </span>
               </div>
             </div>
-          ))}
+          );
+        })}
         </div>
       ) : (
         /* TABLE VIEW */
@@ -513,79 +582,79 @@ export const TeacherDirectoryView: React.FC<TeacherDirectoryViewProps> = ({
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 text-xs">
-                {filteredTeachers.map((teacher, index) => (
-                  <tr key={teacher.id} className="hover:bg-slate-50/80 transition-colors">
-                    <td className="py-3.5 px-4 font-mono font-bold text-slate-400">{index + 1}</td>
-                    <td className="py-3.5 px-4">
-                      <div className="font-extrabold text-slate-900">{teacher.name}</div>
-                      <div className="text-[11px] font-mono text-slate-500">NIP: {teacher.nip || '-'}</div>
-                    </td>
-                    <td className="py-3.5 px-4 text-slate-700 font-medium">
-                      {teacher.birthPlace || '-'}, {teacher.birthDate || '-'}
-                    </td>
-                    <td className="py-3.5 px-4">
-                      <div className="flex flex-wrap gap-1">
-                        <span className="bg-indigo-50 text-indigo-800 font-extrabold px-2 py-0.5 rounded-md text-[10px]">
-                          {teacher.subject1}
-                        </span>
-                        {teacher.subject2 && (
-                          <span className="bg-slate-100 text-slate-700 font-bold px-2 py-0.5 rounded-md text-[10px]">
-                            {teacher.subject2}
+                {filteredTeachers.map((teacher, index) => {
+                  const homeroomInfo = getTeacherHomeroomInfo(teacher);
+
+                  return (
+                    <tr key={teacher.id} className="hover:bg-slate-50/80 transition-colors">
+                      <td className="py-3.5 px-4 font-mono font-bold text-slate-400">{index + 1}</td>
+                      <td className="py-3.5 px-4">
+                        <div className="font-extrabold text-slate-900">{teacher.name}</div>
+                        <div className="text-[11px] font-mono text-slate-500">NIP: {teacher.nip || '-'}</div>
+                      </td>
+                      <td className="py-3.5 px-4 text-slate-700 font-medium">
+                        {teacher.birthPlace || '-'}, {teacher.birthDate || '-'}
+                      </td>
+                      <td className="py-3.5 px-4">
+                        <div className="flex flex-wrap gap-1">
+                          <span className="bg-indigo-50 text-indigo-800 font-extrabold px-2 py-0.5 rounded-md text-[10px]">
+                            {teacher.subject1}
                           </span>
+                          {teacher.subject2 && (
+                            <span className="bg-slate-100 text-slate-700 font-bold px-2 py-0.5 rounded-md text-[10px]">
+                              {teacher.subject2}
+                            </span>
+                          )}
+                        </div>
+                      </td>
+                      <td className="py-3.5 px-4">
+                        {homeroomInfo.isHomeroom ? (
+                          <span className="inline-flex items-center gap-1 bg-indigo-50 text-indigo-800 font-black px-2.5 py-1 rounded-lg text-[10px] border border-indigo-200">
+                            <Building2 className="w-3 h-3 text-indigo-600" />
+                            Wali Kelas {homeroomInfo.className || homeroomInfo.fullLabel}
+                          </span>
+                        ) : teacher.additionalDuty === 'WAKIL_KEPALA_SEKOLAH' ? (
+                          <span className="inline-flex items-center gap-1 bg-amber-50 text-amber-800 font-black px-2.5 py-1 rounded-lg text-[10px] border border-amber-200">
+                            <ShieldCheck className="w-3 h-3 text-amber-600" />
+                            Wakasek
+                          </span>
+                        ) : teacher.additionalDuty === 'HUMAS' ? (
+                          <span className="inline-flex items-center gap-1 bg-cyan-50 text-cyan-800 font-black px-2.5 py-1 rounded-lg text-[10px] border border-cyan-200">
+                            <Megaphone className="w-3 h-3 text-cyan-600" />
+                            Humas
+                          </span>
+                        ) : teacher.additionalDuty === 'BK' ? (
+                          <span className="inline-flex items-center gap-1 bg-purple-50 text-purple-800 font-black px-2.5 py-1 rounded-lg text-[10px] border border-purple-200">
+                            <HeartHandshake className="w-3 h-3 text-purple-600" />
+                            BK
+                          </span>
+                        ) : (
+                          <span className="text-slate-400 font-medium">-</span>
                         )}
-                      </div>
-                    </td>
-                    <td className="py-3.5 px-4">
-                      {teacher.additionalDuty === 'WAKIL_KEPALA_SEKOLAH' && (
-                        <span className="inline-flex items-center gap-1 bg-amber-50 text-amber-800 font-black px-2.5 py-1 rounded-lg text-[10px] border border-amber-200">
-                          <ShieldCheck className="w-3 h-3 text-amber-600" />
-                          Wakasek
-                        </span>
-                      )}
-                      {teacher.additionalDuty === 'HUMAS' && (
-                        <span className="inline-flex items-center gap-1 bg-cyan-50 text-cyan-800 font-black px-2.5 py-1 rounded-lg text-[10px] border border-cyan-200">
-                          <Megaphone className="w-3 h-3 text-cyan-600" />
-                          Humas
-                        </span>
-                      )}
-                      {teacher.additionalDuty === 'BK' && (
-                        <span className="inline-flex items-center gap-1 bg-purple-50 text-purple-800 font-black px-2.5 py-1 rounded-lg text-[10px] border border-purple-200">
-                          <HeartHandshake className="w-3 h-3 text-purple-600" />
-                          BK
-                        </span>
-                      )}
-                      {teacher.additionalDuty === 'WALI_KELAS' && (
-                        <span className="inline-flex items-center gap-1 bg-indigo-50 text-indigo-800 font-black px-2.5 py-1 rounded-lg text-[10px] border border-indigo-200">
-                          <Building2 className="w-3 h-3 text-indigo-600" />
-                          Wali Kelas {teacher.homeroomClassName || '-'}
-                        </span>
-                      )}
-                      {(teacher.additionalDuty === 'TIDAK_ADA' || !teacher.additionalDuty) && (
-                        <span className="text-slate-400 font-medium">-</span>
-                      )}
-                    </td>
-                    <td className="py-3.5 px-4 text-slate-600 font-medium">
-                      <div>{teacher.phone || '-'}</div>
-                      <div className="text-[10px] text-slate-400">{teacher.email || ''}</div>
-                    </td>
-                    <td className="py-3.5 px-4 text-center">
-                      <div className="flex items-center justify-center gap-1">
-                        <button
-                          onClick={() => handleOpenEditModal(teacher)}
-                          className="p-1.5 text-slate-500 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors cursor-pointer"
-                        >
-                          <Edit className="w-4 h-4" />
-                        </button>
-                        <button
-                          onClick={() => setDeleteConfirmId(teacher.id)}
-                          className="p-1.5 text-slate-500 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
+                      </td>
+                      <td className="py-3.5 px-4 text-slate-600 font-medium">
+                        <div>{teacher.phone || '-'}</div>
+                        <div className="text-[10px] text-slate-400">{teacher.email || ''}</div>
+                      </td>
+                      <td className="py-3.5 px-4 text-center">
+                        <div className="flex items-center justify-center gap-1">
+                          <button
+                            onClick={() => handleOpenEditModal(teacher)}
+                            className="p-1.5 text-slate-500 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors cursor-pointer"
+                          >
+                            <Edit className="w-4 h-4" />
+                          </button>
+                          <button
+                            onClick={() => setDeleteConfirmId(teacher.id)}
+                            className="p-1.5 text-slate-500 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -694,6 +763,9 @@ export const TeacherDirectoryView: React.FC<TeacherDirectoryViewProps> = ({
                     onChange={(e) => setFormData({ ...formData, subject1: e.target.value })}
                     className="w-full bg-slate-50 border border-slate-200 text-slate-800 text-xs font-semibold rounded-xl p-3 focus:ring-2 focus:ring-indigo-500 cursor-pointer"
                   >
+                    {formData.subject1 && !availableSubjects.includes(formData.subject1) && (
+                      <option value={formData.subject1}>{formData.subject1}</option>
+                    )}
                     {availableSubjects.map((sub, idx) => (
                       <option key={idx} value={sub}>{sub}</option>
                     ))}
@@ -711,6 +783,9 @@ export const TeacherDirectoryView: React.FC<TeacherDirectoryViewProps> = ({
                     className="w-full bg-slate-50 border border-slate-200 text-slate-800 text-xs font-semibold rounded-xl p-3 focus:ring-2 focus:ring-indigo-500 cursor-pointer"
                   >
                     <option value="">-- Tidak Ada --</option>
+                    {formData.subject2 && !availableSubjects.includes(formData.subject2) && (
+                      <option value={formData.subject2}>{formData.subject2}</option>
+                    )}
                     {availableSubjects.map((sub, idx) => (
                       <option key={idx} value={sub}>{sub}</option>
                     ))}
@@ -796,13 +871,57 @@ export const TeacherDirectoryView: React.FC<TeacherDirectoryViewProps> = ({
                       checked={formData.additionalDuty === 'WALI_KELAS'}
                       onChange={() => setFormData({ 
                         ...formData, 
-                        additionalDuty: 'WALI_KELAS'
+                        additionalDuty: 'WALI_KELAS',
+                        homeroomClassId: formData.homeroomClassId || (classes[0]?.id || ''),
+                        homeroomClassName: formData.homeroomClassName || (classes[0]?.name || '')
                       })}
                       className="text-indigo-600 focus:ring-indigo-500 cursor-pointer"
                     />
                     <span>Wali Kelas</span>
                   </label>
                 </div>
+
+                {formData.additionalDuty === 'WALI_KELAS' && (
+                  <div className="bg-indigo-50/70 border border-indigo-200 rounded-2xl p-4 space-y-2 mt-3">
+                    <div className="flex items-center justify-between">
+                      <label className="block text-xs font-extrabold text-indigo-950">
+                        Pilih Kelas Binaan (Data Kelola Kelas)
+                      </label>
+                      <span className="text-[10px] text-indigo-700 font-black bg-white px-2 py-0.5 rounded-full border border-indigo-200 shadow-2xs">
+                        Tersinkronisasi
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-indigo-700 font-medium">
+                      Pilih rombongan belajar dari data kelola kelas yang akan diampu oleh guru ini:
+                    </p>
+                    <select
+                      value={formData.homeroomClassId || (classes.find(c => c.name === formData.homeroomClassName)?.id || '')}
+                      onChange={(e) => {
+                        const selectedClass = classes.find(c => c.id === e.target.value);
+                        if (selectedClass) {
+                          setFormData({
+                            ...formData,
+                            homeroomClassId: selectedClass.id,
+                            homeroomClassName: selectedClass.name
+                          });
+                        }
+                      }}
+                      className="w-full bg-white border border-indigo-300 text-slate-900 text-xs font-bold rounded-xl p-3 focus:ring-2 focus:ring-indigo-500 cursor-pointer shadow-xs"
+                    >
+                      <option value="">-- Pilih Kelas --</option>
+                      {classes.map(c => {
+                        const currentWali = c.homeroomTeacher && c.homeroomTeacher !== 'Belum Ditentukan' && c.homeroomTeacher !== formData.name
+                          ? ` (Wali saat ini: ${c.homeroomTeacher})`
+                          : '';
+                        return (
+                          <option key={c.id} value={c.id}>
+                            Kelas {c.name} ({c.grade}){currentWali}
+                          </option>
+                        );
+                      })}
+                    </select>
+                  </div>
+                )}
               </div>
 
               {/* Email Resmi Guru */}

@@ -591,7 +591,7 @@ export const SchoolSettingsView: React.FC<SchoolSettingsViewProps> = ({
       alert(`Mata pelajaran "${trimmed}" sudah ada dalam daftar.`);
       return;
     }
-    const updatedSubjects = [...currentSubjects, trimmed];
+    const updatedSubjects = Array.from(new Set([...currentSubjects, trimmed]));
     const updatedProfile: SchoolProfile = {
       ...formData,
       subjects: updatedSubjects
@@ -600,7 +600,7 @@ export const SchoolSettingsView: React.FC<SchoolSettingsViewProps> = ({
     setNewSubjectInput('');
     // Auto-save & sync directly to Cloud Firestore so other devices get it immediately
     onSaveProfile(updatedProfile);
-    setSubjectSavedNotice(`Mata pelajaran "${trimmed}" berhasil ditambahkan & disinkronkan ke cloud.`);
+    setSubjectSavedNotice(`Mata pelajaran "${trimmed}" berhasil ditambahkan & disinkronkan ke seluruh perangkat.`);
     setTimeout(() => setSubjectSavedNotice(null), 4000);
   };
 
@@ -608,7 +608,7 @@ export const SchoolSettingsView: React.FC<SchoolSettingsViewProps> = ({
     const updatedSubjects = currentSubjects.filter(s => s !== subjectToRemove);
     const updatedProfile: SchoolProfile = {
       ...formData,
-      subjects: updatedSubjects
+      subjects: updatedSubjects.length > 0 ? updatedSubjects : ['Matematika']
     };
     setFormData(updatedProfile);
     onSaveProfile(updatedProfile);

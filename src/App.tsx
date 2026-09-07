@@ -46,7 +46,8 @@ import {
   saveClassSchedules,
   getUserSession,
   saveUserSession,
-  initFirestoreRealtimeSync
+  initFirestoreRealtimeSync,
+  reconcileTeachersAndClasses
 } from './lib/storage';
 import { sendWhatsAppGatewayMessage } from './lib/exportUtils';
 import { ShieldCheck, CheckCircle2 } from 'lucide-react';
@@ -183,13 +184,27 @@ export default function App() {
 
   // Sync state on local storage events
   const refreshDataFromStorage = () => {
-    setSchoolProfileState(getSchoolProfile());
-    setStudentsState(getStudents());
-    setClassesState(getSchoolClasses());
+    const rawProfile = getSchoolProfile();
+    const rawStudents = getStudents();
+    const rawClasses = getSchoolClasses();
+    const rawTeachers = getTeachers();
+
+    const { updatedTeachers, updatedClasses, teachersChanged, classesChanged } = reconcileTeachersAndClasses(rawTeachers, rawClasses);
+
+    if (teachersChanged) {
+      saveTeachers(updatedTeachers);
+    }
+    if (classesChanged) {
+      saveSchoolClasses(updatedClasses);
+    }
+
+    setSchoolProfileState(rawProfile);
+    setStudentsState(rawStudents);
+    setClassesState(updatedClasses);
+    setTeachersState(updatedTeachers);
     setAttendanceRecordsState(getAttendanceRecords());
     setLeaveRequestsState(getLeaveRequests());
     setWaLogsState(getWaLogs());
-    setTeachersState(getTeachers());
     setJournalsState(getLearningJournals());
     setTraitsState(getCharacterTraits());
     setCharacterLogsState(getStudentCharacterLogs());
@@ -202,6 +217,20 @@ export default function App() {
 
   useEffect(() => {
     initFirestoreRealtimeSync();
+
+    // Initial reconciliation on boot to make sure teachers & classes match
+    const initialRawClasses = getSchoolClasses();
+    const initialRawTeachers = getTeachers();
+    const { updatedTeachers, updatedClasses, teachersChanged, classesChanged } = reconcileTeachersAndClasses(initialRawTeachers, initialRawClasses);
+    if (teachersChanged) {
+      saveTeachers(updatedTeachers);
+      setTeachersState(updatedTeachers);
+    }
+    if (classesChanged) {
+      saveSchoolClasses(updatedClasses);
+      setClassesState(updatedClasses);
+    }
+
     window.addEventListener('sihadir_storage_updated', refreshDataFromStorage);
     return () => {
       window.removeEventListener('sihadir_storage_updated', refreshDataFromStorage);
@@ -601,7 +630,7 @@ export default function App() {
   const handleAddStudent = (newStudent: Student) => {
     setStudentsState(prev => {
       const updated = [newStudent, ...prev];
-      saveStudents(updated);
+      saveStudents(updated, true);
       return updated;
     });
   };
@@ -609,7 +638,7 @@ export default function App() {
   const handleBatchAddStudents = (newStudents: Student[], newClasses?: SchoolClass[]) => {
     setStudentsState(prev => {
       const updated = [...newStudents, ...prev];
-      saveStudents(updated);
+      saveStudents(updated, true);
       return updated;
     });
 
@@ -630,7 +659,7 @@ export default function App() {
   const handleUpdateStudent = (updatedStudent: Student) => {
     setStudentsState(prev => {
       const updated = prev.map(s => s.id === updatedStudent.id ? updatedStudent : s);
-      saveStudents(updated);
+      saveStudents(updated, true);
       return updated;
     });
   };
@@ -695,20 +724,29 @@ export default function App() {
   // Class CRUD
   const handleAddClass = (newClass: SchoolClass) => {
     const updated = [...classes, newClass];
-    setClassesState(updated);
-    saveSchoolClasses(updated);
+    const { updatedTeachers, updatedClasses } = reconcileTeachersAndClasses(teachers, updated);
+    setClassesState(updatedClasses);
+    setTeachersState(updatedTeachers);
+    saveSchoolClasses(updatedClasses);
+    saveTeachers(updatedTeachers);
   };
 
   const handleUpdateClass = (updatedClass: SchoolClass) => {
     const updated = classes.map(c => c.id === updatedClass.id ? updatedClass : c);
-    setClassesState(updated);
-    saveSchoolClasses(updated);
+    const { updatedTeachers, updatedClasses } = reconcileTeachersAndClasses(teachers, updated);
+    setClassesState(updatedClasses);
+    setTeachersState(updatedTeachers);
+    saveSchoolClasses(updatedClasses);
+    saveTeachers(updatedTeachers);
   };
 
   const handleDeleteClass = (classId: string) => {
     const updated = classes.filter(c => c.id !== classId);
-    setClassesState(updated);
-    saveSchoolClasses(updated);
+    const { updatedTeachers, updatedClasses } = reconcileTeachersAndClasses(teachers, updated);
+    setClassesState(updatedClasses);
+    setTeachersState(updatedTeachers);
+    saveSchoolClasses(updatedClasses);
+    saveTeachers(updatedTeachers);
   };
 
   // Leave Request Handlers
@@ -804,22 +842,29 @@ export default function App() {
       id: `tch-${Date.now()}`
     };
     const updated = [newTeacher, ...teachers];
-    setTeachersState(updated);
-    saveTeachers(updated);
+    const { updatedTeachers, updatedClasses } = reconcileTeachersAndClasses(updated, classes);
+    setTeachersState(updatedTeachers);
+    setClassesState(updatedClasses);
+    saveTeachers(updatedTeachers);
+    saveSchoolClasses(updatedClasses);
   };
 
   const handleImportTeachers = (newTeachers: Teacher[]) => {
     const updated = [...newTeachers, ...teachers];
-    setTeachersState(updated);
-    saveTeachers(updated);
+    const { updatedTeachers, updatedClasses } = reconcileTeachersAndClasses(updated, classes);
+    setTeachersState(updatedTeachers);
+    setClassesState(updatedClasses);
+    saveTeachers(updatedTeachers);
+    saveSchoolClasses(updatedClasses);
   };
 
   const handleUpdateTeacher = (updatedTeacher: Teacher) => {
-    setTeachersState(prev => {
-      const updated = prev.map(t => t.id === updatedTeacher.id ? updatedTeacher : t);
-      saveTeachers(updated);
-      return updated;
-    });
+    const updated = teachers.map(t => t.id === updatedTeacher.id ? updatedTeacher : t);
+    const { updatedTeachers, updatedClasses } = reconcileTeachersAndClasses(updated, classes);
+    setTeachersState(updatedTeachers);
+    setClassesState(updatedClasses);
+    saveTeachers(updatedTeachers);
+    saveSchoolClasses(updatedClasses);
   };
 
   const handleBatchResetTeachersPassword = () => {
@@ -840,8 +885,11 @@ export default function App() {
 
   const handleDeleteTeacher = (id: string) => {
     const updated = teachers.filter(t => t.id !== id);
-    setTeachersState(updated);
-    saveTeachers(updated);
+    const { updatedTeachers, updatedClasses } = reconcileTeachersAndClasses(updated, classes);
+    setTeachersState(updatedTeachers);
+    setClassesState(updatedClasses);
+    saveTeachers(updatedTeachers);
+    saveSchoolClasses(updatedClasses);
   };
 
   // Character Traits Catalog Handlers

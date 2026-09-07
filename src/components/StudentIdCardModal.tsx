@@ -140,9 +140,16 @@ export const StudentIdCardModal: React.FC<StudentIdCardModalProps> = ({
                 {/* Centered Student Photo */}
                 <div className="w-32 h-40 rounded-2xl overflow-hidden ring-4 ring-indigo-50/80 shadow-lg bg-slate-100 border border-slate-200 shrink-0">
                   <img
-                    src={student.photoUrl}
+                    src={student.photoUrl || (student.gender === 'P'
+                      ? 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=300&auto=format&fit=crop&q=80'
+                      : 'https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?w=300&auto=format&fit=crop&q=80')}
                     alt={student.name}
                     className="w-full h-full object-cover"
+                    onError={(e) => {
+                      (e.target as HTMLImageElement).src = student.gender === 'P'
+                        ? 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=300&auto=format&fit=crop&q=80'
+                        : 'https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?w=300&auto=format&fit=crop&q=80';
+                    }}
                   />
                 </div>
 
@@ -237,9 +244,16 @@ export const StudentIdCardModal: React.FC<StudentIdCardModalProps> = ({
                 {/* Left: Centered Pas Foto */}
                 <div className="w-28 h-36 rounded-2xl overflow-hidden ring-4 ring-indigo-50/80 shadow-md bg-slate-100 border border-slate-200 shrink-0">
                   <img
-                    src={student.photoUrl}
+                    src={student.photoUrl || (student.gender === 'P'
+                      ? 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=300&auto=format&fit=crop&q=80'
+                      : 'https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?w=300&auto=format&fit=crop&q=80')}
                     alt={student.name}
                     className="w-full h-full object-cover"
+                    onError={(e) => {
+                      (e.target as HTMLImageElement).src = student.gender === 'P'
+                        ? 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=300&auto=format&fit=crop&q=80'
+                        : 'https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?w=300&auto=format&fit=crop&q=80';
+                    }}
                   />
                 </div>
 

@@ -556,6 +556,22 @@ export const INITIAL_TEACHERS: Teacher[] = [
     email: "bk@smpn1cerdas.sch.id",
     gender: "L",
     status: "AKTIF"
+  },
+  {
+    id: "tch-008",
+    nip: "19870615 201101 1 005",
+    name: "Eko Prasetyo, M.T.",
+    birthPlace: "Yogyakarta",
+    birthDate: "1987-06-15",
+    subject1: "Informatika",
+    subject2: "Matematika",
+    additionalDuty: "WALI_KELAS",
+    homeroomClassId: "c9b",
+    homeroomClassName: "9-B",
+    phone: "081901234567",
+    email: "eko.prasetyo@smpn1cerdas.sch.id",
+    gender: "L",
+    status: "AKTIF"
   }
 ];
 

@@ -198,19 +198,18 @@ export function importAllDatabaseFromJson(jsonString: string): { success: boolea
 // High-efficiency Image Compressor for Student Photos & Cross-Device Cloud Sync
 export function compressBase64Image(
   dataUrl: string,
-  maxWidth = 240,
-  maxHeight = 320,
-  quality = 0.70
+  maxWidth = 200,
+  maxHeight = 267,
+  quality = 0.65
 ): Promise<string> {
   return new Promise((resolve) => {
-    if (!dataUrl || !dataUrl.startsWith('data:image/') || dataUrl.length < 25000) {
+    if (!dataUrl || !dataUrl.startsWith('data:') || dataUrl.length < 15000) {
       return resolve(dataUrl);
     }
     if (typeof window === 'undefined' || typeof document === 'undefined') {
       return resolve(dataUrl);
     }
     const img = new Image();
-    img.crossOrigin = 'anonymous';
     img.onload = () => {
       try {
         let w = img.width;
@@ -243,14 +242,14 @@ export function compressBase64Image(
   });
 }
 
-// Background sanitizer to auto-compress any oversized student photos (>25KB)
+// Background sanitizer to auto-compress any oversized student photos (>18KB)
 export async function sanitizeAndCompressStudentPhotos(students: Student[]): Promise<Student[]> {
   let hasChanges = false;
   const updated = await Promise.all(
     students.map(async (std) => {
-      if (std.photoUrl && std.photoUrl.startsWith('data:image/') && std.photoUrl.length > 25000) {
+      if (std.photoUrl && std.photoUrl.startsWith('data:') && std.photoUrl.length > 18000) {
         try {
-          const compressed = await compressBase64Image(std.photoUrl, 240, 320, 0.70);
+          const compressed = await compressBase64Image(std.photoUrl, 200, 267, 0.65);
           if (compressed.length < std.photoUrl.length) {
             hasChanges = true;
             return { ...std, photoUrl: compressed };
@@ -268,32 +267,57 @@ export async function sanitizeAndCompressStudentPhotos(students: Student[]): Pro
 // Intelligent entity mergers to ensure no data is lost across multiple devices
 export function mergeStudentLists(local: Student[], cloud: Student[]): Student[] {
   const map = new Map<string, Student>();
+  
   // 1. Index cloud items
   cloud.forEach(s => {
     const key = (s.nisn && s.nisn.trim()) || (s.nis && s.nis.trim()) || s.id;
-    if (key) map.set(key, s);
+    if (key) map.set(key, { ...s });
   });
-  // 2. Merge local items (local takes priority if updated or new)
-  local.forEach(s => {
-    const key = (s.nisn && s.nisn.trim()) || (s.nis && s.nis.trim()) || s.id;
-    if (key) {
-      if (map.has(key)) {
-        const cloudItem = map.get(key)!;
-        // Check photo: If cloud has a custom photo (base64 or custom URL)
-        // and local has empty or default mock photo, retain the cloud photo!
-        let photoUrl = s.photoUrl || cloudItem.photoUrl;
-        const isCloudPhotoReal = cloudItem.photoUrl && (cloudItem.photoUrl.startsWith('data:image/') || !cloudItem.photoUrl.includes('unsplash.com'));
-        const isLocalPhotoDefault = !s.photoUrl || s.photoUrl.includes('unsplash.com');
-        if (isCloudPhotoReal && isLocalPhotoDefault) {
-          photoUrl = cloudItem.photoUrl;
-        }
 
-        map.set(key, { ...cloudItem, ...s, photoUrl });
-      } else {
-        map.set(key, s);
+  // 2. Merge local items
+  local.forEach(localItem => {
+    const key = (localItem.nisn && localItem.nisn.trim()) || (localItem.nis && localItem.nis.trim()) || localItem.id;
+    if (!key) return;
+
+    if (map.has(key)) {
+      const cloudItem = map.get(key)!;
+      
+      // Determine best photo:
+      // A photo is considered real/custom if it is not empty and not a generic unsplash placeholder
+      const isCloudRealPhoto = !!cloudItem.photoUrl && !cloudItem.photoUrl.includes('unsplash.com');
+      const isLocalRealPhoto = !!localItem.photoUrl && !localItem.photoUrl.includes('unsplash.com');
+      
+      let bestPhoto = cloudItem.photoUrl || localItem.photoUrl;
+      if (isCloudRealPhoto && !isLocalRealPhoto) {
+        bestPhoto = cloudItem.photoUrl;
+      } else if (!isCloudRealPhoto && isLocalRealPhoto) {
+        bestPhoto = localItem.photoUrl;
+      } else if (isCloudRealPhoto && isLocalRealPhoto) {
+        // If both have custom photos, cloud takes precedence (synced across devices) unless local is longer/valid
+        bestPhoto = cloudItem.photoUrl || localItem.photoUrl;
       }
+
+      // Merge other properties gracefully
+      const merged: Student = {
+        ...localItem,
+        ...cloudItem,
+        name: cloudItem.name || localItem.name,
+        className: cloudItem.className || localItem.className,
+        classId: cloudItem.classId || localItem.classId,
+        parentName: cloudItem.parentName || localItem.parentName,
+        parentPhone: cloudItem.parentPhone || localItem.parentPhone,
+        address: cloudItem.address || localItem.address,
+        birthPlaceDate: cloudItem.birthPlaceDate || localItem.birthPlaceDate,
+        qrCode: cloudItem.qrCode || localItem.qrCode || `STUDENT-${localItem.nisn}`,
+        photoUrl: bestPhoto,
+      };
+
+      map.set(key, merged);
+    } else {
+      map.set(key, { ...localItem });
     }
   });
+
   return Array.from(map.values());
 }
 
@@ -311,6 +335,91 @@ export function mergeTeacherLists(local: Teacher[], cloud: Teacher[]): Teacher[]
   return Array.from(map.values());
 }
 
+/**
+ * Synchronizes Homeroom Teacher (Wali Kelas) data between School Classes and Teachers.
+ * Ensures that teacher duties and homeroom class assignments match the real data from Kelola Kelas.
+ */
+export function reconcileTeachersAndClasses(
+  teachers: Teacher[],
+  classes: SchoolClass[]
+): { updatedTeachers: Teacher[]; updatedClasses: SchoolClass[]; teachersChanged: boolean; classesChanged: boolean } {
+  let teachersChanged = false;
+  let classesChanged = false;
+
+  const classesCopy: SchoolClass[] = classes.map(c => ({ ...c }));
+  
+  // Index classes by id and by homeroomTeacher name
+  const classByIdMap = new Map<string, SchoolClass>();
+  const classByTeacherNameMap = new Map<string, SchoolClass>();
+
+  classesCopy.forEach(c => {
+    classByIdMap.set(c.id, c);
+    if (c.homeroomTeacher && c.homeroomTeacher.trim() && c.homeroomTeacher !== 'Belum Ditentukan') {
+      classByTeacherNameMap.set(c.homeroomTeacher.trim().toLowerCase(), c);
+    }
+  });
+
+  const updatedTeachers: Teacher[] = teachers.map(teacher => {
+    const teacherNameKey = (teacher.name || '').trim().toLowerCase();
+    const assignedClass = classByTeacherNameMap.get(teacherNameKey);
+
+    if (assignedClass) {
+      // Teacher is assigned as homeroom teacher in assignedClass
+      const newClassId = assignedClass.id;
+      const newClassName = assignedClass.name;
+      const newDuty = (teacher.additionalDuty && teacher.additionalDuty !== 'TIDAK_ADA' && teacher.additionalDuty !== 'WALI_KELAS')
+        ? teacher.additionalDuty
+        : 'WALI_KELAS';
+
+      if (
+        teacher.homeroomClassId !== newClassId ||
+        teacher.homeroomClassName !== newClassName ||
+        (teacher.additionalDuty !== 'WALI_KELAS' && teacher.additionalDuty !== 'WAKIL_KEPALA_SEKOLAH')
+      ) {
+        teachersChanged = true;
+        return {
+          ...teacher,
+          additionalDuty: newDuty,
+          homeroomClassId: newClassId,
+          homeroomClassName: newClassName,
+        };
+      }
+      return teacher;
+    } else {
+      // Teacher is not named in class.homeroomTeacher
+      // Check if teacher has a valid homeroomClassId pointing to a class that has 'Belum Ditentukan'
+      if (teacher.homeroomClassId && classByIdMap.has(teacher.homeroomClassId)) {
+        const targetClass = classByIdMap.get(teacher.homeroomClassId)!;
+        if (!targetClass.homeroomTeacher || targetClass.homeroomTeacher === 'Belum Ditentukan') {
+          targetClass.homeroomTeacher = teacher.name;
+          classesChanged = true;
+          classByTeacherNameMap.set(teacherNameKey, targetClass);
+          return teacher;
+        }
+      }
+
+      // If teacher was marked as WALI_KELAS or still has homeroomClassId but no class assigned, clean up
+      if (teacher.additionalDuty === 'WALI_KELAS' || teacher.homeroomClassId || teacher.homeroomClassName) {
+        teachersChanged = true;
+        return {
+          ...teacher,
+          additionalDuty: teacher.additionalDuty === 'WALI_KELAS' ? 'TIDAK_ADA' : teacher.additionalDuty,
+          homeroomClassId: undefined,
+          homeroomClassName: undefined,
+        };
+      }
+      return teacher;
+    }
+  });
+
+  return {
+    updatedTeachers,
+    updatedClasses: classesCopy,
+    teachersChanged,
+    classesChanged
+  };
+}
+
 export function mergeAttendanceLists(local: AttendanceRecord[], cloud: AttendanceRecord[]): AttendanceRecord[] {
   const map = new Map<string, AttendanceRecord>();
   cloud.forEach(a => map.set(`${a.studentId}_${a.date}`, a));
@@ -325,13 +434,56 @@ export function mergeGenericListsById<T extends { id: string }>(local: T[], clou
   return Array.from(map.values());
 }
 
+// Merge SchoolProfile ensuring all subjects from both devices are preserved (union)
+export function mergeSchoolProfile(local: SchoolProfile, cloud: SchoolProfile): SchoolProfile {
+  const subjectsSet = new Set<string>();
+
+  // Collect subjects from cloud
+  if (cloud.subjects && Array.isArray(cloud.subjects)) {
+    cloud.subjects.forEach(s => {
+      if (s && typeof s === 'string' && s.trim()) {
+        subjectsSet.add(s.trim());
+      }
+    });
+  }
+
+  // Collect subjects from local
+  if (local.subjects && Array.isArray(local.subjects)) {
+    local.subjects.forEach(s => {
+      if (s && typeof s === 'string' && s.trim()) {
+        subjectsSet.add(s.trim());
+      }
+    });
+  }
+
+  // Default fallback if no subjects exist
+  if (subjectsSet.size === 0) {
+    (INITIAL_SCHOOL_PROFILE.subjects || ['Matematika', 'Bahasa Indonesia', 'Bahasa Inggris', 'IPA', 'IPS', 'Pendidikan Agama', 'PJOK', 'Seni Budaya', 'Informatika', 'PPKn']).forEach(s => subjectsSet.add(s));
+  }
+
+  const mergedSubjects = Array.from(subjectsSet);
+
+  return {
+    ...INITIAL_SCHOOL_PROFILE,
+    ...local,
+    ...cloud,
+    subjects: mergedSubjects,
+    holidays: (cloud.holidays && Array.isArray(cloud.holidays) && cloud.holidays.length > 0) ? cloud.holidays : (local.holidays || []),
+    activeDays: (cloud.activeDays && Array.isArray(cloud.activeDays) && cloud.activeDays.length > 0) ? cloud.activeDays : (local.activeDays || ['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu']),
+    startTime: cloud.startTime || local.startTime || INITIAL_SCHOOL_PROFILE.startTime,
+    endTime: cloud.endTime || local.endTime || INITIAL_SCHOOL_PROFILE.endTime,
+    autoAlpaTime: cloud.autoAlpaTime || local.autoAlpaTime || INITIAL_SCHOOL_PROFILE.autoAlpaTime,
+    lateToleranceMinutes: typeof cloud.lateToleranceMinutes === 'number' ? cloud.lateToleranceMinutes : (typeof local.lateToleranceMinutes === 'number' ? local.lateToleranceMinutes : (INITIAL_SCHOOL_PROFILE.lateToleranceMinutes ?? 15)),
+  };
+}
+
 // Comprehensive multi-device smart synchronization
 export async function smartSyncAndMergeAllWithCloud(): Promise<{ success: boolean; studentCount: number; message: string }> {
   try {
     setCloudSyncStatus('syncing');
     const { getDoc } = await import('./firebase');
 
-    // 0. Sync School Profile (Jam Masuk, Jam Pulang, Batas Alpa, dll)
+    // 0. Sync School Profile (Jam Masuk, Jam Pulang, Batas Alpa, Mata Pelajaran, dll)
     try {
       const profileDocRef = doc(db, 'sihadir_app_data', KEYS.PROFILE);
       const profileSnap = await getDoc(profileDocRef);
@@ -342,19 +494,17 @@ export async function smartSyncAndMergeAllWithCloud(): Promise<{ success: boolea
         const cloudProfileData = typeof profileSnap.data().data === 'string' ? JSON.parse(profileSnap.data().data) : profileSnap.data().data;
         const cloudUpdatedAt = Number(profileSnap.data().updatedAt) || 0;
         
-        if (cloudUpdatedAt >= localUpdatedAt) {
-          const mergedProfile = { ...currentLocalProfile, ...cloudProfileData };
-          if (cloudProfileData.subjects && Array.isArray(cloudProfileData.subjects) && cloudProfileData.subjects.length > 0) {
-            mergedProfile.subjects = cloudProfileData.subjects;
-          }
-          localStorage.setItem(KEYS.PROFILE, JSON.stringify(mergedProfile));
-          localStorage.setItem(KEYS.PROFILE + '_updatedAt', String(cloudUpdatedAt || Date.now()));
-        } else {
-          await setDoc(profileDocRef, {
-            data: JSON.stringify(currentLocalProfile),
-            updatedAt: localUpdatedAt || Date.now(),
-          });
-        }
+        const mergedProfile = mergeSchoolProfile(currentLocalProfile, cloudProfileData);
+        const finalTimestamp = Math.max(cloudUpdatedAt, localUpdatedAt, Date.now());
+
+        localStorage.setItem(KEYS.PROFILE, JSON.stringify(mergedProfile));
+        localStorage.setItem(KEYS.PROFILE + '_updatedAt', String(finalTimestamp));
+        
+        // Save merged profile back to Firestore so all devices receive the union of subjects
+        await setDoc(profileDocRef, {
+          data: JSON.stringify(mergedProfile),
+          updatedAt: finalTimestamp,
+        });
       } else {
         await setDoc(profileDocRef, {
           data: JSON.stringify(currentLocalProfile),
@@ -397,11 +547,6 @@ export async function smartSyncAndMergeAllWithCloud(): Promise<{ success: boolea
       } catch {}
     }
     const mergedClasses = mergeClassLists(currentLocalClasses, cloudClasses);
-    localStorage.setItem(KEYS.CLASSES, JSON.stringify(mergedClasses));
-    await setDoc(classDocRef, {
-      data: JSON.stringify(mergedClasses),
-      updatedAt: Date.now(),
-    });
 
     // 3. Sync Teachers
     const teacherDocRef = doc(db, 'sihadir_app_data', KEYS.TEACHERS);
@@ -414,9 +559,21 @@ export async function smartSyncAndMergeAllWithCloud(): Promise<{ success: boolea
       } catch {}
     }
     const mergedTeachers = mergeTeacherLists(currentLocalTeachers, cloudTeachers);
-    localStorage.setItem(KEYS.TEACHERS, JSON.stringify(mergedTeachers));
+
+    // Reconcile Wali Kelas data between teachers and classes
+    const reconciled = reconcileTeachersAndClasses(mergedTeachers, mergedClasses);
+    const finalClasses = reconciled.updatedClasses;
+    const finalTeachers = reconciled.updatedTeachers;
+
+    localStorage.setItem(KEYS.CLASSES, JSON.stringify(finalClasses));
+    await setDoc(classDocRef, {
+      data: JSON.stringify(finalClasses),
+      updatedAt: Date.now(),
+    });
+
+    localStorage.setItem(KEYS.TEACHERS, JSON.stringify(finalTeachers));
     await setDoc(teacherDocRef, {
-      data: JSON.stringify(mergedTeachers),
+      data: JSON.stringify(finalTeachers),
       updatedAt: Date.now(),
     });
 
@@ -552,7 +709,39 @@ export async function forceDownloadAllFromCloud(): Promise<{ success: boolean; e
       if (snap.exists()) {
         const payload = snap.data();
         if (payload && payload.data) {
-          localStorage.setItem(key, payload.data);
+          if (key === KEYS.PROFILE) {
+            try {
+              const cloudP = typeof payload.data === 'string' ? JSON.parse(payload.data) : payload.data;
+              const localP = getSchoolProfile();
+              const mergedP = mergeSchoolProfile(localP, cloudP);
+              const mergedStr = JSON.stringify(mergedP);
+              localStorage.setItem(key, mergedStr);
+              localStorage.setItem(key + '_updatedAt', String(payload.updatedAt || Date.now()));
+            } catch {
+              localStorage.setItem(key, payload.data);
+              localStorage.setItem(key + '_updatedAt', String(payload.updatedAt || Date.now()));
+            }
+          } else if (key === KEYS.STUDENTS) {
+            try {
+              const cloudStudents = typeof payload.data === 'string' ? JSON.parse(payload.data) : payload.data;
+              if (Array.isArray(cloudStudents)) {
+                const localStudents = getStudents();
+                const mergedStudents = mergeStudentLists(localStudents, cloudStudents);
+                const mergedStr = JSON.stringify(mergedStudents);
+                localStorage.setItem(key, mergedStr);
+                localStorage.setItem(key + '_updatedAt', String(payload.updatedAt || Date.now()));
+              } else {
+                localStorage.setItem(key, payload.data);
+                localStorage.setItem(key + '_updatedAt', String(payload.updatedAt || Date.now()));
+              }
+            } catch {
+              localStorage.setItem(key, payload.data);
+              localStorage.setItem(key + '_updatedAt', String(payload.updatedAt || Date.now()));
+            }
+          } else {
+            localStorage.setItem(key, payload.data);
+            localStorage.setItem(key + '_updatedAt', String(payload.updatedAt || Date.now()));
+          }
           updatedCount++;
         }
       }
@@ -604,7 +793,47 @@ export function initFirestoreRealtimeSync() {
             const cloudUpdatedAt = Number(payload.updatedAt) || 0;
             const localUpdatedAt = Number(localStorage.getItem(key + '_updatedAt') || '0');
             const currentLocalStr = localStorage.getItem(key);
-            const finalDataToSave = typeof payload.data === 'string' ? payload.data : JSON.stringify(payload.data);
+            let finalDataToSave = typeof payload.data === 'string' ? payload.data : JSON.stringify(payload.data);
+
+            // SPECIAL PROFILE MERGING:
+            // For school profile, always merge subjects so new subjects added on other devices are immediately visible!
+            if (key === KEYS.PROFILE) {
+              try {
+                const cloudProfile = typeof payload.data === 'string' ? JSON.parse(payload.data) : payload.data;
+                const localProfile = getSchoolProfile();
+                const mergedProfile = mergeSchoolProfile(localProfile, cloudProfile);
+                finalDataToSave = JSON.stringify(mergedProfile);
+                lastSavedStringCache[key] = finalDataToSave;
+                localStorage.setItem(key, finalDataToSave);
+                localStorage.setItem(key + '_updatedAt', String(Math.max(cloudUpdatedAt, localUpdatedAt, Date.now())));
+                notifyStorageUpdated();
+                setCloudSyncStatus('connected');
+                return;
+              } catch (e) {
+                console.warn('[Firestore Sync] Error merging school profile:', e);
+              }
+            }
+
+            // SPECIAL STUDENTS MERGING:
+            // Always smartly merge student list so photos captured on other devices appear instantly without being overwritten!
+            if (key === KEYS.STUDENTS) {
+              try {
+                const cloudStudents = typeof payload.data === 'string' ? JSON.parse(payload.data) : payload.data;
+                if (Array.isArray(cloudStudents)) {
+                  const localStudents = getStudents();
+                  const mergedStudents = mergeStudentLists(localStudents, cloudStudents);
+                  finalDataToSave = JSON.stringify(mergedStudents);
+                  lastSavedStringCache[key] = finalDataToSave;
+                  localStorage.setItem(key, finalDataToSave);
+                  localStorage.setItem(key + '_updatedAt', String(Math.max(cloudUpdatedAt, localUpdatedAt, Date.now())));
+                  notifyStorageUpdated();
+                  setCloudSyncStatus('connected');
+                  return;
+                }
+              } catch (e) {
+                console.warn('[Firestore Sync] Error merging student data:', e);
+              }
+            }
 
             // CRITICAL TIMESTAMP CHECK:
             // If local changes were made more recently than cloud snapshot (e.g. user deleted students, or edited records locally,
@@ -643,11 +872,11 @@ export function initFirestoreRealtimeSync() {
     }
   });
 
-  // Startup repair check: if any student photo was previously saved uncompressed (>25KB),
+  // Startup repair check: if any student photo was previously saved uncompressed (>18KB),
   // automatically compress it in the background and push clean data to Firestore.
   try {
     const existingStudents = getStudents();
-    const hasOversized = existingStudents.some(s => s.photoUrl?.startsWith('data:image/') && s.photoUrl.length > 25000);
+    const hasOversized = existingStudents.some(s => s.photoUrl?.startsWith('data:') && s.photoUrl.length > 18000);
     if (hasOversized) {
       sanitizeAndCompressStudentPhotos(existingStudents).then(optimized => {
         if (optimized !== existingStudents) {
@@ -676,6 +905,13 @@ export function getSchoolProfile(): SchoolProfile {
   }
   try {
     const parsed = JSON.parse(data);
+    const rawSubjects = (parsed.subjects && Array.isArray(parsed.subjects) && parsed.subjects.length > 0)
+      ? parsed.subjects
+      : (INITIAL_SCHOOL_PROFILE.subjects || ['Matematika', 'Bahasa Indonesia', 'Bahasa Inggris', 'IPA', 'IPS', 'Pendidikan Agama', 'PJOK', 'Seni Budaya', 'Informatika', 'PPKn']);
+    
+    // Clean, trim, and deduplicate
+    const cleanSubjects = Array.from(new Set(rawSubjects.map((s: any) => String(s).trim()).filter(Boolean)));
+
     return {
       ...INITIAL_SCHOOL_PROFILE,
       ...parsed,
@@ -685,7 +921,7 @@ export function getSchoolProfile(): SchoolProfile {
       lateToleranceMinutes: typeof parsed.lateToleranceMinutes === 'number' ? parsed.lateToleranceMinutes : (INITIAL_SCHOOL_PROFILE.lateToleranceMinutes ?? 15),
       activeDays: parsed.activeDays && Array.isArray(parsed.activeDays) && parsed.activeDays.length > 0 ? parsed.activeDays : (INITIAL_SCHOOL_PROFILE.activeDays || ['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu']),
       holidays: parsed.holidays && Array.isArray(parsed.holidays) ? parsed.holidays : (INITIAL_SCHOOL_PROFILE.holidays || []),
-      subjects: parsed.subjects && Array.isArray(parsed.subjects) && parsed.subjects.length > 0 ? parsed.subjects : (INITIAL_SCHOOL_PROFILE.subjects || ['Matematika', 'Bahasa Indonesia', 'Bahasa Inggris', 'IPA', 'IPS', 'Pendidikan Agama', 'PJOK', 'Seni Budaya', 'Informatika', 'PPKn'])
+      subjects: cleanSubjects.length > 0 ? cleanSubjects : ['Matematika', 'Bahasa Indonesia', 'Bahasa Inggris', 'IPA', 'IPS', 'Pendidikan Agama', 'PJOK', 'Seni Budaya', 'Informatika', 'PPKn']
     };
   } catch {
     return INITIAL_SCHOOL_PROFILE;
@@ -753,9 +989,9 @@ export function saveStudents(students: Student[], instant: boolean = false): voi
   notifyStorageUpdated();
   syncToCloud(KEYS.STUDENTS, students, instant || students.length === 0, now);
 
-  // Background auto-optimization: if any student has an oversized photo (>25KB Base64),
+  // Background auto-optimization: if any student has an oversized photo (>18KB Base64),
   // automatically compress it and update Firestore so cross-device sync never hits 1MB document limit.
-  const hasOversizedPhoto = students.some(s => s.photoUrl?.startsWith('data:image/') && s.photoUrl.length > 25000);
+  const hasOversizedPhoto = students.some(s => s.photoUrl?.startsWith('data:') && s.photoUrl.length > 18000);
   if (hasOversizedPhoto) {
     sanitizeAndCompressStudentPhotos(students).then(optimizedStudents => {
       if (optimizedStudents !== students) {

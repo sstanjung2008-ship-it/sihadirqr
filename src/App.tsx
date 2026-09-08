@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { 
   UserRole, 
   SchoolProfile, 
@@ -385,6 +385,47 @@ export default function App() {
     waLogs
   ]);
 
+  // Teacher WhatsApp Reminder Queue for 30s staggered delivery (to prevent spam/blocking)
+  const teacherReminderQueueRef = useRef<{
+    id: string;
+    phone: string;
+    message: string;
+    apiKey: string;
+    provider: string;
+  }[]>([]);
+  const isProcessingTeacherQueueRef = useRef<boolean>(false);
+  const queuedReminderIdsRef = useRef<Set<string>>(new Set());
+
+  const processTeacherReminderQueue = async () => {
+    if (isProcessingTeacherQueueRef.current) return;
+    isProcessingTeacherQueueRef.current = true;
+
+    while (teacherReminderQueueRef.current.length > 0) {
+      const item = teacherReminderQueueRef.current.shift();
+      if (item) {
+        try {
+          if (item.apiKey && item.apiKey.trim()) {
+            await sendWhatsAppGatewayMessage(
+              item.phone,
+              item.message,
+              item.apiKey,
+              item.provider || 'Fonnte'
+            );
+          }
+        } catch (err) {
+          console.error('[Staggered WA Sender] Error sending teacher reminder to', item.phone, err);
+        }
+
+        // If more items remain in the queue, wait exactly 30 seconds before sending the next reminder
+        if (teacherReminderQueueRef.current.length > 0) {
+          await new Promise(resolve => setTimeout(resolve, 30000));
+        }
+      }
+    }
+
+    isProcessingTeacherQueueRef.current = false;
+  };
+
   // Automatic WhatsApp Reminder for Teachers based on KBM Schedule
   useEffect(() => {
     // Check if feature is enabled in settings
@@ -424,7 +465,7 @@ export default function App() {
       if (todayPeriods.length === 0) return;
 
       const currentMinutes = now.getHours() * 60 + now.getMinutes();
-      const minutesBefore = schoolProfile.waTeacherReminderMinutesBefore || 0;
+      const minutesBefore = schoolProfile.waTeacherReminderMinutesBefore ?? 0;
 
       // Schedules for today
       const todaySchedules = schedules.filter(s => s.day === currentDayName);
@@ -451,9 +492,15 @@ export default function App() {
             // Unique log ID for today's reminder per slot
             const reminderLogId = `wa-teacher-kbm-${dateStr}-${slot.id || `${slot.classId}-${slot.periodNumber}-${slot.teacherId}`}`;
 
-            // Check if reminder was already sent today
-            const alreadySent = currentWaLogs.some(l => l.id === reminderLogId) || newWaLogs.some(l => l.id === reminderLogId);
+            // Check if reminder was already sent today or already in queue
+            const alreadySent = 
+              currentWaLogs.some(l => l.id === reminderLogId) || 
+              newWaLogs.some(l => l.id === reminderLogId) ||
+              queuedReminderIdsRef.current.has(reminderLogId);
             if (alreadySent) return;
+
+            // Mark as queued immediately to avoid duplicate dispatch on 25s check interval
+            queuedReminderIdsRef.current.add(reminderLogId);
 
             // Find teacher
             const teacher = teachers.find(t => t.id === slot.teacherId || t.name.toLowerCase() === (slot.teacherName || '').toLowerCase());
@@ -476,14 +523,16 @@ export default function App() {
               .replace(/\[Period\]/g, String(slot.periodNumber))
               .replace(/\[SchoolName\]/g, schoolProfile.name);
 
-            // Send via WhatsApp Gateway if configured & enabled
+            // Queue for staggered sending (every 30 seconds) via WhatsApp Gateway if configured & enabled
             if (schoolProfile.waApiKey && schoolProfile.waApiKey.trim() && schoolProfile.waGatewayEnabled !== false) {
-              sendWhatsAppGatewayMessage(
-                teacher.phone,
-                waMsg,
-                schoolProfile.waApiKey,
-                schoolProfile.waGatewayProvider || 'Fonnte'
-              );
+              teacherReminderQueueRef.current.push({
+                id: reminderLogId,
+                phone: teacher.phone,
+                message: waMsg,
+                apiKey: schoolProfile.waApiKey,
+                provider: schoolProfile.waGatewayProvider || 'Fonnte'
+              });
+              processTeacherReminderQueue();
             }
 
             const waLog: WhatsAppLog = {

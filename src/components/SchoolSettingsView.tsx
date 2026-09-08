@@ -2026,13 +2026,13 @@ export const SchoolSettingsView: React.FC<SchoolSettingsViewProps> = ({
                     onChange={(e) => setFormData({ ...formData, waTeacherReminderMinutesBefore: Number(e.target.value) })}
                     className="w-full bg-white border border-slate-300 text-slate-800 text-xs rounded-xl p-2.5 font-bold focus:ring-2 focus:ring-indigo-500 cursor-pointer shadow-xs"
                   >
-                    <option value={0}>Tepat saat jam JP dimulai (0 Menit)</option>
-                    <option value={5}>5 Menit sebelum jam JP dimulai</option>
-                    <option value={10}>10 Menit sebelum jam JP dimulai</option>
-                    <option value={15}>15 Menit sebelum jam JP dimulai</option>
+                    <option value={0}>Tepat jam dimulai</option>
+                    <option value={3}>3 menit sebelum jam dimulai</option>
+                    <option value={5}>5 menit sebelum jam dimulai</option>
+                    <option value={10}>10 menit sebelum jam dimulai</option>
                   </select>
                   <p className="text-[10px] text-slate-500 mt-1">
-                    Kapan notifikasi otomatis dikirimkan ke guru sebelum atau saat JP dimulai.
+                    Pesan pengingat dikirim bertahap tiap 30 detik ke nomor WA guru untuk mencegah pemblokiran.
                   </p>
                 </div>
 

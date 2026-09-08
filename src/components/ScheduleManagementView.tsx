@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { 
   SchoolProfile, 
   SchoolClass, 
@@ -77,9 +77,46 @@ export const ScheduleManagementView: React.FC<ScheduleManagementViewProps> = ({
   const defaultClassId = classes.length > 0 ? classes[0].id : '';
   const [selectedClassId, setSelectedClassId] = useState<string>(defaultClassId);
 
-  // Selected Teacher for Teacher View
-  const defaultTeacherId = teachers.length > 0 ? teachers[0].id : '';
+  // Match logged-in teacher based on userSession (by teacherId, NIP, username, or displayName)
+  const loggedInTeacher = useMemo(() => {
+    if (!userSession) return null;
+    if (userSession.teacherId) {
+      const found = teachers.find(t => t.id === userSession.teacherId);
+      if (found) return found;
+    }
+    if (userSession.nipOrNisn) {
+      const cleanNip = userSession.nipOrNisn.replace(/\s+/g, '').toLowerCase();
+      const found = teachers.find(t => t.nip && t.nip.replace(/\s+/g, '').toLowerCase() === cleanNip);
+      if (found) return found;
+    }
+    if (userSession.username) {
+      const cleanUser = userSession.username.replace(/\s+/g, '').toLowerCase();
+      const found = teachers.find(t => 
+        (t.nip && t.nip.replace(/\s+/g, '').toLowerCase() === cleanUser) ||
+        (t.name && t.name.toLowerCase() === cleanUser)
+      );
+      if (found) return found;
+    }
+    if (userSession.displayName) {
+      const cleanName = userSession.displayName.trim().toLowerCase();
+      const found = teachers.find(t => t.name.trim().toLowerCase() === cleanName);
+      if (found) return found;
+    }
+    return null;
+  }, [userSession, teachers]);
+
+  // Selected Teacher for Teacher View (Default automatically to logged-in teacher if available)
+  const defaultTeacherId = loggedInTeacher?.id || (teachers.length > 0 ? teachers[0].id : '');
   const [selectedTeacherId, setSelectedTeacherId] = useState<string>(defaultTeacherId);
+
+  // Keep selectedTeacherId synchronized when logged-in teacher or teachers list loads/changes
+  useEffect(() => {
+    if (loggedInTeacher?.id) {
+      setSelectedTeacherId(loggedInTeacher.id);
+    } else if (teachers.length > 0 && !selectedTeacherId) {
+      setSelectedTeacherId(teachers[0].id);
+    }
+  }, [loggedInTeacher?.id, teachers]);
 
   // Day tab in Period Settings: 'SEMUA' | 'Senin' | 'Selasa' | 'Rabu' | 'Kamis' | 'Jumat' | 'Sabtu'
   const [selectedPeriodDayTab, setSelectedPeriodDayTab] = useState<string>('SEMUA');
@@ -342,11 +379,16 @@ export const ScheduleManagementView: React.FC<ScheduleManagementViewProps> = ({
         durationJP: 1
       });
     } else {
+      const defaultTeacher = loggedInTeacher || teachers[0];
+      const defaultSubject = (defaultTeacher && defaultTeacher.subject1 && availableSubjects.includes(defaultTeacher.subject1))
+        ? defaultTeacher.subject1
+        : (availableSubjects[0] || 'Matematika');
+
       setEditingSlot({
         day,
         periodNumber: periodNumber,
-        subject: availableSubjects[0] || 'Matematika',
-        teacherId: teachers[0]?.id || '',
+        subject: defaultSubject,
+        teacherId: defaultTeacher?.id || '',
         room: `Ruang ${selectedClass.name}`,
         notes: '',
         durationJP: 1
@@ -1098,7 +1140,7 @@ export const ScheduleManagementView: React.FC<ScheduleManagementViewProps> = ({
               >
                 {teachers.map(t => (
                   <option key={t.id} value={t.id}>
-                    {t.name} {t.nip ? `(NIP: ${t.nip})` : ''} - {t.subject1}
+                    {t.name} {t.nip ? `(NIP: ${t.nip})` : ''} - {t.subject1} {loggedInTeacher?.id === t.id ? '⭐ (Akun Anda)' : ''}
                   </option>
                 ))}
               </select>
@@ -1577,7 +1619,7 @@ export const ScheduleManagementView: React.FC<ScheduleManagementViewProps> = ({
                   <option value="">-- Pilih Guru Pengajar --</option>
                   {teachers.map(t => (
                     <option key={t.id} value={t.id}>
-                      {t.name} {t.nip ? `(NIP: ${t.nip})` : ''} - {t.subject1}
+                      {t.name} {t.nip ? `(NIP: ${t.nip})` : ''} - {t.subject1} {loggedInTeacher?.id === t.id ? '⭐ (Akun Anda)' : ''}
                     </option>
                   ))}
                 </select>

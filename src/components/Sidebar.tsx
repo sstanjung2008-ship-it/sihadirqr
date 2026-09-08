@@ -104,7 +104,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
       return [
         { id: 'dashboard', label: 'Absensi Hari Ini', icon: UserCheck, desc: 'Dashboard presensi kelas' },
         { id: 'scanner', label: 'Scan QR Presensi', icon: ScanLine, desc: 'Scan QR manual siswa' },
-        { id: 'teacher_assistant', label: 'Asisten Guru (AI)', icon: Sparkles, desc: 'Buat Soal AI & Modul Ajar Word' },
         { id: 'schedule', label: 'Jadwal Pelajaran', icon: CalendarDays, desc: 'Jadwal KBM & jam mengajar' },
         { id: 'learning', label: 'Fitur Pembelajaran', icon: BookOpen, desc: 'Jurnal KBM & keaktifan siswa' },
         { id: 'character_points', label: 'Nilai Karakter', icon: Award, desc: 'Poin & bukti foto karakter' },
@@ -112,6 +111,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         { id: 'leaves', label: 'Persetujuan Izin', icon: MessageSquare, desc: 'Persetujuan wali murid', badge: unreadLeavesCount },
         { id: 'recap', label: 'Rekap Laporan', icon: FileText, desc: 'Ekspor laporan bulanan' },
         { id: 'chat', label: 'Fitur Chat Wali Murid', icon: MessageSquare, desc: 'Obrolan Wali Kelas, Humas & BK' },
+        { id: 'teacher_assistant', label: 'Asisten Guru (AI)', icon: Sparkles, desc: 'Buat Soal AI & Modul Ajar Word' },
         { id: 'account', label: 'Akun Guru', icon: UserCircle, desc: 'Identitas guru & ubah password' },
       ];
     }
@@ -120,7 +120,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
     return [
       { id: 'dashboard', label: 'Dasbor Presensi', icon: BarChart3, desc: 'Ringkasan & statistik utama' },
       { id: 'scanner', label: 'Pos Scan QR', icon: ScanLine, desc: 'Pemindai barcode/QR harian' },
-      { id: 'teacher_assistant', label: 'Asisten Guru (AI)', icon: Sparkles, desc: 'Generator Soal & Modul Ajar Word' },
       { id: 'schedule', label: 'Jadwal Pelajaran', icon: CalendarDays, desc: 'Sesi JP, guru & mapel per kelas' },
       { id: 'learning', label: 'Jurnal Pembelajaran', icon: BookOpen, desc: 'Rekap KBM & keaktifan kelas' },
       { id: 'character_input', label: 'Input Karakter Siswa', icon: Sparkles, desc: 'Master data & bobot karakter (+/-)' },
@@ -133,6 +132,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       { id: 'leaves', label: 'Permohonan Izin', icon: MessageSquare, desc: 'Verifikasi surat izin/sakit', badge: unreadLeavesCount },
       { id: 'recap', label: 'Rekap & Ekspor', icon: FileText, desc: 'Cetak laporan PDF/Excel' },
       { id: 'walogs', label: 'Log WhatsApp', icon: Bell, desc: 'Riwayat notifikasi WA' },
+      { id: 'teacher_assistant', label: 'Asisten Guru (AI)', icon: Sparkles, desc: 'Generator Soal & Modul Ajar Word' },
       { id: 'settings', label: 'Pengaturan Sekolah', icon: Settings, desc: 'Profil & jam operasional' },
     ];
 

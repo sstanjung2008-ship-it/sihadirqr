@@ -13,7 +13,7 @@ import {
   INITIAL_LESSON_PERIODS,
   INITIAL_CLASS_SCHEDULES
 } from '../data/mockData';
-import { db, doc, setDoc, onSnapshot } from './firebase';
+import { db, doc, setDoc, getDoc, onSnapshot } from './firebase';
 
 const KEYS = {
   PROFILE: 'sihadir_school_profile_v2',
@@ -54,7 +54,97 @@ const notifyStorageUpdated = () => {
   }, 0);
 };
 
-// Debounced and deduped push to Firestore to strictly respect Free Tier limits
+// Max chunk size per Firestore document: 450 KB (well below the 1MB Firestore threshold)
+const FIRESTORE_MAX_CHUNK_SIZE = 450 * 1024;
+
+export async function writeCloudDocument(key: string, dataStr: string, timestamp: number): Promise<void> {
+  const totalLength = dataStr.length;
+  if (totalLength <= FIRESTORE_MAX_CHUNK_SIZE) {
+    // Normal single document
+    const docRef = doc(db, 'sihadir_app_data', key);
+    await setDoc(docRef, {
+      data: dataStr,
+      updatedAt: timestamp,
+      isChunked: false,
+      totalChunks: 1,
+    });
+  } else {
+    // Multi-chunk document sharding
+    const numChunks = Math.ceil(totalLength / FIRESTORE_MAX_CHUNK_SIZE);
+    const chunks: string[] = [];
+    for (let i = 0; i < numChunks; i++) {
+      chunks.push(dataStr.slice(i * FIRESTORE_MAX_CHUNK_SIZE, (i + 1) * FIRESTORE_MAX_CHUNK_SIZE));
+    }
+
+    // Write chunks 1 to numChunks - 1 first
+    const chunkPromises = [];
+    for (let i = 1; i < numChunks; i++) {
+      const chunkDocRef = doc(db, 'sihadir_app_data', `${key}_chunk_${i}`);
+      chunkPromises.push(
+        setDoc(chunkDocRef, {
+          data: chunks[i],
+          updatedAt: timestamp,
+          chunkIndex: i,
+          parentKey: key,
+        })
+      );
+    }
+    await Promise.all(chunkPromises);
+
+    // Finally write the root document (chunk 0) which acts as the commit pointer
+    const rootDocRef = doc(db, 'sihadir_app_data', key);
+    await setDoc(rootDocRef, {
+      data: chunks[0],
+      updatedAt: timestamp,
+      isChunked: true,
+      totalChunks: numChunks,
+    });
+  }
+}
+
+export async function readCloudDocument(key: string): Promise<{ data: string; updatedAt: number } | null> {
+  try {
+    const rootDocRef = doc(db, 'sihadir_app_data', key);
+    const snap = await getDoc(rootDocRef);
+    if (!snap.exists()) return null;
+
+    const payload = snap.data();
+    if (!payload) return null;
+
+    const updatedAt = Number(payload.updatedAt) || 0;
+    const isChunked = !!payload.isChunked && Number(payload.totalChunks) > 1;
+
+    if (!isChunked) {
+      const dataStr = typeof payload.data === 'string' ? payload.data : JSON.stringify(payload.data || '');
+      return { data: dataStr, updatedAt };
+    }
+
+    // Assemble chunked documents
+    const totalChunks = Number(payload.totalChunks);
+    const chunkPromises: Promise<string>[] = [];
+
+    for (let i = 1; i < totalChunks; i++) {
+      const chunkDocRef = doc(db, 'sihadir_app_data', `${key}_chunk_${i}`);
+      chunkPromises.push(
+        getDoc(chunkDocRef).then((cSnap) => {
+          if (cSnap.exists() && cSnap.data()?.data) {
+            return String(cSnap.data().data);
+          }
+          return '';
+        }).catch(() => '')
+      );
+    }
+
+    const otherChunks = await Promise.all(chunkPromises);
+    const fullDataStr = (payload.data || '') + otherChunks.join('');
+    return { data: fullDataStr, updatedAt };
+  } catch (err) {
+    console.error(`[Firestore Sync] Error reading cloud document for ${key}:`, err);
+    return null;
+  }
+}
+
+// Debounced and deduped push to Firestore with Auto-Chunking support
 export function syncToCloud(key: string, data: any, instant: boolean = false, explicitTimestamp?: number) {
   if (typeof window === 'undefined') return;
 
@@ -73,12 +163,8 @@ export function syncToCloud(key: string, data: any, instant: boolean = false, ex
   const doWrite = async () => {
     try {
       setCloudSyncStatus('syncing');
-      const docRef = doc(db, 'sihadir_app_data', key);
       const timestamp = explicitTimestamp || Number(localStorage.getItem(key + '_updatedAt')) || Date.now();
-      await setDoc(docRef, { 
-        data: dataStr, 
-        updatedAt: timestamp 
-      });
+      await writeCloudDocument(key, dataStr, timestamp);
       lastSavedStringCache[key] = dataStr;
       setCloudSyncStatus('connected');
     } catch (err: any) {
@@ -481,18 +567,16 @@ export function mergeSchoolProfile(local: SchoolProfile, cloud: SchoolProfile): 
 export async function smartSyncAndMergeAllWithCloud(): Promise<{ success: boolean; studentCount: number; message: string }> {
   try {
     setCloudSyncStatus('syncing');
-    const { getDoc } = await import('./firebase');
 
     // 0. Sync School Profile (Jam Masuk, Jam Pulang, Batas Alpa, Mata Pelajaran, dll)
     try {
-      const profileDocRef = doc(db, 'sihadir_app_data', KEYS.PROFILE);
-      const profileSnap = await getDoc(profileDocRef);
+      const profileCloud = await readCloudDocument(KEYS.PROFILE);
       const currentLocalProfile = getSchoolProfile();
       const localUpdatedAt = Number(localStorage.getItem(KEYS.PROFILE + '_updatedAt') || '0');
 
-      if (profileSnap.exists() && profileSnap.data()?.data) {
-        const cloudProfileData = typeof profileSnap.data().data === 'string' ? JSON.parse(profileSnap.data().data) : profileSnap.data().data;
-        const cloudUpdatedAt = Number(profileSnap.data().updatedAt) || 0;
+      if (profileCloud && profileCloud.data) {
+        const cloudProfileData = typeof profileCloud.data === 'string' ? JSON.parse(profileCloud.data) : profileCloud.data;
+        const cloudUpdatedAt = profileCloud.updatedAt || 0;
         
         const mergedProfile = mergeSchoolProfile(currentLocalProfile, cloudProfileData);
         const finalTimestamp = Math.max(cloudUpdatedAt, localUpdatedAt, Date.now());
@@ -500,62 +584,56 @@ export async function smartSyncAndMergeAllWithCloud(): Promise<{ success: boolea
         localStorage.setItem(KEYS.PROFILE, JSON.stringify(mergedProfile));
         localStorage.setItem(KEYS.PROFILE + '_updatedAt', String(finalTimestamp));
         
-        // Save merged profile back to Firestore so all devices receive the union of subjects
-        await setDoc(profileDocRef, {
-          data: JSON.stringify(mergedProfile),
-          updatedAt: finalTimestamp,
-        });
+        // Save merged profile back to Firestore
+        await writeCloudDocument(KEYS.PROFILE, JSON.stringify(mergedProfile), finalTimestamp);
       } else {
-        await setDoc(profileDocRef, {
-          data: JSON.stringify(currentLocalProfile),
-          updatedAt: localUpdatedAt || Date.now(),
-        });
+        await writeCloudDocument(KEYS.PROFILE, JSON.stringify(currentLocalProfile), localUpdatedAt || Date.now());
       }
     } catch (e) {
       console.warn('Error syncing profile with cloud:', e);
     }
 
-    // 1. Sync Students
-    const studentDocRef = doc(db, 'sihadir_app_data', KEYS.STUDENTS);
-    const studentSnap = await getDoc(studentDocRef);
+    // 1. Sync Students with auto-compression and multi-chunk support
+    const studentCloud = await readCloudDocument(KEYS.STUDENTS);
     let currentLocalStudents = getStudents();
     let cloudStudents: Student[] = [];
 
-    if (studentSnap.exists() && studentSnap.data()?.data) {
+    if (studentCloud && studentCloud.data) {
       try {
-        cloudStudents = JSON.parse(studentSnap.data().data);
+        cloudStudents = JSON.parse(studentCloud.data);
       } catch (e) {
         console.warn('Error parsing cloud students:', e);
       }
     }
 
     const mergedStudents = mergeStudentLists(currentLocalStudents, cloudStudents);
-    localStorage.setItem(KEYS.STUDENTS, JSON.stringify(mergedStudents));
-    await setDoc(studentDocRef, {
-      data: JSON.stringify(mergedStudents),
-      updatedAt: Date.now(),
-    });
+    
+    // Auto-compress any student photo on save to keep it ultra lightweight
+    const optimizedStudents = await sanitizeAndCompressStudentPhotos(mergedStudents);
+    const studentsJsonStr = JSON.stringify(optimizedStudents);
+    
+    localStorage.setItem(KEYS.STUDENTS, studentsJsonStr);
+    localStorage.setItem(KEYS.STUDENTS + '_updatedAt', String(Date.now()));
+    await writeCloudDocument(KEYS.STUDENTS, studentsJsonStr, Date.now());
 
     // 2. Sync Classes
-    const classDocRef = doc(db, 'sihadir_app_data', KEYS.CLASSES);
-    const classSnap = await getDoc(classDocRef);
+    const classCloud = await readCloudDocument(KEYS.CLASSES);
     let currentLocalClasses = getSchoolClasses();
     let cloudClasses: SchoolClass[] = [];
-    if (classSnap.exists() && classSnap.data()?.data) {
+    if (classCloud && classCloud.data) {
       try {
-        cloudClasses = JSON.parse(classSnap.data().data);
+        cloudClasses = JSON.parse(classCloud.data);
       } catch {}
     }
     const mergedClasses = mergeClassLists(currentLocalClasses, cloudClasses);
 
     // 3. Sync Teachers
-    const teacherDocRef = doc(db, 'sihadir_app_data', KEYS.TEACHERS);
-    const teacherSnap = await getDoc(teacherDocRef);
+    const teacherCloud = await readCloudDocument(KEYS.TEACHERS);
     let currentLocalTeachers = getTeachers();
     let cloudTeachers: Teacher[] = [];
-    if (teacherSnap.exists() && teacherSnap.data()?.data) {
+    if (teacherCloud && teacherCloud.data) {
       try {
-        cloudTeachers = JSON.parse(teacherSnap.data().data);
+        cloudTeachers = JSON.parse(teacherCloud.data);
       } catch {}
     }
     const mergedTeachers = mergeTeacherLists(currentLocalTeachers, cloudTeachers);
@@ -566,51 +644,40 @@ export async function smartSyncAndMergeAllWithCloud(): Promise<{ success: boolea
     const finalTeachers = reconciled.updatedTeachers;
 
     localStorage.setItem(KEYS.CLASSES, JSON.stringify(finalClasses));
-    await setDoc(classDocRef, {
-      data: JSON.stringify(finalClasses),
-      updatedAt: Date.now(),
-    });
+    await writeCloudDocument(KEYS.CLASSES, JSON.stringify(finalClasses), Date.now());
 
     localStorage.setItem(KEYS.TEACHERS, JSON.stringify(finalTeachers));
-    await setDoc(teacherDocRef, {
-      data: JSON.stringify(finalTeachers),
-      updatedAt: Date.now(),
-    });
+    await writeCloudDocument(KEYS.TEACHERS, JSON.stringify(finalTeachers), Date.now());
 
     // 4. Sync Attendance Records
-    const attDocRef = doc(db, 'sihadir_app_data', KEYS.ATTENDANCE);
-    const attSnap = await getDoc(attDocRef);
+    const attCloud = await readCloudDocument(KEYS.ATTENDANCE);
     let currentLocalAtt = getAttendanceRecords();
     let cloudAtt: AttendanceRecord[] = [];
-    if (attSnap.exists() && attSnap.data()?.data) {
+    if (attCloud && attCloud.data) {
       try {
-        cloudAtt = JSON.parse(attSnap.data().data);
+        cloudAtt = JSON.parse(attCloud.data);
       } catch {}
     }
     const mergedAtt = mergeAttendanceLists(currentLocalAtt, cloudAtt);
     localStorage.setItem(KEYS.ATTENDANCE, JSON.stringify(mergedAtt));
-    await setDoc(attDocRef, {
-      data: JSON.stringify(mergedAtt),
-      updatedAt: Date.now(),
-    });
+    await writeCloudDocument(KEYS.ATTENDANCE, JSON.stringify(mergedAtt), Date.now());
 
     // 5. Sync Leave Requests, Journals, Traits, Logs, Grades
     const syncGeneric = async <T extends { id: string }>(
       key: string,
       getLocal: () => T[]
     ) => {
-      const dRef = doc(db, 'sihadir_app_data', key);
-      const snap = await getDoc(dRef);
+      const cDoc = await readCloudDocument(key);
       let localItems = getLocal();
       let cItems: T[] = [];
-      if (snap.exists() && snap.data()?.data) {
+      if (cDoc && cDoc.data) {
         try {
-          cItems = JSON.parse(snap.data().data);
+          cItems = JSON.parse(cDoc.data);
         } catch {}
       }
       const merged = mergeGenericListsById(localItems, cItems);
       localStorage.setItem(key, JSON.stringify(merged));
-      await setDoc(dRef, { data: JSON.stringify(merged), updatedAt: Date.now() });
+      await writeCloudDocument(key, JSON.stringify(merged), Date.now());
     };
 
     await syncGeneric(KEYS.LEAVES, getLeaveRequests);
@@ -626,8 +693,8 @@ export async function smartSyncAndMergeAllWithCloud(): Promise<{ success: boolea
 
     return {
       success: true,
-      studentCount: mergedStudents.length,
-      message: `Berhasil menyinkronkan! Total ${mergedStudents.length} siswa sekarang tersinkron di Cloud dan semua perangkat.`
+      studentCount: optimizedStudents.length,
+      message: `Berhasil menyinkronkan! Total ${optimizedStudents.length} siswa sekarang tersinkron di Cloud dan semua perangkat.`
     };
   } catch (err: any) {
     console.error('[Smart Sync Error]:', err);
@@ -664,11 +731,7 @@ export async function forceUploadAllToCloud(): Promise<{ success: boolean; error
     for (const key of ALL_KEYS) {
       const raw = localStorage.getItem(key);
       if (raw) {
-        const docRef = doc(db, 'sihadir_app_data', key);
-        await setDoc(docRef, {
-          data: raw,
-          updatedAt: Date.now(),
-        });
+        await writeCloudDocument(key, raw, Date.now());
       }
     }
     setCloudSyncStatus('connected');
@@ -684,7 +747,6 @@ export async function forceUploadAllToCloud(): Promise<{ success: boolean; error
 export async function forceDownloadAllFromCloud(): Promise<{ success: boolean; error?: string }> {
   try {
     setCloudSyncStatus('syncing');
-    const { getDoc } = await import('./firebase');
     const ALL_KEYS = [
       KEYS.PROFILE,
       KEYS.CLASSES,
@@ -704,46 +766,42 @@ export async function forceDownloadAllFromCloud(): Promise<{ success: boolean; e
 
     let updatedCount = 0;
     for (const key of ALL_KEYS) {
-      const docRef = doc(db, 'sihadir_app_data', key);
-      const snap = await getDoc(docRef);
-      if (snap.exists()) {
-        const payload = snap.data();
-        if (payload && payload.data) {
-          if (key === KEYS.PROFILE) {
-            try {
-              const cloudP = typeof payload.data === 'string' ? JSON.parse(payload.data) : payload.data;
-              const localP = getSchoolProfile();
-              const mergedP = mergeSchoolProfile(localP, cloudP);
-              const mergedStr = JSON.stringify(mergedP);
-              localStorage.setItem(key, mergedStr);
-              localStorage.setItem(key + '_updatedAt', String(payload.updatedAt || Date.now()));
-            } catch {
-              localStorage.setItem(key, payload.data);
-              localStorage.setItem(key + '_updatedAt', String(payload.updatedAt || Date.now()));
-            }
-          } else if (key === KEYS.STUDENTS) {
-            try {
-              const cloudStudents = typeof payload.data === 'string' ? JSON.parse(payload.data) : payload.data;
-              if (Array.isArray(cloudStudents)) {
-                const localStudents = getStudents();
-                const mergedStudents = mergeStudentLists(localStudents, cloudStudents);
-                const mergedStr = JSON.stringify(mergedStudents);
-                localStorage.setItem(key, mergedStr);
-                localStorage.setItem(key + '_updatedAt', String(payload.updatedAt || Date.now()));
-              } else {
-                localStorage.setItem(key, payload.data);
-                localStorage.setItem(key + '_updatedAt', String(payload.updatedAt || Date.now()));
-              }
-            } catch {
-              localStorage.setItem(key, payload.data);
-              localStorage.setItem(key + '_updatedAt', String(payload.updatedAt || Date.now()));
-            }
-          } else {
-            localStorage.setItem(key, payload.data);
-            localStorage.setItem(key + '_updatedAt', String(payload.updatedAt || Date.now()));
+      const cloudDoc = await readCloudDocument(key);
+      if (cloudDoc && cloudDoc.data) {
+        if (key === KEYS.PROFILE) {
+          try {
+            const cloudP = JSON.parse(cloudDoc.data);
+            const localP = getSchoolProfile();
+            const mergedP = mergeSchoolProfile(localP, cloudP);
+            const mergedStr = JSON.stringify(mergedP);
+            localStorage.setItem(key, mergedStr);
+            localStorage.setItem(key + '_updatedAt', String(cloudDoc.updatedAt || Date.now()));
+          } catch {
+            localStorage.setItem(key, cloudDoc.data);
+            localStorage.setItem(key + '_updatedAt', String(cloudDoc.updatedAt || Date.now()));
           }
-          updatedCount++;
+        } else if (key === KEYS.STUDENTS) {
+          try {
+            const cloudStudents = JSON.parse(cloudDoc.data);
+            if (Array.isArray(cloudStudents)) {
+              const localStudents = getStudents();
+              const mergedStudents = mergeStudentLists(localStudents, cloudStudents);
+              const mergedStr = JSON.stringify(mergedStudents);
+              localStorage.setItem(key, mergedStr);
+              localStorage.setItem(key + '_updatedAt', String(cloudDoc.updatedAt || Date.now()));
+            } else {
+              localStorage.setItem(key, cloudDoc.data);
+              localStorage.setItem(key + '_updatedAt', String(cloudDoc.updatedAt || Date.now()));
+            }
+          } catch {
+            localStorage.setItem(key, cloudDoc.data);
+            localStorage.setItem(key + '_updatedAt', String(cloudDoc.updatedAt || Date.now()));
+          }
+        } else {
+          localStorage.setItem(key, cloudDoc.data);
+          localStorage.setItem(key + '_updatedAt', String(cloudDoc.updatedAt || Date.now()));
         }
+        updatedCount++;
       }
     }
     if (updatedCount > 0) {
@@ -786,20 +844,40 @@ export function initFirestoreRealtimeSync() {
   SYNC_KEYS.forEach(({ key }) => {
     try {
       const docRef = doc(db, 'sihadir_app_data', key);
-      onSnapshot(docRef, (docSnap) => {
+      onSnapshot(docRef, async (docSnap) => {
         if (docSnap.exists()) {
           const payload = docSnap.data();
           if (payload && payload.data !== undefined) {
             const cloudUpdatedAt = Number(payload.updatedAt) || 0;
             const localUpdatedAt = Number(localStorage.getItem(key + '_updatedAt') || '0');
             const currentLocalStr = localStorage.getItem(key);
-            let finalDataToSave = typeof payload.data === 'string' ? payload.data : JSON.stringify(payload.data);
+            
+            let finalDataToSave = '';
+            if (payload.isChunked && Number(payload.totalChunks) > 1) {
+              const totalChunks = Number(payload.totalChunks);
+              const chunkPromises: Promise<string>[] = [];
+              for (let i = 1; i < totalChunks; i++) {
+                const chunkDocRef = doc(db, 'sihadir_app_data', `${key}_chunk_${i}`);
+                chunkPromises.push(
+                  getDoc(chunkDocRef).then((cSnap) => {
+                    if (cSnap.exists() && cSnap.data()?.data) {
+                      return String(cSnap.data().data);
+                    }
+                    return '';
+                  }).catch(() => '')
+                );
+              }
+              const otherChunks = await Promise.all(chunkPromises);
+              finalDataToSave = (payload.data || '') + otherChunks.join('');
+            } else {
+              finalDataToSave = typeof payload.data === 'string' ? payload.data : JSON.stringify(payload.data);
+            }
 
             // SPECIAL PROFILE MERGING:
             // For school profile, always merge subjects so new subjects added on other devices are immediately visible!
             if (key === KEYS.PROFILE) {
               try {
-                const cloudProfile = typeof payload.data === 'string' ? JSON.parse(payload.data) : payload.data;
+                const cloudProfile = typeof finalDataToSave === 'string' ? JSON.parse(finalDataToSave) : finalDataToSave;
                 const localProfile = getSchoolProfile();
                 const mergedProfile = mergeSchoolProfile(localProfile, cloudProfile);
                 finalDataToSave = JSON.stringify(mergedProfile);
@@ -818,7 +896,7 @@ export function initFirestoreRealtimeSync() {
             // Always smartly merge student list so photos captured on other devices appear instantly without being overwritten!
             if (key === KEYS.STUDENTS) {
               try {
-                const cloudStudents = typeof payload.data === 'string' ? JSON.parse(payload.data) : payload.data;
+                const cloudStudents = typeof finalDataToSave === 'string' ? JSON.parse(finalDataToSave) : finalDataToSave;
                 if (Array.isArray(cloudStudents)) {
                   const localStudents = getStudents();
                   const mergedStudents = mergeStudentLists(localStudents, cloudStudents);
@@ -836,8 +914,6 @@ export function initFirestoreRealtimeSync() {
             }
 
             // CRITICAL TIMESTAMP CHECK:
-            // If local changes were made more recently than cloud snapshot (e.g. user deleted students, or edited records locally,
-            // while Firestore write failed or quota was exceeded), NEVER overwrite local data with stale cloud data!
             if (currentLocalStr !== null && localUpdatedAt > 0) {
               if (cloudUpdatedAt > 0 && cloudUpdatedAt < localUpdatedAt) {
                 console.log(`[Firestore Sync] Data lokal untuk ${key} lebih baru (${localUpdatedAt} > ${cloudUpdatedAt}). Mengabaikan snapshot lama dari Cloud.`);

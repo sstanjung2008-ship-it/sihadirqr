@@ -77,7 +77,76 @@ import { LoginView } from './components/LoginView';
 export default function App() {
   const [userSession, setUserSessionState] = useState<UserSession | null>(() => getUserSession());
   const [currentRole, setCurrentRole] = useState<UserRole>(userSession?.role || 'ADMIN');
-  const [activeTab, setActiveTab] = useState<string>('dashboard');
+  const [activeTab, setActiveTab] = useState<string>(() => {
+    if (window.history.state && window.history.state.tab) {
+      return window.history.state.tab;
+    }
+    return userSession?.role === 'SCANNER_POS' ? 'scanner' : 'dashboard';
+  });
+
+  // Track tab changes in browser history for Hardware Back Button & Browser Back Button support
+  const handleTabChange = (tabId: string, replace: boolean = false) => {
+    setActiveTab(tabId);
+    if (replace) {
+      window.history.replaceState({ tab: tabId, role: currentRole }, '', `#${tabId}`);
+    } else {
+      // Only push new history entry if different from current history state
+      if (window.history.state?.tab !== tabId) {
+        window.history.pushState({ tab: tabId, role: currentRole }, '', `#${tabId}`);
+      }
+    }
+  };
+
+  // Hardware/Device & Browser Back Button Handler (popstate)
+  useEffect(() => {
+    // Initialize initial state if empty
+    if (!window.history.state || !window.history.state.tab) {
+      window.history.replaceState(
+        { tab: activeTab, role: currentRole },
+        '',
+        `#${activeTab}`
+      );
+    }
+
+    const handlePopState = (event: PopStateEvent) => {
+      // 1. Check if any open modal / full-screen overlay exists and close it first
+      const closeButtons = document.querySelectorAll<HTMLButtonElement>(
+        '[data-modal-close="true"], .modal-close-btn, [aria-label="Close modal"], [aria-label="Tutup"]'
+      );
+      if (closeButtons.length > 0) {
+        const topCloseBtn = closeButtons[closeButtons.length - 1];
+        if (topCloseBtn && typeof topCloseBtn.click === 'function') {
+          topCloseBtn.click();
+          // Keep history balanced
+          window.history.pushState({ tab: activeTab, role: currentRole }, '', `#${activeTab}`);
+          return;
+        }
+      }
+
+      // 2. Navigate back to previous tab
+      if (event.state && event.state.tab) {
+        setActiveTab(event.state.tab);
+        if (event.state.role && event.state.role !== currentRole) {
+          setCurrentRole(event.state.role);
+        }
+      } else {
+        // Default to home / dashboard instead of letting the browser exit the app
+        const defaultTab = currentRole === 'SCANNER_POS' ? 'scanner' : 'dashboard';
+        if (activeTab !== defaultTab) {
+          setActiveTab(defaultTab);
+          window.history.replaceState({ tab: defaultTab, role: currentRole }, '', `#${defaultTab}`);
+        } else {
+          // If already at default tab, re-push state to prevent accidental app exit on mobile WebView/PWA
+          window.history.pushState({ tab: defaultTab, role: currentRole }, '', `#${defaultTab}`);
+        }
+      }
+    };
+
+    window.addEventListener('popstate', handlePopState);
+    return () => {
+      window.removeEventListener('popstate', handlePopState);
+    };
+  }, [activeTab, currentRole]);
 
   // Core Data States
   const [schoolProfile, setSchoolProfileState] = useState<SchoolProfile>(getSchoolProfile());
@@ -592,11 +661,8 @@ export default function App() {
       setUserSessionState(updatedSession);
       saveUserSession(updatedSession);
     }
-    if (role === 'SCANNER_POS') {
-      setActiveTab('scanner');
-    } else {
-      setActiveTab('dashboard');
-    }
+    const targetTab = role === 'SCANNER_POS' ? 'scanner' : 'dashboard';
+    handleTabChange(targetTab);
   };
 
   const handleLoginSuccess = (session: UserSession) => {
@@ -606,11 +672,8 @@ export default function App() {
     if (session.role === 'PARENT' && session.studentId) {
       setSelectedChildId(session.studentId);
     }
-    if (session.role === 'SCANNER_POS') {
-      setActiveTab('scanner');
-    } else {
-      setActiveTab('dashboard');
-    }
+    const targetTab = session.role === 'SCANNER_POS' ? 'scanner' : 'dashboard';
+    handleTabChange(targetTab, true);
   };
 
   const handleLogout = () => {
@@ -1023,7 +1086,7 @@ export default function App() {
         currentRole={currentRole}
         onRoleChange={handleRoleChange}
         activeTab={activeTab}
-        onTabChange={setActiveTab}
+        onTabChange={handleTabChange}
         schoolProfile={schoolProfile}
         unreadLeavesCount={unreadLeavesCount}
         userSession={userSession}
@@ -1251,7 +1314,7 @@ export default function App() {
               schoolProfile={schoolProfile}
               userRole={currentRole}
               userSession={userSession}
-              onNavigateToMasterInput={() => setActiveTab('character_input')}
+              onNavigateToMasterInput={() => handleTabChange('character_input')}
             />
           )}
 

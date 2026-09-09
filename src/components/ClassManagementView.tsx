@@ -66,6 +66,11 @@ export const ClassManagementView: React.FC<ClassManagementViewProps> = ({
   const [editingClass, setEditingClass] = useState<SchoolClass | null>(null);
   const [classToDelete, setClassToDelete] = useState<SchoolClass | null>(null);
 
+  // Teachers sorted alphabetically ascending by name (A-Z)
+  const sortedTeachers = useMemo(() => {
+    return [...teachers].sort((a, b) => (a.name || '').localeCompare(b.name || '', 'id', { sensitivity: 'base' }));
+  }, [teachers]);
+
   // Class Selection for Detail / Recap View
   const [selectedClassForRecap, setSelectedClassForRecap] = useState<SchoolClass | null>(null);
   const [recapSubTab, setRecapSubTab] = useState<'REKAP_PRESENSI' | 'REKAP_KARAKTER' | 'PER_SISWA' | 'JURNAL_KBM'>('REKAP_PRESENSI');
@@ -2280,7 +2285,7 @@ export const ClassManagementView: React.FC<ClassManagementViewProps> = ({
                   className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer"
                 >
                   <option value="Belum Ditentukan">Belum Ditentukan</option>
-                  {teachers.map((t) => (
+                  {sortedTeachers.map((t) => (
                     <option key={t.id} value={t.name}>
                       {t.name} ({t.additionalDuty || 'Guru Mapel'})
                     </option>

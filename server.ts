@@ -1054,9 +1054,25 @@ async function startServer() {
     });
   }
 
-  app.listen(PORT, "0.0.0.0", () => {
+  const server = app.listen(PORT, "0.0.0.0", () => {
     console.log(`[SiHadir QR Server] Listening on http://0.0.0.0:${PORT}`);
   });
+
+  const handleShutdown = (signal: string) => {
+    console.log(`[SiHadir QR Server] Received ${signal}, closing server gracefully...`);
+    server.close(() => {
+      console.log("[SiHadir QR Server] Closed remaining connections.");
+      process.exit(0);
+    });
+    // Force close after 5 seconds if connections linger
+    setTimeout(() => {
+      console.error("[SiHadir QR Server] Force shutdown timeout reached.");
+      process.exit(0);
+    }, 5000);
+  };
+
+  process.on("SIGTERM", () => handleShutdown("SIGTERM"));
+  process.on("SIGINT", () => handleShutdown("SIGINT"));
 }
 
 startServer();

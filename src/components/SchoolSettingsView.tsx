@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { SchoolProfile, Teacher, Student, SchoolHoliday } from '../types';
 import { Settings, Save, School, Clock, MessageSquare, RotateCcw, CreditCard, CheckCircle2, Upload, Image as ImageIcon, Link, BookOpen, Plus, X, KeyRound, Lock, Eye, EyeOff, User, GraduationCap, Search, Check, RefreshCw, Users, ShieldAlert, Send, Smartphone, ShieldCheck, Zap, AlertCircle, Calendar, Trash2, Edit3, Tag, Flag, AlertTriangle, Sparkles, Filter, Cloud, CloudDownload, CloudUpload, FileJson, Download } from 'lucide-react';
 import { resetToDefaultData, forceUploadAllToCloud, forceDownloadAllFromCloud, getCloudSyncStatus, CloudSyncStatus, downloadDatabaseBackupFile } from '../lib/storage';
@@ -31,6 +31,11 @@ export const SchoolSettingsView: React.FC<SchoolSettingsViewProps> = ({
   const [showResetModal, setShowResetModal] = useState(false);
   const [confirmBatchTeacherModal, setConfirmBatchTeacherModal] = useState(false);
   const [confirmBatchStudentModal, setConfirmBatchStudentModal] = useState(false);
+
+  // Teachers sorted alphabetically ascending by name (A-Z)
+  const sortedTeachers = useMemo(() => {
+    return [...teachers].sort((a, b) => (a.name || '').localeCompare(b.name || '', 'id', { sensitivity: 'base' }));
+  }, [teachers]);
 
   // Cloud Database Sync State
   const [cloudStatus, setCloudStatus] = useState<CloudSyncStatus>(() => getCloudSyncStatus());
@@ -2094,7 +2099,7 @@ export const SchoolSettingsView: React.FC<SchoolSettingsViewProps> = ({
                       className="w-full bg-slate-50 border border-slate-200 text-slate-800 rounded-xl px-3 py-2 text-xs font-bold focus:ring-2 focus:ring-indigo-500 cursor-pointer"
                     >
                       <option value="">-- Pilih Guru Tujuan Uji Coba --</option>
-                      {teachers.map(t => (
+                      {sortedTeachers.map(t => (
                         <option key={t.id} value={t.id}>
                           {t.name} ({t.subject1}) - {t.phone || 'No WA belum ada'}
                         </option>
@@ -2404,7 +2409,7 @@ export const SchoolSettingsView: React.FC<SchoolSettingsViewProps> = ({
                     className="w-full bg-slate-50 border border-slate-200 text-slate-800 rounded-xl p-2.5 font-medium focus:ring-2 focus:ring-indigo-500 cursor-pointer"
                   >
                     <option value="">-- Pilih Guru / No. HP --</option>
-                    {teachers.map(t => (
+                    {sortedTeachers.map(t => (
                       <option key={t.id} value={t.id}>
                         {t.name} (WA: {t.phone || '-'} | NIP: {t.nip}) {t.password ? '🔑 [Custom Password]' : '🔒 [Default: 123456]'}
                       </option>

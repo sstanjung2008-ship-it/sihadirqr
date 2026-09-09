@@ -105,18 +105,23 @@ export const ScheduleManagementView: React.FC<ScheduleManagementViewProps> = ({
     return null;
   }, [userSession, teachers]);
 
+  // Teachers sorted alphabetically ascending by name (A-Z)
+  const sortedTeachers = useMemo(() => {
+    return [...teachers].sort((a, b) => (a.name || '').localeCompare(b.name || '', 'id', { sensitivity: 'base' }));
+  }, [teachers]);
+
   // Selected Teacher for Teacher View (Default automatically to logged-in teacher if available)
-  const defaultTeacherId = loggedInTeacher?.id || (teachers.length > 0 ? teachers[0].id : '');
+  const defaultTeacherId = loggedInTeacher?.id || (sortedTeachers.length > 0 ? sortedTeachers[0].id : '');
   const [selectedTeacherId, setSelectedTeacherId] = useState<string>(defaultTeacherId);
 
   // Keep selectedTeacherId synchronized when logged-in teacher or teachers list loads/changes
   useEffect(() => {
     if (loggedInTeacher?.id) {
       setSelectedTeacherId(loggedInTeacher.id);
-    } else if (teachers.length > 0 && !selectedTeacherId) {
-      setSelectedTeacherId(teachers[0].id);
+    } else if (sortedTeachers.length > 0 && !selectedTeacherId) {
+      setSelectedTeacherId(sortedTeachers[0].id);
     }
-  }, [loggedInTeacher?.id, teachers]);
+  }, [loggedInTeacher?.id, sortedTeachers, selectedTeacherId]);
 
   // Day tab in Period Settings: 'SEMUA' | 'Senin' | 'Selasa' | 'Rabu' | 'Kamis' | 'Jumat' | 'Sabtu'
   const [selectedPeriodDayTab, setSelectedPeriodDayTab] = useState<string>('SEMUA');
@@ -1138,7 +1143,7 @@ export const ScheduleManagementView: React.FC<ScheduleManagementViewProps> = ({
                 onChange={(e) => setSelectedTeacherId(e.target.value)}
                 className="bg-slate-50 border border-slate-300 text-slate-900 text-sm font-bold rounded-xl px-3.5 py-2 focus:ring-2 focus:ring-indigo-500 focus:outline-none cursor-pointer shadow-sm"
               >
-                {teachers.map(t => (
+                {sortedTeachers.map(t => (
                   <option key={t.id} value={t.id}>
                     {t.name} {t.nip ? `(NIP: ${t.nip})` : ''} - {t.subject1} {loggedInTeacher?.id === t.id ? '⭐ (Akun Anda)' : ''}
                   </option>
@@ -1617,7 +1622,7 @@ export const ScheduleManagementView: React.FC<ScheduleManagementViewProps> = ({
                   required
                 >
                   <option value="">-- Pilih Guru Pengajar --</option>
-                  {teachers.map(t => (
+                  {sortedTeachers.map(t => (
                     <option key={t.id} value={t.id}>
                       {t.name} {t.nip ? `(NIP: ${t.nip})` : ''} - {t.subject1} {loggedInTeacher?.id === t.id ? '⭐ (Akun Anda)' : ''}
                     </option>

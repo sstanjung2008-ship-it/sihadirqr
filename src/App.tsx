@@ -73,6 +73,7 @@ import { ParentAccountView } from './components/ParentAccountView';
 import { TeacherAccountView } from './components/TeacherAccountView';
 import { TeacherAssistantView } from './components/TeacherAssistantView';
 import { LoginView } from './components/LoginView';
+import { PWAInstallBanner } from './components/PWAInstallBanner';
 
 export default function App() {
   const [userSession, setUserSessionState] = useState<UserSession | null>(() => getUserSession());
@@ -1096,6 +1097,9 @@ export default function App() {
 
       {/* Right Content Area */}
       <div className="flex-1 flex flex-col min-w-0">
+        
+        {/* PWA In-App Install Prompt Banner (Visible on browser and not installed) */}
+        <PWAInstallBanner />
         
         {/* Parent Student Info Banner (Automatic by Logged-in NISN, No Selection) */}
         {currentRole === 'PARENT' && parentStudent && (

@@ -32,6 +32,7 @@ import {
 } from 'lucide-react';
 import { getCloudSyncStatus, CloudSyncStatus, getStudents } from '../lib/storage';
 import { MultiDeviceSyncModal } from './MultiDeviceSyncModal';
+import { PWAInstallButton } from './PWAInstallButton';
 
 interface SidebarProps {
   currentRole: UserRole;
@@ -388,6 +389,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
               </button>
             )}
           </div>
+
+          {/* Dedicated PWA Install Button (Displays when opened in browser and not installed) */}
+          <PWAInstallButton variant="sidebar" />
 
           {/* Realtime Clock Widget */}
           <div className="flex items-center justify-between bg-slate-800/80 px-3 py-2 rounded-xl border border-slate-700/60 text-slate-300 text-xs">

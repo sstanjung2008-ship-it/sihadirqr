@@ -11,6 +11,7 @@ import {
   Sparkles, 
   Clock 
 } from 'lucide-react';
+import { PWAInstallBanner } from './PWAInstallBanner';
 
 interface LoginViewProps {
   schoolProfile: SchoolProfile;
@@ -182,7 +183,7 @@ export const LoginView: React.FC<LoginViewProps> = ({
       <div className="absolute bottom-0 right-1/4 -mb-20 w-96 h-96 bg-amber-300/25 rounded-full blur-3xl pointer-events-none"></div>
 
       {/* Top Header Bar */}
-      <div className="max-w-6xl w-full mx-auto flex items-center justify-between relative z-10 pb-6">
+      <div className="max-w-6xl w-full mx-auto flex items-center justify-between relative z-10 pb-4">
         <div className="flex items-center space-x-3">
           <div className="w-11 h-11 rounded-2xl bg-gradient-to-br from-indigo-600 to-indigo-800 p-0.5 flex items-center justify-center shadow-lg shadow-indigo-500/25">
             {schoolProfile.schoolLogo ? (
@@ -213,6 +214,11 @@ export const LoginView: React.FC<LoginViewProps> = ({
           <Clock className="w-4 h-4 text-amber-500 animate-pulse" />
           <span className="font-mono font-bold text-slate-700">{timeStr} WITA</span>
         </div>
+      </div>
+
+      {/* Dedicated PWA Install Banner */}
+      <div className="max-w-md sm:max-w-2xl w-full mx-auto relative z-10 mb-4">
+        <PWAInstallBanner floating={true} />
       </div>
 
       {/* Main Login Card Center Container */}

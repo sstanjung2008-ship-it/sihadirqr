@@ -1,4 +1,4 @@
-import { SchoolProfile, SchoolClass, Student, AttendanceRecord, LeaveRequest, WhatsAppLog, Teacher, LearningJournal, CharacterTrait, StudentCharacterLog, CharacterPredicateSettings, UserSession, StudentGradeAssessment, LessonPeriod, ClassScheduleSlot } from '../types';
+import { SchoolProfile, SchoolClass, Student, AttendanceRecord, LeaveRequest, WhatsAppLog, Teacher, LearningJournal, CharacterTrait, StudentCharacterLog, CharacterPredicateSettings, UserSession, StudentGradeAssessment, LessonPeriod, ClassScheduleSlot, DirectChatMessage } from '../types';
 import { 
   INITIAL_SCHOOL_PROFILE, 
   INITIAL_CLASSES, 
@@ -31,6 +31,7 @@ const KEYS = {
   PERIODS: 'sihadir_lesson_periods_v2',
   SCHEDULES: 'sihadir_class_schedules_v2',
   SESSION: 'sihadir_user_session_v2',
+  DIRECT_CHATS: 'sihadir_parent_direct_chats_v2',
 };
 
 export type CloudSyncStatus = 'connected' | 'syncing' | 'offline' | 'quota_exceeded';
@@ -209,6 +210,7 @@ export function exportAllDatabaseToJson(): string {
     grades: getStudentGradeAssessments(),
     periods: getLessonPeriods(),
     schedules: getClassSchedules(),
+    directChats: getDirectChats(),
   };
   return JSON.stringify(backupObject, null, 2);
 }
@@ -259,6 +261,7 @@ export function importAllDatabaseFromJson(jsonString: string): { success: boolea
     if (data.grades) setKey(KEYS.GRADES, data.grades);
     if (data.periods) setKey(KEYS.PERIODS, data.periods);
     if (data.schedules) setKey(KEYS.SCHEDULES, data.schedules);
+    if (data.directChats) setKey(KEYS.DIRECT_CHATS, data.directChats);
 
     const totalStudents = (data.students && Array.isArray(data.students)) ? data.students.length : getStudents().length;
 
@@ -839,6 +842,7 @@ export function initFirestoreRealtimeSync() {
     { key: KEYS.GRADES, getDefault: () => [] },
     { key: KEYS.PERIODS, getDefault: () => INITIAL_LESSON_PERIODS },
     { key: KEYS.SCHEDULES, getDefault: () => INITIAL_CLASS_SCHEDULES },
+    { key: KEYS.DIRECT_CHATS, getDefault: () => ({}) },
   ];
 
   SYNC_KEYS.forEach(({ key }) => {
@@ -1438,6 +1442,27 @@ export function copyClassSchedule(sourceClassId: string, targetClassId: string, 
   }
 
   saveClassSchedules(updated);
+}
+
+// Direct Chat Storage (Parent & Selected Teacher Private Consultation)
+export function getDirectChats(): Record<string, DirectChatMessage[]> {
+  const data = localStorage.getItem(KEYS.DIRECT_CHATS);
+  if (!data) return {};
+  try {
+    const parsed = JSON.parse(data);
+    return typeof parsed === 'object' && parsed !== null ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+export function saveDirectChats(chats: Record<string, DirectChatMessage[]>): void {
+  const now = Date.now();
+  const dataStr = JSON.stringify(chats);
+  localStorage.setItem(KEYS.DIRECT_CHATS, dataStr);
+  localStorage.setItem(KEYS.DIRECT_CHATS + '_updatedAt', String(now));
+  notifyStorageUpdated();
+  syncToCloud(KEYS.DIRECT_CHATS, chats, true, now);
 }
 
 export function resetToDefaultData(): void {

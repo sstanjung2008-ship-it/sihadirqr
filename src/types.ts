@@ -71,6 +71,20 @@ export interface ChatMessage {
   attachmentUrl?: string;
 }
 
+export interface DirectChatMessage {
+  id: string;
+  threadId?: string;
+  studentId?: string;
+  teacherId?: string;
+  senderRole: 'PARENT' | 'STAFF';
+  senderName: string;
+  senderId?: string;
+  message: string;
+  timestamp: string;
+  attachmentUrl?: string;
+  read?: boolean;
+}
+
 export interface LeaveRequest {
   id: string;
   studentId: string;

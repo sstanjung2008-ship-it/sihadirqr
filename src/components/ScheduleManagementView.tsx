@@ -37,7 +37,10 @@ import {
   Calendar,
   Check,
   ArrowRight,
-  ShieldAlert
+  ShieldAlert,
+  Palette,
+  Filter,
+  Volume2
 } from 'lucide-react';
 import { 
   exportClassSchedulePdf, 
@@ -46,6 +49,315 @@ import {
   getPeriodsForDay as getExportPeriodsForDay
 } from '../lib/exportUtils';
 import { INITIAL_LESSON_PERIODS } from '../data/mockData';
+import { testKbmVoiceReminder } from '../lib/kbmVoiceReminder';
+
+export interface TeacherColorTheme {
+  id: string;
+  name: string;
+  colorName: string;
+  bg: string;
+  hoverBg: string;
+  border: string;
+  borderLeft: string;
+  text: string;
+  badgeBg: string;
+  badgeText: string;
+  iconColor: string;
+  dotBg: string;
+  ringColor: string;
+  hex: string;
+}
+
+export const TEACHER_COLOR_PALETTES: TeacherColorTheme[] = [
+  {
+    id: 'emerald',
+    name: 'emerald',
+    colorName: 'Emerald (Hijau Zamrud)',
+    bg: 'bg-emerald-50/90',
+    hoverBg: 'hover:bg-emerald-100',
+    border: 'border-emerald-300',
+    borderLeft: 'border-l-emerald-600',
+    text: 'text-emerald-950',
+    badgeBg: 'bg-emerald-100/90',
+    badgeText: 'text-emerald-900',
+    iconColor: 'text-emerald-700',
+    dotBg: 'bg-emerald-500',
+    ringColor: 'ring-emerald-400',
+    hex: '#10b981',
+  },
+  {
+    id: 'sky',
+    name: 'sky',
+    colorName: 'Sky (Biru Langit)',
+    bg: 'bg-sky-50/90',
+    hoverBg: 'hover:bg-sky-100',
+    border: 'border-sky-300',
+    borderLeft: 'border-l-sky-600',
+    text: 'text-sky-950',
+    badgeBg: 'bg-sky-100/90',
+    badgeText: 'text-sky-900',
+    iconColor: 'text-sky-700',
+    dotBg: 'bg-sky-500',
+    ringColor: 'ring-sky-400',
+    hex: '#0ea5e9',
+  },
+  {
+    id: 'amber',
+    name: 'amber',
+    colorName: 'Amber (Kuning Emas)',
+    bg: 'bg-amber-50/90',
+    hoverBg: 'hover:bg-amber-100',
+    border: 'border-amber-300',
+    borderLeft: 'border-l-amber-600',
+    text: 'text-amber-950',
+    badgeBg: 'bg-amber-100/90',
+    badgeText: 'text-amber-900',
+    iconColor: 'text-amber-700',
+    dotBg: 'bg-amber-500',
+    ringColor: 'ring-amber-400',
+    hex: '#f59e0b',
+  },
+  {
+    id: 'purple',
+    name: 'purple',
+    colorName: 'Purple (Ungu)',
+    bg: 'bg-purple-50/90',
+    hoverBg: 'hover:bg-purple-100',
+    border: 'border-purple-300',
+    borderLeft: 'border-l-purple-600',
+    text: 'text-purple-950',
+    badgeBg: 'bg-purple-100/90',
+    badgeText: 'text-purple-900',
+    iconColor: 'text-purple-700',
+    dotBg: 'bg-purple-500',
+    ringColor: 'ring-purple-400',
+    hex: '#a855f7',
+  },
+  {
+    id: 'rose',
+    name: 'rose',
+    colorName: 'Rose (Merah Mawar)',
+    bg: 'bg-rose-50/90',
+    hoverBg: 'hover:bg-rose-100',
+    border: 'border-rose-300',
+    borderLeft: 'border-l-rose-600',
+    text: 'text-rose-950',
+    badgeBg: 'bg-rose-100/90',
+    badgeText: 'text-rose-900',
+    iconColor: 'text-rose-700',
+    dotBg: 'bg-rose-500',
+    ringColor: 'ring-rose-400',
+    hex: '#f43f5e',
+  },
+  {
+    id: 'indigo',
+    name: 'indigo',
+    colorName: 'Indigo (Biru Tua)',
+    bg: 'bg-indigo-50/90',
+    hoverBg: 'hover:bg-indigo-100',
+    border: 'border-indigo-300',
+    borderLeft: 'border-l-indigo-600',
+    text: 'text-indigo-950',
+    badgeBg: 'bg-indigo-100/90',
+    badgeText: 'text-indigo-900',
+    iconColor: 'text-indigo-700',
+    dotBg: 'bg-indigo-500',
+    ringColor: 'ring-indigo-400',
+    hex: '#6366f1',
+  },
+  {
+    id: 'teal',
+    name: 'teal',
+    colorName: 'Teal (Toska Segar)',
+    bg: 'bg-teal-50/90',
+    hoverBg: 'hover:bg-teal-100',
+    border: 'border-teal-300',
+    borderLeft: 'border-l-teal-600',
+    text: 'text-teal-950',
+    badgeBg: 'bg-teal-100/90',
+    badgeText: 'text-teal-900',
+    iconColor: 'text-teal-700',
+    dotBg: 'bg-teal-500',
+    ringColor: 'ring-teal-400',
+    hex: '#14b8a6',
+  },
+  {
+    id: 'orange',
+    name: 'orange',
+    colorName: 'Orange (Jingga Cerah)',
+    bg: 'bg-orange-50/90',
+    hoverBg: 'hover:bg-orange-100',
+    border: 'border-orange-300',
+    borderLeft: 'border-l-orange-600',
+    text: 'text-orange-950',
+    badgeBg: 'bg-orange-100/90',
+    badgeText: 'text-orange-900',
+    iconColor: 'text-orange-700',
+    dotBg: 'bg-orange-500',
+    ringColor: 'ring-orange-400',
+    hex: '#f97316',
+  },
+  {
+    id: 'violet',
+    name: 'violet',
+    colorName: 'Violet (Ungu Violet)',
+    bg: 'bg-violet-50/90',
+    hoverBg: 'hover:bg-violet-100',
+    border: 'border-violet-300',
+    borderLeft: 'border-l-violet-600',
+    text: 'text-violet-950',
+    badgeBg: 'bg-violet-100/90',
+    badgeText: 'text-violet-900',
+    iconColor: 'text-violet-700',
+    dotBg: 'bg-violet-500',
+    ringColor: 'ring-violet-400',
+    hex: '#8b5cf6',
+  },
+  {
+    id: 'cyan',
+    name: 'cyan',
+    colorName: 'Cyan (Sian Pesisir)',
+    bg: 'bg-cyan-50/90',
+    hoverBg: 'hover:bg-cyan-100',
+    border: 'border-cyan-300',
+    borderLeft: 'border-l-cyan-600',
+    text: 'text-cyan-950',
+    badgeBg: 'bg-cyan-100/90',
+    badgeText: 'text-cyan-900',
+    iconColor: 'text-cyan-700',
+    dotBg: 'bg-cyan-500',
+    ringColor: 'ring-cyan-400',
+    hex: '#06b6d4',
+  },
+  {
+    id: 'fuchsia',
+    name: 'fuchsia',
+    colorName: 'Fuchsia (Fanta Magenta)',
+    bg: 'bg-fuchsia-50/90',
+    hoverBg: 'hover:bg-fuchsia-100',
+    border: 'border-fuchsia-300',
+    borderLeft: 'border-l-fuchsia-600',
+    text: 'text-fuchsia-950',
+    badgeBg: 'bg-fuchsia-100/90',
+    badgeText: 'text-fuchsia-900',
+    iconColor: 'text-fuchsia-700',
+    dotBg: 'bg-fuchsia-500',
+    ringColor: 'ring-fuchsia-400',
+    hex: '#d946ef',
+  },
+  {
+    id: 'lime',
+    name: 'lime',
+    colorName: 'Lime (Hijau Daun)',
+    bg: 'bg-lime-50/90',
+    hoverBg: 'hover:bg-lime-100',
+    border: 'border-lime-300',
+    borderLeft: 'border-l-lime-600',
+    text: 'text-lime-950',
+    badgeBg: 'bg-lime-100/90',
+    badgeText: 'text-lime-900',
+    iconColor: 'text-lime-700',
+    dotBg: 'bg-lime-500',
+    ringColor: 'ring-lime-400',
+    hex: '#84cc16',
+  },
+  {
+    id: 'blue',
+    name: 'blue',
+    colorName: 'Blue (Biru Royal)',
+    bg: 'bg-blue-50/90',
+    hoverBg: 'hover:bg-blue-100',
+    border: 'border-blue-300',
+    borderLeft: 'border-l-blue-600',
+    text: 'text-blue-950',
+    badgeBg: 'bg-blue-100/90',
+    badgeText: 'text-blue-900',
+    iconColor: 'text-blue-700',
+    dotBg: 'bg-blue-500',
+    ringColor: 'ring-blue-400',
+    hex: '#3b82f6',
+  },
+  {
+    id: 'pink',
+    name: 'pink',
+    colorName: 'Pink (Merah Muda)',
+    bg: 'bg-pink-50/90',
+    hoverBg: 'hover:bg-pink-100',
+    border: 'border-pink-300',
+    borderLeft: 'border-l-pink-600',
+    text: 'text-pink-950',
+    badgeBg: 'bg-pink-100/90',
+    badgeText: 'text-pink-900',
+    iconColor: 'text-pink-700',
+    dotBg: 'bg-pink-500',
+    ringColor: 'ring-pink-400',
+    hex: '#ec4899',
+  },
+  {
+    id: 'yellow',
+    name: 'yellow',
+    colorName: 'Yellow (Kuning Lemon)',
+    bg: 'bg-yellow-50/90',
+    hoverBg: 'hover:bg-yellow-100',
+    border: 'border-yellow-300',
+    borderLeft: 'border-l-yellow-600',
+    text: 'text-yellow-950',
+    badgeBg: 'bg-yellow-100/90',
+    badgeText: 'text-yellow-900',
+    iconColor: 'text-yellow-700',
+    dotBg: 'bg-yellow-500',
+    ringColor: 'ring-yellow-400',
+    hex: '#eab308',
+  },
+  {
+    id: 'slate',
+    name: 'slate',
+    colorName: 'Slate (Abu-abu Baja)',
+    bg: 'bg-slate-100/90',
+    hoverBg: 'hover:bg-slate-200',
+    border: 'border-slate-300',
+    borderLeft: 'border-l-slate-600',
+    text: 'text-slate-900',
+    badgeBg: 'bg-slate-200/90',
+    badgeText: 'text-slate-800',
+    iconColor: 'text-slate-700',
+    dotBg: 'bg-slate-500',
+    ringColor: 'ring-slate-400',
+    hex: '#64748b',
+  },
+];
+
+/**
+ * Returns a consistent and unique color theme for each teacher.
+ */
+export function getTeacherColor(
+  teacherIdOrName: string | undefined | null,
+  teachersList: Teacher[] = []
+): TeacherColorTheme {
+  if (!teacherIdOrName) return TEACHER_COLOR_PALETTES[0];
+
+  const clean = teacherIdOrName.trim().toLowerCase();
+
+  // 1. Match by ID in teacherList
+  const idxById = teachersList.findIndex(t => t.id && t.id.toLowerCase() === clean);
+  if (idxById >= 0) {
+    return TEACHER_COLOR_PALETTES[idxById % TEACHER_COLOR_PALETTES.length];
+  }
+
+  // 2. Match by Name in teacherList
+  const idxByName = teachersList.findIndex(t => t.name && t.name.trim().toLowerCase() === clean);
+  if (idxByName >= 0) {
+    return TEACHER_COLOR_PALETTES[idxByName % TEACHER_COLOR_PALETTES.length];
+  }
+
+  // 3. Fallback deterministic hash based on string
+  let hash = 0;
+  for (let i = 0; i < clean.length; i++) {
+    hash = clean.charCodeAt(i) + ((hash << 5) - hash);
+  }
+  const index = Math.abs(hash) % TEACHER_COLOR_PALETTES.length;
+  return TEACHER_COLOR_PALETTES[index];
+}
 
 interface ScheduleManagementViewProps {
   schoolProfile: SchoolProfile;
@@ -152,6 +464,9 @@ export const ScheduleManagementView: React.FC<ScheduleManagementViewProps> = ({
   // Period Settings Edit Modal State
   const [periodModalOpen, setPeriodModalOpen] = useState(false);
   const [editingPeriod, setEditingPeriod] = useState<LessonPeriod | null>(null);
+
+  // Highlighted Teacher filter state for timetable
+  const [highlightedTeacherId, setHighlightedTeacherId] = useState<string | null>(null);
 
   // Confirmation Modal State (replaces all window.confirm)
   const [confirmModal, setConfirmModal] = useState<{
@@ -360,6 +675,39 @@ export const ScheduleManagementView: React.FC<ScheduleManagementViewProps> = ({
     return Array.from(subs);
   }, [schoolProfile.subjects, teachers]);
 
+  // Unique list of teachers teaching in the current class along with their distinct color theme & total JPs
+  const classTeachersWithColors = useMemo(() => {
+    const classSlots = schedules.filter(s => s.classId === selectedClass.id);
+    const teacherMap = new Map<string, {
+      teacherId: string;
+      teacherName: string;
+      teacherNip?: string;
+      subjects: Set<string>;
+      jpCount: number;
+      colorTheme: TeacherColorTheme;
+    }>();
+
+    classSlots.forEach(s => {
+      const tKey = s.teacherId || s.teacherName || 'unknown';
+      if (!teacherMap.has(tKey)) {
+        const theme = getTeacherColor(s.teacherId || s.teacherName, teachers);
+        teacherMap.set(tKey, {
+          teacherId: s.teacherId || '',
+          teacherName: s.teacherName || 'Guru Pengajar',
+          teacherNip: s.teacherNip,
+          subjects: new Set(s.subject ? [s.subject] : []),
+          jpCount: 0,
+          colorTheme: theme,
+        });
+      }
+      const existing = teacherMap.get(tKey)!;
+      if (s.subject) existing.subjects.add(s.subject);
+      existing.jpCount += 1;
+    });
+
+    return Array.from(teacherMap.values()).sort((a, b) => b.jpCount - a.jpCount);
+  }, [schedules, selectedClass.id, teachers]);
+
   // Handle Opening Slot Modal for cell click
   const handleCellClick = (day: string, periodNumber: number) => {
     if (currentRole !== 'ADMIN' && currentRole !== 'SUPER_ADMIN') return;
@@ -426,6 +774,8 @@ export const ScheduleManagementView: React.FC<ScheduleManagementViewProps> = ({
         ? editingSlot.id
         : `sch-${selectedClass.id}-${editingSlot.day.toLowerCase().slice(0, 3)}-${currentJP}-${Date.now()}-${i}`;
 
+      const teacherColorTheme = getTeacherColor(editingSlot.teacherId, teachers);
+
       const slotData: ClassScheduleSlot = {
         id: slotId,
         classId: selectedClass.id,
@@ -438,9 +788,7 @@ export const ScheduleManagementView: React.FC<ScheduleManagementViewProps> = ({
         teacherNip: teacherNip,
         room: editingSlot.room,
         notes: editingSlot.notes,
-        color: editingSlot.subject.toLowerCase().includes('mat') ? 'blue' : 
-               editingSlot.subject.toLowerCase().includes('ipa') ? 'emerald' : 
-               editingSlot.subject.toLowerCase().includes('indo') ? 'amber' : 'indigo'
+        color: teacherColorTheme.name
       };
 
       const existingIndex = newSchedules.findIndex(s => s.classId === selectedClass.id && s.day === editingSlot.day && s.periodNumber === currentJP);
@@ -925,6 +1273,18 @@ export const ScheduleManagementView: React.FC<ScheduleManagementViewProps> = ({
               )}
 
               <button
+                onClick={async () => {
+                  showToast('Memutar Nada & Suara AI Pengingat KBM...');
+                  await testKbmVoiceReminder();
+                }}
+                title="Putar nada lonceng & Suara AI Pengingat KBM perempuan"
+                className="px-3 py-1.5 bg-purple-50 hover:bg-purple-100 text-purple-700 text-xs font-semibold rounded-xl border border-purple-200 flex items-center space-x-1.5 transition-colors cursor-pointer"
+              >
+                <Volume2 className="w-3.5 h-3.5 text-purple-600" />
+                <span>Tes Suara KBM</span>
+              </button>
+
+              <button
                 onClick={() => exportClassSchedulePdf(selectedClass, schedules, periods, schoolProfile)}
                 className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold rounded-xl shadow-xs flex items-center space-x-1.5 transition-colors cursor-pointer"
               >
@@ -954,6 +1314,78 @@ export const ScheduleManagementView: React.FC<ScheduleManagementViewProps> = ({
               <span className="text-[11px] text-amber-800 font-medium">
                 Klik sel KBM untuk mengisi / mengubah guru & mapel.
               </span>
+            )}
+          </div>
+
+          {/* Teacher Color Legend & Quick Filter */}
+          <div className="bg-white p-3.5 sm:p-4 rounded-2xl border border-slate-200 shadow-sm space-y-2.5">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <div className="flex items-center space-x-2">
+                <div className="p-1.5 bg-indigo-50 text-indigo-600 rounded-lg">
+                  <Palette className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-xs font-bold text-slate-800 flex items-center space-x-1.5">
+                    <span>Warna Kotak Guru di Kelas {selectedClass.name}</span>
+                    <span className="text-[11px] font-normal text-slate-500">
+                      ({classTeachersWithColors.length} Guru Aktif)
+                    </span>
+                  </h3>
+                  <p className="text-[10px] text-slate-500">
+                    Setiap guru memiliki warna kotak tersendiri agar mudah dibedakan. Klik nama guru untuk menyorot jadwalnya di tabel.
+                  </p>
+                </div>
+              </div>
+
+              {highlightedTeacherId && (
+                <button
+                  onClick={() => setHighlightedTeacherId(null)}
+                  className="self-start sm:self-auto text-[11px] font-bold text-indigo-700 hover:text-indigo-900 bg-indigo-50 hover:bg-indigo-100 px-2.5 py-1 rounded-xl transition-colors cursor-pointer flex items-center space-x-1 border border-indigo-200 shadow-xs"
+                >
+                  <X className="w-3.5 h-3.5" />
+                  <span>Hapus Sorotan Guru</span>
+                </button>
+              )}
+            </div>
+
+            {classTeachersWithColors.length === 0 ? (
+              <div className="text-xs text-slate-400 italic py-1.5 px-1 bg-slate-50 rounded-xl border border-dashed border-slate-200 text-center">
+                Belum ada jadwal guru yang diplot untuk Kelas {selectedClass.name}. Klik tombol "Isi Mapel" pada sel tabel untuk mulai menyusun jadwal.
+              </div>
+            ) : (
+              <div className="flex flex-wrap gap-2 pt-1">
+                {classTeachersWithColors.map(t => {
+                  const isSelected = highlightedTeacherId === t.teacherId || (!!t.teacherName && highlightedTeacherId === t.teacherName);
+                  const color = t.colorTheme;
+
+                  return (
+                    <button
+                      key={t.teacherId || t.teacherName}
+                      onClick={() => {
+                        const targetKey = t.teacherId || t.teacherName;
+                        setHighlightedTeacherId(prev => (prev === targetKey ? null : targetKey));
+                      }}
+                      title={`Klik untuk menyorot seluruh jadwal ${t.teacherName} (${color.colorName})`}
+                      className={`flex items-center space-x-2 px-3 py-1.5 rounded-xl border text-xs transition-all cursor-pointer ${
+                        color.bg
+                      } ${color.border} ${color.text} ${
+                        isSelected 
+                          ? `ring-3 ${color.ringColor} font-bold shadow-md scale-[1.03] brightness-105 border-l-4 ${color.borderLeft}` 
+                          : 'hover:shadow-sm hover:scale-[1.01]'
+                      }`}
+                    >
+                      <span className={`w-3 h-3 rounded-full ${color.dotBg} shrink-0 ring-2 ring-white shadow-xs`} />
+                      <span className="font-bold">{t.teacherName}</span>
+                      <span className="text-[10px] opacity-80 font-medium">
+                        ({Array.from(t.subjects).join(', ')})
+                      </span>
+                      <span className={`px-1.5 py-0.5 rounded-md text-[10px] font-bold ${color.badgeBg} ${color.badgeText} border ${color.border}`}>
+                        {t.jpCount} JP
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
             )}
           </div>
 
@@ -1025,6 +1457,9 @@ export const ScheduleManagementView: React.FC<ScheduleManagementViewProps> = ({
 
                             const slot = schedules.find(s => s.classId === selectedClass.id && s.day === day && s.periodNumber === jpNumber);
                             const conflictTeacherClasses = slot ? checkSlotConflict(day, jpNumber, slot.teacherId, slot.id) : null;
+                            const slotColor = slot ? getTeacherColor(slot.teacherId || slot.teacherName, teachers) : null;
+                            const isSlotHighlighted = highlightedTeacherId && slot && (slot.teacherId === highlightedTeacherId || slot.teacherName === highlightedTeacherId);
+                            const isSlotDimmed = highlightedTeacherId && slot && (slot.teacherId !== highlightedTeacherId && slot.teacherName !== highlightedTeacherId);
 
                             return (
                               <td 
@@ -1034,25 +1469,33 @@ export const ScheduleManagementView: React.FC<ScheduleManagementViewProps> = ({
                                   isAdmin ? 'cursor-pointer hover:bg-indigo-50/60' : ''
                                 } ${slot ? 'bg-white' : 'bg-slate-50/20'}`}
                               >
-                                {slot ? (
-                                  <div className={`p-2.5 rounded-xl border transition-all text-xs relative group ${
+                                {slot && slotColor ? (
+                                  <div className={`p-2.5 rounded-xl border transition-all text-xs relative group border-l-[5px] ${
                                     conflictTeacherClasses 
-                                      ? 'bg-rose-50 border-rose-300 text-rose-900 shadow-sm' 
-                                      : 'bg-indigo-50/70 hover:bg-indigo-100/70 border-indigo-200 text-indigo-950 shadow-xs'
+                                      ? 'bg-rose-50 border-rose-300 border-l-rose-600 text-rose-900 shadow-sm' 
+                                      : `${slotColor.bg} ${slotColor.hoverBg} ${slotColor.border} ${slotColor.borderLeft} ${slotColor.text} shadow-xs`
+                                  } ${
+                                    isSlotHighlighted ? `ring-3 ${slotColor.ringColor} shadow-md scale-[1.03] z-10 brightness-105` : ''
+                                  } ${
+                                    isSlotDimmed ? 'opacity-35 grayscale-[20%]' : ''
                                   }`}>
-                                    {/* Subject Title */}
-                                    <div className="font-bold text-slate-900 text-xs line-clamp-1 mb-1">
-                                      {slot.subject}
+                                    {/* Subject Title & Color Indicator Dot */}
+                                    <div className="font-bold text-slate-900 text-xs line-clamp-1 mb-1.5 flex items-center justify-between">
+                                      <span className="truncate">{slot.subject}</span>
+                                      <span 
+                                        className={`w-2.5 h-2.5 rounded-full ${slotColor.dotBg} shrink-0 ml-1 shadow-xs`} 
+                                        title={`Guru: ${slot.teacherName} (${slotColor.colorName})`}
+                                      />
                                     </div>
 
-                                    {/* Teacher */}
-                                    <div className="flex items-center space-x-1 text-[11px] text-slate-600 mb-1">
-                                      <UserCheck className="w-3 h-3 text-indigo-600 shrink-0" />
-                                      <span className="truncate font-medium">{slot.teacherName}</span>
+                                    {/* Teacher with Distinct Color Badge */}
+                                    <div className={`inline-flex items-center space-x-1.5 px-2 py-0.5 rounded-lg text-[11px] font-semibold mb-1.5 max-w-full ${slotColor.badgeBg} ${slotColor.badgeText} border ${slotColor.border}`}>
+                                      <UserCheck className={`w-3 h-3 ${slotColor.iconColor} shrink-0`} />
+                                      <span className="truncate">{slot.teacherName}</span>
                                     </div>
 
                                     {/* Time Badge for this specific day */}
-                                    <div className="flex items-center justify-between text-[10px] text-slate-500 font-mono pt-1 border-t border-indigo-100/80">
+                                    <div className="flex items-center justify-between text-[10px] text-slate-500 font-mono pt-1 border-t border-slate-200/70">
                                       <span>{dayJP.startTime} - {dayJP.endTime}</span>
                                       {slot.room && (
                                         <span className="bg-white/90 border border-slate-200 px-1 rounded text-[9px] font-sans font-medium text-slate-600">
@@ -1063,7 +1506,7 @@ export const ScheduleManagementView: React.FC<ScheduleManagementViewProps> = ({
 
                                     {/* Conflict Warning Badge */}
                                     {conflictTeacherClasses && (
-                                      <div className="mt-1.5 bg-rose-500 text-white text-[10px] px-1.5 py-0.5 rounded font-semibold flex items-center space-x-1">
+                                      <div className="mt-1.5 bg-rose-500 text-white text-[10px] px-1.5 py-0.5 rounded font-semibold flex items-center space-x-1 shadow-xs">
                                         <AlertTriangle className="w-3 h-3" />
                                         <span>Bentrok: {conflictTeacherClasses}</span>
                                       </div>
@@ -1071,7 +1514,7 @@ export const ScheduleManagementView: React.FC<ScheduleManagementViewProps> = ({
 
                                     {isAdmin && (
                                       <div className="absolute top-1.5 right-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
-                                        <span className="p-1 bg-white rounded-lg shadow-sm border border-slate-200 text-indigo-600 block">
+                                        <span className="p-1 bg-white rounded-lg shadow-sm border border-slate-200 text-indigo-600 block hover:bg-indigo-50">
                                           <Edit3 className="w-3 h-3" />
                                         </span>
                                       </div>
@@ -1243,20 +1686,23 @@ export const ScheduleManagementView: React.FC<ScheduleManagementViewProps> = ({
 
                               const mySlots = schedules.filter(s => s.teacherId === selectedTeacher.id && s.day === day && s.periodNumber === jpNumber);
                               const isConflict = mySlots.length > 1;
+                              const teacherColor = getTeacherColor(selectedTeacher.id, teachers);
 
                               return (
                                 <td key={day} className="p-2 border-r border-slate-200 last:border-r-0 align-middle text-center">
                                   {mySlots.length > 0 ? (
-                                    <div className={`p-2 rounded-xl border text-xs font-semibold ${
+                                    <div className={`p-2 rounded-xl border text-xs font-semibold border-l-4 ${
                                       isConflict 
-                                        ? 'bg-rose-100 border-rose-300 text-rose-900' 
-                                        : 'bg-emerald-50 border-emerald-200 text-emerald-900'
+                                        ? 'bg-rose-100 border-rose-300 border-l-rose-600 text-rose-900 shadow-sm' 
+                                        : `${teacherColor.bg} ${teacherColor.border} ${teacherColor.borderLeft} ${teacherColor.text} shadow-xs`
                                     }`}>
                                       {mySlots.map((ms, idx) => (
                                         <div key={idx} className="space-y-0.5">
-                                          <div className="font-bold text-slate-900">Kelas {ms.className}</div>
-                                          <div className="text-[11px] text-slate-600">{ms.subject}</div>
-                                          <div className="text-[10px] text-slate-400 font-mono">{dayJP.startTime}-{dayJP.endTime}</div>
+                                          <div className="font-bold text-slate-900 flex items-center justify-center space-x-1">
+                                            <span>Kelas {ms.className}</span>
+                                          </div>
+                                          <div className="text-[11px] text-slate-700 font-medium">{ms.subject}</div>
+                                          <div className="text-[10px] text-slate-500 font-mono">{dayJP.startTime}-{dayJP.endTime}</div>
                                         </div>
                                       ))}
                                       {isConflict && (
@@ -1628,6 +2074,22 @@ export const ScheduleManagementView: React.FC<ScheduleManagementViewProps> = ({
                     </option>
                   ))}
                 </select>
+
+                {editingSlot.teacherId && (() => {
+                  const tColor = getTeacherColor(editingSlot.teacherId, teachers);
+                  const tObj = teachers.find(t => t.id === editingSlot.teacherId);
+                  return (
+                    <div className={`mt-2 p-2 rounded-xl border flex items-center justify-between text-xs ${tColor.bg} ${tColor.border} ${tColor.text} border-l-4 ${tColor.borderLeft}`}>
+                      <div className="flex items-center space-x-2">
+                        <span className={`w-3 h-3 rounded-full ${tColor.dotBg} shrink-0 ring-2 ring-white shadow-xs`} />
+                        <span className="font-bold">Warna Kotak: {tColor.colorName}</span>
+                      </div>
+                      <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold ${tColor.badgeBg} ${tColor.badgeText} border ${tColor.border}`}>
+                        {tObj?.name || 'Guru Terpilih'}
+                      </span>
+                    </div>
+                  );
+                })()}
               </div>
 
               {/* Room & Multi-JP Duration */}

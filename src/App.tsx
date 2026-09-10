@@ -74,6 +74,12 @@ import { TeacherAccountView } from './components/TeacherAccountView';
 import { TeacherAssistantView } from './components/TeacherAssistantView';
 import { LoginView } from './components/LoginView';
 import { PWAInstallBanner } from './components/PWAInstallBanner';
+import { KbmVoiceReminderBanner } from './components/KbmVoiceReminderBanner';
+import { 
+  KbmReminderInfo, 
+  playTeacherKbmVoiceReminder, 
+  isKbmVoiceReminderEnabled 
+} from './lib/kbmVoiceReminder';
 
 export default function App() {
   const [userSession, setUserSessionState] = useState<UserSession | null>(() => getUserSession());
@@ -251,6 +257,10 @@ export default function App() {
 
   // Effective child ID passed down to views
   const effectiveChildId = (currentRole === 'PARENT' && parentStudent) ? parentStudent.id : (selectedChildId || students[0]?.id || '');
+
+  // Active KBM Voice Reminder Popup
+  const [activeVoiceReminder, setActiveVoiceReminder] = useState<KbmReminderInfo | null>(null);
+  const triggeredVoiceReminderKeysRef = useRef<Set<string>>(new Set());
 
   // Sync state on local storage events
   const refreshDataFromStorage = () => {
@@ -649,6 +659,114 @@ export default function App() {
     periods,
     schedules,
     teachers
+  ]);
+
+  // -------------------------------------------------------------
+  // Real-Time AI Voice Reminder for Teachers with Active KBM Slots
+  // Plays pleasant chime + female AI speech:
+  // "Anda Memiliki Jam Mengajar Saat ini, Selamat Menjalankan Tugas. Terima Kasih "
+  // -------------------------------------------------------------
+  useEffect(() => {
+    const checkAndTriggerKbmVoiceReminder = () => {
+      if (!isKbmVoiceReminderEnabled()) return;
+
+      const now = new Date();
+      const dayNames = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
+      const currentDayName = dayNames[now.getDay()];
+
+      // 1. Check active school day
+      const activeDays = schoolProfile.activeDays || ['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
+      if (!activeDays.includes(currentDayName)) return;
+
+      // 2. Check holiday
+      const year = now.getFullYear();
+      const month = String(now.getMonth() + 1).padStart(2, '0');
+      const day = String(now.getDate()).padStart(2, '0');
+      const dateStr = `${year}-${month}-${day}`;
+
+      const holidays = schoolProfile.holidays || [];
+      const isTodayHoliday = holidays.some(h => {
+        if (h.endDate) {
+          return dateStr >= h.date && dateStr <= h.endDate;
+        }
+        return h.date === dateStr;
+      });
+      if (isTodayHoliday) return;
+
+      // 3. Periods for today
+      const daySpecificPeriods = periods.filter(p => p.day === currentDayName || p.daySpecific === currentDayName);
+      const todayPeriods = (daySpecificPeriods.length > 0 
+        ? daySpecificPeriods 
+        : periods.filter(p => !p.day || p.day === 'SEMUA')
+      ).filter(p => p.type === 'KBM');
+
+      if (todayPeriods.length === 0) return;
+
+      const currentMinutes = now.getHours() * 60 + now.getMinutes();
+      const todaySchedules = schedules.filter(s => s.day === currentDayName);
+      if (todaySchedules.length === 0) return;
+
+      todayPeriods.forEach(period => {
+        if (!period.startTime) return;
+        const [pH, pM] = period.startTime.split(':').map(Number);
+        if (isNaN(pH) || isNaN(pM)) return;
+
+        const periodStartMinutes = pH * 60 + pM;
+
+        // Trigger window: right at start time (within first 2 minutes of the period)
+        if (currentMinutes >= periodStartMinutes && currentMinutes <= periodStartMinutes + 2) {
+          const matchingSlots = todaySchedules.filter(s => s.periodNumber === period.periodNumber);
+
+          matchingSlots.forEach(slot => {
+            if (!slot.teacherId && !slot.teacherName) return;
+
+            // If in TEACHER role, trigger specifically for the logged-in teacher
+            if (currentRole === 'TEACHER' && currentTeacher) {
+              const isMySlot = 
+                (slot.teacherId && slot.teacherId === currentTeacher.id) ||
+                (slot.teacherName && slot.teacherName.toLowerCase() === currentTeacher.name.toLowerCase());
+              if (!isMySlot) return;
+            }
+
+            const voiceKey = `voice-kbm-${dateStr}-${slot.id || `${slot.classId}-${slot.periodNumber}-${slot.teacherId}`}-${period.startTime}`;
+            if (triggeredVoiceReminderKeysRef.current.has(voiceKey)) return;
+
+            triggeredVoiceReminderKeysRef.current.add(voiceKey);
+
+            const reminderInfo: KbmReminderInfo = {
+              teacherName: slot.teacherName || currentTeacher?.name || 'Bapak/Ibu Guru',
+              subject: slot.subject,
+              className: slot.className,
+              room: slot.room,
+              periodNumber: slot.periodNumber,
+              startTime: period.startTime,
+              endTime: period.endTime,
+              slotId: slot.id
+            };
+
+            // Play Chime + Female AI Speech: "Anda Memiliki Jam Mengajar Saat ini, Selamat Menjalankan Tugas. Terima Kasih "
+            playTeacherKbmVoiceReminder(
+              reminderInfo,
+              "Anda Memiliki Jam Mengajar Saat ini, Selamat Menjalankan Tugas. Terima Kasih "
+            );
+
+            // Pop up interactive banner
+            setActiveVoiceReminder(reminderInfo);
+          });
+        }
+      });
+    };
+
+    checkAndTriggerKbmVoiceReminder();
+    const interval = setInterval(checkAndTriggerKbmVoiceReminder, 12000);
+    return () => clearInterval(interval);
+  }, [
+    currentRole,
+    currentTeacher,
+    schoolProfile.activeDays,
+    schoolProfile.holidays,
+    periods,
+    schedules
   ]);
 
   // Update session role changes
@@ -1382,6 +1500,16 @@ export default function App() {
           )}
         </main>
       </div>
+
+      {/* Floating KBM Voice Reminder Alert Banner */}
+      <KbmVoiceReminderBanner
+        reminder={activeVoiceReminder}
+        onDismiss={() => setActiveVoiceReminder(null)}
+        onOpenJournal={() => {
+          handleTabChange('learning');
+          setActiveVoiceReminder(null);
+        }}
+      />
 
     </div>
   );

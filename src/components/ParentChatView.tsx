@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { Student, Teacher, SchoolClass, SchoolProfile, UserRole, UserSession } from '../types';
+import { Student, Teacher, SchoolClass, SchoolProfile, UserRole, UserSession, DirectChatMessage } from '../types';
 import { 
   MessageSquare, 
   Send, 
@@ -19,17 +19,13 @@ import {
   ChevronRight,
   Info,
   Filter,
-  User
+  User,
+  Lock,
+  Search,
+  BookOpen,
+  UserPlus
 } from 'lucide-react';
-
-export interface DirectChatMessage {
-  id: string;
-  senderRole: 'PARENT' | 'STAFF';
-  senderName: string;
-  message: string;
-  timestamp: string;
-  attachmentUrl?: string;
-}
+import { getDirectChats, saveDirectChats } from '../lib/storage';
 
 interface ParentChatViewProps {
   students: Student[];
@@ -41,7 +37,7 @@ interface ParentChatViewProps {
   userSession?: UserSession | null;
 }
 
-type ContactType = 'WALI_KELAS' | 'HUMAS' | 'BK';
+type ContactCategory = 'WALI_KELAS' | 'HUMAS' | 'BK' | 'OTHER_TEACHER';
 
 export const ParentChatView: React.FC<ParentChatViewProps> = ({
   students,
@@ -56,28 +52,65 @@ export const ParentChatView: React.FC<ParentChatViewProps> = ({
   const isTeacherAccount = userRole === 'TEACHER' || userSession?.role === 'TEACHER';
   const loggedInTeacherName = userSession?.displayName || '';
 
-  const loggedTeacher = teachers.find(
-    t => (loggedInTeacherName && t.name.toLowerCase() === loggedInTeacherName.toLowerCase()) ||
-         (userSession?.teacherId && t.id === userSession.teacherId) ||
-         (t.nip && userSession?.username && t.nip.trim() === userSession.username.trim()) ||
-         (t.nip && userSession?.nipOrNisn && t.nip.trim() === userSession.nipOrNisn.trim())
-  ) || {
-    id: userSession?.teacherId || 'tch-logged-in',
-    nip: userSession?.username || '-',
-    name: loggedInTeacherName || 'Guru Terdaftar',
-    birthPlace: '-',
-    birthDate: '1985-01-01',
-    subject1: 'Guru Pengajar',
-    additionalDuty: 'GURU_PENGAJAR',
-    phone: '081234567890',
-    email: 'guru@smpn1cerdas.sch.id',
-    gender: 'L',
-    status: 'AKTIF'
-  };
+  // Resolve the logged-in teacher identity strictly
+  const loggedTeacher: Teacher = useMemo(() => {
+    return teachers.find(
+      t => (userSession?.teacherId && t.id === userSession.teacherId) ||
+           (t.nip && userSession?.username && t.nip.trim() === userSession.username.trim()) ||
+           (t.nip && userSession?.nipOrNisn && t.nip.trim() === userSession.nipOrNisn.trim()) ||
+           (loggedInTeacherName && t.name.toLowerCase() === loggedInTeacherName.toLowerCase())
+    ) || {
+      id: userSession?.teacherId || 'tch-logged-in',
+      nip: userSession?.username || '-',
+      name: loggedInTeacherName || 'Guru Terdaftar',
+      birthPlace: '-',
+      birthDate: '1985-01-01',
+      subject1: 'Guru Pengajar',
+      additionalDuty: 'GURU_PENGAJAR',
+      phone: '081234567890',
+      email: 'guru@smpn1cerdas.sch.id',
+      gender: 'L',
+      status: 'AKTIF'
+    };
+  }, [teachers, userSession, loggedInTeacherName]);
 
   // Internal active child selection
   const [activeChildId, setActiveChildId] = useState<string>(selectedChildId || students[0]?.id || '');
   const [selectedClassFilter, setSelectedClassFilter] = useState<string>('ALL');
+  const [teacherSearchQuery, setTeacherSearchQuery] = useState<string>('');
+
+  // Parent contact selection
+  const [selectedCategory, setSelectedCategory] = useState<ContactCategory>('WALI_KELAS');
+  const [selectedCustomTeacherId, setSelectedCustomTeacherId] = useState<string>('');
+
+  // Input states
+  const [messageText, setMessageText] = useState('');
+  const [attachmentUrl, setAttachmentUrl] = useState<string | null>(null);
+
+  // Chat storage state (all threads)
+  const [chatThreads, setChatThreads] = useState<Record<string, DirectChatMessage[]>>(() => getDirectChats());
+
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  // Sync state with storage changes (including cross-tab or realtime Firestore sync)
+  useEffect(() => {
+    const handleStorageUpdate = () => {
+      setChatThreads(getDirectChats());
+    };
+    window.addEventListener('sihadir_storage_updated', handleStorageUpdate);
+    return () => window.removeEventListener('sihadir_storage_updated', handleStorageUpdate);
+  }, []);
+
+  // Sync if selectedChildId changes externally
+  useEffect(() => {
+    if (selectedChildId) {
+      setActiveChildId(selectedChildId);
+    }
+  }, [selectedChildId]);
+
+  const activeStudent = useMemo(() => {
+    return students.find(s => s.id === activeChildId) || students[0];
+  }, [students, activeChildId]);
 
   // Extract available unique class names
   const availableClassNames = useMemo(() => {
@@ -87,18 +120,191 @@ export const ParentChatView: React.FC<ParentChatViewProps> = ({
     return merged;
   }, [classes, students]);
 
-  // Filtered students based on class selection
+  // 1. Resolve Wali Kelas contact for the selected child
+  const childClass = useMemo(() => {
+    return classes.find(c => c.name === activeStudent?.className || c.id === activeStudent?.classId);
+  }, [classes, activeStudent]);
+  
+  const waliKelasTeacher = useMemo(() => {
+    return teachers.find(t => 
+      (t.additionalDuty === 'WALI_KELAS' && (t.homeroomClassName === activeStudent?.className || t.homeroomClassId === activeStudent?.classId)) ||
+      t.homeroomClassName === activeStudent?.className ||
+      (childClass && childClass.homeroomTeacher && t.name.toLowerCase().includes(childClass.homeroomTeacher.toLowerCase()))
+    ) || {
+      id: 'tch-walikelas-default',
+      nip: '19850312 201001 2 015',
+      name: childClass?.homeroomTeacher || 'Siti Rahmawati, S.Pd.',
+      birthPlace: '-',
+      birthDate: '1985-03-12',
+      subject1: 'Wali Kelas & Guru Mata Pelajaran',
+      additionalDuty: 'WALI_KELAS',
+      homeroomClassName: activeStudent?.className || '7-A',
+      phone: '081234567891',
+      email: 'walikelas@smpn1cerdas.sch.id',
+      gender: 'P',
+      status: 'AKTIF'
+    };
+  }, [teachers, activeStudent, childClass]);
+
+  // 2. Resolve Humas contact
+  const humasTeacher = useMemo(() => {
+    return teachers.find(t => t.additionalDuty === 'HUMAS') || {
+      id: 'tch-humas-default',
+      nip: '19820514 200801 2 006',
+      name: 'Dra. Hj. Rina Wijaya',
+      birthPlace: 'Jakarta',
+      birthDate: '1982-05-14',
+      subject1: 'Humas & Layanan Informasi Sekolah',
+      additionalDuty: 'HUMAS',
+      phone: '081299887766',
+      email: 'humas@smpn1cerdas.sch.id',
+      gender: 'P',
+      status: 'AKTIF'
+    };
+  }, [teachers]);
+
+  // 3. Resolve BK contact
+  const bkTeacher = useMemo(() => {
+    return teachers.find(t => t.additionalDuty === 'BK') || {
+      id: 'tch-bk-default',
+      nip: '19900210 201801 1 003',
+      name: 'Ahmad Fauzi, S.Psi.',
+      birthPlace: 'Surabaya',
+      birthDate: '1990-02-10',
+      subject1: 'Bimbingan Konseling (BK)',
+      additionalDuty: 'BK',
+      phone: '081377665544',
+      email: 'bk@smpn1cerdas.sch.id',
+      gender: 'L',
+      status: 'AKTIF'
+    };
+  }, [teachers]);
+
+  // 4. Resolve Custom Chosen Teacher (if chosen by parent)
+  const customTeacher = useMemo(() => {
+    if (!selectedCustomTeacherId) return null;
+    return teachers.find(t => t.id === selectedCustomTeacherId) || null;
+  }, [teachers, selectedCustomTeacherId]);
+
+  // Filtered teachers for custom selection (exclude default wali kelas, humas, bk if already listed)
+  const otherTeachersList = useMemo(() => {
+    return teachers.filter(t => {
+      const isSearchMatch = !teacherSearchQuery.trim() || 
+        t.name.toLowerCase().includes(teacherSearchQuery.toLowerCase()) || 
+        (t.subject1 && t.subject1.toLowerCase().includes(teacherSearchQuery.toLowerCase())) ||
+        (t.subject2 && t.subject2.toLowerCase().includes(teacherSearchQuery.toLowerCase()));
+      return isSearchMatch;
+    });
+  }, [teachers, teacherSearchQuery]);
+
+  // Initialize selectedCustomTeacherId if not set and category is OTHER_TEACHER
+  useEffect(() => {
+    if (selectedCategory === 'OTHER_TEACHER' && !selectedCustomTeacherId && otherTeachersList.length > 0) {
+      setSelectedCustomTeacherId(otherTeachersList[0].id);
+    }
+  }, [selectedCategory, selectedCustomTeacherId, otherTeachersList]);
+
+  // Determine the active target teacher for current conversation
+  const activeTargetTeacher: Teacher = useMemo(() => {
+    if (isTeacherAccount) {
+      // When a teacher is logged in, the target teacher is strictly the logged-in teacher themselves!
+      return loggedTeacher;
+    }
+
+    if (selectedCategory === 'WALI_KELAS') return waliKelasTeacher;
+    if (selectedCategory === 'HUMAS') return humasTeacher;
+    if (selectedCategory === 'BK') return bkTeacher;
+    if (selectedCategory === 'OTHER_TEACHER' && customTeacher) return customTeacher;
+
+    return waliKelasTeacher;
+  }, [isTeacherAccount, loggedTeacher, selectedCategory, waliKelasTeacher, humasTeacher, bkTeacher, customTeacher]);
+
+  // Determine the canonical Thread Key for private communication:
+  // Key format: `${studentId}_${teacherId}`
+  const canonicalThreadKey = useMemo(() => {
+    const sId = activeStudent?.id || 'std-default';
+    const tId = activeTargetTeacher?.id || 'tch-default';
+    return `${sId}_${tId}`;
+  }, [activeStudent, activeTargetTeacher]);
+
+  // Retrieve messages for canonical key, including legacy fallback keys (e.g. `${studentId}_WALI_KELAS`)
+  const currentMessages: DirectChatMessage[] = useMemo(() => {
+    if (chatThreads[canonicalThreadKey]) {
+      return chatThreads[canonicalThreadKey];
+    }
+
+    // Check legacy fallback keys if applicable
+    const sId = activeStudent?.id || 'std-default';
+    if (selectedCategory === 'WALI_KELAS' && chatThreads[`${sId}_WALI_KELAS`]) {
+      return chatThreads[`${sId}_WALI_KELAS`];
+    }
+    if (selectedCategory === 'HUMAS' && chatThreads[`${sId}_HUMAS`]) {
+      return chatThreads[`${sId}_HUMAS`];
+    }
+    if (selectedCategory === 'BK' && chatThreads[`${sId}_BK`]) {
+      return chatThreads[`${sId}_BK`];
+    }
+
+    // Default initial greeting if no messages yet
+    const roleTitle = activeTargetTeacher.additionalDuty === 'WALI_KELAS'
+      ? `Wali Kelas ${activeStudent?.className || ''}`
+      : activeTargetTeacher.additionalDuty === 'HUMAS'
+      ? 'Humas Sekolah'
+      : activeTargetTeacher.additionalDuty === 'BK'
+      ? 'Bimbingan Konseling (BK)'
+      : (activeTargetTeacher.subject1 || 'Guru Pengajar');
+
+    return [
+      {
+        id: `init-${canonicalThreadKey}`,
+        threadId: canonicalThreadKey,
+        studentId: activeStudent?.id,
+        teacherId: activeTargetTeacher.id,
+        senderRole: 'STAFF',
+        senderName: activeTargetTeacher.name,
+        message: isTeacherAccount
+          ? `Ruang Konsultasi Pribadi dibuka untuk Wali Murid Ananda ${activeStudent?.name || 'Siswa'} (Kelas ${activeStudent?.className || ''}). Pesan Anda hanya dapat dilihat oleh Wali Murid ini.`
+          : `Halo Bpk/Ibu Wali dari ${activeStudent?.name || 'Siswa'} (Kelas ${activeStudent?.className || ''}). Saya ${activeTargetTeacher.name} (${roleTitle}). Silakan sampaikan pesan atau konsultasi pribadi Anda di sini.`,
+        timestamp: 'Hari ini, 07:30'
+      }
+    ];
+  }, [chatThreads, canonicalThreadKey, activeStudent, selectedCategory, activeTargetTeacher, isTeacherAccount]);
+
+  // Teachers View: Identify all students who have active messages with THIS logged-in teacher
+  const studentsWithActiveChatsForLoggedTeacher = useMemo(() => {
+    if (!isTeacherAccount) return [];
+    const tId = loggedTeacher.id;
+    const studentIdSet = new Set<string>();
+
+    Object.entries(chatThreads).forEach(([key, msgs]) => {
+      const messageList = Array.isArray(msgs) ? (msgs as DirectChatMessage[]) : [];
+      if (messageList.length > 0) {
+        // Matches canonical key `${studentId}_${loggedTeacher.id}` or message teacherId
+        if (key.endsWith(`_${tId}`) || messageList.some(m => m.teacherId === tId || (m.senderName && m.senderName.includes(loggedTeacher.name)))) {
+          const sId = key.split('_')[0];
+          if (sId) studentIdSet.add(sId);
+        }
+      }
+    });
+
+    return students.filter(s => studentIdSet.has(s.id));
+  }, [isTeacherAccount, loggedTeacher, chatThreads, students]);
+
+  // Filtered students for teacher selection
   const filteredStudents = useMemo(() => {
+    if (!isStaffView) return students;
+
+    // If teacher is Wali Kelas, prioritize their homeroom class
+    if (loggedTeacher.additionalDuty === 'WALI_KELAS' && loggedTeacher.homeroomClassName && selectedClassFilter === 'ALL') {
+      const homeroomStudents = students.filter(s => s.className === loggedTeacher.homeroomClassName);
+      if (homeroomStudents.length > 0) {
+        return homeroomStudents;
+      }
+    }
+
     if (selectedClassFilter === 'ALL') return students;
     return students.filter(s => s.className === selectedClassFilter);
-  }, [students, selectedClassFilter]);
-
-  // Sync if selectedChildId changes externally
-  useEffect(() => {
-    if (selectedChildId) {
-      setActiveChildId(selectedChildId);
-    }
-  }, [selectedChildId]);
+  }, [students, isStaffView, selectedClassFilter, loggedTeacher]);
 
   // Sync activeChildId if current activeChildId is not in filteredStudents
   useEffect(() => {
@@ -107,177 +313,10 @@ export const ParentChatView: React.FC<ParentChatViewProps> = ({
     }
   }, [selectedClassFilter, filteredStudents, activeChildId]);
 
-  const activeStudent = students.find(s => s.id === activeChildId) || students[0];
-  const [activeContactType, setActiveContactType] = useState<ContactType>('WALI_KELAS');
-
-  // Input states
-  const [messageText, setMessageText] = useState('');
-  const [attachmentUrl, setAttachmentUrl] = useState<string | null>(null);
-  const [isSimulatingResponse, setIsSimulatingResponse] = useState(false);
-
-  // Chat storage state
-  const [chatThreads, setChatThreads] = useState<Record<string, DirectChatMessage[]>>({});
-
-  const messagesEndRef = useRef<HTMLDivElement>(null);
-
-  // Load chats from localStorage
-  useEffect(() => {
-    const saved = localStorage.getItem('sihadir_parent_direct_chats_v2');
-    if (saved) {
-      try {
-        setChatThreads(JSON.parse(saved));
-      } catch {
-        setChatThreads({});
-      }
-    }
-  }, []);
-
-  // Save chats to localStorage
-  const saveThreads = (updated: Record<string, DirectChatMessage[]>) => {
-    setChatThreads(updated);
-    try {
-      localStorage.setItem('sihadir_parent_direct_chats_v2', JSON.stringify(updated));
-    } catch (e) {
-      console.error('Error saving chats:', e);
-    }
-  };
-
-  // 1. Resolve Wali Kelas contact for the selected child
-  const childClass = classes.find(c => c.name === activeStudent?.className || c.id === activeStudent?.classId);
-  
-  const waliKelasTeacher = teachers.find(t => 
-    (t.additionalDuty === 'WALI_KELAS' && (t.homeroomClassName === activeStudent?.className || t.homeroomClassId === activeStudent?.classId)) ||
-    t.homeroomClassName === activeStudent?.className ||
-    (childClass && childClass.homeroomTeacher && t.name.toLowerCase().includes(childClass.homeroomTeacher.toLowerCase()))
-  ) || {
-    id: 'tch-walikelas-default',
-    nip: '19850312 201001 2 015',
-    name: childClass?.homeroomTeacher || 'Siti Rahmawati, S.Pd.',
-    birthPlace: '-',
-    birthDate: '1985-03-12',
-    subject1: 'Wali Kelas & Guru Mata Pelajaran',
-    additionalDuty: 'WALI_KELAS',
-    homeroomClassName: activeStudent?.className || '7-A',
-    phone: '081234567891',
-    email: 'walikelas@smpn1cerdas.sch.id',
-    gender: 'P',
-    status: 'AKTIF'
-  };
-
-  // 2. Resolve Humas contact
-  const humasTeacher = teachers.find(t => t.additionalDuty === 'HUMAS') || {
-    id: 'tch-humas-default',
-    nip: '19820514 200801 2 006',
-    name: 'Dra. Hj. Rina Wijaya',
-    birthPlace: 'Jakarta',
-    birthDate: '1982-05-14',
-    subject1: 'Humas & Layanan Informasi Sekolah',
-    additionalDuty: 'HUMAS',
-    phone: '081299887766',
-    email: 'humas@smpn1cerdas.sch.id',
-    gender: 'P',
-    status: 'AKTIF'
-  };
-
-  // 3. Resolve BK contact
-  const bkTeacher = teachers.find(t => t.additionalDuty === 'BK') || {
-    id: 'tch-bk-default',
-    nip: '19900210 201801 1 003',
-    name: 'Ahmad Fauzi, S.Psi.',
-    birthPlace: 'Surabaya',
-    birthDate: '1990-02-10',
-    subject1: 'Bimbingan Konseling (BK)',
-    additionalDuty: 'BK',
-    phone: '081377665544',
-    email: 'bk@smpn1cerdas.sch.id',
-    gender: 'L',
-    status: 'AKTIF'
-  };
-
-  // Get active contact object
-  const getActiveContact = () => {
-    if (isTeacherAccount) {
-      const roleTitleDisplay = loggedTeacher.additionalDuty === 'WALI_KELAS' 
-        ? `Wali Kelas ${loggedTeacher.homeroomClassName || activeStudent?.className || ''}` 
-        : loggedTeacher.additionalDuty === 'HUMAS'
-        ? 'Tim Humas Sekolah'
-        : loggedTeacher.additionalDuty === 'BK'
-        ? 'Bimbingan Konseling (BK)'
-        : loggedTeacher.additionalDuty === 'ADMIN'
-        ? 'Administrator Sekolah'
-        : loggedTeacher.additionalDuty === 'TU'
-        ? 'Tata Usaha (TU)'
-        : loggedTeacher.additionalDuty === 'PERPUSTAKAAN'
-        ? 'Pengelola Perpustakaan'
-        : (loggedTeacher.subject1 ? `Guru ${loggedTeacher.subject1}` : 'Guru Pengajar');
-
-      return {
-        type: 'WALI_KELAS' as ContactType,
-        roleTitle: roleTitleDisplay,
-        badgeColor: 'bg-indigo-50 text-indigo-800 border-indigo-200',
-        icon: UserCheck,
-        iconBg: 'bg-indigo-600',
-        teacher: loggedTeacher,
-        subtitle: `Terhubung dengan Wali Murid ${activeStudent?.name || 'Siswa'}`,
-        defaultWelcome: `Halo Bpk/Ibu Wali Murid dari ${activeStudent?.name || 'Siswa'} (Kelas ${activeStudent?.className || ''}). Saya ${loggedTeacher.name}. Silakan sampaikan pesan atau konsultasi Anda.`
-      };
-    }
-
-    switch (activeContactType) {
-      case 'WALI_KELAS':
-        return {
-          type: 'WALI_KELAS' as ContactType,
-          roleTitle: `Wali Kelas ${activeStudent?.className || ''}`,
-          badgeColor: 'bg-emerald-50 text-emerald-800 border-emerald-200',
-          icon: UserCheck,
-          iconBg: 'bg-emerald-600',
-          teacher: waliKelasTeacher,
-          subtitle: `Terhubung otomatis dengan Wali Kelas Ananda ${activeStudent?.name || ''}`,
-          defaultWelcome: `Halo Bpk/Ibu Wali dari ${activeStudent?.name || 'Siswa'} (Kelas ${activeStudent?.className || ''}). Saya ${waliKelasTeacher.name}, Wali Kelas Ananda. Silakan sampaikan jika ada pertanyaan mengenai absensi, jurnal KBM, atau aktivitas Ananda di sekolah.`
-        };
-      case 'HUMAS':
-        return {
-          type: 'HUMAS' as ContactType,
-          roleTitle: 'Tim Humas & Layanan Informasi',
-          badgeColor: 'bg-cyan-50 text-cyan-800 border-cyan-200',
-          icon: Megaphone,
-          iconBg: 'bg-cyan-600',
-          teacher: humasTeacher,
-          subtitle: 'Layanan Hubungan Masyarakat & Informasi Umum Sekolah',
-          defaultWelcome: `Selamat datang di Layanan Humas ${schoolProfile.name}. Saya ${humasTeacher.name} dari Tim Humas. Ada yang bisa kami bantu terkait informasi kegiatan sekolah, perizinan, atau pengumuman resmi?`
-        };
-      case 'BK':
-        return {
-          type: 'BK' as ContactType,
-          roleTitle: 'Bimbingan Konseling (BK)',
-          badgeColor: 'bg-purple-50 text-purple-800 border-purple-200',
-          icon: HeartHandshake,
-          iconBg: 'bg-purple-600',
-          teacher: bkTeacher,
-          subtitle: 'Layanan Konseling Siswa, Minat Bakat & Kedisiplinan',
-          defaultWelcome: `Salam hangat Bpk/Ibu. Saya ${bkTeacher.name} dari Tim Bimbingan Konseling (BK). Kami siap membantu konsultasi pengembangan karakter, kedisiplinan, maupun bimbingan belajar Ananda ${activeStudent?.name || ''}.`
-        };
-    }
-  };
-
-  const activeContact = getActiveContact();
-  const threadKey = `${activeStudent?.id || 'child'}_${activeContactType}`;
-
-  // Get current messages or populate default welcome
-  const currentMessages: DirectChatMessage[] = chatThreads[threadKey] || [
-    {
-      id: `init-${threadKey}`,
-      senderRole: 'STAFF',
-      senderName: activeContact.teacher.name,
-      message: activeContact.defaultWelcome,
-      timestamp: 'Hari ini, 07.30'
-    }
-  ];
-
   // Scroll to bottom on message change
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [currentMessages, isSimulatingResponse]);
+  }, [currentMessages]);
 
   // Handle file upload
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -296,54 +335,72 @@ export const ParentChatView: React.FC<ParentChatViewProps> = ({
     const content = textToSend || messageText;
     if (!content.trim() && !attachmentUrl) return;
 
+    const timeString = new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
+
+    let newMsg: DirectChatMessage;
+
     if (isStaffView) {
       // Sending as Teacher / Staff
-      const newStaffMsg: DirectChatMessage = {
+      newMsg = {
         id: `msg-${Date.now()}`,
+        threadId: canonicalThreadKey,
+        studentId: activeStudent?.id,
+        teacherId: activeTargetTeacher.id,
+        senderId: loggedTeacher.id,
         senderRole: 'STAFF',
-        senderName: `${activeContact.teacher.name} (${activeContact.roleTitle})`,
+        senderName: `${loggedTeacher.name}`,
         message: content.trim(),
-        timestamp: new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }),
-        attachmentUrl: attachmentUrl || undefined
+        timestamp: timeString,
+        attachmentUrl: attachmentUrl || undefined,
+        read: true
       };
-
-      const updatedList = [...currentMessages, newStaffMsg];
-      const newThreads = { ...chatThreads, [threadKey]: updatedList };
-      saveThreads(newThreads);
-
-      setMessageText('');
-      setAttachmentUrl(null);
     } else {
       // Sending as Parent
-      const newParentMsg: DirectChatMessage = {
+      newMsg = {
         id: `msg-${Date.now()}`,
+        threadId: canonicalThreadKey,
+        studentId: activeStudent?.id,
+        teacherId: activeTargetTeacher.id,
+        senderId: activeStudent?.nisn || activeStudent?.id,
         senderRole: 'PARENT',
         senderName: `${activeStudent?.parentName || 'Orang Tua'} (Wali ${activeStudent?.name})`,
         message: content.trim(),
-        timestamp: new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }),
-        attachmentUrl: attachmentUrl || undefined
+        timestamp: timeString,
+        attachmentUrl: attachmentUrl || undefined,
+        read: false
       };
-
-      const updatedList = [...currentMessages, newParentMsg];
-      const newThreads = { ...chatThreads, [threadKey]: updatedList };
-      saveThreads(newThreads);
-
-      setMessageText('');
-      setAttachmentUrl(null);
     }
+
+    const updatedThread = [...currentMessages, newMsg];
+    const newThreads = { ...chatThreads, [canonicalThreadKey]: updatedThread };
+    
+    // Save to localStorage & Cloud Database Sync
+    saveDirectChats(newThreads);
+    setChatThreads(newThreads);
+
+    setMessageText('');
+    setAttachmentUrl(null);
   };
 
   // Open WhatsApp link directly
   const handleOpenWhatsApp = () => {
-    const rawPhone = activeContact.teacher.phone || '081234567890';
+    const rawPhone = activeTargetTeacher.phone || '081234567890';
     let formattedPhone = rawPhone.replace(/\D/g, '');
     if (formattedPhone.startsWith('0')) {
       formattedPhone = '62' + formattedPhone.slice(1);
     }
+    const roleTitle = activeTargetTeacher.additionalDuty === 'WALI_KELAS'
+      ? `Wali Kelas ${activeStudent?.className || ''}`
+      : activeTargetTeacher.additionalDuty === 'HUMAS'
+      ? 'Humas Sekolah'
+      : activeTargetTeacher.additionalDuty === 'BK'
+      ? 'Bimbingan Konseling (BK)'
+      : (activeTargetTeacher.subject1 || 'Guru Pengajar');
+
     const text = encodeURIComponent(
       isStaffView
-        ? `Halo Bpk/Ibu Wali Murid ${activeStudent?.name} (Kelas ${activeStudent?.className}), ini pesan dari ${activeContact.teacher.name} (${activeContact.roleTitle}).`
-        : `Halo ${activeContact.teacher.name} (${activeContact.roleTitle}), saya Wali Murid dari ${activeStudent?.name} (Kelas ${activeStudent?.className}).`
+        ? `Halo Bpk/Ibu Wali Murid ${activeStudent?.name} (Kelas ${activeStudent?.className}), ini pesan dari ${loggedTeacher.name}.`
+        : `Halo Bpk/Ibu ${activeTargetTeacher.name} (${roleTitle}), saya Wali Murid dari ${activeStudent?.name} (Kelas ${activeStudent?.className}).`
     );
     window.open(`https://wa.me/${formattedPhone}?text=${text}`, '_blank');
   };
@@ -351,42 +408,43 @@ export const ParentChatView: React.FC<ParentChatViewProps> = ({
   return (
     <div className="max-w-7xl mx-auto space-y-6">
       
-      {/* Top Banner Header */}
-      <div className="bg-gradient-to-r from-indigo-900 via-indigo-800 to-slate-900 rounded-3xl p-6 text-white shadow-xl relative overflow-hidden">
+      {/* Top Banner Header with Strict Confidentiality Badge */}
+      <div className="bg-gradient-to-r from-indigo-950 via-indigo-900 to-slate-900 rounded-3xl p-6 text-white shadow-xl relative overflow-hidden border border-indigo-800/80">
         <div className="absolute top-0 right-0 -mt-8 -mr-8 w-64 h-64 bg-indigo-500/10 rounded-full blur-3xl pointer-events-none"></div>
         
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 relative z-10">
           <div>
-            <div className="inline-flex items-center gap-2 bg-indigo-500/20 text-indigo-200 border border-indigo-400/30 px-3 py-1 rounded-full text-xs font-bold mb-2">
-              <Sparkles className="w-3.5 h-3.5 text-amber-300" />
-              {isStaffView ? 'Portal Staf & Guru Sekolah' : 'Pusat Komunikasi Orang Tua & Sekolah'}
+            <div className="inline-flex items-center gap-2 bg-emerald-500/20 text-emerald-300 border border-emerald-400/30 px-3 py-1 rounded-full text-xs font-bold mb-2">
+              <Lock className="w-3.5 h-3.5 text-emerald-400" />
+              <span>Privasi Terenkripsi: Khusus Akun Guru & Wali Murid Terpilih</span>
             </div>
             <h1 className="text-2xl font-black tracking-tight text-white flex items-center gap-2.5">
               <MessageSquare className="w-7 h-7 text-amber-300" />
-              {isStaffView ? 'Fitur Chat & Komunikasi Wali Murid' : 'Fitur Chat & Kontak Sekolah'}
+              {isStaffView ? 'Konsultasi & Chat Pribadi Guru - Wali Murid' : 'Chat Pribadi Guru & Wali Kelas'}
             </h1>
             <p className="text-xs text-indigo-200 mt-1 max-w-2xl font-medium leading-relaxed">
               {isStaffView 
-                ? 'Layanan obrolan langsung untuk akun tugas tambahan Wali Kelas, Humas, dan Bimbingan Konseling (BK) dengan para Wali Murid.'
-                : 'Hubungi secara langsung Wali Kelas, Humas, dan Bimbingan Konseling (BK). Wali Kelas terhubung otomatis dengan wali kelas dari ananda.'
+                ? `Setiap percakapan bersifat privat dan diisolasi khusus untuk akun Anda (${loggedTeacher.name}). Guru lain tidak dapat melihat riwayat pesan konsultasi ini.`
+                : 'Pilih Guru yang ingin Anda hubungi secara privat (Wali Kelas, Humas, BK, atau Guru Mata Pelajaran). Pesan hanya dapat dibaca oleh Anda dan Guru yang dipilih.'
               }
             </p>
           </div>
 
-          {/* Active Student Card Badge / Dropdown */}
+          {/* Active Interlocutor & Student Identity Card */}
           {activeStudent && (
             <div className="bg-white/10 backdrop-blur-md border border-white/15 rounded-2xl p-3.5 flex items-center gap-3 shrink-0">
               <img 
                 src={activeStudent.photoUrl} 
                 alt={activeStudent.name} 
-                className="w-11 h-11 rounded-xl object-cover border-2 border-white/40 shadow-sm"
+                className="w-11 h-11 rounded-xl object-cover border-2 border-emerald-400 shadow-sm"
                 onError={(e) => {
                   (e.target as HTMLElement).style.display = 'none';
                 }}
               />
               <div className="text-xs">
-                <span className="text-[10px] text-indigo-300 font-extrabold uppercase tracking-wider block">
-                  {isStaffView ? 'Siswa / Wali Murid Terpilih' : 'Ananda Terpilih'}
+                <span className="text-[10px] text-emerald-300 font-extrabold uppercase tracking-wider block flex items-center gap-1">
+                  <ShieldCheck className="w-3 h-3 text-emerald-400" />
+                  {isStaffView ? 'Wali Murid Siswa Terpilih' : 'Siswa / Ananda'}
                 </span>
                 <span className="font-black text-white text-sm block">{activeStudent.name}</span>
                 <span className="text-[11px] text-amber-300 font-bold">Kelas {activeStudent.className} • Wali: {activeStudent.parentName || 'Orang Tua'}</span>
@@ -396,16 +454,16 @@ export const ParentChatView: React.FC<ParentChatViewProps> = ({
         </div>
       </div>
 
-      {/* Main Grid: Left Contacts Selection Bar & Right Chat Canvas */}
+      {/* Main Grid: Left Contacts / Teacher Selection (4 Cols) & Right Chat Canvas (8 Cols) */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
         
-        {/* Left Column: Contact Accounts Selection (4 Cols) */}
-        <div className="lg:col-span-4 space-y-3">
+        {/* Left Column: Contact Accounts & Student Selection */}
+        <div className="lg:col-span-4 space-y-4">
           
-          {/* If Staff / Teacher View: Student Selection Box */}
+          {/* TEACHER VIEW: Select Student to Chat with */}
           {isStaffView && (
             <div className="bg-white border border-indigo-200/80 rounded-3xl p-4 shadow-sm space-y-3">
-              <div className="flex items-center justify-between">
+              <div className="flex items-center justify-between pb-2 border-b border-slate-100">
                 <label className="text-xs font-black text-slate-800 uppercase tracking-wider flex items-center gap-2">
                   <GraduationCap className="w-4 h-4 text-indigo-600" />
                   Pilih Siswa / Wali Murid
@@ -415,12 +473,38 @@ export const ParentChatView: React.FC<ParentChatViewProps> = ({
                 </span>
               </div>
 
+              {/* Active chats notification for this teacher */}
+              {studentsWithActiveChatsForLoggedTeacher.length > 0 && (
+                <div className="bg-emerald-50 border border-emerald-200/80 rounded-2xl p-2.5 text-[11px] text-emerald-900">
+                  <div className="font-extrabold flex items-center gap-1.5 text-emerald-800 mb-1">
+                    <MessageSquare className="w-3.5 h-3.5 text-emerald-600" />
+                    <span>{studentsWithActiveChatsForLoggedTeacher.length} Percakapan Aktif dengan Anda</span>
+                  </div>
+                  <div className="flex flex-wrap gap-1 mt-1">
+                    {studentsWithActiveChatsForLoggedTeacher.slice(0, 4).map(s => (
+                      <button
+                        key={s.id}
+                        type="button"
+                        onClick={() => setActiveChildId(s.id)}
+                        className={`text-[10px] font-bold px-2 py-0.5 rounded-lg border transition-all cursor-pointer ${
+                          activeChildId === s.id 
+                            ? 'bg-emerald-600 text-white border-emerald-700' 
+                            : 'bg-white text-emerald-800 border-emerald-300 hover:bg-emerald-100'
+                        }`}
+                      >
+                        {s.name.split(' ')[0]} ({s.className})
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               <div className="space-y-2.5">
                 {/* Filter Kelas */}
                 <div>
                   <label className="block text-[11px] font-extrabold text-slate-600 mb-1 flex items-center gap-1.5">
                     <Filter className="w-3.5 h-3.5 text-indigo-600" />
-                    Filter Kelas
+                    Filter Kelas Siswa
                   </label>
                   <select
                     value={selectedClassFilter}
@@ -448,7 +532,7 @@ export const ParentChatView: React.FC<ParentChatViewProps> = ({
                     className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer"
                   >
                     {filteredStudents.length === 0 ? (
-                      <option value="">Tidak ada siswa di kelas ini</option>
+                      <option value="">Tidak ada siswa di filter ini</option>
                     ) : (
                       filteredStudents.map((s) => (
                         <option key={s.id} value={s.id}>
@@ -462,207 +546,288 @@ export const ParentChatView: React.FC<ParentChatViewProps> = ({
             </div>
           )}
 
+          {/* PARENT VIEW: Contact Selection Panel (Wali Kelas, Humas, BK, or Specific Teacher) */}
           <div className="bg-white border border-slate-200/80 rounded-3xl p-4 shadow-sm space-y-3">
             <div className="flex items-center justify-between pb-2 border-b border-slate-100">
               <h2 className="text-xs font-black text-slate-800 uppercase tracking-wider flex items-center gap-2">
                 <ShieldCheck className="w-4 h-4 text-indigo-600" />
-                Channel / Duty Kontak
+                {isTeacherAccount ? 'Akun Konsultasi Anda' : 'Pilih Kontak / Guru Tujuan'}
               </h2>
               <span className="text-[10px] bg-indigo-50 text-indigo-700 font-extrabold px-2 py-0.5 rounded-full">
-                {isTeacherAccount ? '1 Akun Login Guru' : '3 Tugas Resmi'}
+                {isTeacherAccount ? 'Akun Guru Terisolasi' : 'Privat & Rahasia'}
               </span>
             </div>
 
             {isTeacherAccount ? (
-              /* Single Account Option for Logged-In Teacher */
-              <button
-                onClick={() => setActiveContactType('WALI_KELAS')}
-                className="w-full text-left p-3.5 rounded-2xl border transition-all cursor-pointer relative overflow-hidden bg-gradient-to-r from-indigo-700 via-indigo-800 to-slate-900 text-white border-indigo-600 shadow-md ring-2 ring-indigo-500/30"
-              >
+              /* Single Isolated Account Option for Logged-In Teacher */
+              <div className="w-full text-left p-4 rounded-2xl border bg-gradient-to-br from-indigo-900 via-indigo-800 to-slate-900 text-white border-indigo-700 shadow-md ring-2 ring-indigo-500/20 space-y-2">
                 <div className="flex items-start gap-3">
                   <div className="p-2.5 rounded-xl bg-white/20 text-white shrink-0">
                     <UserCheck className="w-5 h-5 text-amber-300" />
                   </div>
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center justify-between">
-                      <span className="text-[10px] font-black uppercase px-2 py-0.5 rounded-md bg-white/20 text-white">
-                        AKUN GURU LOGIN
+                      <span className="text-[10px] font-black uppercase px-2 py-0.5 rounded-md bg-emerald-500/30 text-emerald-200 border border-emerald-400/30">
+                        AKUN LOGIN ANDA
                       </span>
-                      <ChevronRight className="w-4 h-4 text-white" />
+                      <Lock className="w-3.5 h-3.5 text-emerald-400" />
                     </div>
                     <h3 className="font-extrabold text-sm mt-1 truncate">
                       {loggedTeacher.name}
                     </h3>
                     <p className="text-[11px] mt-0.5 truncate text-indigo-200">
-                      {loggedTeacher.subject1 || 'Guru Pengajar Sekolah'}
+                      NIP: {loggedTeacher.nip} • {loggedTeacher.subject1 || 'Guru Sekolah'}
                     </p>
-                    <div className="mt-2 pt-2 border-t border-white/20 text-[10px] font-bold flex items-center gap-1.5 text-amber-200">
-                      <GraduationCap className="w-3.5 h-3.5 shrink-0" />
-                      <span className="truncate">Terhubung dgn {activeStudent?.name || 'Wali Murid'}</span>
-                    </div>
                   </div>
                 </div>
-              </button>
+
+                <div className="pt-2.5 border-t border-white/15 text-[11px] text-amber-200 font-medium flex items-center gap-2">
+                  <Lock className="w-3.5 h-3.5 text-amber-300 shrink-0" />
+                  <span>Guru lain tidak memiliki akses untuk membuka ruang obrolan Anda ini.</span>
+                </div>
+              </div>
             ) : (
-              <>
-                {/* Account Option 1: Wali Kelas */}
+              <div className="space-y-2.5">
+                {/* Contact Option 1: Wali Kelas */}
                 <button
-                  onClick={() => setActiveContactType('WALI_KELAS')}
-                  className={`w-full text-left p-3.5 rounded-2xl border transition-all cursor-pointer relative overflow-hidden group ${
-                    activeContactType === 'WALI_KELAS'
+                  type="button"
+                  onClick={() => setSelectedCategory('WALI_KELAS')}
+                  className={`w-full text-left p-3 rounded-2xl border transition-all cursor-pointer relative overflow-hidden group ${
+                    selectedCategory === 'WALI_KELAS'
                       ? 'bg-gradient-to-r from-emerald-600 to-teal-700 text-white border-emerald-500 shadow-md shadow-emerald-600/20 ring-2 ring-emerald-500/30'
                       : 'bg-slate-50 hover:bg-slate-100 text-slate-800 border-slate-200'
                   }`}
                 >
                   <div className="flex items-start gap-3">
                     <div className={`p-2.5 rounded-xl text-white shrink-0 ${
-                      activeContactType === 'WALI_KELAS' ? 'bg-white/20' : 'bg-emerald-600'
+                      selectedCategory === 'WALI_KELAS' ? 'bg-white/20' : 'bg-emerald-600'
                     }`}>
                       <UserCheck className="w-5 h-5" />
                     </div>
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center justify-between">
                         <span className={`text-[10px] font-black uppercase px-2 py-0.5 rounded-md ${
-                          activeContactType === 'WALI_KELAS' ? 'bg-white/20 text-white' : 'bg-emerald-100 text-emerald-800'
+                          selectedCategory === 'WALI_KELAS' ? 'bg-white/20 text-white' : 'bg-emerald-100 text-emerald-800'
                         }`}>
                           Wali Kelas {activeStudent?.className || ''}
                         </span>
-                        <ChevronRight className={`w-4 h-4 transition-transform ${activeContactType === 'WALI_KELAS' ? 'translate-x-1 text-white' : 'text-slate-400'}`} />
+                        <ChevronRight className={`w-4 h-4 transition-transform ${selectedCategory === 'WALI_KELAS' ? 'translate-x-1 text-white' : 'text-slate-400'}`} />
                       </div>
-                      <h3 className="font-extrabold text-sm mt-1 truncate">
+                      <h3 className="font-extrabold text-xs mt-1 truncate">
                         {waliKelasTeacher.name}
                       </h3>
                       <p className={`text-[11px] mt-0.5 truncate ${
-                        activeContactType === 'WALI_KELAS' ? 'text-emerald-100' : 'text-slate-500'
+                        selectedCategory === 'WALI_KELAS' ? 'text-emerald-100' : 'text-slate-500'
                       }`}>
-                        {waliKelasTeacher.subject1 || 'Wali Kelas Siswa'}
+                        {waliKelasTeacher.subject1 || 'Wali Kelas Ananda'}
                       </p>
-                      <div className={`mt-2 pt-2 border-t text-[10px] font-bold flex items-center gap-1.5 ${
-                        activeContactType === 'WALI_KELAS' ? 'border-white/20 text-amber-200' : 'border-slate-200 text-emerald-700'
-                      }`}>
-                        <GraduationCap className="w-3.5 h-3.5 shrink-0" />
-                        <span className="truncate">Terhubung dgn {activeStudent?.name}</span>
-                      </div>
                     </div>
                   </div>
                 </button>
 
-                {/* Account Option 2: Humas */}
+                {/* Contact Option 2: Humas */}
                 <button
-                  onClick={() => setActiveContactType('HUMAS')}
-                  className={`w-full text-left p-3.5 rounded-2xl border transition-all cursor-pointer relative overflow-hidden group ${
-                    activeContactType === 'HUMAS'
+                  type="button"
+                  onClick={() => setSelectedCategory('HUMAS')}
+                  className={`w-full text-left p-3 rounded-2xl border transition-all cursor-pointer relative overflow-hidden group ${
+                    selectedCategory === 'HUMAS'
                       ? 'bg-gradient-to-r from-cyan-600 to-blue-700 text-white border-cyan-500 shadow-md shadow-cyan-600/20 ring-2 ring-cyan-500/30'
                       : 'bg-slate-50 hover:bg-slate-100 text-slate-800 border-slate-200'
                   }`}
                 >
                   <div className="flex items-start gap-3">
                     <div className={`p-2.5 rounded-xl text-white shrink-0 ${
-                      activeContactType === 'HUMAS' ? 'bg-white/20' : 'bg-cyan-600'
+                      selectedCategory === 'HUMAS' ? 'bg-white/20' : 'bg-cyan-600'
                     }`}>
                       <Megaphone className="w-5 h-5" />
                     </div>
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center justify-between">
                         <span className={`text-[10px] font-black uppercase px-2 py-0.5 rounded-md ${
-                          activeContactType === 'HUMAS' ? 'bg-white/20 text-white' : 'bg-cyan-100 text-cyan-800'
+                          selectedCategory === 'HUMAS' ? 'bg-white/20 text-white' : 'bg-cyan-100 text-cyan-800'
                         }`}>
                           Humas Sekolah
                         </span>
-                        <ChevronRight className={`w-4 h-4 transition-transform ${activeContactType === 'HUMAS' ? 'translate-x-1 text-white' : 'text-slate-400'}`} />
+                        <ChevronRight className={`w-4 h-4 transition-transform ${selectedCategory === 'HUMAS' ? 'translate-x-1 text-white' : 'text-slate-400'}`} />
                       </div>
-                      <h3 className="font-extrabold text-sm mt-1 truncate">
+                      <h3 className="font-extrabold text-xs mt-1 truncate">
                         {humasTeacher.name}
                       </h3>
                       <p className={`text-[11px] mt-0.5 truncate ${
-                        activeContactType === 'HUMAS' ? 'text-cyan-100' : 'text-slate-500'
+                        selectedCategory === 'HUMAS' ? 'text-cyan-100' : 'text-slate-500'
                       }`}>
                         Layanan Informasi & Hubungan Masyarakat
                       </p>
-                      <div className={`mt-2 pt-2 border-t text-[10px] font-bold flex items-center gap-1.5 ${
-                        activeContactType === 'HUMAS' ? 'border-white/20 text-cyan-200' : 'border-slate-200 text-cyan-700'
-                      }`}>
-                        <Info className="w-3.5 h-3.5 shrink-0" />
-                        <span>Informasi umum, perizinan & event</span>
-                      </div>
                     </div>
                   </div>
                 </button>
 
-                {/* Account Option 3: BK */}
+                {/* Contact Option 3: BK */}
                 <button
-                  onClick={() => setActiveContactType('BK')}
-                  className={`w-full text-left p-3.5 rounded-2xl border transition-all cursor-pointer relative overflow-hidden group ${
-                    activeContactType === 'BK'
+                  type="button"
+                  onClick={() => setSelectedCategory('BK')}
+                  className={`w-full text-left p-3 rounded-2xl border transition-all cursor-pointer relative overflow-hidden group ${
+                    selectedCategory === 'BK'
                       ? 'bg-gradient-to-r from-purple-600 to-indigo-700 text-white border-purple-500 shadow-md shadow-purple-600/20 ring-2 ring-purple-500/30'
                       : 'bg-slate-50 hover:bg-slate-100 text-slate-800 border-slate-200'
                   }`}
                 >
                   <div className="flex items-start gap-3">
                     <div className={`p-2.5 rounded-xl text-white shrink-0 ${
-                      activeContactType === 'BK' ? 'bg-white/20' : 'bg-purple-600'
+                      selectedCategory === 'BK' ? 'bg-white/20' : 'bg-purple-600'
                     }`}>
                       <HeartHandshake className="w-5 h-5" />
                     </div>
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center justify-between">
                         <span className={`text-[10px] font-black uppercase px-2 py-0.5 rounded-md ${
-                          activeContactType === 'BK' ? 'bg-white/20 text-white' : 'bg-purple-100 text-purple-800'
+                          selectedCategory === 'BK' ? 'bg-white/20 text-white' : 'bg-purple-100 text-purple-800'
                         }`}>
                           Bimbingan Konseling (BK)
                         </span>
-                        <ChevronRight className={`w-4 h-4 transition-transform ${activeContactType === 'BK' ? 'translate-x-1 text-white' : 'text-slate-400'}`} />
+                        <ChevronRight className={`w-4 h-4 transition-transform ${selectedCategory === 'BK' ? 'translate-x-1 text-white' : 'text-slate-400'}`} />
                       </div>
-                      <h3 className="font-extrabold text-sm mt-1 truncate">
+                      <h3 className="font-extrabold text-xs mt-1 truncate">
                         {bkTeacher.name}
                       </h3>
                       <p className={`text-[11px] mt-0.5 truncate ${
-                        activeContactType === 'BK' ? 'text-purple-100' : 'text-slate-500'
+                        selectedCategory === 'BK' ? 'text-purple-100' : 'text-slate-500'
                       }`}>
                         Konselor Kedisiplinan & Karakter
                       </p>
-                      <div className={`mt-2 pt-2 border-t text-[10px] font-bold flex items-center gap-1.5 ${
-                        activeContactType === 'BK' ? 'border-white/20 text-purple-200' : 'border-slate-200 text-purple-700'
-                      }`}>
-                        <Sparkles className="w-3.5 h-3.5 shrink-0 text-amber-300" />
-                        <span>Konsultasi minat & karakter</span>
-                      </div>
                     </div>
                   </div>
                 </button>
-              </>
+
+                {/* Contact Option 4: Pilih Guru Mata Pelajaran Lain */}
+                <div className={`p-3 rounded-2xl border transition-all ${
+                  selectedCategory === 'OTHER_TEACHER'
+                    ? 'bg-gradient-to-br from-indigo-50 to-blue-50 border-indigo-300 ring-2 ring-indigo-400/30'
+                    : 'bg-slate-50 border-slate-200'
+                }`}>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedCategory('OTHER_TEACHER')}
+                    className="w-full text-left flex items-center justify-between cursor-pointer"
+                  >
+                    <div className="flex items-center gap-2">
+                      <div className="p-2 rounded-xl bg-indigo-600 text-white">
+                        <BookOpen className="w-4 h-4" />
+                      </div>
+                      <div>
+                        <span className="text-[10px] font-black uppercase px-2 py-0.5 rounded-md bg-indigo-100 text-indigo-800">
+                          Guru Mata Pelajaran Lain
+                        </span>
+                        <h4 className="font-extrabold text-xs text-slate-800 mt-0.5">
+                          {customTeacher ? customTeacher.name : 'Pilih Guru dari Daftar'}
+                        </h4>
+                      </div>
+                    </div>
+                    <span className="text-[10px] font-bold text-indigo-600 bg-white border border-indigo-200 px-2 py-1 rounded-lg">
+                      {selectedCategory === 'OTHER_TEACHER' ? 'Dipilih ✓' : 'Pilih'}
+                    </span>
+                  </button>
+
+                  {/* If category is OTHER_TEACHER, show search & teacher dropdown */}
+                  {selectedCategory === 'OTHER_TEACHER' && (
+                    <div className="mt-3 pt-3 border-t border-indigo-200 space-y-2">
+                      <div className="relative">
+                        <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2.5" />
+                        <input
+                          type="text"
+                          value={teacherSearchQuery}
+                          onChange={(e) => setTeacherSearchQuery(e.target.value)}
+                          placeholder="Cari nama guru atau mata pelajaran..."
+                          className="w-full bg-white border border-slate-300 rounded-xl pl-8 pr-3 py-1.5 text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                        />
+                      </div>
+
+                      <select
+                        value={selectedCustomTeacherId}
+                        onChange={(e) => {
+                          setSelectedCustomTeacherId(e.target.value);
+                          setSelectedCategory('OTHER_TEACHER');
+                        }}
+                        className="w-full bg-white border border-indigo-300 rounded-xl px-3 py-2 text-xs font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer"
+                      >
+                        {otherTeachersList.map(t => (
+                          <option key={t.id} value={t.id}>
+                            {t.name} — {t.subject1 || 'Guru Pengajar'} {t.additionalDuty && t.additionalDuty !== 'GURU_PENGAJAR' ? `(${t.additionalDuty})` : ''}
+                          </option>
+                        ))}
+                      </select>
+                      
+                      {customTeacher && (
+                        <p className="text-[10px] text-slate-500 italic">
+                          Mata Pelajaran: <strong>{customTeacher.subject1 || '-'}</strong> {customTeacher.subject2 ? `& ${customTeacher.subject2}` : ''}
+                        </p>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
             )}
+          </div>
+
+          {/* Confidentiality Notice Card */}
+          <div className="bg-slate-900 text-white rounded-3xl p-4 shadow-sm border border-slate-800 space-y-2">
+            <div className="flex items-center gap-2 text-emerald-400 text-xs font-extrabold">
+              <Lock className="w-4 h-4" />
+              <span>Jaminan Privasi & Kerahasiaan</span>
+            </div>
+            <p className="text-[11px] text-slate-300 leading-relaxed">
+              Ruang obrolan ini hanya terhubung antara akun Anda dan <strong>{activeTargetTeacher.name}</strong>. Guru lain di sekolah tidak dapat mengakses riwayat pesan ini.
+            </p>
           </div>
         </div>
 
-        {/* Right Column: Interactive Chat Panel (8 Cols) */}
-        <div className="lg:col-span-8 bg-white border border-slate-200/80 rounded-3xl shadow-sm flex flex-col h-[640px] overflow-hidden">
+        {/* Right Column: Interactive Chat Canvas (8 Cols) */}
+        <div className="lg:col-span-8 bg-white border border-slate-200/80 rounded-3xl shadow-sm flex flex-col h-[650px] overflow-hidden">
           
           {/* Chat Header Bar */}
           <div className="p-4 bg-slate-900 text-white flex items-center justify-between border-b border-slate-800 shrink-0">
             <div className="flex items-center gap-3 min-w-0">
-              <div className={`w-10 h-10 rounded-2xl p-2 text-white flex items-center justify-center shrink-0 ${activeContact.iconBg}`}>
-                <activeContact.icon className="w-5 h-5" />
+              <div className="w-10 h-10 rounded-2xl p-2 text-white flex items-center justify-center shrink-0 bg-indigo-600 shadow-sm">
+                <MessageSquare className="w-5 h-5 text-amber-300" />
               </div>
               <div className="min-w-0">
-                <div className="flex items-center gap-2">
-                  <h2 className="font-black text-sm text-white truncate">{activeContact.teacher.name}</h2>
-                  <span className={`text-[10px] font-extrabold px-2 py-0.5 rounded-full border ${activeContact.badgeColor}`}>
-                    {activeContact.roleTitle}
+                <div className="flex items-center gap-2 flex-wrap">
+                  <h2 className="font-black text-sm text-white truncate">{activeTargetTeacher.name}</h2>
+                  <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-full border bg-emerald-500/20 text-emerald-300 border-emerald-400/40 flex items-center gap-1">
+                    <Lock className="w-2.5 h-2.5 text-emerald-400" />
+                    Chat Pribadi
                   </span>
                 </div>
-                <p className="text-[11px] text-slate-300 truncate mt-0.5">{activeContact.subtitle}</p>
+                <p className="text-[11px] text-slate-300 truncate mt-0.5">
+                  {isTeacherAccount 
+                    ? `Konsultasi Khusus dengan Wali Murid Ananda ${activeStudent?.name || 'Siswa'}`
+                    : `${activeTargetTeacher.subject1 || 'Guru Pengajar'} • SMP Negeri 2 Tanjung`}
+                </p>
               </div>
             </div>
+
+            {/* Direct WhatsApp Emergency Contact Button */}
+            <button
+              type="button"
+              onClick={handleOpenWhatsApp}
+              className="flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1.5 rounded-xl text-xs font-bold transition-all shadow-sm cursor-pointer shrink-0"
+              title="Hubungi via WhatsApp Resmi"
+            >
+              <Phone className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">WhatsApp</span>
+            </button>
           </div>
 
-          {/* Active Child Context Reminder Strip */}
-          <div className="bg-indigo-50/80 border-b border-indigo-100 px-4 py-2 text-[11px] font-semibold text-indigo-900 flex items-center justify-between">
+          {/* Active Context Banner with Lock reminder */}
+          <div className="bg-indigo-50/90 border-b border-indigo-100 px-4 py-2 text-[11px] font-semibold text-indigo-950 flex items-center justify-between">
             <span className="flex items-center gap-1.5 truncate">
               <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-              Pesan terhubung dengan data ananda: <strong className="font-extrabold">{activeStudent?.name}</strong> ({activeStudent?.className})
+              Siswa: <strong className="font-extrabold">{activeStudent?.name}</strong> ({activeStudent?.className}) • Wali: <strong className="font-extrabold">{activeStudent?.parentName || 'Orang Tua'}</strong>
             </span>
-            <span className="text-[10px] text-indigo-600 font-bold hidden sm:inline">SiHadir Direct Messenger</span>
+            <span className="text-[10px] text-emerald-700 font-extrabold bg-emerald-100 px-2 py-0.5 rounded-md flex items-center gap-1 shrink-0">
+              <Lock className="w-3 h-3 text-emerald-600" />
+              Terkunci Khusus Akun Ini
+            </span>
           </div>
 
           {/* Messages Display Body */}
@@ -677,7 +842,7 @@ export const ParentChatView: React.FC<ParentChatViewProps> = ({
                   className={`flex flex-col ${isRightSide ? 'items-end' : 'items-start'}`}
                 >
                   <div className="flex items-center gap-1.5 mb-1 px-1">
-                    <span className="text-[10px] font-black text-slate-500">{msg.senderName}</span>
+                    <span className="text-[10px] font-black text-slate-600">{msg.senderName}</span>
                     <span className="text-[10px] text-slate-400 font-mono">• {msg.timestamp}</span>
                   </div>
 
@@ -702,7 +867,7 @@ export const ParentChatView: React.FC<ParentChatViewProps> = ({
 
                   <div className="flex items-center gap-1 mt-0.5 px-1">
                     {isRightSide && (
-                      <span className="text-[10px] text-indigo-500 font-medium flex items-center gap-0.5">
+                      <span className="text-[10px] text-indigo-600 font-medium flex items-center gap-0.5">
                         <CheckCheck className="w-3 h-3 text-indigo-600" />
                         Terkirim
                       </span>
@@ -711,24 +876,6 @@ export const ParentChatView: React.FC<ParentChatViewProps> = ({
                 </div>
               );
             })}
-
-            {isSimulatingResponse && (
-              <div className="flex flex-col items-start">
-                <div className="flex items-center gap-1.5 mb-1 px-1">
-                  <span className="text-[10px] font-black text-slate-500">
-                    {isStaffView ? (activeStudent?.parentName || 'Orang Tua') : activeContact.teacher.name}
-                  </span>
-                </div>
-                <div className="bg-white border border-slate-200 text-slate-500 rounded-2xl rounded-tl-none p-3 text-xs flex items-center gap-2 shadow-2xs">
-                  <span className="flex gap-1">
-                    <span className="w-1.5 h-1.5 rounded-full bg-slate-400 animate-bounce"></span>
-                    <span className="w-1.5 h-1.5 rounded-full bg-slate-400 animate-bounce delay-100"></span>
-                    <span className="w-1.5 h-1.5 rounded-full bg-slate-400 animate-bounce delay-200"></span>
-                  </span>
-                  <span className="text-[11px] italic font-medium">sedang mengetik balasan...</span>
-                </div>
-              </div>
-            )}
 
             <div ref={messagesEndRef} />
           </div>
@@ -742,43 +889,49 @@ export const ParentChatView: React.FC<ParentChatViewProps> = ({
             {isStaffView ? (
               <>
                 <button
-                  onClick={() => handleSendMessage(`Mengingatkan Bpk/Ibu Wali Murid terkait kehadiran Ananda ${activeStudent?.name} di kelas.`)}
+                  type="button"
+                  onClick={() => handleSendMessage(`Mengingatkan Bpk/Ibu Wali Murid terkait kehadiran dan keaktifan Ananda ${activeStudent?.name} di kelas.`)}
                   className="text-[11px] font-bold bg-white text-indigo-900 border border-indigo-200 px-2.5 py-1 rounded-full hover:bg-indigo-50 shrink-0 cursor-pointer transition-colors shadow-2xs"
                 >
                   Pengingat Kehadiran
                 </button>
                 <button
-                  onClick={() => handleSendMessage(`Menginformasikan catatan KBM dan perkembangan Ananda ${activeStudent?.name} di kelas ${activeStudent?.className}.`)}
+                  type="button"
+                  onClick={() => handleSendMessage(`Menginformasikan catatan KBM dan perkembangan belajar Ananda ${activeStudent?.name} di kelas ${activeStudent?.className}.`)}
                   className="text-[11px] font-bold bg-white text-indigo-900 border border-indigo-200 px-2.5 py-1 rounded-full hover:bg-indigo-50 shrink-0 cursor-pointer transition-colors shadow-2xs"
                 >
                   Info Catatan KBM
                 </button>
                 <button
-                  onClick={() => handleSendMessage(`Mengundang Bpk/Ibu Wali untuk sesi konsultasi Bimbingan Konseling (BK) Ananda ${activeStudent?.name}.`)}
+                  type="button"
+                  onClick={() => handleSendMessage(`Mengundang Bpk/Ibu Wali untuk konsultasi perkembangan karakter Ananda ${activeStudent?.name}.`)}
                   className="text-[11px] font-bold bg-white text-indigo-900 border border-indigo-200 px-2.5 py-1 rounded-full hover:bg-indigo-50 shrink-0 cursor-pointer transition-colors shadow-2xs"
                 >
-                  Undangan Konsultasi BK
+                  Undangan Konsultasi
                 </button>
               </>
             ) : (
               <>
                 <button
-                  onClick={() => handleSendMessage(`Menanyakan kabar keaktifan dan absensi ${activeStudent?.name} hari ini.`)}
+                  type="button"
+                  onClick={() => handleSendMessage(`Menanyakan kabar keaktifan dan nilai tugas ${activeStudent?.name} di sekolah.`)}
                   className="text-[11px] font-bold bg-white text-indigo-900 border border-indigo-200 px-2.5 py-1 rounded-full hover:bg-indigo-50 shrink-0 cursor-pointer transition-colors shadow-2xs"
                 >
-                  Tanya Absensi & Keaktifan
+                  Tanya Nilai & Tugas
                 </button>
                 <button
-                  onClick={() => handleSendMessage(`Izin menginformasikan terkait ${activeStudent?.name} untuk kegiatan besok.`)}
+                  type="button"
+                  onClick={() => handleSendMessage(`Izin menginformasikan terkait kondisi ${activeStudent?.name} untuk kegiatan pembelajaran.`)}
                   className="text-[11px] font-bold bg-white text-indigo-900 border border-indigo-200 px-2.5 py-1 rounded-full hover:bg-indigo-50 shrink-0 cursor-pointer transition-colors shadow-2xs"
                 >
-                  Info Kegiatan Besok
+                  Info Kondisi Ananda
                 </button>
                 <button
-                  onClick={() => handleSendMessage(`Mohon waktu konsultasi terkait perkembangan minat/karakter ${activeStudent?.name}.`)}
+                  type="button"
+                  onClick={() => handleSendMessage(`Mohon waktu konsultasi terkait perkembangan belajar Ananda ${activeStudent?.name}.`)}
                   className="text-[11px] font-bold bg-white text-indigo-900 border border-indigo-200 px-2.5 py-1 rounded-full hover:bg-indigo-50 shrink-0 cursor-pointer transition-colors shadow-2xs"
                 >
-                  Konsultasi Perkembangan
+                  Konsultasi Pembelajaran
                 </button>
               </>
             )}
@@ -792,8 +945,9 @@ export const ParentChatView: React.FC<ParentChatViewProps> = ({
                 <span className="text-xs font-bold text-indigo-900">Lampiran foto disiapkan</span>
               </div>
               <button
+                type="button"
                 onClick={() => setAttachmentUrl(null)}
-                className="text-slate-400 hover:text-red-600 p-1 rounded-lg"
+                className="text-slate-400 hover:text-red-600 p-1 rounded-lg cursor-pointer"
               >
                 <X className="w-4 h-4" />
               </button>
@@ -824,8 +978,8 @@ export const ParentChatView: React.FC<ParentChatViewProps> = ({
               onChange={(e) => setMessageText(e.target.value)}
               placeholder={
                 isStaffView
-                  ? `Tulis pesan sebagai ${activeContact.teacher.name} (${activeContact.roleTitle}) ke Wali Murid ${activeStudent?.name}...`
-                  : `Tulis pesan ke ${activeContact.teacher.name} (${activeContact.roleTitle})...`
+                  ? `Tulis pesan pribadi sebagai ${loggedTeacher.name} ke Wali Murid ${activeStudent?.name}...`
+                  : `Tulis pesan pribadi ke ${activeTargetTeacher.name}...`
               }
               className="flex-1 bg-slate-100/80 border border-slate-200 rounded-2xl px-4 py-2.5 text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 font-medium"
             />

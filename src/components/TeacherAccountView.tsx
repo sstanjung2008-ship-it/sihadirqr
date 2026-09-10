@@ -23,8 +23,16 @@ import {
   Info,
   Building2,
   Check,
-  UserCheck
+  UserCheck,
+  Volume2,
+  VolumeX,
+  Bell
 } from 'lucide-react';
+import { 
+  isKbmVoiceReminderEnabled, 
+  setKbmVoiceReminderEnabled, 
+  testKbmVoiceReminder 
+} from '../lib/kbmVoiceReminder';
 
 interface TeacherAccountViewProps {
   teacher: Teacher | null;
@@ -59,6 +67,22 @@ export const TeacherAccountView: React.FC<TeacherAccountViewProps> = ({
   const [editBirthDate, setEditBirthDate] = useState(teacher?.birthDate || '');
   const [editPhotoUrl, setEditPhotoUrl] = useState(teacher?.photoUrl || '');
   const [profileNotice, setProfileNotice] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+
+  // KBM Voice reminder state
+  const [voiceReminderEnabled, setVoiceReminderEnabledState] = useState(isKbmVoiceReminderEnabled());
+  const [isTestingVoice, setIsTestingVoice] = useState(false);
+
+  const handleToggleVoiceReminder = () => {
+    const next = !voiceReminderEnabled;
+    setVoiceReminderEnabledState(next);
+    setKbmVoiceReminderEnabled(next);
+  };
+
+  const handleTestVoice = async () => {
+    setIsTestingVoice(true);
+    await testKbmVoiceReminder();
+    setIsTestingVoice(false);
+  };
 
   if (!teacher) {
     return (
@@ -725,6 +749,80 @@ export const TeacherAccountView: React.FC<TeacherAccountViewProps> = ({
                 </button>
               </div>
             )}
+          </div>
+
+          {/* KBM Voice Reminder Audio Settings Card */}
+          <div className="bg-white border border-slate-200/80 rounded-3xl p-6 shadow-xs space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-4">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-purple-50 text-purple-600 flex items-center justify-center font-bold">
+                  <Volume2 className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-extrabold text-slate-900 flex items-center gap-1.5">
+                    <span>Pengingat Suara AI KBM Otomatis</span>
+                    <span className="bg-purple-100 text-purple-700 text-[10px] font-bold px-2 py-0.5 rounded-full">
+                      Suara Perempuan
+                    </span>
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    Membunyikan nada pengingat lonceng harmonis & Suara AI saat jam mengajar Anda dimulai sesuai jadwal pelajaran.
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleTestVoice}
+                  disabled={isTestingVoice}
+                  className="px-3.5 py-2 bg-purple-600 hover:bg-purple-700 text-white font-bold rounded-xl text-xs transition shadow-xs cursor-pointer flex items-center gap-1.5 disabled:opacity-50 shrink-0"
+                >
+                  <Volume2 className={`w-3.5 h-3.5 ${isTestingVoice ? 'animate-pulse' : ''}`} />
+                  <span>{isTestingVoice ? 'Memutar Suara...' : 'Uji Coba Suara AI'}</span>
+                </button>
+              </div>
+            </div>
+
+            {/* AI Speech Bubble */}
+            <div className="bg-gradient-to-r from-purple-50 via-indigo-50 to-pink-50 border border-purple-200/70 rounded-2xl p-3.5 flex items-start gap-3">
+              <div className="p-1.5 bg-purple-600 text-white rounded-xl shrink-0 mt-0.5 shadow-xs">
+                <Sparkles className="w-4 h-4" />
+              </div>
+              <div className="space-y-1">
+                <p className="text-[11px] font-bold text-purple-950 uppercase tracking-wider">
+                  Naskah Suara Pengingat Guru Saat Jam KBM Dimulai:
+                </p>
+                <p className="text-xs text-slate-700 italic font-medium leading-relaxed">
+                  &ldquo;Anda Memiliki Jam Mengajar Saat ini, Selamat Menjalankan Tugas. Terima Kasih &rdquo;
+                </p>
+              </div>
+            </div>
+
+            {/* Toggle Status */}
+            <div className="flex items-center justify-between bg-slate-50 p-3.5 rounded-2xl border border-slate-200 text-xs">
+              <div className="space-y-0.5">
+                <p className="font-bold text-slate-800">
+                  Status Pengingat Suara: {voiceReminderEnabled ? 'Aktif (Otomatis)' : 'Dinonaktifkan'}
+                </p>
+                <p className="text-[11px] text-slate-500">
+                  {voiceReminderEnabled 
+                    ? 'Browser akan otomatis membunyikan pengingat tepat saat jam JP Anda dimulai.' 
+                    : 'Pengingat suara sedang dinonaktifkan di perangkat ini.'}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={handleToggleVoiceReminder}
+                className={`px-3 py-1.5 rounded-xl font-bold text-xs transition cursor-pointer border ${
+                  voiceReminderEnabled 
+                    ? 'bg-emerald-50 text-emerald-700 border-emerald-300 hover:bg-emerald-100' 
+                    : 'bg-slate-200 text-slate-700 border-slate-300 hover:bg-slate-300'
+                }`}
+              >
+                {voiceReminderEnabled ? '🔊 Suara Aktif' : '🔇 Dinonaktifkan'}
+              </button>
+            </div>
           </div>
 
           {/* Quick Guidance Box */}

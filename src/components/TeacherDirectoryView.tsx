@@ -25,7 +25,10 @@ import {
   Megaphone,
   HeartHandshake,
   Upload,
-  FileSpreadsheet
+  FileSpreadsheet,
+  Shield,
+  FileText,
+  Library
 } from 'lucide-react';
 
 interface TeacherDirectoryViewProps {
@@ -66,6 +69,39 @@ export const TeacherDirectoryView: React.FC<TeacherDirectoryViewProps> = ({
     return Array.from(new Set(list.map(s => String(s).trim()).filter(Boolean)));
   }, [schoolProfile.subjects]);
 
+  // Check if any demo sample teachers exist in current dataset
+  const demoTeacherIds = useMemo(() => {
+    const demoNips = new Set([
+      '19850312 201001 2 015',
+      '19790820 200501 1 008',
+      '19881105 201402 2 009',
+      '19910403 201903 1 011',
+      '19830218 200902 2 004',
+      '19820514 200801 2 006',
+      '19900210 201801 1 003',
+      '19870615 201101 1 005'
+    ]);
+    const demoIds = new Set([
+      'tch-001', 'tch-002', 'tch-003', 'tch-004',
+      'tch-005', 'tch-006', 'tch-007', 'tch-008'
+    ]);
+    return teachers
+      .filter(t => demoNips.has(t.nip) || demoIds.has(t.id))
+      .map(t => t.id);
+  }, [teachers]);
+
+  const handleCleanDemoTeachers = () => {
+    if (demoTeacherIds.length === 0) {
+      alert('Tidak ada data guru contoh demo yang ditemukan.');
+      return;
+    }
+
+    if (window.confirm(`Hapus permanen ${demoTeacherIds.length} data guru contoh bawaan demo? Data guru asli sekolah Anda akan tetap aman 100%.`)) {
+      demoTeacherIds.forEach(id => onDeleteTeacher(id));
+      alert(`Berhasil menghapus permanen ${demoTeacherIds.length} guru demo!`);
+    }
+  };
+
   // Form State
   const emptyForm = {
     nip: '',
@@ -73,9 +109,9 @@ export const TeacherDirectoryView: React.FC<TeacherDirectoryViewProps> = ({
     birthPlace: '',
     birthDate: '',
     gender: 'L' as 'L' | 'P',
-    subject1: availableSubjects[0] || 'Matematika',
+    subject1: '',
     subject2: '',
-    additionalDuty: 'TIDAK_ADA' as 'WAKIL_KEPALA_SEKOLAH' | 'WALI_KELAS' | 'TIDAK_ADA',
+    additionalDuty: 'TIDAK_ADA' as 'WAKIL_KEPALA_SEKOLAH' | 'HUMAS' | 'BK' | 'ADMIN' | 'TU' | 'PERPUSTAKAAN' | 'WALI_KELAS' | 'TIDAK_ADA',
     homeroomClassId: '',
     homeroomClassName: '',
     phone: '',
@@ -157,7 +193,7 @@ export const TeacherDirectoryView: React.FC<TeacherDirectoryViewProps> = ({
       birthPlace: teacher.birthPlace || '',
       birthDate: teacher.birthDate || '',
       gender: teacher.gender || 'L',
-      subject1: teacher.subject1 || availableSubjects[0] || 'Matematika',
+      subject1: teacher.subject1 || '',
       subject2: teacher.subject2 || '',
       additionalDuty: homeroomInfo.isHomeroom ? 'WALI_KELAS' : (teacher.additionalDuty || 'TIDAK_ADA'),
       homeroomClassId: homeroomInfo.classId || teacher.homeroomClassId || (classes[0]?.id || ''),
@@ -244,6 +280,9 @@ export const TeacherDirectoryView: React.FC<TeacherDirectoryViewProps> = ({
     if (dutyFilter === 'WAKIL_KEPALA_SEKOLAH') matchesDuty = teacher.additionalDuty === 'WAKIL_KEPALA_SEKOLAH';
     if (dutyFilter === 'HUMAS') matchesDuty = teacher.additionalDuty === 'HUMAS';
     if (dutyFilter === 'BK') matchesDuty = teacher.additionalDuty === 'BK';
+    if (dutyFilter === 'ADMIN') matchesDuty = teacher.additionalDuty === 'ADMIN';
+    if (dutyFilter === 'TU') matchesDuty = teacher.additionalDuty === 'TU';
+    if (dutyFilter === 'PERPUSTAKAAN') matchesDuty = teacher.additionalDuty === 'PERPUSTAKAAN';
     if (dutyFilter === 'WALI_KELAS') matchesDuty = homeroomInfo.isHomeroom || teacher.additionalDuty === 'WALI_KELAS';
     if (dutyFilter === 'GURU_MAPEL') matchesDuty = !homeroomInfo.isHomeroom && (teacher.additionalDuty === 'TIDAK_ADA' || !teacher.additionalDuty);
 
@@ -253,6 +292,9 @@ export const TeacherDirectoryView: React.FC<TeacherDirectoryViewProps> = ({
   const totalWakil = teachers.filter(t => t.additionalDuty === 'WAKIL_KEPALA_SEKOLAH').length;
   const totalHumas = teachers.filter(t => t.additionalDuty === 'HUMAS').length;
   const totalBK = teachers.filter(t => t.additionalDuty === 'BK').length;
+  const totalAdmin = teachers.filter(t => t.additionalDuty === 'ADMIN').length;
+  const totalTU = teachers.filter(t => t.additionalDuty === 'TU').length;
+  const totalPerpus = teachers.filter(t => t.additionalDuty === 'PERPUSTAKAAN').length;
   const totalWali = teachers.filter(t => getTeacherHomeroomInfo(t).isHomeroom || t.additionalDuty === 'WALI_KELAS').length;
 
   return (
@@ -388,6 +430,9 @@ export const TeacherDirectoryView: React.FC<TeacherDirectoryViewProps> = ({
               <option value="WAKIL_KEPALA_SEKOLAH">Wakasek</option>
               <option value="HUMAS">Humas</option>
               <option value="BK">BK</option>
+              <option value="ADMIN">Admin</option>
+              <option value="TU">TU</option>
+              <option value="PERPUSTAKAAN">Perpustakaan</option>
               <option value="WALI_KELAS">Wali Kelas</option>
               <option value="GURU_MAPEL">Guru Mapel</option>
             </select>
@@ -411,6 +456,19 @@ export const TeacherDirectoryView: React.FC<TeacherDirectoryViewProps> = ({
                 Tabel
               </button>
             </div>
+
+            {/* Tombol Bersihkan Guru Demo (Hanya muncul jika guru demo terdeteksi) */}
+            {demoTeacherIds.length > 0 && (
+              <button
+                type="button"
+                onClick={handleCleanDemoTeachers}
+                className="bg-amber-500 hover:bg-amber-600 text-white font-extrabold px-3 py-2 rounded-xl text-xs flex items-center gap-1.5 transition-all cursor-pointer shadow-md shadow-amber-500/20 shrink-0"
+                title="Hapus permanen guru contoh demo bawaan sistem"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>Bersihkan {demoTeacherIds.length} Guru Demo</span>
+              </button>
+            )}
           </div>
         </div>
       </div>
@@ -473,6 +531,21 @@ export const TeacherDirectoryView: React.FC<TeacherDirectoryViewProps> = ({
                           <HeartHandshake className="w-3 h-3 text-purple-600" />
                           BK
                         </span>
+                      ) : teacher.additionalDuty === 'ADMIN' ? (
+                        <span className="inline-flex items-center gap-1 bg-blue-50 text-blue-800 border border-blue-200 text-[10px] font-black px-2.5 py-1 rounded-xl shadow-2xs">
+                          <Shield className="w-3 h-3 text-blue-600" />
+                          Admin
+                        </span>
+                      ) : teacher.additionalDuty === 'TU' ? (
+                        <span className="inline-flex items-center gap-1 bg-teal-50 text-teal-800 border border-teal-200 text-[10px] font-black px-2.5 py-1 rounded-xl shadow-2xs">
+                          <FileText className="w-3 h-3 text-teal-600" />
+                          TU
+                        </span>
+                      ) : teacher.additionalDuty === 'PERPUSTAKAAN' ? (
+                        <span className="inline-flex items-center gap-1 bg-emerald-50 text-emerald-800 border border-emerald-200 text-[10px] font-black px-2.5 py-1 rounded-xl shadow-2xs">
+                          <Library className="w-3 h-3 text-emerald-600" />
+                          Perpustakaan
+                        </span>
                       ) : (
                         <span className="inline-flex items-center gap-1 bg-slate-100 text-slate-600 border border-slate-200 text-[10px] font-bold px-2.5 py-1 rounded-xl">
                           Tanpa Tugas Tambahan
@@ -523,9 +596,13 @@ export const TeacherDirectoryView: React.FC<TeacherDirectoryViewProps> = ({
                   <div className="flex items-center text-slate-600 gap-2">
                     <BookOpen className="w-3.5 h-3.5 text-indigo-500 shrink-0" />
                     <div className="flex flex-wrap gap-1 min-w-0">
-                      <span className="bg-white border border-slate-200 text-slate-800 font-extrabold px-2 py-0.5 rounded-lg text-[10px]">
-                        {teacher.subject1}
-                      </span>
+                      {teacher.subject1 ? (
+                        <span className="bg-white border border-slate-200 text-slate-800 font-extrabold px-2 py-0.5 rounded-lg text-[10px]">
+                          {teacher.subject1}
+                        </span>
+                      ) : (
+                        <span className="text-slate-400 italic text-[11px]">Tidak ada mapel</span>
+                      )}
                       {teacher.subject2 && (
                         <span className="bg-white border border-slate-200 text-slate-700 font-bold px-2 py-0.5 rounded-lg text-[10px]">
                           {teacher.subject2}
@@ -597,9 +674,13 @@ export const TeacherDirectoryView: React.FC<TeacherDirectoryViewProps> = ({
                       </td>
                       <td className="py-3.5 px-4">
                         <div className="flex flex-wrap gap-1">
-                          <span className="bg-indigo-50 text-indigo-800 font-extrabold px-2 py-0.5 rounded-md text-[10px]">
-                            {teacher.subject1}
-                          </span>
+                          {teacher.subject1 ? (
+                            <span className="bg-indigo-50 text-indigo-800 font-extrabold px-2 py-0.5 rounded-md text-[10px]">
+                              {teacher.subject1}
+                            </span>
+                          ) : (
+                            <span className="text-slate-400 italic text-[11px]">-</span>
+                          )}
                           {teacher.subject2 && (
                             <span className="bg-slate-100 text-slate-700 font-bold px-2 py-0.5 rounded-md text-[10px]">
                               {teacher.subject2}
@@ -627,6 +708,21 @@ export const TeacherDirectoryView: React.FC<TeacherDirectoryViewProps> = ({
                           <span className="inline-flex items-center gap-1 bg-purple-50 text-purple-800 font-black px-2.5 py-1 rounded-lg text-[10px] border border-purple-200">
                             <HeartHandshake className="w-3 h-3 text-purple-600" />
                             BK
+                          </span>
+                        ) : teacher.additionalDuty === 'ADMIN' ? (
+                          <span className="inline-flex items-center gap-1 bg-blue-50 text-blue-800 font-black px-2.5 py-1 rounded-lg text-[10px] border border-blue-200">
+                            <Shield className="w-3 h-3 text-blue-600" />
+                            Admin
+                          </span>
+                        ) : teacher.additionalDuty === 'TU' ? (
+                          <span className="inline-flex items-center gap-1 bg-teal-50 text-teal-800 font-black px-2.5 py-1 rounded-lg text-[10px] border border-teal-200">
+                            <FileText className="w-3 h-3 text-teal-600" />
+                            TU
+                          </span>
+                        ) : teacher.additionalDuty === 'PERPUSTAKAAN' ? (
+                          <span className="inline-flex items-center gap-1 bg-emerald-50 text-emerald-800 font-black px-2.5 py-1 rounded-lg text-[10px] border border-emerald-200">
+                            <Library className="w-3 h-3 text-emerald-600" />
+                            Perpustakaan
                           </span>
                         ) : (
                           <span className="text-slate-400 font-medium">-</span>
@@ -756,13 +852,14 @@ export const TeacherDirectoryView: React.FC<TeacherDirectoryViewProps> = ({
                 {/* Mata Pelajaran 1 */}
                 <div>
                   <label className="block text-xs font-extrabold text-slate-800 mb-1">
-                    Mata Pelajaran 1 (Utama) <span className="text-rose-500">*</span>
+                    Mata Pelajaran 1 (Utama / Opsional)
                   </label>
                   <select
                     value={formData.subject1}
                     onChange={(e) => setFormData({ ...formData, subject1: e.target.value })}
                     className="w-full bg-slate-50 border border-slate-200 text-slate-800 text-xs font-semibold rounded-xl p-3 focus:ring-2 focus:ring-indigo-500 cursor-pointer"
                   >
+                    <option value="">-- Pilih Mata Pelajaran (Opsional) --</option>
                     {formData.subject1 && !availableSubjects.includes(formData.subject1) && (
                       <option value={formData.subject1}>{formData.subject1}</option>
                     )}
@@ -858,6 +955,60 @@ export const TeacherDirectoryView: React.FC<TeacherDirectoryViewProps> = ({
                       className="text-indigo-600 focus:ring-indigo-500 cursor-pointer"
                     />
                     <span>BK</span>
+                  </label>
+
+                  <label className={`flex items-center gap-2 p-3 rounded-xl border text-xs font-bold cursor-pointer transition-all ${
+                    formData.additionalDuty === 'ADMIN' 
+                      ? 'bg-white border-indigo-600 text-indigo-900 shadow-xs ring-1 ring-indigo-600' 
+                      : 'bg-white/60 border-slate-200 text-slate-700 hover:bg-white'
+                  }`}>
+                    <input
+                      type="radio"
+                      name="additionalDuty"
+                      checked={formData.additionalDuty === 'ADMIN'}
+                      onChange={() => setFormData({ ...formData, additionalDuty: 'ADMIN', homeroomClassId: '', homeroomClassName: '' })}
+                      className="text-indigo-600 focus:ring-indigo-500 cursor-pointer"
+                    />
+                    <span className="flex items-center gap-1.5">
+                      <Shield className="w-3.5 h-3.5 text-blue-600" />
+                      Admin
+                    </span>
+                  </label>
+
+                  <label className={`flex items-center gap-2 p-3 rounded-xl border text-xs font-bold cursor-pointer transition-all ${
+                    formData.additionalDuty === 'TU' 
+                      ? 'bg-white border-indigo-600 text-indigo-900 shadow-xs ring-1 ring-indigo-600' 
+                      : 'bg-white/60 border-slate-200 text-slate-700 hover:bg-white'
+                  }`}>
+                    <input
+                      type="radio"
+                      name="additionalDuty"
+                      checked={formData.additionalDuty === 'TU'}
+                      onChange={() => setFormData({ ...formData, additionalDuty: 'TU', homeroomClassId: '', homeroomClassName: '' })}
+                      className="text-indigo-600 focus:ring-indigo-500 cursor-pointer"
+                    />
+                    <span className="flex items-center gap-1.5">
+                      <FileText className="w-3.5 h-3.5 text-teal-600" />
+                      TU
+                    </span>
+                  </label>
+
+                  <label className={`flex items-center gap-2 p-3 rounded-xl border text-xs font-bold cursor-pointer transition-all ${
+                    formData.additionalDuty === 'PERPUSTAKAAN' 
+                      ? 'bg-white border-indigo-600 text-indigo-900 shadow-xs ring-1 ring-indigo-600' 
+                      : 'bg-white/60 border-slate-200 text-slate-700 hover:bg-white'
+                  }`}>
+                    <input
+                      type="radio"
+                      name="additionalDuty"
+                      checked={formData.additionalDuty === 'PERPUSTAKAAN'}
+                      onChange={() => setFormData({ ...formData, additionalDuty: 'PERPUSTAKAAN', homeroomClassId: '', homeroomClassName: '' })}
+                      className="text-indigo-600 focus:ring-indigo-500 cursor-pointer"
+                    />
+                    <span className="flex items-center gap-1.5">
+                      <Library className="w-3.5 h-3.5 text-emerald-600" />
+                      Perpustakaan
+                    </span>
                   </label>
 
                   <label className={`flex items-center gap-2 p-3 rounded-xl border text-xs font-bold cursor-pointer transition-all ${

@@ -24,7 +24,7 @@ interface ParsedTeacherRow {
   birthDate: string;
   subject1: string;
   subject2: string;
-  additionalDuty: 'WAKIL_KEPALA_SEKOLAH' | 'HUMAS' | 'BK' | 'WALI_KELAS' | 'TIDAK_ADA';
+  additionalDuty: 'WAKIL_KEPALA_SEKOLAH' | 'HUMAS' | 'BK' | 'WALI_KELAS' | 'ADMIN' | 'TU' | 'PERPUSTAKAAN' | 'TIDAK_ADA';
   homeroomClassName: string;
   phone: string;
   email: string;
@@ -119,14 +119,20 @@ export const ImportTeachersModal: React.FC<ImportTeachersModalProps> = ({
           }
 
           // Determine additional duty
-          let additionalDuty: 'WAKIL_KEPALA_SEKOLAH' | 'HUMAS' | 'BK' | 'WALI_KELAS' | 'TIDAK_ADA' = 'TIDAK_ADA';
+          let additionalDuty: 'WAKIL_KEPALA_SEKOLAH' | 'HUMAS' | 'BK' | 'WALI_KELAS' | 'ADMIN' | 'TU' | 'PERPUSTAKAAN' | 'TIDAK_ADA' = 'TIDAK_ADA';
           const dUpper = rawDuty.toUpperCase();
           if (dUpper.includes('WAKIL') || dUpper.includes('WAKASEK')) {
             additionalDuty = 'WAKIL_KEPALA_SEKOLAH';
           } else if (dUpper.includes('HUMAS')) {
             additionalDuty = 'HUMAS';
-          } else if (dUpper.includes('BK') || dUpper.includes('BIMBINGAN')) {
+          } else if (dUpper.includes('BK') || dUpper.includes('BIMBINGAN') || dUpper.includes('KONSELING')) {
             additionalDuty = 'BK';
+          } else if (dUpper.includes('ADMIN')) {
+            additionalDuty = 'ADMIN';
+          } else if (dUpper.includes('TU') || dUpper.includes('TATA USAHA')) {
+            additionalDuty = 'TU';
+          } else if (dUpper.includes('PERPUS') || dUpper.includes('PUSTAKA')) {
+            additionalDuty = 'PERPUSTAKAAN';
           } else if (dUpper.includes('WALI')) {
             additionalDuty = 'WALI_KELAS';
           } else {
@@ -153,7 +159,7 @@ export const ImportTeachersModal: React.FC<ImportTeachersModalProps> = ({
             gender,
             birthPlace: birthPlace || '-',
             birthDate: birthDate || '1990-01-01',
-            subject1: subject1 || 'Matematika',
+            subject1: subject1 === '-' ? '' : (subject1 || ''),
             subject2: subject2 === '-' ? '' : subject2,
             additionalDuty,
             homeroomClassName: homeroomClassName === '-' ? '' : homeroomClassName,
@@ -398,6 +404,9 @@ export const ImportTeachersModal: React.FC<ImportTeachersModalProps> = ({
                           {row.additionalDuty === 'WAKIL_KEPALA_SEKOLAH' ? 'Wakasek' :
                            row.additionalDuty === 'HUMAS' ? 'Humas' :
                            row.additionalDuty === 'BK' ? 'BK' :
+                           row.additionalDuty === 'ADMIN' ? 'Admin' :
+                           row.additionalDuty === 'TU' ? 'TU' :
+                           row.additionalDuty === 'PERPUSTAKAAN' ? 'Perpustakaan' :
                            row.additionalDuty === 'WALI_KELAS' ? `Wali Kelas ${row.homeroomClassName || ''}` : 'Guru Mapel'}
                         </span>
                       </td>

@@ -1796,7 +1796,8 @@ export function exportKeaktifanExcel(
   journals: LearningJournal[],
   filterTitle: string,
   startDateStr: string,
-  endDateStr: string
+  endDateStr: string,
+  selectedSubjectFilter: string = 'ALL'
 ) {
   const dataForExcel = students.map((std, idx) => {
     let sangatAktif = 0;
@@ -1842,6 +1843,7 @@ export function exportKeaktifanExcel(
       'NIS': std.nis || '-',
       'Nama Siswa': std.name,
       'Kelas': std.className,
+      'Mata Pelajaran': selectedSubjectFilter !== 'ALL' ? selectedSubjectFilter : 'Semua Mapel',
       'Total Pertemuan KBM': totalPertemuan,
       'Sangat Aktif': sangatAktif,
       'Cukup Aktif': cukupAktif,
@@ -1918,7 +1920,8 @@ export async function exportKeaktifanPdf(
   filterTitle: string,
   startDateStr: string,
   endDateStr: string,
-  selectedClassFilter: string = 'ALL'
+  selectedClassFilter: string = 'ALL',
+  selectedSubjectFilter: string = 'ALL'
 ) {
   const doc = new jsPDF({
     orientation: 'landscape',
@@ -1953,11 +1956,14 @@ export async function exportKeaktifanPdf(
 
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(12);
-  doc.text(`REKAPITULASI DATA KEAKTIFAN SISWA (${selectedClassFilter === 'ALL' ? 'SEMUA KELAS' : `KELAS ${selectedClassFilter}`})`, 148, 36, { align: 'center' });
+  const classLabel = selectedClassFilter === 'ALL' ? 'SEMUA KELAS' : `KELAS ${selectedClassFilter}`;
+  const subjectLabel = selectedSubjectFilter && selectedSubjectFilter !== 'ALL' ? ` - MAPEL: ${selectedSubjectFilter.toUpperCase()}` : '';
+  doc.text(`REKAPITULASI DATA KEAKTIFAN SISWA (${classLabel}${subjectLabel})`, 148, 36, { align: 'center' });
 
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(8.5);
-  doc.text(`Periode: ${startDateStr} s/d ${endDateStr}   |   Jumlah Siswa: ${students.length} Siswa   |   Total Jurnal: ${journals.length}`, 148, 41, { align: 'center' });
+  const subjectSubText = selectedSubjectFilter && selectedSubjectFilter !== 'ALL' ? `   |   Mata Pelajaran: ${selectedSubjectFilter}` : '';
+  doc.text(`Periode: ${startDateStr} s/d ${endDateStr}${subjectSubText}   |   Jumlah Siswa: ${students.length} Siswa   |   Total Jurnal: ${journals.length}`, 148, 41, { align: 'center' });
 
   const tableData = students.map((std, idx) => {
     let sangatAktif = 0;

@@ -81,6 +81,7 @@ export const RecapExportView: React.FC<RecapExportViewProps> = ({
   const [selectedSubject, setSelectedSubject] = useState<string>(() => {
     return (schoolProfile?.subjects && schoolProfile.subjects[0]) || "Matematika";
   });
+  const [selectedKeaktifanSubject, setSelectedKeaktifanSubject] = useState<string>('ALL');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [filterPeriod, setFilterPeriod] = useState<'WEEKLY' | 'MONTHLY' | 'YEARLY' | 'CUSTOM'>('MONTHLY');
   const [selectedGradeType, setSelectedGradeType] = useState<'ALL' | 'HARIAN' | 'TUGAS' | 'ULANGAN'>('ALL');
@@ -310,8 +311,9 @@ export const RecapExportView: React.FC<RecapExportViewProps> = ({
       "Pendidikan Agama", "PJOK", "Seni Budaya", "Informatika", "PPKn"
     ];
     const subjectsFromAssessments = assessmentsList.map(a => a.subject).filter(Boolean);
-    return Array.from(new Set([...defaultList, ...subjectsFromAssessments]));
-  }, [schoolProfile?.subjects, assessmentsList]);
+    const subjectsFromJournals = learningJournals.map(j => j.subject).filter(Boolean);
+    return Array.from(new Set([...defaultList, ...subjectsFromAssessments, ...subjectsFromJournals]));
+  }, [schoolProfile?.subjects, assessmentsList, learningJournals]);
 
   // Keep selectedSubject valid if available subjects change
   useEffect(() => {
@@ -322,12 +324,15 @@ export const RecapExportView: React.FC<RecapExportViewProps> = ({
     }
   }, [availableSubjects, selectedSubject]);
 
-  // Filter journals by date range
+  // Filter journals by date range, class, and subject
   const filteredJournals = useMemo(() => {
     return learningJournals.filter(j => {
-      return j.date >= startDate && j.date <= endDate;
+      const matchesDate = j.date >= startDate && j.date <= endDate;
+      const matchesClass = selectedClass === 'ALL' || j.className === selectedClass;
+      const matchesSubject = selectedKeaktifanSubject === 'ALL' || !selectedKeaktifanSubject || j.subject === selectedKeaktifanSubject;
+      return matchesDate && matchesClass && matchesSubject;
     });
-  }, [learningJournals, startDate, endDate]);
+  }, [learningJournals, startDate, endDate, selectedClass, selectedKeaktifanSubject]);
 
   // Filter character logs by date range
   const filteredCharacterLogs = useMemo(() => {
@@ -655,13 +660,17 @@ export const RecapExportView: React.FC<RecapExportViewProps> = ({
         );
       }
     } else if (activeMenu === 'KEAKTIFAN') {
+      const keaktifanTitle = selectedKeaktifanSubject !== 'ALL'
+        ? `${filterTitle} - Mapel ${selectedKeaktifanSubject}`
+        : filterTitle;
       exportKeaktifanExcel(
         schoolProfile,
         filteredStudents,
         filteredJournals,
-        filterTitle,
+        keaktifanTitle,
         startDate,
-        endDate
+        endDate,
+        selectedKeaktifanSubject
       );
     } else if (activeMenu === 'KARAKTER') {
       exportCharacterPointsExcel(
@@ -711,14 +720,18 @@ export const RecapExportView: React.FC<RecapExportViewProps> = ({
           );
         }
       } else if (activeMenu === 'KEAKTIFAN') {
+        const keaktifanTitle = selectedKeaktifanSubject !== 'ALL'
+          ? `${filterTitle} - Mapel ${selectedKeaktifanSubject}`
+          : filterTitle;
         await exportKeaktifanPdf(
           schoolProfile,
           filteredStudents,
           filteredJournals,
-          filterTitle,
+          keaktifanTitle,
           startDate,
           endDate,
-          selectedClass
+          selectedClass,
+          selectedKeaktifanSubject
         );
       } else if (activeMenu === 'KARAKTER') {
         await exportCharacterPointsPdf(
@@ -891,7 +904,7 @@ export const RecapExportView: React.FC<RecapExportViewProps> = ({
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3.5 text-xs">
           
           {/* Search Filter */}
-          <div className={activeMenu === 'NILAI' ? "sm:col-span-2 md:col-span-1 lg:col-span-1" : "sm:col-span-2 md:col-span-1 lg:col-span-2"}>
+          <div className={(activeMenu === 'NILAI' || activeMenu === 'KEAKTIFAN') ? "sm:col-span-2 md:col-span-1 lg:col-span-1" : "sm:col-span-2 md:col-span-1 lg:col-span-2"}>
             <label className="block text-slate-700 font-semibold mb-1">
               {activeMenu === 'NILAI' ? 'Cari Siswa / Mapel / Materi' : 'Cari Nama / NIS / NISN'}
             </label>
@@ -921,6 +934,23 @@ export const RecapExportView: React.FC<RecapExportViewProps> = ({
               ))}
             </select>
           </div>
+
+          {/* Subject Filter (For KEAKTIFAN) */}
+          {activeMenu === 'KEAKTIFAN' && (
+            <div className="col-span-1">
+              <label className="block text-slate-700 font-semibold mb-1">Mata Pelajaran</label>
+              <select
+                value={selectedKeaktifanSubject}
+                onChange={(e) => setSelectedKeaktifanSubject(e.target.value)}
+                className="w-full bg-slate-50 border border-slate-200 text-slate-800 rounded-xl p-2.5 font-semibold focus:ring-2 focus:ring-emerald-500 cursor-pointer"
+              >
+                <option value="ALL">Semua Mapel ({availableSubjects.length})</option>
+                {availableSubjects.map(sub => (
+                  <option key={sub} value={sub}>{sub}</option>
+                ))}
+              </select>
+            </div>
+          )}
 
           {/* Subject Filter (For NILAI) */}
           {activeMenu === 'NILAI' && (
@@ -1430,9 +1460,14 @@ export const RecapExportView: React.FC<RecapExportViewProps> = ({
       {activeMenu === 'KEAKTIFAN' && (
         <div className="bg-white border border-slate-200/80 rounded-3xl shadow-sm overflow-hidden">
           <div className="p-4 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-2 bg-emerald-50/40">
-            <h2 className="text-sm font-extrabold text-emerald-900 flex items-center gap-2">
-              <BookOpen className="w-4 h-4 text-emerald-600" />
-              Tabel Rekapitulasi Keaktifan Siswa (Jurnal KBM): {filterTitle}
+            <h2 className="text-sm font-extrabold text-emerald-900 flex flex-wrap items-center gap-2">
+              <BookOpen className="w-4 h-4 text-emerald-600 shrink-0" />
+              <span>Tabel Rekapitulasi Keaktifan Siswa (Jurnal KBM): {filterTitle}</span>
+              {selectedKeaktifanSubject !== 'ALL' && (
+                <span className="bg-emerald-200 text-emerald-900 text-xs px-2.5 py-0.5 rounded-full font-black border border-emerald-300">
+                  Mapel: {selectedKeaktifanSubject}
+                </span>
+              )}
             </h2>
             <span className="text-xs text-emerald-700 font-mono font-bold">
               Total Jurnal Terdata: {filteredJournals.length} Jurnal | {filteredStudents.length} Siswa

@@ -892,24 +892,26 @@ export function initFirestoreRealtimeSync() {
               }
             }
 
-            // SPECIAL STUDENTS MERGING:
-            // Always smartly merge student list so photos captured on other devices appear instantly without being overwritten!
+            // SPECIAL STUDENTS SYNC:
+            // Check timestamps: only merge if local has newer updates than cloud or update directly from latest snapshot.
             if (key === KEYS.STUDENTS) {
               try {
+                // If local has newer modifications that haven't pushed yet, skip older cloud snapshot
+                if (localUpdatedAt > 0 && cloudUpdatedAt > 0 && localUpdatedAt > cloudUpdatedAt) {
+                  return;
+                }
+
                 const cloudStudents = typeof finalDataToSave === 'string' ? JSON.parse(finalDataToSave) : finalDataToSave;
                 if (Array.isArray(cloudStudents)) {
-                  const localStudents = getStudents();
-                  const mergedStudents = mergeStudentLists(localStudents, cloudStudents);
-                  finalDataToSave = JSON.stringify(mergedStudents);
                   lastSavedStringCache[key] = finalDataToSave;
                   localStorage.setItem(key, finalDataToSave);
-                  localStorage.setItem(key + '_updatedAt', String(Math.max(cloudUpdatedAt, localUpdatedAt, Date.now())));
+                  localStorage.setItem(key + '_updatedAt', String(Math.max(cloudUpdatedAt, Date.now())));
                   notifyStorageUpdated();
                   setCloudSyncStatus('connected');
                   return;
                 }
               } catch (e) {
-                console.warn('[Firestore Sync] Error merging student data:', e);
+                console.warn('[Firestore Sync] Error updating student data:', e);
               }
             }
 

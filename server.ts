@@ -54,8 +54,17 @@ function getGeminiClient(): GoogleGenAI | null {
 }
 
 // Health check endpoint
+app.get("/health", (_req, res) => {
+  res.status(200).send("OK");
+});
+
 app.get("/api/health", (_req, res) => {
   res.json({ status: "ok", timestamp: new Date().toISOString() });
+});
+
+// Robots.txt endpoint
+app.get("/robots.txt", (_req, res) => {
+  res.type("text/plain").send("User-agent: *\nDisallow: /api/\nAllow: /");
 });
 
 // Gemini AI analysis endpoint for attendance performance

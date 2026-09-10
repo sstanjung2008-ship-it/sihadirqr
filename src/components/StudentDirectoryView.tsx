@@ -227,6 +227,39 @@ export const StudentDirectoryView: React.FC<StudentDirectoryViewProps> = ({
     setBulkDeleteConfirmInput('');
   };
 
+  // Check if any demo sample students exist in current dataset
+  const demoStudentIds = useMemo(() => {
+    const demoNisns = new Set([
+      '0081234561', '0081234562', '0081234563', '0081234564',
+      '0081234565', '0081234566', '0081234567', '0081234568',
+      '0081234569', '0081234570', '0081234571', '0081234572'
+    ]);
+    const demoIds = new Set([
+      'std-001', 'std-002', 'std-003', 'std-004',
+      'std-005', 'std-006', 'std-007', 'std-008',
+      'std-009', 'std-010', 'std-011', 'std-012'
+    ]);
+    return students
+      .filter(s => demoNisns.has(s.nisn) || demoIds.has(s.id))
+      .map(s => s.id);
+  }, [students]);
+
+  const handleCleanDemoStudents = () => {
+    if (demoStudentIds.length === 0) {
+      alert('Tidak ada data siswa contoh demo yang ditemukan.');
+      return;
+    }
+
+    if (window.confirm(`Hapus permanen ${demoStudentIds.length} data siswa contoh bawaan demo? Data siswa asli Anda (beserta foto yang diupload) akan tetap aman.`)) {
+      if (onBatchDeleteStudents) {
+        onBatchDeleteStudents(demoStudentIds);
+      } else {
+        demoStudentIds.forEach(id => onDeleteStudent(id));
+      }
+      alert(`Berhasil menghapus permanen ${demoStudentIds.length} siswa demo! Total siswa sekarang pas dengan data asli Anda.`);
+    }
+  };
+
   // Form modal state
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [editingStudent, setEditingStudent] = useState<Student | null>(null);
@@ -735,6 +768,19 @@ export const StudentDirectoryView: React.FC<StudentDirectoryViewProps> = ({
               <Trash2 className="w-3.5 h-3.5 text-rose-600" />
               <span>Hapus Massal</span>
             </button>
+
+            {/* Tombol Bersihkan 12 Siswa Demo (Hanya muncul jika siswa demo terdeteksi) */}
+            {demoStudentIds.length > 0 && (
+              <button
+                type="button"
+                onClick={handleCleanDemoStudents}
+                className="bg-amber-500 hover:bg-amber-600 text-white font-extrabold px-3 py-2 rounded-xl text-xs flex items-center gap-1.5 transition-all cursor-pointer shadow-md shadow-amber-500/20 shrink-0 animate-pulse hover:animate-none"
+                title="Hapus permanen 12 siswa contoh demo bawaan sistem (foto dan data asli Anda tetap aman 100%)"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>Bersihkan {demoStudentIds.length} Siswa Demo</span>
+              </button>
+            )}
           </div>
         </div>
       </div>

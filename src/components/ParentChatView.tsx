@@ -203,6 +203,12 @@ export const ParentChatView: React.FC<ParentChatViewProps> = ({
         ? 'Tim Humas Sekolah'
         : loggedTeacher.additionalDuty === 'BK'
         ? 'Bimbingan Konseling (BK)'
+        : loggedTeacher.additionalDuty === 'ADMIN'
+        ? 'Administrator Sekolah'
+        : loggedTeacher.additionalDuty === 'TU'
+        ? 'Tata Usaha (TU)'
+        : loggedTeacher.additionalDuty === 'PERPUSTAKAAN'
+        ? 'Pengelola Perpustakaan'
         : (loggedTeacher.subject1 ? `Guru ${loggedTeacher.subject1}` : 'Guru Pengajar');
 
       return {

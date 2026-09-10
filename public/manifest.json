@@ -2,11 +2,11 @@
   "id": "/",
   "name": "SiHadirQR",
   "short_name": "SiHadirQR",
-  "description": "Aplikasi Presensi QR Code dan Manajemen Kehadiran Sekolah Modern SiHadirQR.",
+  "description": "Aplikasi Presensi QR Code dan Manajemen Kehadiran Sekolah SMP Negeri 2 Tanjung SiHadirQR.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
-  "orientation": "portrait",
+  "orientation": "portrait-primary",
   "theme_color": "#2563eb",
   "background_color": "#0a1128",
   "icons": [
@@ -23,15 +23,21 @@
       "purpose": "any"
     },
     {
+      "src": "/pwa-maskable-192x192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
       "src": "/pwa-maskable-512x512.png",
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "maskable"
     },
     {
-      "src": "/icon.svg",
-      "sizes": "any",
-      "type": "image/svg+xml",
+      "src": "/apple-touch-icon.png",
+      "sizes": "180x180",
+      "type": "image/png",
       "purpose": "any"
     }
   ],

@@ -885,21 +885,6 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
               </div>
 
               <div className="flex items-center gap-2 flex-wrap">
-                {/* Mode Cermin (Mirror Mode) Toggle */}
-                <button
-                  type="button"
-                  onClick={() => setIsMirrorMode(!isMirrorMode)}
-                  className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer border ${
-                    isMirrorMode
-                      ? 'bg-purple-600 text-white border-purple-500 shadow-xs ring-2 ring-purple-300/50'
-                      : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border-slate-200'
-                  }`}
-                  title="Aktifkan/Nonaktifkan tampilan seperti cermin (Flip horizontal kamera depan)"
-                >
-                  <FlipHorizontal className="w-3.5 h-3.5" />
-                  <span>{isMirrorMode ? '🪞 Mode Cermin: AKTIF' : '🪞 Mode Cermin: OFF'}</span>
-                </button>
-
                 {/* Flip Camera Button */}
                 {isScanning && (
                   <button
@@ -917,10 +902,19 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
                   <select
                     value={activeCameraId}
                     onChange={(e) => {
-                      setActiveCameraId(e.target.value);
-                      const isFront = cameras.find(c => c.id === e.target.value)?.label.toLowerCase().includes('depan');
-                      if (isFront) setIsMirrorMode(true);
-                      startCamera(e.target.value);
+                      const newCamId = e.target.value;
+                      setActiveCameraId(newCamId);
+                      const camObj = cameras.find(c => c.id === newCamId);
+                      const isFront = camObj && (
+                        camObj.label.toLowerCase().includes('depan') ||
+                        camObj.label.toLowerCase().includes('front') ||
+                        camObj.label.toLowerCase().includes('user') ||
+                        camObj.label.toLowerCase().includes('selfie')
+                      );
+                      const nextFacing = isFront ? 'user' : 'environment';
+                      setFacingMode(nextFacing);
+                      setIsMirrorMode(Boolean(isFront));
+                      startCamera(newCamId, nextFacing);
                     }}
                     className="bg-slate-50 border border-slate-200 text-slate-800 rounded-xl px-2.5 py-1 text-xs font-semibold"
                   >
@@ -964,29 +958,12 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
               
               <div id={qrRegionId} className="w-full h-full text-slate-300"></div>
 
-              {/* Floating Mirror Indicator Badge */}
+              {/* Floating Mirror Indicator Badge (Automatic for Front Camera) */}
               {isScanning && isMirrorMode && (
-                <div className="absolute top-3 left-3 z-10 bg-purple-900/80 backdrop-blur-xs text-purple-100 text-[11px] font-bold px-3 py-1 rounded-full border border-purple-400/40 flex items-center gap-1.5 shadow-md pointer-events-none animate-fadeIn">
+                <div className="absolute top-3 left-3 z-10 bg-purple-950/80 backdrop-blur-md text-purple-200 text-[11px] font-bold px-3 py-1 rounded-full border border-purple-400/40 flex items-center gap-1.5 shadow-md pointer-events-none animate-fadeIn">
                   <FlipHorizontal className="w-3.5 h-3.5 text-purple-300" />
-                  <span>🪞 Mode Cermin Aktif</span>
+                  <span>Kamera Depan (Cermin Otomatis)</span>
                 </div>
-              )}
-
-              {/* In-view Quick Mirror Toggle Button */}
-              {isScanning && (
-                <button
-                  type="button"
-                  onClick={() => setIsMirrorMode(!isMirrorMode)}
-                  className={`absolute bottom-3 right-3 z-10 text-[11px] font-bold px-3 py-1.5 rounded-xl border flex items-center gap-1.5 shadow-md backdrop-blur-md transition-all cursor-pointer ${
-                    isMirrorMode
-                      ? 'bg-purple-600/90 hover:bg-purple-600 text-white border-purple-400'
-                      : 'bg-slate-900/80 hover:bg-slate-900 text-slate-300 border-slate-700'
-                  }`}
-                  title="Klik untuk menyalakan/mematikan tampilan cermin horizontal"
-                >
-                  <FlipHorizontal className="w-3.5 h-3.5" />
-                  <span>{isMirrorMode ? '🪞 Cermin: ON' : 'Cermin: OFF'}</span>
-                </button>
               )}
 
               {!isScanning && !cameraError && (

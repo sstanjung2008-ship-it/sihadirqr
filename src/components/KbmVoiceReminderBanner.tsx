@@ -8,9 +8,10 @@ import {
   X, 
   Sparkles,
   Play,
-  CheckCircle2
+  CheckCircle2,
+  GraduationCap
 } from 'lucide-react';
-import { KbmReminderInfo, playTeacherKbmVoiceReminder } from '../lib/kbmVoiceReminder';
+import { KbmReminderInfo, playTeacherKbmVoiceReminder, generateKbmSpeechText } from '../lib/kbmVoiceReminder';
 
 interface KbmVoiceReminderBannerProps {
   reminder: KbmReminderInfo | null;
@@ -27,12 +28,11 @@ export const KbmVoiceReminderBanner: React.FC<KbmVoiceReminderBannerProps> = ({
 
   if (!reminder) return null;
 
+  const speechText = generateKbmSpeechText(reminder);
+
   const handleReplay = async () => {
     setIsPlaying(true);
-    await playTeacherKbmVoiceReminder(
-      reminder,
-      "Anda Memiliki Jam Mengajar Saat ini, Selamat Menjalankan Tugas. Terima Kasih "
-    );
+    await playTeacherKbmVoiceReminder(reminder);
     setIsPlaying(false);
   };
 
@@ -55,7 +55,7 @@ export const KbmVoiceReminderBanner: React.FC<KbmVoiceReminderBannerProps> = ({
           <div>
             <div className="flex items-center space-x-1.5">
               <span className="text-[10px] font-extrabold uppercase tracking-wider bg-amber-400/20 text-amber-300 border border-amber-400/30 px-2 py-0.5 rounded-full">
-                Pengingat KBM Tepat Waktu
+                Pengingat Jadwal Mengajar (KBM)
               </span>
             </div>
             <h4 className="text-sm font-bold text-white mt-0.5">
@@ -75,13 +75,13 @@ export const KbmVoiceReminderBanner: React.FC<KbmVoiceReminderBannerProps> = ({
       </div>
 
       {/* AI Voice Quote Speech Bubble */}
-      <div className="mt-3.5 bg-white/10 border border-white/15 rounded-2xl p-3 backdrop-blur-sm relative z-10">
-        <div className="flex items-start space-x-2">
-          <div className="p-1 rounded-lg bg-pink-500/30 text-pink-300 mt-0.5 shrink-0">
-            <Sparkles className="w-3.5 h-3.5" />
+      <div className="mt-3.5 bg-white/10 border border-white/15 rounded-2xl p-3.5 backdrop-blur-sm relative z-10">
+        <div className="flex items-start space-x-2.5">
+          <div className="p-1.5 rounded-xl bg-pink-500/30 text-pink-300 mt-0.5 shrink-0">
+            <Sparkles className="w-4 h-4" />
           </div>
-          <div className="text-xs text-indigo-100 italic leading-relaxed">
-            &ldquo;Anda Memiliki Jam Mengajar Saat ini, Selamat Menjalankan Tugas. Terima Kasih &rdquo;
+          <div className="text-xs text-indigo-100 leading-relaxed font-medium">
+            &ldquo;{speechText}&rdquo;
           </div>
         </div>
       </div>
@@ -102,10 +102,16 @@ export const KbmVoiceReminderBanner: React.FC<KbmVoiceReminderBannerProps> = ({
             Kelas {reminder.className} {reminder.room ? `(${reminder.room})` : ''}
           </span>
         </div>
+        <div className="flex items-center justify-between text-xs">
+          <span className="text-slate-400">Alokasi Waktu:</span>
+          <span className="font-extrabold text-amber-300 bg-amber-400/20 px-2 py-0.5 rounded-md border border-amber-400/30">
+            {reminder.jpCount && reminder.jpCount > 1 ? `${reminder.jpCount} JP (Jam Ke-${reminder.periodNumber} s.d ${reminder.periodNumber + reminder.jpCount - 1})` : `1 JP (Jam Ke-${reminder.periodNumber})`}
+          </span>
+        </div>
         <div className="flex items-center justify-between text-xs pt-1.5 border-t border-white/10">
           <div className="flex items-center space-x-1.5 text-slate-400">
             <Clock className="w-3.5 h-3.5 text-indigo-300" />
-            <span>Waktu KBM (JP {reminder.periodNumber}):</span>
+            <span>Mulai Pukul:</span>
           </div>
           <span className="font-mono font-bold text-amber-300 bg-amber-400/10 px-2 py-0.5 rounded-lg border border-amber-400/20">
             {reminder.startTime} {reminder.endTime ? `- ${reminder.endTime}` : ''}

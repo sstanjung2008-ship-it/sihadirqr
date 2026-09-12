@@ -31,7 +31,8 @@ import {
 import { 
   isKbmVoiceReminderEnabled, 
   setKbmVoiceReminderEnabled, 
-  testKbmVoiceReminder 
+  testKbmVoiceReminder,
+  playTeacherKbmVoiceReminder 
 } from '../lib/kbmVoiceReminder';
 
 interface TeacherAccountViewProps {
@@ -80,7 +81,20 @@ export const TeacherAccountView: React.FC<TeacherAccountViewProps> = ({
 
   const handleTestVoice = async () => {
     setIsTestingVoice(true);
-    await testKbmVoiceReminder();
+    if (teacher) {
+      await playTeacherKbmVoiceReminder({
+        teacherName: teacher.name,
+        subject: teacher.subject1 || 'Mata Pelajaran',
+        className: teacher.homeroomClassName || '7A',
+        room: 'Ruang Kelas',
+        periodNumber: 1,
+        jpCount: 2,
+        startTime: '07:30',
+        endTime: '09:00'
+      });
+    } else {
+      await testKbmVoiceReminder();
+    }
     setIsTestingVoice(false);
   };
 
@@ -791,10 +805,10 @@ export const TeacherAccountView: React.FC<TeacherAccountViewProps> = ({
               </div>
               <div className="space-y-1">
                 <p className="text-[11px] font-bold text-purple-950 uppercase tracking-wider">
-                  Naskah Suara Pengingat Guru Saat Jam KBM Dimulai:
+                  Contoh Panggilan Suara AI Pengingat Jadwal KBM:
                 </p>
                 <p className="text-xs text-slate-700 italic font-medium leading-relaxed">
-                  &ldquo;Anda Memiliki Jam Mengajar Saat ini, Selamat Menjalankan Tugas. Terima Kasih &rdquo;
+                  &ldquo;Panggilan untuk {teacher ? teacher.name : 'Bapak/Ibu Guru'}, Anda memiliki jadwal mengajar mata pelajaran {teacher?.subject1 || 'Matematika'} di kelas {teacher?.homeroomClassName || '7A'} sebanyak 2 Jam Pelajaran saat ini. Selamat menjalankan tugas dan terima kasih.&rdquo;
                 </p>
               </div>
             </div>

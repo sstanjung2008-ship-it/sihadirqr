@@ -127,7 +127,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       { id: 'character_points', label: 'Nilai Karakter', icon: Award, desc: 'Poin & bukti foto karakter' },
       { id: 'chat', label: 'Fitur Chat Wali Murid', icon: MessageSquare, desc: 'Pusat obrolan Wali Kelas, Humas & BK' },
       { id: 'analytics', label: 'Analitik & AI', icon: Sparkles, desc: 'Laporan AI & grafik tren' },
-      { id: 'teachers', label: 'Database Guru', icon: UserCheck, desc: 'Kelola data & NIP guru' },
+      { id: 'teachers', label: 'Database Guru & TU', icon: UserCheck, desc: 'Kelola data guru & staf TU' },
       { id: 'students', label: 'Database Siswa', icon: Users, desc: 'Kelola data & kartu KTS' },
       { id: 'classes', label: 'Kelola Data Kelas', icon: Building2, desc: 'Daftar & wali kelas' },
       { id: 'leaves', label: 'Permohonan Izin', icon: MessageSquare, desc: 'Verifikasi surat izin/sakit', badge: unreadLeavesCount },

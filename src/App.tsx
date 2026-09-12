@@ -733,22 +733,37 @@ export default function App() {
 
             triggeredVoiceReminderKeysRef.current.add(voiceKey);
 
+            // Calculate consecutive JP count for this teaching session block
+            let consecutiveJp = 1;
+            let nextPeriodNum = slot.periodNumber + 1;
+            while (todaySchedules.some(s => 
+              s.periodNumber === nextPeriodNum && 
+              s.classId === slot.classId && 
+              ((slot.teacherId && s.teacherId === slot.teacherId) || (slot.teacherName && s.teacherName === slot.teacherName)) && 
+              s.subject === slot.subject
+            )) {
+              consecutiveJp++;
+              nextPeriodNum++;
+            }
+
+            // Determine final end time of the block
+            const lastPeriodInBlock = todayPeriods.find(p => p.periodNumber === slot.periodNumber + consecutiveJp - 1);
+            const finalEndTime = lastPeriodInBlock?.endTime || period.endTime;
+
             const reminderInfo: KbmReminderInfo = {
               teacherName: slot.teacherName || currentTeacher?.name || 'Bapak/Ibu Guru',
               subject: slot.subject,
               className: slot.className,
               room: slot.room,
               periodNumber: slot.periodNumber,
+              jpCount: consecutiveJp,
               startTime: period.startTime,
-              endTime: period.endTime,
+              endTime: finalEndTime,
               slotId: slot.id
             };
 
-            // Play Chime + Female AI Speech: "Anda Memiliki Jam Mengajar Saat ini, Selamat Menjalankan Tugas. Terima Kasih "
-            playTeacherKbmVoiceReminder(
-              reminderInfo,
-              "Anda Memiliki Jam Mengajar Saat ini, Selamat Menjalankan Tugas. Terima Kasih "
-            );
+            // Play Chime + Female AI Speech: Menyebutkan nama guru, kelas, mata pelajaran, dan jumlah JP
+            playTeacherKbmVoiceReminder(reminderInfo);
 
             // Pop up interactive banner
             setActiveVoiceReminder(reminderInfo);

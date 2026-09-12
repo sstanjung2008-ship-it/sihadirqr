@@ -34,7 +34,13 @@ import {
   FileText,
   Download,
   Printer,
-  GraduationCap
+  GraduationCap,
+  Edit,
+  Edit3,
+  Lock,
+  Unlock,
+  RotateCcw,
+  PlusCircle
 } from 'lucide-react';
 import { exportLearningJournalPdf, exportTeacherJournalPdf } from '../lib/exportUtils';
 import { StudentGradesSection } from './StudentGradesSection';
@@ -160,6 +166,11 @@ export const LearningJournalView: React.FC<LearningJournalViewProps> = ({
   const [teacherName, setTeacherName] = useState<string>(initialTeacherName);
   const [journalDate, setJournalDate] = useState<string>(todayStr);
 
+  // Journal Persistence & Edit States
+  const [savedJournalId, setSavedJournalId] = useState<string | null>(null);
+  const [isSaved, setIsSaved] = useState<boolean>(false);
+  const [isEditing, setIsEditing] = useState<boolean>(true);
+
   // Sync teacherName when logged in user session or teacher list changes
   React.useEffect(() => {
     if (initialTeacherName) {
@@ -167,8 +178,9 @@ export const LearningJournalView: React.FC<LearningJournalViewProps> = ({
     }
   }, [initialTeacherName]);
 
-  // Auto-set subject to teacher's subject1 or first available subject in list
+  // Auto-set subject to teacher's subject1 or first available subject in list (only when creating new journal)
   React.useEffect(() => {
+    if (isSaved) return; // Do not overwrite when in saved/edit mode
     const currentName = teacherName || initialTeacherName || userSession?.displayName;
     if (!currentName) {
       const defaultSub = schoolProfile.subjects?.[0] || 'Matematika';
@@ -187,7 +199,7 @@ export const LearningJournalView: React.FC<LearningJournalViewProps> = ({
       const defaultSub = schoolProfile.subjects?.[0] || 'Matematika';
       setSelectedSubject(defaultSub);
     }
-  }, [teacherName, initialTeacherName, userSession, teachers, schoolProfile.subjects]);
+  }, [teacherName, initialTeacherName, userSession, teachers, schoolProfile.subjects, isSaved]);
 
   const availableSubjectsList = useMemo(() => {
     const defaultList = schoolProfile.subjects || [
@@ -518,17 +530,22 @@ export const LearningJournalView: React.FC<LearningJournalViewProps> = ({
   // Initialize or update default ratings when selected class changes
   React.useEffect(() => {
     if (currentClassStudents.length > 0) {
-      const initial: Record<string, { status: LearningParticipationStatus; notes: string }> = {};
-      currentClassStudents.forEach(std => {
-        // preserve existing if already touched, else default 'Sangat aktif'
-        initial[std.id] = studentRatings[std.id] || { status: 'Sangat aktif', notes: '' };
+      setStudentRatings(prev => {
+        const initial: Record<string, { status: LearningParticipationStatus; notes: string }> = { ...prev };
+        currentClassStudents.forEach(std => {
+          // preserve existing if already touched, else default 'Sangat aktif'
+          if (!initial[std.id]) {
+            initial[std.id] = { status: 'Sangat aktif', notes: '' };
+          }
+        });
+        return initial;
       });
-      setStudentRatings(initial);
     }
   }, [selectedClassId, currentClassStudents]);
 
   // Toggle Jam Ke (1-8)
   const togglePeriod = (periodNum: number) => {
+    if (isSaved && !isEditing) return;
     if (selectedPeriods.includes(periodNum)) {
       if (selectedPeriods.length > 1) {
         setSelectedPeriods(selectedPeriods.filter(p => p !== periodNum).sort((a, b) => a - b));
@@ -540,6 +557,7 @@ export const LearningJournalView: React.FC<LearningJournalViewProps> = ({
 
   // Bulk set all students to a specific status
   const handleBulkSetStatus = (status: LearningParticipationStatus) => {
+    if (isSaved && !isEditing) return;
     const updated = { ...studentRatings };
     currentClassStudents.forEach(std => {
       updated[std.id] = {
@@ -552,6 +570,7 @@ export const LearningJournalView: React.FC<LearningJournalViewProps> = ({
 
   // Update individual student status
   const handleStudentStatusChange = (studentId: string, status: LearningParticipationStatus) => {
+    if (isSaved && !isEditing) return;
     setStudentRatings(prev => ({
       ...prev,
       [studentId]: {
@@ -563,6 +582,7 @@ export const LearningJournalView: React.FC<LearningJournalViewProps> = ({
 
   // Update individual student notes
   const handleStudentNoteChange = (studentId: string, notes: string) => {
+    if (isSaved && !isEditing) return;
     setStudentRatings(prev => ({
       ...prev,
       [studentId]: {
@@ -570,6 +590,87 @@ export const LearningJournalView: React.FC<LearningJournalViewProps> = ({
         notes
       }
     }));
+  };
+
+  // Reset form to fill a brand new journal
+  const handleResetToNewJournal = () => {
+    setSavedJournalId(null);
+    setIsSaved(false);
+    setIsEditing(true);
+    setMaterial('');
+    setMaterialLimit('');
+    setNotesOrTask('');
+    setJournalDate(todayStr);
+    setSelectedPeriods([1, 2]);
+
+    // Reset default subject based on current teacher
+    const currentName = teacherName || initialTeacherName || userSession?.displayName;
+    const matchedTeacher = teachers.find(
+      t => (currentName && t.name.toLowerCase() === currentName.toLowerCase()) ||
+           (userSession?.teacherId && t.id === userSession.teacherId) ||
+           (t.nip && userSession?.username && t.nip.trim() === userSession.username.trim()) ||
+           (t.nip && userSession?.nipOrNisn && t.nip.trim() === userSession.nipOrNisn.trim())
+    );
+    if (matchedTeacher && matchedTeacher.subject1) {
+      setSelectedSubject(matchedTeacher.subject1);
+    } else {
+      setSelectedSubject(schoolProfile.subjects?.[0] || 'Matematika');
+    }
+    setCustomSubject('');
+
+    // Reset student ratings
+    if (currentClassStudents.length > 0) {
+      const initial: Record<string, { status: LearningParticipationStatus; notes: string }> = {};
+      currentClassStudents.forEach(std => {
+        initial[std.id] = { status: 'Sangat aktif', notes: '' };
+      });
+      setStudentRatings(initial);
+    }
+
+    setActiveSubTab('create');
+    setSuccessToast('Formulir siap untuk pengisian Jurnal KBM baru.');
+    setTimeout(() => setSuccessToast(null), 2500);
+  };
+
+  // Load an existing journal into the form for editing
+  const handleLoadJournalForEdit = (journal: LearningJournal) => {
+    setSavedJournalId(journal.id);
+    setIsSaved(true);
+    setIsEditing(true);
+    setJournalDate(journal.date);
+    setTeacherName(journal.teacherName);
+    setSelectedClassId(journal.classId);
+
+    const isCustom = !availableSubjectsList.includes(journal.subject);
+    if (isCustom) {
+      setSelectedSubject('LAINNYA');
+      setCustomSubject(journal.subject);
+    } else {
+      setSelectedSubject(journal.subject);
+      setCustomSubject('');
+    }
+
+    setSelectedPeriods(journal.periods || [1, 2]);
+    setMaterial(journal.material || '');
+    setMaterialLimit(journal.materialLimit || '');
+    setNotesOrTask(journal.notesOrTask || '');
+
+    // Map student ratings
+    const ratings: Record<string, { status: LearningParticipationStatus; notes: string }> = {};
+    if (journal.studentAttendances && journal.studentAttendances.length > 0) {
+      journal.studentAttendances.forEach(att => {
+        ratings[att.studentId] = {
+          status: att.status,
+          notes: att.notes || ''
+        };
+      });
+    }
+    setStudentRatings(ratings);
+
+    setActiveSubTab('create');
+    setSelectedHistoryJournal(null);
+    setSuccessToast(`Memuat data Jurnal KBM (${journal.className} - ${journal.subject}) untuk diedit.`);
+    setTimeout(() => setSuccessToast(null), 3000);
   };
 
   // Handle Form Submission
@@ -606,8 +707,11 @@ export const LearningJournalView: React.FC<LearningJournalViewProps> = ({
       notes: studentRatings[std.id]?.notes?.trim() || undefined
     }));
 
-    const newJournal: LearningJournal = {
-      id: `lj-${Date.now()}`,
+    const targetJournalId = savedJournalId || `lj-${Date.now()}`;
+    const existingJournal = journals.find(j => j.id === targetJournalId);
+
+    const savedJournal: LearningJournal = {
+      id: targetJournalId,
       date: journalDate,
       teacherName: teacherName || 'Guru Pengajar',
       classId: currentClass.id,
@@ -618,20 +722,24 @@ export const LearningJournalView: React.FC<LearningJournalViewProps> = ({
       materialLimit: materialLimit.trim() || undefined,
       notesOrTask: notesOrTask.trim() || undefined,
       studentAttendances: studentAttendancesList,
-      createdAt: new Date().toISOString()
+      createdAt: existingJournal?.createdAt || new Date().toISOString()
     };
 
-    onSaveJournal(newJournal);
+    onSaveJournal(savedJournal);
+
+    // Save state & transition to saved mode
+    setSavedJournalId(targetJournalId);
+    setIsSaved(true);
+    setIsEditing(false);
 
     // Show Toast Success
-    setSuccessToast(`Jurnal KBM ${finalSubject} (${currentClass.name}) berhasil disimpan!`);
-    setTimeout(() => setSuccessToast(null), 3500);
+    const toastMsg = existingJournal
+      ? `Perubahan Jurnal KBM ${finalSubject} (${currentClass.name}) berhasil disimpan!`
+      : `Jurnal KBM ${finalSubject} (${currentClass.name}) berhasil disimpan! Data tersimpan dan dapat diedit.`;
+    setSuccessToast(toastMsg);
+    setTimeout(() => setSuccessToast(null), 4000);
 
-    // Reset Form
-    setMaterial('');
-    setMaterialLimit('');
-    setNotesOrTask('');
-    // Switch to history tab option
+    // Note: Form data (material, limit, notes, ratings) remains on screen!
   };
 
   // Filtered History Journals
@@ -683,7 +791,13 @@ export const LearningJournalView: React.FC<LearningJournalViewProps> = ({
           <div className="bg-slate-900/90 p-2 rounded-2xl border border-slate-700/80 flex flex-col gap-2 w-full sm:w-64 shrink-0">
             <button
               type="button"
-              onClick={() => setActiveSubTab('create')}
+              onClick={() => {
+                if (activeSubTab === 'create' && isSaved) {
+                  handleResetToNewJournal();
+                } else {
+                  handleResetToNewJournal();
+                }
+              }}
               className={`w-full px-4 py-2.5 rounded-xl text-xs font-extrabold transition-all cursor-pointer flex items-center gap-2.5 justify-start ${
                 activeSubTab === 'create'
                   ? 'bg-indigo-600 text-white shadow-md'
@@ -732,17 +846,93 @@ export const LearningJournalView: React.FC<LearningJournalViewProps> = ({
       {/* SUBTAB 1: INPUT JURNAL PEMBELAJARAN BARU */}
       {activeSubTab === 'create' && (
         <form onSubmit={handleSubmit} className="space-y-6">
+
+          {/* Saved / Editing Status Banner */}
+          {isSaved && (
+            <div className={`p-4 sm:p-5 rounded-3xl border flex flex-col sm:flex-row sm:items-center justify-between gap-4 transition-all shadow-sm ${
+              isEditing 
+                ? 'bg-amber-50/90 border-amber-300 text-amber-950' 
+                : 'bg-emerald-50/90 border-emerald-300 text-emerald-950'
+            }`}>
+              <div className="flex items-start sm:items-center gap-3">
+                <div className={`w-10 h-10 rounded-2xl flex items-center justify-center shrink-0 ${
+                  isEditing ? 'bg-amber-500 text-white shadow-md' : 'bg-emerald-600 text-white shadow-md'
+                }`}>
+                  {isEditing ? <Unlock className="w-5 h-5" /> : <CheckCircle2 className="w-5 h-5" />}
+                </div>
+                <div>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <h3 className="text-sm font-black">
+                      {isEditing ? 'Mode Edit Jurnal KBM Aktif' : 'Jurnal KBM Telah Disimpan'}
+                    </h3>
+                    <span className={`text-[10px] font-black px-2.5 py-0.5 rounded-full border ${
+                      isEditing 
+                        ? 'bg-amber-200/80 text-amber-900 border-amber-300' 
+                        : 'bg-emerald-200/80 text-emerald-900 border-emerald-300'
+                    }`}>
+                      {isEditing ? 'Bisa Diedit' : 'Tersimpan & Tampil Lengkap'}
+                    </span>
+                  </div>
+                  <p className="text-xs mt-0.5 opacity-90">
+                    {isEditing 
+                      ? 'Silakan ubah isian data jurnal atau keaktifan siswa di bawah, lalu klik "Simpan Perubahan".'
+                      : 'Semua data jurnal tetap ditampilkan. Klik tombol "Edit Jurnal" di bawah jika ingin mengubah data, atau klik "Input Jurnal Baru" untuk membuat jurnal baru.'
+                    }
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2 shrink-0 self-end sm:self-center">
+                {!isEditing ? (
+                  <button
+                    type="button"
+                    onClick={() => setIsEditing(true)}
+                    className="bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold text-xs px-4 py-2.5 rounded-xl shadow-md flex items-center gap-1.5 transition-all cursor-pointer"
+                  >
+                    <Edit3 className="w-4 h-4 text-amber-300" />
+                    Edit Jurnal
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setIsEditing(false)}
+                    className="bg-white hover:bg-slate-100 text-slate-700 font-extrabold text-xs px-3.5 py-2.5 rounded-xl border border-slate-300 transition-all cursor-pointer flex items-center gap-1"
+                  >
+                    <Lock className="w-3.5 h-3.5 text-slate-500" />
+                    Batal Edit
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={handleResetToNewJournal}
+                  className="bg-white hover:bg-slate-100 text-slate-700 font-extrabold text-xs px-3.5 py-2.5 rounded-xl border border-slate-300 transition-all cursor-pointer flex items-center gap-1"
+                >
+                  <PlusCircle className="w-3.5 h-3.5 text-emerald-600" />
+                  Input Baru
+                </button>
+              </div>
+            </div>
+          )}
           
           {/* Card 1: Informasi Dasar Pembelajaran */}
           <div className="bg-white border border-slate-200/80 rounded-3xl p-6 shadow-sm space-y-6">
-            <div className="flex items-center gap-3 border-b border-slate-100 pb-4">
-              <div className="w-10 h-10 rounded-2xl bg-indigo-100 text-indigo-700 flex items-center justify-center shrink-0">
-                <BookMarked className="w-5 h-5" />
+            <div className="flex items-center justify-between border-b border-slate-100 pb-4">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-2xl bg-indigo-100 text-indigo-700 flex items-center justify-center shrink-0">
+                  <BookMarked className="w-5 h-5" />
+                </div>
+                <div>
+                  <h2 className="text-base font-extrabold text-slate-900">Form Jurnal Kegiatan Belajar Mengajar</h2>
+                  <p className="text-xs text-slate-500">Lengkapi data mata pelajaran, jam ke, materi, dan pilih kelas yang diajar.</p>
+                </div>
               </div>
-              <div>
-                <h2 className="text-base font-extrabold text-slate-900">Form Jurnal Kegiatan Belajar Mengajar</h2>
-                <p className="text-xs text-slate-500">Lengkapi data mata pelajaran, jam ke, materi, dan pilih kelas yang diajar.</p>
-              </div>
+
+              {isSaved && !isEditing && (
+                <span className="hidden sm:inline-flex items-center gap-1.5 text-xs font-bold text-slate-500 bg-slate-100 px-3 py-1 rounded-xl border border-slate-200">
+                  <Lock className="w-3.5 h-3.5 text-slate-400" />
+                  Mode Tinjau (Terkunci)
+                </span>
+              )}
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -756,9 +946,10 @@ export const LearningJournalView: React.FC<LearningJournalViewProps> = ({
                 <input
                   type="date"
                   required
+                  disabled={isSaved && !isEditing}
                   value={journalDate}
                   onChange={(e) => setJournalDate(e.target.value)}
-                  className="w-full bg-slate-50 border border-slate-300 text-slate-900 text-xs font-bold rounded-xl p-3 focus:ring-2 focus:ring-indigo-500 cursor-pointer"
+                  className="w-full bg-slate-50 border border-slate-300 text-slate-900 text-xs font-bold rounded-xl p-3 focus:ring-2 focus:ring-indigo-500 cursor-pointer disabled:bg-slate-100 disabled:text-slate-600 disabled:cursor-not-allowed"
                 />
               </div>
 
@@ -782,8 +973,9 @@ export const LearningJournalView: React.FC<LearningJournalViewProps> = ({
                 </label>
                 <select
                   value={selectedClassId}
+                  disabled={isSaved && !isEditing}
                   onChange={(e) => setSelectedClassId(e.target.value)}
-                  className="w-full bg-slate-50 border border-slate-300 text-slate-900 text-xs font-black rounded-xl p-3 focus:ring-2 focus:ring-indigo-500 cursor-pointer"
+                  className="w-full bg-slate-50 border border-slate-300 text-slate-900 text-xs font-black rounded-xl p-3 focus:ring-2 focus:ring-indigo-500 cursor-pointer disabled:bg-slate-100 disabled:text-slate-600 disabled:cursor-not-allowed"
                 >
                   {sortedClasses.map(c => (
                     <option key={c.id} value={c.id}>
@@ -801,8 +993,9 @@ export const LearningJournalView: React.FC<LearningJournalViewProps> = ({
                 </label>
                 <select
                   value={selectedSubject}
+                  disabled={isSaved && !isEditing}
                   onChange={(e) => setSelectedSubject(e.target.value)}
-                  className="w-full bg-slate-50 border border-slate-300 text-slate-900 text-xs font-bold rounded-xl p-3 focus:ring-2 focus:ring-indigo-500 cursor-pointer"
+                  className="w-full bg-slate-50 border border-slate-300 text-slate-900 text-xs font-bold rounded-xl p-3 focus:ring-2 focus:ring-indigo-500 cursor-pointer disabled:bg-slate-100 disabled:text-slate-600 disabled:cursor-not-allowed"
                 >
                   {availableSubjectsList.map(sub => (
                     <option key={sub} value={sub}>{sub}</option>
@@ -814,10 +1007,11 @@ export const LearningJournalView: React.FC<LearningJournalViewProps> = ({
                   <input
                     type="text"
                     required
+                    disabled={isSaved && !isEditing}
                     value={customSubject}
                     onChange={(e) => setCustomSubject(e.target.value)}
                     placeholder="Tulis Mata Pelajaran..."
-                    className="mt-2 w-full bg-white border border-indigo-300 text-slate-900 text-xs font-bold rounded-xl p-2.5 focus:ring-2 focus:ring-indigo-500"
+                    className="mt-2 w-full bg-white border border-indigo-300 text-slate-900 text-xs font-bold rounded-xl p-2.5 focus:ring-2 focus:ring-indigo-500 disabled:bg-slate-100 disabled:text-slate-600 disabled:cursor-not-allowed"
                   />
                 )}
               </div>
@@ -839,12 +1033,16 @@ export const LearningJournalView: React.FC<LearningJournalViewProps> = ({
               <div className="grid grid-cols-4 sm:grid-cols-8 gap-2 pt-1">
                 {[1, 2, 3, 4, 5, 6, 7, 8].map(pNum => {
                   const isChecked = selectedPeriods.includes(pNum);
+                  const isLocked = isSaved && !isEditing;
                   return (
                     <button
                       key={pNum}
                       type="button"
+                      disabled={isLocked}
                       onClick={() => togglePeriod(pNum)}
-                      className={`p-3 rounded-2xl border text-center transition-all cursor-pointer font-black text-xs flex flex-col items-center justify-center gap-1 ${
+                      className={`p-3 rounded-2xl border text-center transition-all font-black text-xs flex flex-col items-center justify-center gap-1 ${
+                        isLocked ? 'cursor-not-allowed opacity-80' : 'cursor-pointer'
+                      } ${
                         isChecked 
                           ? 'bg-indigo-600 text-white border-indigo-600 shadow-md ring-2 ring-indigo-300' 
                           : 'bg-white text-slate-700 border-slate-300 hover:border-indigo-400 hover:bg-indigo-50/50'
@@ -854,8 +1052,9 @@ export const LearningJournalView: React.FC<LearningJournalViewProps> = ({
                         <input
                           type="checkbox"
                           checked={isChecked}
+                          disabled={isLocked}
                           onChange={() => {}} // handled by parent button
-                          className="w-3.5 h-3.5 accent-indigo-600 rounded cursor-pointer"
+                          className="w-3.5 h-3.5 accent-indigo-600 rounded cursor-pointer disabled:cursor-not-allowed"
                         />
                         <span>Jam {pNum}</span>
                       </div>
@@ -875,10 +1074,11 @@ export const LearningJournalView: React.FC<LearningJournalViewProps> = ({
                 <textarea
                   required
                   rows={2}
+                  disabled={isSaved && !isEditing}
                   value={material}
                   onChange={(e) => setMaterial(e.target.value)}
                   placeholder="Contoh: Bab 3 - Persamaan Kuadrat dan Aplikasi Kontekstual dalam Kehidupan Sehari-hari..."
-                  className="w-full bg-slate-50 border border-slate-300 text-slate-900 text-xs font-medium rounded-2xl p-3.5 focus:ring-2 focus:ring-indigo-500 focus:bg-white"
+                  className="w-full bg-slate-50 border border-slate-300 text-slate-900 text-xs font-medium rounded-2xl p-3.5 focus:ring-2 focus:ring-indigo-500 focus:bg-white disabled:bg-slate-100 disabled:text-slate-700 disabled:cursor-not-allowed"
                 />
               </div>
 
@@ -890,10 +1090,11 @@ export const LearningJournalView: React.FC<LearningJournalViewProps> = ({
                 </label>
                 <input
                   type="text"
+                  disabled={isSaved && !isEditing}
                   value={materialLimit}
                   onChange={(e) => setMaterialLimit(e.target.value)}
                   placeholder="Contoh: Sub-bab 2.1 s.d 2.3 (Buku Paket Hal. 45-58) / Capaian Pembelajaran KD 3.2..."
-                  className="w-full bg-slate-50 border border-slate-300 text-slate-900 text-xs font-medium rounded-2xl p-3 focus:ring-2 focus:ring-indigo-500 focus:bg-white"
+                  className="w-full bg-slate-50 border border-slate-300 text-slate-900 text-xs font-medium rounded-2xl p-3 focus:ring-2 focus:ring-indigo-500 focus:bg-white disabled:bg-slate-100 disabled:text-slate-700 disabled:cursor-not-allowed"
                 />
               </div>
 
@@ -905,10 +1106,11 @@ export const LearningJournalView: React.FC<LearningJournalViewProps> = ({
                 </label>
                 <textarea
                   rows={2}
+                  disabled={isSaved && !isEditing}
                   value={notesOrTask}
                   onChange={(e) => setNotesOrTask(e.target.value)}
                   placeholder="Contoh: Kerjakan Soal Latihan Mandiri 2.3 Nomor 1-5 Halaman 60, dikumpulkan minggu depan..."
-                  className="w-full bg-slate-50 border border-slate-300 text-slate-900 text-xs font-medium rounded-2xl p-3.5 focus:ring-2 focus:ring-indigo-500 focus:bg-white"
+                  className="w-full bg-slate-50 border border-slate-300 text-slate-900 text-xs font-medium rounded-2xl p-3.5 focus:ring-2 focus:ring-indigo-500 focus:bg-white disabled:bg-slate-100 disabled:text-slate-700 disabled:cursor-not-allowed"
                 />
               </div>
             </div>
@@ -934,15 +1136,17 @@ export const LearningJournalView: React.FC<LearningJournalViewProps> = ({
                 <span className="text-[11px] font-bold text-slate-500">Pilih Cepat:</span>
                 <button
                   type="button"
+                  disabled={isSaved && !isEditing}
                   onClick={() => handleBulkSetStatus('Sangat aktif')}
-                  className="bg-emerald-100 hover:bg-emerald-200 text-emerald-800 text-[11px] font-bold px-3 py-1.5 rounded-xl border border-emerald-300 transition-colors cursor-pointer"
+                  className="bg-emerald-100 hover:bg-emerald-200 text-emerald-800 text-[11px] font-bold px-3 py-1.5 rounded-xl border border-emerald-300 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   Set Semua Sangat Aktif
                 </button>
                 <button
                   type="button"
+                  disabled={isSaved && !isEditing}
                   onClick={() => handleBulkSetStatus('Cukup aktif')}
-                  className="bg-indigo-100 hover:bg-indigo-200 text-indigo-800 text-[11px] font-bold px-3 py-1.5 rounded-xl border border-indigo-300 transition-colors cursor-pointer"
+                  className="bg-indigo-100 hover:bg-indigo-200 text-indigo-800 text-[11px] font-bold px-3 py-1.5 rounded-xl border border-indigo-300 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   Set Semua Cukup Aktif
                 </button>
@@ -958,6 +1162,7 @@ export const LearningJournalView: React.FC<LearningJournalViewProps> = ({
               <div className="space-y-3">
                 {currentClassStudents.map((std, idx) => {
                   const rating = studentRatings[std.id] || { status: 'Sangat aktif', notes: '' };
+                  const isLocked = isSaved && !isEditing;
 
                   return (
                     <div 
@@ -992,8 +1197,11 @@ export const LearningJournalView: React.FC<LearningJournalViewProps> = ({
                               <button
                                 key={opt.value}
                                 type="button"
+                                disabled={isLocked}
                                 onClick={() => handleStudentStatusChange(std.id, opt.value)}
-                                className={`px-3 py-2 rounded-xl text-[11px] font-extrabold transition-all cursor-pointer border flex items-center gap-1.5 ${
+                                className={`px-3 py-2 rounded-xl text-[11px] font-extrabold transition-all border flex items-center gap-1.5 ${
+                                  isLocked ? 'cursor-not-allowed opacity-90' : 'cursor-pointer'
+                                } ${
                                   isSelected 
                                     ? `${opt.color} shadow-sm ring-2 ring-offset-1 ring-slate-400 scale-[1.02]` 
                                     : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-100 hover:text-slate-900'
@@ -1012,10 +1220,11 @@ export const LearningJournalView: React.FC<LearningJournalViewProps> = ({
                       <div className="pt-1">
                         <input
                           type="text"
+                          disabled={isLocked}
                           value={rating.notes}
                           onChange={(e) => handleStudentNoteChange(std.id, e.target.value)}
                           placeholder="Catatan keaktifan / perilaku siswa saat KBM (Opsional)..."
-                          className="w-full bg-white border border-slate-200 text-slate-700 text-xs rounded-xl px-3 py-1.5 focus:ring-2 focus:ring-indigo-400 placeholder:text-slate-400"
+                          className="w-full bg-white border border-slate-200 text-slate-700 text-xs rounded-xl px-3 py-1.5 focus:ring-2 focus:ring-indigo-400 placeholder:text-slate-400 disabled:bg-slate-100 disabled:text-slate-600 disabled:cursor-not-allowed"
                         />
                       </div>
                     </div>
@@ -1024,19 +1233,77 @@ export const LearningJournalView: React.FC<LearningJournalViewProps> = ({
               </div>
             )}
 
-            {/* Submit Bar */}
-            <div className="pt-4 border-t border-slate-100 flex items-center justify-between gap-4">
-              <p className="text-xs text-slate-500 font-medium">
-                Pastikan seluruh data KBM & keaktifan siswa telah terisi dengan benar.
-              </p>
-              <button
-                type="submit"
-                disabled={currentClassStudents.length === 0}
-                className="bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs px-6 py-3.5 rounded-2xl shadow-lg shadow-emerald-600/20 flex items-center gap-2 transition-all cursor-pointer hover:scale-[1.01] disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                <Save className="w-4 h-4 text-emerald-200" />
-                Simpan Jurnal KBM
-              </button>
+            {/* Submit Bar with Edit Button & New Input */}
+            <div className="pt-4 border-t border-slate-100 flex flex-col sm:flex-row items-center justify-between gap-4">
+              <div className="text-xs text-slate-500 font-medium text-center sm:text-left">
+                {isSaved ? (
+                  <span className="flex items-center gap-1.5 text-emerald-700 font-bold">
+                    <CheckCircle2 className="w-4 h-4" />
+                    Data Jurnal KBM tersimpan. Klik "Edit Jurnal" untuk memodifikasi atau "Input Jurnal KBM" untuk sesi baru.
+                  </span>
+                ) : (
+                  <span>Pastikan seluruh data KBM & keaktifan siswa telah terisi dengan benar.</span>
+                )}
+              </div>
+
+              <div className="flex items-center gap-2.5 flex-wrap justify-center sm:justify-end w-full sm:w-auto">
+                {isSaved && !isEditing ? (
+                  <>
+                    {/* EDIT BUTTON BESIDE SAVE */}
+                    <button
+                      type="button"
+                      id="btn-edit-jurnal"
+                      onClick={() => setIsEditing(true)}
+                      className="bg-indigo-600 hover:bg-indigo-700 text-white font-black text-xs px-6 py-3.5 rounded-2xl shadow-lg shadow-indigo-600/20 flex items-center gap-2 transition-all cursor-pointer hover:scale-[1.01]"
+                    >
+                      <Edit3 className="w-4 h-4 text-amber-300" />
+                      Edit Jurnal KBM
+                    </button>
+
+                    {/* NEW JOURNAL BUTTON */}
+                    <button
+                      type="button"
+                      id="btn-input-jurnal-baru"
+                      onClick={handleResetToNewJournal}
+                      className="bg-slate-900 hover:bg-slate-800 text-white font-extrabold text-xs px-5 py-3.5 rounded-2xl shadow-md flex items-center gap-2 transition-all cursor-pointer hover:scale-[1.01]"
+                    >
+                      <PlusCircle className="w-4 h-4 text-emerald-400" />
+                      Input Jurnal Baru
+                    </button>
+                  </>
+                ) : isSaved && isEditing ? (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => setIsEditing(false)}
+                      className="bg-white hover:bg-slate-100 text-slate-700 font-bold text-xs px-4 py-3.5 rounded-2xl border border-slate-300 transition-all cursor-pointer flex items-center gap-1.5"
+                    >
+                      <Lock className="w-4 h-4 text-slate-500" />
+                      Batal Edit
+                    </button>
+
+                    <button
+                      type="submit"
+                      id="btn-simpan-perubahan-jurnal"
+                      disabled={currentClassStudents.length === 0}
+                      className="bg-amber-600 hover:bg-amber-700 text-white font-black text-xs px-6 py-3.5 rounded-2xl shadow-lg shadow-amber-600/20 flex items-center gap-2 transition-all cursor-pointer hover:scale-[1.01] disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      <Save className="w-4 h-4 text-amber-200" />
+                      Simpan Perubahan Jurnal
+                    </button>
+                  </>
+                ) : (
+                  <button
+                    type="submit"
+                    id="btn-simpan-jurnal"
+                    disabled={currentClassStudents.length === 0}
+                    className="bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs px-6 py-3.5 rounded-2xl shadow-lg shadow-emerald-600/20 flex items-center gap-2 transition-all cursor-pointer hover:scale-[1.01] disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    <Save className="w-4 h-4 text-emerald-200" />
+                    Simpan Jurnal KBM
+                  </button>
+                )}
+              </div>
             </div>
 
           </div>
@@ -1256,6 +1523,15 @@ export const LearningJournalView: React.FC<LearningJournalViewProps> = ({
                                 <span className="text-[10px] text-slate-500 font-bold">{totalStudents} Siswa</span>
                                 <button
                                   type="button"
+                                  onClick={() => handleLoadJournalForEdit(j)}
+                                  className="text-[10px] font-extrabold bg-amber-500 hover:bg-amber-600 text-slate-950 px-2.5 py-1 rounded-lg transition-colors cursor-pointer flex items-center gap-1 shadow-xs"
+                                  title="Edit Jurnal KBM ini di formulir input"
+                                >
+                                  <Edit3 className="w-3 h-3" />
+                                  Edit
+                                </button>
+                                <button
+                                  type="button"
                                   onClick={() => setSelectedHistoryJournal(j)}
                                   className="text-[10px] font-extrabold bg-indigo-600 hover:bg-indigo-700 text-white px-2.5 py-1 rounded-lg transition-colors cursor-pointer flex items-center gap-1 shadow-xs"
                                 >
@@ -1386,7 +1662,18 @@ export const LearningJournalView: React.FC<LearningJournalViewProps> = ({
             </div>
 
             {/* Modal Footer */}
-            <div className="pt-3 border-t border-slate-100 flex justify-end">
+            <div className="pt-3 border-t border-slate-100 flex items-center justify-between gap-3">
+              <button
+                type="button"
+                onClick={() => {
+                  handleLoadJournalForEdit(selectedHistoryJournal);
+                }}
+                className="bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold text-xs px-5 py-2.5 rounded-xl flex items-center gap-1.5 transition-all cursor-pointer shadow-md shadow-indigo-600/20"
+              >
+                <Edit3 className="w-4 h-4 text-amber-300" />
+                Edit Jurnal Ini
+              </button>
+
               <button
                 onClick={() => setSelectedHistoryJournal(null)}
                 className="bg-slate-800 text-white font-bold text-xs px-5 py-2.5 rounded-xl hover:bg-slate-900 cursor-pointer"

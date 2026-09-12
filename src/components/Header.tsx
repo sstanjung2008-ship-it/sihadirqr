@@ -98,7 +98,7 @@ export const Header: React.FC<HeaderProps> = ({
     return [
       { id: 'dashboard', label: 'Dasbor', icon: BarChart3 },
       { id: 'scanner', label: 'Scan QR', icon: ScanLine },
-      { id: 'analytics', label: 'Analitik & AI', icon: BarChart3 },
+      { id: 'teachers', label: 'Database Guru & TU', icon: UserCheck },
       { id: 'students', label: 'Database Siswa', icon: Users },
       { id: 'classes', label: 'Data Kelas', icon: Building2 },
       { id: 'leaves', label: 'Permohonan Izin', icon: MessageSquare, badge: unreadLeavesCount },

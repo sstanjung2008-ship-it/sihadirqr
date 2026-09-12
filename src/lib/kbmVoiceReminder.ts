@@ -7,13 +7,44 @@ export interface KbmReminderInfo {
   className: string;
   room?: string;
   periodNumber: number;
+  jpCount?: number;
   startTime: string;
   endTime?: string;
   slotId?: string;
 }
 
 const STORAGE_KEY_VOICE_ENABLED = 'sihadir_kbm_voice_reminder_enabled';
-const DEFAULT_SPEECH_TEXT = "Anda Memiliki Jam Mengajar Saat ini, Selamat Menjalankan Tugas. Terima Kasih ";
+
+export const DEFAULT_SPEECH_TEXT = "Pemberitahuan, Anda memiliki jam mengajar saat ini. Selamat menjalankan tugas, terima kasih.";
+
+/**
+ * Buat kalimat suara AI alami & santun dalam Bahasa Indonesia yang menyebutkan:
+ * - Nama guru
+ * - Kelas yang diajarkan
+ * - Mata pelajaran
+ * - Jumlah JP (Jam Pelajaran)
+ */
+export function generateKbmSpeechText(info?: KbmReminderInfo): string {
+  if (!info) {
+    return "Pemberitahuan, Anda memiliki jam mengajar saat ini. Selamat menjalankan tugas, terima kasih.";
+  }
+
+  // Bersihkan gelar atau format nama guru agar dibaca natural oleh AI
+  const rawName = info.teacherName?.trim() || 'Guru Pengampu';
+  const hasGreeting = /^(bapak|ibu|bpk|dr|dra|drs|ustadz|ustadzah)\b/i.test(rawName);
+  const teacherGreeting = hasGreeting ? rawName : `Bapak atau Ibu ${rawName}`;
+
+  const classText = info.className.toLowerCase().startsWith('kelas') 
+    ? info.className 
+    : `Kelas ${info.className}`;
+
+  const jpNumber = info.jpCount && info.jpCount > 0 ? info.jpCount : 1;
+  const jpText = `sebanyak ${jpNumber} Jam Pelajaran`;
+
+  const subjectText = info.subject?.trim() || 'Mata Pelajaran';
+
+  return `Pemberitahuan kepada ${teacherGreeting}. Anda memiliki jadwal mengajar mata pelajaran ${subjectText} di ${classText} ${jpText}. Selamat menjalankan tugas, terima kasih.`;
+}
 
 /**
  * Cek apakah nada pengingat suara diaktifkan
@@ -173,6 +204,7 @@ export function speakKbmVoice(text: string = DEFAULT_SPEECH_TEXT): Promise<void>
 
 /**
  * Mainkan Pengingat Lengkap: Lonceng Harmonis + Suara AI Perempuan
+ * Menyebutkan nama guru, kelas yang diajarkan, mata pelajaran, dan jumlah JP
  */
 export async function playTeacherKbmVoiceReminder(
   info?: KbmReminderInfo,
@@ -182,9 +214,8 @@ export async function playTeacherKbmVoiceReminder(
     return;
   }
 
-  // Teks sesuai permintaan user:
-  // "Anda Memiliki Jam Mengajar Saat ini, Selamat Menjalankan Tugas. Terima Kasih "
-  const speechText = customText || DEFAULT_SPEECH_TEXT;
+  // Gunakan teks khusus jika diberikan, atau hasilkan dari info jadwal KBM guru
+  const speechText = customText || generateKbmSpeechText(info);
 
   try {
     // 1. Putar Lonceng Harmonis terlebih dahulu
@@ -201,9 +232,16 @@ export async function playTeacherKbmVoiceReminder(
  * Fungsi uji coba suara nada pengingat untuk tombol "Tes Suara" di antarmuka
  */
 export async function testKbmVoiceReminder(): Promise<void> {
-  // Buka AudioContext & SpeechSynthesis via event user
-  await playTeacherKbmVoiceReminder(
-    undefined,
-    "Anda Memiliki Jam Mengajar Saat ini, Selamat Menjalankan Tugas. Terima Kasih "
-  );
+  const sampleInfo: KbmReminderInfo = {
+    teacherName: "Ahmad Fauzi, S.Pd",
+    subject: "Matematika",
+    className: "7A",
+    room: "R.01",
+    periodNumber: 1,
+    jpCount: 2,
+    startTime: "07:30",
+    endTime: "09:00"
+  };
+
+  await playTeacherKbmVoiceReminder(sampleInfo);
 }

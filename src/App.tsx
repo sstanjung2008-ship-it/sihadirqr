@@ -72,6 +72,7 @@ import { ParentChatView } from './components/ParentChatView';
 import { ParentAccountView } from './components/ParentAccountView';
 import { TeacherAccountView } from './components/TeacherAccountView';
 import { TeacherAssistantView } from './components/TeacherAssistantView';
+import { ParentBottomNav } from './components/ParentBottomNav';
 import { LoginView } from './components/LoginView';
 import { PWAInstallBanner } from './components/PWAInstallBanner';
 import { KbmVoiceReminderBanner } from './components/KbmVoiceReminderBanner';
@@ -404,12 +405,14 @@ export default function App() {
         updatedAttendance.push(record);
         hasChanges = true;
 
-        if (isParentWaEnabled && schoolProfile.waTemplateAbsent) {
-          const waMsg = schoolProfile.waTemplateAbsent
-            .replace('[ParentName]', student.parentName)
-            .replace('[StudentName]', student.name)
-            .replace('[ClassName]', student.className)
-            .replace('[Time]', autoAlpaTime);
+        const absentTemplate = schoolProfile.parentTemplateAbsent || schoolProfile.waTemplateAbsent;
+        if (isParentWaEnabled && absentTemplate) {
+          const waMsg = absentTemplate
+            .replace(/\[ParentName\]/g, student.parentName || 'Orang Tua / Wali Murid')
+            .replace(/\[StudentName\]/g, student.name)
+            .replace(/\[ClassName\]/g, student.className)
+            .replace(/\[Time\]/g, autoAlpaTime)
+            .replace(/\[SchoolName\]/g, schoolProfile.name || 'Sekolah');
 
           // Automatic dispatch via WhatsApp Gateway API if configured
           if (schoolProfile.waApiKey && schoolProfile.waApiKey.trim() && schoolProfile.waGatewayEnabled !== false) {
@@ -1284,7 +1287,7 @@ export default function App() {
         )}
 
         {/* Main View Router */}
-        <main className="flex-1 p-4 sm:p-6 lg:p-8 max-w-7xl w-full mx-auto">
+        <main className={`flex-1 p-4 sm:p-6 lg:p-8 max-w-7xl w-full mx-auto ${currentRole === 'PARENT' ? 'pb-28 lg:pb-8' : ''}`}>
           {activeTab === 'scanner' && (
             <QRScannerView
               students={students}
@@ -1308,6 +1311,9 @@ export default function App() {
               characterLogs={characterLogs}
               predicateSettings={predicateSettings}
               userSession={userSession}
+              onNavigateTab={handleTabChange}
+              schoolProfile={schoolProfile}
+              unreadLeavesCount={leaveRequests.filter(l => l.status === 'PENDING').length}
             />
           )}
 
@@ -1525,6 +1531,15 @@ export default function App() {
           setActiveVoiceReminder(null);
         }}
       />
+
+      {/* Mobile Glass Bottom Navigation Bar for Parent Role */}
+      {currentRole === 'PARENT' && (
+        <ParentBottomNav
+          activeTab={activeTab}
+          onTabChange={handleTabChange}
+          unreadLeavesCount={leaveRequests.filter(l => l.status === 'PENDING').length}
+        />
+      )}
 
     </div>
   );

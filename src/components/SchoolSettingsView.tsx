@@ -1,8 +1,29 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { SchoolProfile, Teacher, Student, SchoolHoliday } from '../types';
-import { Settings, Save, School, Clock, MessageSquare, RotateCcw, CreditCard, CheckCircle2, Upload, Image as ImageIcon, Link, BookOpen, Plus, X, KeyRound, Lock, Eye, EyeOff, User, GraduationCap, Search, Check, RefreshCw, Users, ShieldAlert, Send, Smartphone, ShieldCheck, Zap, AlertCircle, Calendar, Trash2, Edit3, Tag, Flag, AlertTriangle, Sparkles, Filter, Cloud, CloudDownload, CloudUpload, FileJson, Download } from 'lucide-react';
+import { Settings, Save, School, Clock, RotateCcw, CreditCard, CheckCircle2, Upload, Image as ImageIcon, Link, BookOpen, Plus, X, KeyRound, Lock, Eye, EyeOff, User, GraduationCap, Search, Check, RefreshCw, Users, ShieldAlert, ShieldCheck, AlertCircle, Calendar, Trash2, Edit3, Tag, Flag, AlertTriangle, Sparkles, Filter, Cloud, CloudDownload, CloudUpload, FileJson, Download, Volume2, VolumeX, Mic, Headphones, BellRing, UserCheck, Smile, UserX, Play, Square, MessageSquare } from 'lucide-react';
 import { resetToDefaultData, forceUploadAllToCloud, forceDownloadAllFromCloud, getCloudSyncStatus, CloudSyncStatus, downloadDatabaseBackupFile } from '../lib/storage';
-import { sendWhatsAppGatewayMessage } from '../lib/exportUtils';
+import { 
+  DEFAULT_TEACHER_SPEECH_TEMPLATE,
+  DEFAULT_PARENT_ARRIVAL_MESSAGE,
+  DEFAULT_PARENT_LATE_MESSAGE,
+  DEFAULT_PARENT_DEPARTURE_MESSAGE,
+  DEFAULT_PARENT_ABSENT_MESSAGE,
+  DEFAULT_PARENT_VOICE_ARRIVAL,
+  DEFAULT_PARENT_VOICE_LATE,
+  DEFAULT_PARENT_VOICE_DEPARTURE,
+  DEFAULT_PARENT_VOICE_ABSENT,
+  testKbmVoiceReminder,
+  testParentVoiceNotification,
+  playTeacherKbmVoiceReminder,
+  playParentVoiceNotification,
+  isKbmVoiceReminderEnabled,
+  setKbmVoiceReminderEnabled,
+  isParentVoiceEnabled,
+  setParentVoiceEnabled,
+  generateKbmSpeechText,
+  generateParentNotificationContent,
+  ParentAttendanceType
+} from '../lib/kbmVoiceReminder';
 import { MultiDeviceSyncModal } from './MultiDeviceSyncModal';
 
 interface SchoolSettingsViewProps {
@@ -50,7 +71,7 @@ export const SchoolSettingsView: React.FC<SchoolSettingsViewProps> = ({
     { id: 'section-profil-sekolah', key: 'profil', label: 'Profil Sekolah', icon: School, color: 'text-indigo-600', activeBg: 'bg-indigo-600 text-white shadow-indigo-100' },
     { id: 'section-jam-libur', key: 'jam-libur', label: 'Jam Masuk & Libur', icon: Clock, color: 'text-amber-600', activeBg: 'bg-amber-600 text-white shadow-amber-100' },
     { id: 'section-akademik', key: 'akademik', label: 'Akademik', icon: GraduationCap, color: 'text-blue-600', activeBg: 'bg-blue-600 text-white shadow-blue-100' },
-    { id: 'section-whatsapp', key: 'whatsapp', label: 'WhatsApp', icon: MessageSquare, color: 'text-emerald-600', activeBg: 'bg-emerald-600 text-white shadow-emerald-100' },
+    { id: 'section-suara-ai', key: 'suara-ai', label: 'Suara AI & Notifikasi', icon: Volume2, color: 'text-violet-600', activeBg: 'bg-violet-600 text-white shadow-violet-100' },
     { id: 'section-password', key: 'password', label: 'Password', icon: KeyRound, color: 'text-purple-600', activeBg: 'bg-purple-600 text-white shadow-purple-100' },
   ];
 
@@ -115,166 +136,169 @@ export const SchoolSettingsView: React.FC<SchoolSettingsViewProps> = ({
   const [newSubjectInput, setNewSubjectInput] = useState('');
   const [subjectSavedNotice, setSubjectSavedNotice] = useState<string | null>(null);
 
-  // WhatsApp Gateway API Key state
-  const [showWaApiKeySecret, setShowWaApiKeySecret] = useState<boolean>(false);
-  const [testPhoneInput, setTestPhoneInput] = useState<string>('081234567890');
-  const [isTestingWaApi, setIsTestingWaApi] = useState<boolean>(false);
-  const [testWaResult, setTestWaResult] = useState<{ success: boolean; message: string } | null>(null);
+  // ==========================================
+  // FITUR SUARA AI & NOTIFIKASI PERAN (GURU & ORANG TUA)
+  // ==========================================
 
-  const handleTestWaGateway = async () => {
-    if (!formData.waApiKey || !formData.waApiKey.trim()) {
-      setTestWaResult({
-        success: false,
-        message: 'Silakan isi kode API Key Gateway WhatsApp terlebih dahulu!'
-      });
-      return;
-    }
-    if (!testPhoneInput.trim()) {
-      setTestWaResult({
-        success: false,
-        message: 'Masukkan nomor HP penerima uji coba terlebih dahulu!'
-      });
-      return;
-    }
-
-    setIsTestingWaApi(true);
-    setTestWaResult(null);
-
-    const testMsg = `[UJI COBA GATEWAY WA] Halo, ini adalah pesan tes dari Sistem Presensi SiHadirQR (${formData.name}) menggunakan ${formData.waGatewayProvider || 'Fonnte'}. Layanan notifikasi WhatsApp bekerja dengan baik!`;
-
-    const result = await sendWhatsAppGatewayMessage(
-      testPhoneInput,
-      testMsg,
-      formData.waApiKey,
-      formData.waGatewayProvider || 'Fonnte'
-    );
-
-    setIsTestingWaApi(false);
-    if (result.success) {
-      setTestWaResult({
-        success: true,
-        message: `BERHASIL! Pesan uji coba WhatsApp sukses dikirim ke nomor ${testPhoneInput} via ${formData.waGatewayProvider || 'Fonnte'}.`
-      });
-    } else {
-      setTestWaResult({
-        success: false,
-        message: `GAGAL KIRIM: ${result.error || 'Respon dari Gateway menunjukkan kesalahan API Key, Token Device tidak aktif, atau kuota habis.'}`
-      });
-    }
-  };
-
-  // Uji coba pengingat jadwal guru via WhatsApp
-  const [selectedTestTeacherId, setSelectedTestTeacherId] = useState<string>('');
-  const [isTestingTeacherWa, setIsTestingTeacherWa] = useState<boolean>(false);
-  const [testTeacherWaResult, setTestTeacherWaResult] = useState<{ success: boolean; message: string } | null>(null);
-
-  const handleTestTeacherWaReminder = async () => {
-    if (!formData.waApiKey || !formData.waApiKey.trim()) {
-      setTestTeacherWaResult({
-        success: false,
-        message: 'Silakan masukkan kode API Key Gateway WhatsApp terlebih dahulu di atas!'
-      });
-      return;
-    }
-
-    const teacher = teachers.find(t => t.id === selectedTestTeacherId) || teachers[0];
-    if (!teacher) {
-      setTestTeacherWaResult({
-        success: false,
-        message: 'Belum ada data guru yang terdaftar di sistem.'
-      });
-      return;
-    }
-
-    if (!teacher.phone || !teacher.phone.trim()) {
-      setTestTeacherWaResult({
-        success: false,
-        message: `Guru ${teacher.name} belum memiliki nomor telepon / WhatsApp yang terdaftar!`
-      });
-      return;
-    }
-
-    setIsTestingTeacherWa(true);
-    setTestTeacherWaResult(null);
-
-    const template = formData.waTemplateTeacherReminder || 
-      "PENGINGAT MENGAJAR: Yth. Bpk/Ibu [TeacherName], mengingatkan bahwa jadwal mengajar mata pelajaran [Subject] di Kelas [ClassName] ([Room]) akan dimulai pada pukul [Time] WITA ([PeriodLabel]). Selamat menjalankan KBM!";
-
-    const previewMsg = template
-      .replace(/\[TeacherName\]/g, teacher.name)
-      .replace(/\[Subject\]/g, teacher.subject1 || 'Mata Pelajaran')
-      .replace(/\[ClassName\]/g, teacher.homeroomClassName || 'Kelas 7A')
-      .replace(/\[Room\]/g, 'Ruang Kelas')
-      .replace(/\[Time\]/g, formData.startTime || '07:30')
-      .replace(/\[PeriodLabel\]/g, 'JP 1')
-      .replace(/\[Period\]/g, '1')
-      .replace(/\[SchoolName\]/g, formData.name);
-
-    const result = await sendWhatsAppGatewayMessage(
-      teacher.phone,
-      previewMsg,
-      formData.waApiKey,
-      formData.waGatewayProvider || 'Fonnte'
-    );
-
-    setIsTestingTeacherWa(false);
-    if (result.success) {
-      setTestTeacherWaResult({
-        success: true,
-        message: `BERHASIL! Pesan pengingat jadwal berhasil dikirim ke WhatsApp Guru: ${teacher.name} (${teacher.phone}).`
-      });
-    } else {
-      setTestTeacherWaResult({
-        success: false,
-        message: `GAGAL: ${result.error || 'Periksa status Token Device dan koneksi WhatsApp Gateway.'}`
-      });
-    }
-  };
-
-  // Reset Default Templates Constants & Handlers
-  const DEFAULT_WA_TEACHER_REMINDER = "PENGINGAT MENGAJAR: Yth. Bpk/Ibu [TeacherName], mengingatkan bahwa jadwal mengajar mata pelajaran [Subject] di Kelas [ClassName] ([Room]) akan dimulai pada pukul [Time] WITA ([PeriodLabel]). Selamat menjalankan KBM!";
-  const DEFAULT_WA_ARRIVAL = "Yth. Bpk/Ibu [ParentName], memberitahukan bahwa siswa [StudentName] ([ClassName]) telah Tiba di Sekolah pada [Time] WITA dalam keadaan TEPAT WAKTU.";
-  const DEFAULT_WA_LATE = "PEMBERITAHUAN TERLAMBAT: Yth. Bpk/Ibu [ParentName], siswa [StudentName] ([ClassName]) Tiba di Sekolah pukul [Time] WITA (Terlambat). Mohon perhatiannya.";
-  const DEFAULT_WA_DEPARTURE = "PEMBERITAHUAN PULANG: Yth. Bpk/Ibu [ParentName], memberitahukan bahwa siswa [StudentName] ([ClassName]) telah Pulang dari Sekolah pada pukul [Time] WITA. Terima kasih.";
-  const DEFAULT_WA_ABSENT = "PERHATIAN: Yth. Bpk/Ibu [ParentName], siswa [StudentName] ([ClassName]) Belum Absen hingga pukul 08:30 WITA hari ini tanpa keterangan. Mohon konfirmasi.";
-
+  // Toast / Feedback Notice saat Template di-Reset
   const [templateResetToast, setTemplateResetToast] = useState<string | null>(null);
 
-  const handleResetTeacherTemplate = () => {
+  // Uji Coba Suara AI Pengingat Jadwal KBM Guru
+  const [selectedTestTeacherId, setSelectedTestTeacherId] = useState<string>('');
+  const [isTestingTeacherVoice, setIsTestingTeacherVoice] = useState<boolean>(false);
+  const [testTeacherVoicePlayingText, setTestTeacherVoicePlayingText] = useState<string | null>(null);
+
+  const handleTestTeacherVoice = async () => {
+    const teacher = sortedTeachers.find(t => t.id === selectedTestTeacherId) || sortedTeachers[0];
+    if (!teacher) {
+      setTemplateResetToast('Belum ada data guru yang terdaftar di sistem untuk diuji coba.');
+      setTimeout(() => setTemplateResetToast(null), 3500);
+      return;
+    }
+
+    setIsTestingTeacherVoice(true);
+    const template = formData.aiVoiceTemplateTeacherReminder || formData.waTemplateTeacherReminder || DEFAULT_TEACHER_SPEECH_TEMPLATE;
+    const info = {
+      teacherName: teacher.name,
+      subject: teacher.subject1 || 'Mata Pelajaran',
+      className: teacher.homeroomClassName || 'Kelas 7A',
+      room: 'Ruang Kelas',
+      periodNumber: 1,
+      jpCount: 2,
+      startTime: formData.startTime || '07:30',
+      endTime: '09:00'
+    };
+    
+    const speechText = generateKbmSpeechText(info, template, formData.name);
+    setTestTeacherVoicePlayingText(speechText);
+
+    try {
+      await testKbmVoiceReminder(template, info);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setIsTestingTeacherVoice(false);
+    }
+  };
+
+  const handleResetTeacherVoiceTemplate = () => {
     setFormData(prev => ({
       ...prev,
-      waTemplateTeacherReminder: DEFAULT_WA_TEACHER_REMINDER
+      aiVoiceTemplateTeacherReminder: DEFAULT_TEACHER_SPEECH_TEMPLATE,
+      waTemplateTeacherReminder: DEFAULT_TEACHER_SPEECH_TEMPLATE
     }));
-    setTemplateResetToast('Format pesan pengingat jadwal guru berhasil dikembalikan ke format awal (default).');
+    setTemplateResetToast('Format Suara AI & Pengingat Jadwal Guru berhasil dikembalikan ke format awal.');
+    setTimeout(() => setTemplateResetToast(null), 3500);
+  };
+
+  // Uji Coba & Manajemen Suara AI / Notifikasi Orang Tua
+  const [selectedTestStudentId, setSelectedTestStudentId] = useState<string>('');
+  const [selectedTestParentType, setSelectedTestParentType] = useState<ParentAttendanceType>('ARRIVAL');
+  const [isTestingParentVoice, setIsTestingParentVoice] = useState<boolean>(false);
+  const [activeSingleTestingKey, setActiveSingleTestingKey] = useState<string | null>(null);
+  const [testParentVoicePlayingText, setTestParentVoicePlayingText] = useState<string | null>(null);
+
+  const handleTestParentVoice = async (type: ParentAttendanceType, studentIdOverride?: string) => {
+    const student = students.find(s => s.id === (studentIdOverride || selectedTestStudentId)) || students[0];
+    
+    // Waktu dinamis per kondisi presensi (Untuk ABSENT diambil dari Waktu Batas Otomatis Alpa)
+    const getNotificationTime = (t: ParentAttendanceType) => {
+      if (t === 'ABSENT') return formData.autoAlpaTime || '08:30';
+      if (t === 'DEPARTURE') return formData.endTime || '15:00';
+      if (t === 'LATE') return formData.lateToleranceTime || formData.startTime || '07:35';
+      return formData.startTime || '07:10';
+    };
+
+    const sampleStudent = {
+      name: student ? student.name : "Muhammad Rizky Pratama",
+      className: student ? student.className : "7A",
+      parentName: student?.parentName || "Bpk. Hendra Pratama",
+      time: getNotificationTime(type)
+    };
+
+    setIsTestingParentVoice(true);
+    setActiveSingleTestingKey(type);
+
+    let customVoiceTemplate: string | undefined;
+    if (type === 'ARRIVAL') customVoiceTemplate = formData.parentVoiceTemplateArrival || DEFAULT_PARENT_VOICE_ARRIVAL;
+    else if (type === 'LATE') customVoiceTemplate = formData.parentVoiceTemplateLate || DEFAULT_PARENT_VOICE_LATE;
+    else if (type === 'DEPARTURE') customVoiceTemplate = formData.parentVoiceTemplateDeparture || DEFAULT_PARENT_VOICE_DEPARTURE;
+    else if (type === 'ABSENT') customVoiceTemplate = formData.parentVoiceTemplateAbsent || DEFAULT_PARENT_VOICE_ABSENT;
+
+    const speechText = generateParentNotificationContent(type, {
+      studentName: sampleStudent.name,
+      className: sampleStudent.className,
+      time: sampleStudent.time,
+      parentName: sampleStudent.parentName,
+      schoolName: formData.name
+    }, { isVoice: true, customTemplate: customVoiceTemplate });
+
+    setTestParentVoicePlayingText(speechText);
+
+    try {
+      await testParentVoiceNotification(type, sampleStudent, customVoiceTemplate);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setIsTestingParentVoice(false);
+      setActiveSingleTestingKey(null);
+    }
+  };
+
+  const handleResetSingleParentTemplate = (type: ParentAttendanceType) => {
+    if (type === 'ARRIVAL') {
+      setFormData(prev => ({
+        ...prev,
+        parentTemplateArrival: DEFAULT_PARENT_ARRIVAL_MESSAGE,
+        waTemplateArrival: DEFAULT_PARENT_ARRIVAL_MESSAGE,
+        parentVoiceTemplateArrival: DEFAULT_PARENT_VOICE_ARRIVAL
+      }));
+      setTemplateResetToast('Format pesan & Suara AI Hadir Tepat Waktu berhasil di-reset ke format awal.');
+    } else if (type === 'LATE') {
+      setFormData(prev => ({
+        ...prev,
+        parentTemplateLate: DEFAULT_PARENT_LATE_MESSAGE,
+        waTemplateLate: DEFAULT_PARENT_LATE_MESSAGE,
+        parentVoiceTemplateLate: DEFAULT_PARENT_VOICE_LATE
+      }));
+      setTemplateResetToast('Format pesan & Suara AI Terlambat berhasil di-reset ke format awal.');
+    } else if (type === 'DEPARTURE') {
+      setFormData(prev => ({
+        ...prev,
+        parentTemplateDeparture: DEFAULT_PARENT_DEPARTURE_MESSAGE,
+        waTemplateDeparture: DEFAULT_PARENT_DEPARTURE_MESSAGE,
+        parentVoiceTemplateDeparture: DEFAULT_PARENT_VOICE_DEPARTURE
+      }));
+      setTemplateResetToast('Format pesan & Suara AI Pulang Sekolah berhasil di-reset ke format awal.');
+    } else if (type === 'ABSENT') {
+      setFormData(prev => ({
+        ...prev,
+        parentTemplateAbsent: DEFAULT_PARENT_ABSENT_MESSAGE,
+        waTemplateAbsent: DEFAULT_PARENT_ABSENT_MESSAGE,
+        parentVoiceTemplateAbsent: DEFAULT_PARENT_VOICE_ABSENT
+      }));
+      setTemplateResetToast('Format pesan & Suara AI Belum Absen / Alpa berhasil di-reset ke format awal.');
+    }
     setTimeout(() => setTemplateResetToast(null), 3500);
   };
 
   const handleResetAllParentTemplates = () => {
     setFormData(prev => ({
       ...prev,
-      waTemplateArrival: DEFAULT_WA_ARRIVAL,
-      waTemplateLate: DEFAULT_WA_LATE,
-      waTemplateDeparture: DEFAULT_WA_DEPARTURE,
-      waTemplateAbsent: DEFAULT_WA_ABSENT
+      parentTemplateArrival: DEFAULT_PARENT_ARRIVAL_MESSAGE,
+      waTemplateArrival: DEFAULT_PARENT_ARRIVAL_MESSAGE,
+      parentVoiceTemplateArrival: DEFAULT_PARENT_VOICE_ARRIVAL,
+      parentTemplateLate: DEFAULT_PARENT_LATE_MESSAGE,
+      waTemplateLate: DEFAULT_PARENT_LATE_MESSAGE,
+      parentVoiceTemplateLate: DEFAULT_PARENT_VOICE_LATE,
+      parentTemplateDeparture: DEFAULT_PARENT_DEPARTURE_MESSAGE,
+      waTemplateDeparture: DEFAULT_PARENT_DEPARTURE_MESSAGE,
+      parentVoiceTemplateDeparture: DEFAULT_PARENT_VOICE_DEPARTURE,
+      parentTemplateAbsent: DEFAULT_PARENT_ABSENT_MESSAGE,
+      waTemplateAbsent: DEFAULT_PARENT_ABSENT_MESSAGE,
+      parentVoiceTemplateAbsent: DEFAULT_PARENT_VOICE_ABSENT
     }));
-    setTemplateResetToast('Semua format pesan presensi orang tua (Hadir, Terlambat, Pulang, Alpa) berhasil dikembalikan ke format awal (default).');
-    setTimeout(() => setTemplateResetToast(null), 3500);
-  };
-
-  const handleResetSingleParentTemplate = (type: 'ARRIVAL' | 'LATE' | 'DEPARTURE' | 'ABSENT') => {
-    if (type === 'ARRIVAL') {
-      setFormData(prev => ({ ...prev, waTemplateArrival: DEFAULT_WA_ARRIVAL }));
-      setTemplateResetToast('Format pesan presensi Hadir berhasil di-reset ke format awal.');
-    } else if (type === 'LATE') {
-      setFormData(prev => ({ ...prev, waTemplateLate: DEFAULT_WA_LATE }));
-      setTemplateResetToast('Format pesan presensi Terlambat berhasil di-reset ke format awal.');
-    } else if (type === 'DEPARTURE') {
-      setFormData(prev => ({ ...prev, waTemplateDeparture: DEFAULT_WA_DEPARTURE }));
-      setTemplateResetToast('Format pesan presensi Pulang berhasil di-reset ke format awal.');
-    } else if (type === 'ABSENT') {
-      setFormData(prev => ({ ...prev, waTemplateAbsent: DEFAULT_WA_ABSENT }));
-      setTemplateResetToast('Format pesan presensi Alpa berhasil di-reset ke format awal.');
-    }
+    setTemplateResetToast('Semua format pesan & Suara AI notifikasi orang tua berhasil dikembalikan ke format awal.');
     setTimeout(() => setTemplateResetToast(null), 3500);
   };
 
@@ -1805,527 +1829,704 @@ export const SchoolSettingsView: React.FC<SchoolSettingsViewProps> = ({
           </div>
         </div>
 
-        {/* Templates & Gateway WhatsApp */}
-        <div id="section-whatsapp" className="bg-white border border-slate-200/80 rounded-3xl p-6 shadow-sm space-y-6 scroll-mt-24">
+        {/* ========================================================= */}
+        {/* FITUR SUARA AI & NOTIFIKASI PERAN (GURU & ORANG TUA)       */}
+        {/* ========================================================= */}
+        <div id="section-suara-ai" className="bg-white border border-slate-200/80 rounded-3xl p-6 shadow-sm space-y-6 scroll-mt-24">
           
-          {/* Header */}
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-4">
-            <div>
-              <h2 className="text-sm font-bold text-slate-800 flex items-center gap-2">
-                <MessageSquare className="w-4 h-4 text-emerald-600" />
-                Template Pesan Otomatis & API Key Gateway WhatsApp Orang Tua
-              </h2>
-              <p className="text-xs text-slate-500 mt-0.5">
-                Konfigurasikan API Key Gateway (Fonnte/Lainnya) agar pesan notifikasi presensi terkirim secara otomatis tanpa perlu konfirmasi manual.
-              </p>
-            </div>
-
-            {/* Gateway Status Badge */}
-            <div className="shrink-0">
-              {formData.waApiKey && formData.waApiKey.trim() ? (
-                <span className="bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-bold px-3 py-1.5 rounded-xl flex items-center gap-1.5 shadow-xs">
-                  <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-                  Gateway Terhubung ({formData.waGatewayProvider || 'Fonnte'})
-                </span>
-              ) : (
-                <span className="bg-amber-50 border border-amber-200 text-amber-800 text-xs font-bold px-3 py-1.5 rounded-xl flex items-center gap-1.5 shadow-xs">
-                  <AlertCircle className="w-3.5 h-3.5 text-amber-600" />
-                  Mode Manual (Link wa.me)
-                </span>
-              )}
-            </div>
-          </div>
-
-          {/* SECTION 1: KODE API KEY GATEWAY WHATSAPP (FONNTE / LAINNYA) */}
-          <div className="bg-gradient-to-br from-emerald-50/60 via-slate-50 to-emerald-50/30 border border-emerald-200/80 rounded-2xl p-5 space-y-4">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <div className="p-2 bg-emerald-600 text-white rounded-xl shadow-xs">
-                  <Zap className="w-4 h-4" />
-                </div>
-                <div>
-                  <h3 className="text-xs font-extrabold text-slate-900 uppercase tracking-wider">
-                    Pengaturan API Key Gateway WhatsApp (Fonnte / Lainnya)
-                  </h3>
-                  <p className="text-[11px] text-slate-500 font-medium">
-                    Masukkan Token Device / API Key dari penyedia gateway (seperti <strong className="text-emerald-700">fonnte.com</strong>) agar pesan otomatis bekerja.
-                  </p>
-                </div>
+          {/* Header Section */}
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-100 pb-5">
+            <div className="flex items-start gap-3.5">
+              <div className="w-11 h-11 rounded-2xl bg-gradient-to-tr from-violet-600 to-indigo-600 text-white flex items-center justify-center shadow-md shadow-violet-100 shrink-0 mt-0.5">
+                <Volume2 className="w-6 h-6" />
               </div>
-
-              {/* Gateway Enable Toggle */}
-              <label className="relative inline-flex items-center cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={formData.waGatewayEnabled !== false}
-                  onChange={(e) => setFormData({ ...formData, waGatewayEnabled: e.target.checked })}
-                  className="sr-only peer"
-                />
-                <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-600"></div>
-                <span className="ml-2 text-xs font-bold text-slate-700 hidden sm:inline">
-                  {formData.waGatewayEnabled !== false ? 'Otomatis Aktif' : 'Non-aktif'}
-                </span>
-              </label>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 pt-1">
-              {/* Provider Selection */}
               <div>
-                <label className="block text-slate-800 font-bold text-xs mb-1">
-                  Penyedia Gateway WhatsApp
-                </label>
-                <select
-                  value={formData.waGatewayProvider || 'Fonnte'}
-                  onChange={(e) => setFormData({ ...formData, waGatewayProvider: e.target.value })}
-                  className="w-full bg-white border border-slate-300 text-slate-800 text-xs rounded-xl p-2.5 font-bold focus:ring-2 focus:ring-emerald-500 cursor-pointer shadow-xs"
-                >
-                  <option value="Fonnte">Fonnte (Rekomendasi - fonnte.com)</option>
-                  <option value="Wablas">Wablas Gateway</option>
-                  <option value="Lainnya">Lainnya / Generic Fonnte API</option>
-                </select>
-                <p className="text-[10px] text-slate-500 mt-1">Layanan disarankan: <strong>fonnte.com</strong></p>
-              </div>
-
-              {/* API Key Input */}
-              <div className="md:col-span-2">
-                <label className="block text-slate-800 font-bold text-xs mb-1 flex items-center justify-between">
-                  <span>Kode API Key / Device Token Gateway</span>
-                  <a
-                    href="https://fonnte.com"
-                    target="_blank"
-                    rel="noreferrer"
-                    className="text-[10px] text-emerald-700 hover:underline flex items-center gap-0.5 font-bold"
-                  >
-                    Dapatkan Token di fonnte.com
-                    <Link className="w-2.5 h-2.5" />
-                  </a>
-                </label>
-                <div className="relative">
-                  <input
-                    type={showWaApiKeySecret ? 'text' : 'password'}
-                    value={formData.waApiKey || ''}
-                    onChange={(e) => setFormData({ ...formData, waApiKey: e.target.value })}
-                    placeholder="Contoh: x8K9p2L1zQ... (Token Device Fonnte)"
-                    className="w-full bg-white border border-slate-300 text-slate-900 rounded-xl p-2.5 pr-10 text-xs font-mono font-bold focus:ring-2 focus:ring-emerald-500 shadow-xs"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowWaApiKeySecret(!showWaApiKeySecret)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 cursor-pointer p-1"
-                    title={showWaApiKeySecret ? "Sembunyikan API Key" : "Tampilkan API Key"}
-                  >
-                    {showWaApiKeySecret ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                  </button>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <h2 className="text-base font-black text-slate-900 tracking-tight">
+                    Fitur Suara AI & Pengaturan Notifikasi Peran
+                  </h2>
+                  <span className="bg-violet-50 text-violet-700 border border-violet-200/80 px-2.5 py-0.5 rounded-full text-[11px] font-extrabold flex items-center gap-1">
+                    <Sparkles className="w-3 h-3 text-violet-600" />
+                    AI Voice & Audio Engine
+                  </span>
                 </div>
-                <p className="text-[10px] text-slate-500 mt-1">
-                  🔑 Tempelkan kode Token Fonnte Anda dari Menu <strong>Device</strong> di Fonnte.
+                <p className="text-xs text-slate-500 mt-1 leading-relaxed">
+                  Kelola notifikasi suara pintar berbasis AI dan template pesan otomatis untuk pengingat jadwal mengajar Guru serta notifikasi kehadiran Putra-Putri bagi Orang Tua/Wali Murid.
                 </p>
               </div>
             </div>
 
-            {/* Test WhatsApp API Key Live Sandbox */}
-            <div className="bg-white border border-emerald-200/80 rounded-xl p-3.5 space-y-3">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 pb-2">
-                <span className="text-xs font-extrabold text-slate-800 flex items-center gap-1.5">
-                  <Smartphone className="w-3.5 h-3.5 text-emerald-600" />
-                  Uji Coba Pengiriman Pesan WhatsApp (Test API Key)
-                </span>
-                <span className="text-[10px] text-slate-500">Pastikan perangkat Anda terhubung di Fonnte</span>
-              </div>
-
-              <div className="flex flex-col sm:flex-row gap-2">
-                <div className="flex-1">
-                  <input
-                    type="text"
-                    value={testPhoneInput}
-                    onChange={(e) => setTestPhoneInput(e.target.value)}
-                    placeholder="Nomor HP tujuan (misal: 081234567890)..."
-                    className="w-full bg-slate-50 border border-slate-200 text-slate-800 rounded-xl px-3 py-2 text-xs font-mono font-bold focus:ring-2 focus:ring-emerald-500"
-                  />
-                </div>
-                <button
-                  type="button"
-                  onClick={handleTestWaGateway}
-                  disabled={isTestingWaApi}
-                  className="bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold px-4 py-2 rounded-xl text-xs flex items-center justify-center gap-1.5 shadow-xs transition-all cursor-pointer disabled:opacity-50 shrink-0"
-                >
-                  {isTestingWaApi ? (
-                    <>
-                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                      Mengirim Test...
-                    </>
-                  ) : (
-                    <>
-                      <Send className="w-3.5 h-3.5" />
-                      Tes Kirim Pesan WA
-                    </>
-                  )}
-                </button>
-              </div>
-
-              {testWaResult && (
-                <div className={`p-3 rounded-xl text-xs font-medium flex items-start gap-2 ${
-                  testWaResult.success 
-                    ? 'bg-emerald-50 border border-emerald-200 text-emerald-900' 
-                    : 'bg-rose-50 border border-rose-200 text-rose-900'
-                }`}>
-                  {testWaResult.success ? (
-                    <ShieldCheck className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
-                  ) : (
-                    <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
-                  )}
-                  <span className="flex-1">{testWaResult.message}</span>
-                </div>
-              )}
-            </div>
-
-          </div>
-
-          {/* SECTION 2: PENGINGAT JADWAL KBM GURU VIA WHATSAPP */}
-          <div className="bg-gradient-to-br from-indigo-50/80 via-white to-emerald-50/60 border border-indigo-200/80 rounded-2xl p-5 space-y-4 shadow-xs">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-indigo-100 pb-3">
-              <div>
-                <div className="flex items-center gap-2">
-                  <h3 className="text-xs font-extrabold text-slate-800 uppercase tracking-wider flex items-center gap-1.5">
-                    <BookOpen className="w-4 h-4 text-indigo-600" />
-                    Pengingat Otomatis Jadwal Mengajar Guru via WhatsApp (KBM)
-                  </h3>
-                  <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-extrabold border ${
-                    formData.waTeacherReminderEnabled !== false
-                      ? 'bg-emerald-100 text-emerald-800 border-emerald-300'
-                      : 'bg-slate-200 text-slate-700 border-slate-300'
-                  }`}>
-                    {formData.waTeacherReminderEnabled !== false ? 'AKTIF' : 'NON-AKTIF'}
-                  </span>
-                </div>
-                <p className="text-[11px] text-slate-600 mt-0.5">
-                  Sistem membaca jadwal pelajaran KBM dari database, mencocokkan waktu aktif real-time, dan mengirim pesan pengingat ke nomor WA guru saat jam mengajar dimulai.
-                </p>
-              </div>
-
-              {/* Saklar / Toggle Switch Menonaktifkan / Mengaktifkan Fitur Pengingat WhatsApp Guru */}
-              <label className="relative inline-flex items-center cursor-pointer shrink-0">
-                <input
-                  type="checkbox"
-                  checked={formData.waTeacherReminderEnabled !== false}
-                  onChange={(e) => setFormData({ ...formData, waTeacherReminderEnabled: e.target.checked })}
-                  className="sr-only peer"
-                />
-                <div className="w-12 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-600"></div>
-                <span className="ml-2.5 text-xs font-bold text-slate-800">
-                  {formData.waTeacherReminderEnabled !== false ? 'Pengingat Aktif' : 'Non-aktif'}
-                </span>
-              </label>
-            </div>
-
-            {/* Waktu Kirim & Template */}
-            <div className={`space-y-4 transition-all ${formData.waTeacherReminderEnabled === false ? 'opacity-60 pointer-events-none' : ''}`}>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                <div className="md:col-span-1">
-                  <label className="block text-slate-800 font-bold text-xs mb-1 flex items-center gap-1">
-                    <Clock className="w-3.5 h-3.5 text-indigo-600" />
-                    Waktu Pengiriman Pengingat
-                  </label>
-                  <select
-                    value={formData.waTeacherReminderMinutesBefore ?? 0}
-                    onChange={(e) => setFormData({ ...formData, waTeacherReminderMinutesBefore: Number(e.target.value) })}
-                    className="w-full bg-white border border-slate-300 text-slate-800 text-xs rounded-xl p-2.5 font-bold focus:ring-2 focus:ring-indigo-500 cursor-pointer shadow-xs"
-                  >
-                    <option value={0}>Tepat jam dimulai</option>
-                    <option value={3}>3 menit sebelum jam dimulai</option>
-                    <option value={5}>5 menit sebelum jam dimulai</option>
-                    <option value={10}>10 menit sebelum jam dimulai</option>
-                  </select>
-                  <p className="text-[10px] text-slate-500 mt-1">
-                    Pesan pengingat dikirim bertahap tiap 30 detik ke nomor WA guru untuk mencegah pemblokiran.
-                  </p>
-                </div>
-
-                <div className="md:col-span-2">
-                  <div className="flex items-center justify-between mb-1">
-                    <label className="block text-slate-800 font-bold text-xs">
-                      Format Template Pesan Pengingat Jadwal Guru
-                    </label>
-                    <button
-                      type="button"
-                      onClick={handleResetTeacherTemplate}
-                      className="inline-flex items-center gap-1 text-[11px] font-bold text-indigo-700 hover:text-indigo-900 bg-indigo-50 hover:bg-indigo-100 px-2.5 py-1 rounded-lg border border-indigo-200 transition-all cursor-pointer shadow-2xs"
-                      title="Kembalikan format pesan pengingat jadwal guru ke format default awal"
-                    >
-                      <RotateCcw className="w-3 h-3 text-indigo-600" />
-                      Reset Default Pesan
-                    </button>
-                  </div>
-                  <textarea
-                    rows={3}
-                    value={formData.waTemplateTeacherReminder || DEFAULT_WA_TEACHER_REMINDER}
-                    onChange={(e) => setFormData({ ...formData, waTemplateTeacherReminder: e.target.value })}
-                    placeholder="Tuliskan format pesan pengingat jadwal mengajar guru..."
-                    className="w-full bg-white border border-slate-300 text-slate-800 rounded-xl p-2.5 focus:ring-2 focus:ring-indigo-500 text-xs font-medium shadow-xs"
-                  />
-                  
-                  <div className="bg-white/80 p-2.5 rounded-xl border border-indigo-100 mt-1.5 space-y-1">
-                    <p className="text-[10px] font-bold text-slate-700">
-                      Variabel dinamis yang dapat digunakan:
-                    </p>
-                    <div className="flex flex-wrap gap-1 font-mono text-[10px]">
-                      <span className="bg-indigo-50 px-2 py-0.5 rounded border border-indigo-200 text-indigo-700 font-bold">[TeacherName]</span>
-                      <span className="bg-indigo-50 px-2 py-0.5 rounded border border-indigo-200 text-indigo-700 font-bold">[Subject]</span>
-                      <span className="bg-indigo-50 px-2 py-0.5 rounded border border-indigo-200 text-indigo-700 font-bold">[ClassName]</span>
-                      <span className="bg-indigo-50 px-2 py-0.5 rounded border border-indigo-200 text-indigo-700 font-bold">[Room]</span>
-                      <span className="bg-indigo-50 px-2 py-0.5 rounded border border-indigo-200 text-indigo-700 font-bold">[Time]</span>
-                      <span className="bg-indigo-50 px-2 py-0.5 rounded border border-indigo-200 text-indigo-700 font-bold">[PeriodLabel]</span>
-                      <span className="bg-indigo-50 px-2 py-0.5 rounded border border-indigo-200 text-indigo-700 font-bold">[SchoolName]</span>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              {/* Uji Coba Pengingat Guru Sandbox */}
-              <div className="bg-white border border-indigo-200/90 rounded-xl p-3 space-y-2.5">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-extrabold text-slate-800 flex items-center gap-1.5">
-                    <Send className="w-3.5 h-3.5 text-indigo-600" />
-                    Uji Coba Pengiriman Pengingat Jadwal ke WhatsApp Guru
-                  </span>
-                  <span className="text-[10px] text-slate-500">Kirim pesan simulasi ke nomor WA guru</span>
-                </div>
-
-                <div className="flex flex-col sm:flex-row gap-2">
-                  <div className="flex-1">
-                    <select
-                      value={selectedTestTeacherId}
-                      onChange={(e) => setSelectedTestTeacherId(e.target.value)}
-                      className="w-full bg-slate-50 border border-slate-200 text-slate-800 rounded-xl px-3 py-2 text-xs font-bold focus:ring-2 focus:ring-indigo-500 cursor-pointer"
-                    >
-                      <option value="">-- Pilih Guru Tujuan Uji Coba --</option>
-                      {sortedTeachers.map(t => (
-                        <option key={t.id} value={t.id}>
-                          {t.name} ({t.subject1}) - {t.phone || 'No WA belum ada'}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={handleTestTeacherWaReminder}
-                    disabled={isTestingTeacherWa}
-                    className="bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold px-4 py-2 rounded-xl text-xs flex items-center justify-center gap-1.5 shadow-xs transition-all cursor-pointer disabled:opacity-50 shrink-0"
-                  >
-                    {isTestingTeacherWa ? (
-                      <>
-                        <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                        Mengirim...
-                      </>
-                    ) : (
-                      <>
-                        <Send className="w-3.5 h-3.5" />
-                        Tes Kirim Pengingat Guru
-                      </>
-                    )}
-                  </button>
-                </div>
-
-                {testTeacherWaResult && (
-                  <div className={`p-2.5 rounded-xl text-xs font-medium flex items-start gap-2 ${
-                    testTeacherWaResult.success 
-                      ? 'bg-emerald-50 border border-emerald-200 text-emerald-900' 
-                      : 'bg-rose-50 border border-rose-200 text-rose-900'
-                  }`}>
-                    {testTeacherWaResult.success ? (
-                      <ShieldCheck className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
-                    ) : (
-                      <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
-                    )}
-                    <span className="flex-1">{testTeacherWaResult.message}</span>
-                  </div>
-                )}
-              </div>
+            {/* Global Engine Indicator */}
+            <div className="flex items-center gap-2 self-start sm:self-auto bg-slate-50 border border-slate-200/80 px-3.5 py-2 rounded-2xl">
+              <div className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></div>
+              <span className="text-xs font-bold text-slate-700">Web Speech & Audio API Aktif</span>
             </div>
           </div>
 
-          {/* Toast / Alert Feedback saat Template di-Reset */}
+          {/* Reset Feedback Notice Toast */}
           {templateResetToast && (
-            <div className="bg-emerald-50 border border-emerald-300 text-emerald-900 px-4 py-2.5 rounded-2xl text-xs font-bold flex items-center justify-between shadow-sm animate-fade-in">
-              <div className="flex items-center gap-2">
-                <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-                <span>{templateResetToast}</span>
-              </div>
-              <button
-                type="button"
-                onClick={() => setTemplateResetToast(null)}
-                className="text-emerald-700 hover:text-emerald-900 font-bold ml-2"
-              >
-                <X className="w-3.5 h-3.5" />
-              </button>
+            <div className="p-3.5 bg-emerald-50 border border-emerald-200 rounded-2xl text-xs font-bold text-emerald-900 flex items-center gap-2.5 shadow-xs animate-fadeIn">
+              <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+              <span>{templateResetToast}</span>
             </div>
           )}
 
-          {/* SECTION 3: TEMPLATE PESAN NOTIFIKASI PRESENSI SISWA (NOTIFIKASI ORANG TUA) */}
-          <div className="bg-gradient-to-br from-emerald-50/70 via-white to-slate-50 border border-emerald-200/80 rounded-2xl p-5 space-y-4 shadow-xs">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-emerald-100 pb-3">
-              <div>
-                <div className="flex items-center gap-2">
-                  <h3 className="text-xs font-extrabold text-slate-800 uppercase tracking-wider flex items-center gap-1.5">
-                    <MessageSquare className="w-4 h-4 text-emerald-600" />
-                    Format Template Pesan Presensi Siswa (Notifikasi WhatsApp Orang Tua)
-                  </h3>
-                  <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-extrabold border ${
-                    formData.waParentNotificationEnabled !== false
-                      ? 'bg-emerald-100 text-emerald-800 border-emerald-300'
-                      : 'bg-slate-200 text-slate-700 border-slate-300'
-                  }`}>
-                    {formData.waParentNotificationEnabled !== false ? 'AKTIF' : 'NON-AKTIF'}
-                  </span>
+          {/* ======================================================== */}
+          {/* SUB-BAGIAN 1: PENGINGAT SUARA AI JADWAL KBM GURU         */}
+          {/* ======================================================== */}
+          <div className="bg-gradient-to-br from-violet-50/70 via-white to-indigo-50/40 border border-violet-200/80 rounded-3xl p-5 sm:p-6 space-y-5">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-violet-100 pb-4">
+              <div className="flex items-center gap-3">
+                <div className="w-9 h-9 rounded-xl bg-violet-600 text-white flex items-center justify-center font-bold shadow-xs">
+                  <BellRing className="w-4 h-4" />
                 </div>
-                <p className="text-[11px] text-slate-600 mt-0.5">
-                  Kirim notifikasi otomatis ke nomor WhatsApp orang tua/wali murid saat siswa scan masuk, pulang, atau saat dinyatakan alpa.
-                </p>
+                <div>
+                  <h3 className="text-sm font-extrabold text-slate-900">
+                    1. Pengingat Jadwal Mengajar Guru (Suara AI KBM)
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    Memadukan lonceng harmonis 4-akord dan Suara AI alami untuk mengingatkan guru saat jam mengajar dimulai.
+                  </p>
+                </div>
               </div>
 
-              <div className="flex items-center gap-2.5 shrink-0 flex-wrap">
-                {/* Tombol Reset Default Semua Pesan Presensi */}
+              {/* Master Toggle Suara AI Guru */}
+              <label className="relative inline-flex items-center cursor-pointer select-none self-start sm:self-auto">
+                <input
+                  type="checkbox"
+                  checked={formData.aiVoiceTeacherReminderEnabled ?? formData.waTeacherReminderEnabled ?? true}
+                  onChange={(e) => {
+                    const val = e.target.checked;
+                    setFormData({
+                      ...formData,
+                      aiVoiceTeacherReminderEnabled: val,
+                      waTeacherReminderEnabled: val
+                    });
+                    setKbmVoiceReminderEnabled(val);
+                  }}
+                  className="sr-only peer"
+                />
+                <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-violet-600"></div>
+                <span className="ml-2.5 text-xs font-bold text-slate-800">
+                  {(formData.aiVoiceTeacherReminderEnabled ?? formData.waTeacherReminderEnabled ?? true) ? '🔊 Suara AI Aktif' : '🔇 Dinonaktifkan'}
+                </span>
+              </label>
+            </div>
+
+            {/* Setting: Waktu Pengingat Menit Sebelum */}
+            <div className="grid grid-cols-1 sm:grid-cols-12 gap-4 items-center bg-white border border-violet-100/80 rounded-2xl p-4 shadow-2xs">
+              <div className="sm:col-span-8">
+                <label className="block text-xs font-bold text-slate-800">
+                  Waktu Pemutaran Pengingat Suara AI
+                </label>
+                <p className="text-[11px] text-slate-500 mt-0.5">
+                  Tentukan kapan nada lonceng dan panggilan Suara AI dibunyikan sebelum jam mengajar dimulai.
+                </p>
+              </div>
+              <div className="sm:col-span-4">
+                <select
+                  value={formData.aiVoiceTeacherReminderMinutesBefore ?? formData.waTeacherReminderMinutesBefore ?? 0}
+                  onChange={(e) => setFormData({
+                    ...formData,
+                    aiVoiceTeacherReminderMinutesBefore: Number(e.target.value),
+                    waTeacherReminderMinutesBefore: Number(e.target.value)
+                  })}
+                  className="w-full text-xs font-bold bg-violet-50/50 border border-violet-200 rounded-xl px-3 py-2.5 text-violet-900 focus:ring-2 focus:ring-violet-500 focus:outline-none"
+                >
+                  <option value={0}>⏰ Tepat Saat Jam KBM Dimulai (0 Menit)</option>
+                  <option value={3}>⏳ 3 Menit Sebelum KBM Dimulai</option>
+                  <option value={5}>⏳ 5 Menit Sebelum KBM Dimulai</option>
+                  <option value={10}>⏳ 10 Menit Sebelum KBM Dimulai</option>
+                </select>
+              </div>
+            </div>
+
+            {/* Format Kalimat Suara AI Pengingat Guru */}
+            <div className="space-y-2 bg-white border border-violet-100/80 rounded-2xl p-4 shadow-2xs">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                <label className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
+                  <MessageSquare className="w-3.5 h-3.5 text-violet-600" />
+                  Format Kalimat Suara AI & Pesan Pengingat Guru:
+                </label>
+                <button
+                  type="button"
+                  onClick={handleResetTeacherVoiceTemplate}
+                  className="text-[11px] text-violet-600 hover:text-violet-800 font-bold underline flex items-center gap-1 cursor-pointer self-start sm:self-auto"
+                >
+                  <RotateCcw className="w-3 h-3" />
+                  Kembalikan Format Default
+                </button>
+              </div>
+
+              <textarea
+                rows={3}
+                value={formData.aiVoiceTemplateTeacherReminder ?? formData.waTemplateTeacherReminder ?? DEFAULT_TEACHER_SPEECH_TEMPLATE}
+                onChange={(e) => setFormData({
+                  ...formData,
+                  aiVoiceTemplateTeacherReminder: e.target.value,
+                  waTemplateTeacherReminder: e.target.value
+                })}
+                placeholder="Contoh: Pemberitahuan kepada [TeacherName]. Anda memiliki jadwal mengajar mata pelajaran [Subject] di [ClassName] [PeriodLabel]..."
+                className="w-full text-xs bg-slate-50 border border-slate-200 rounded-xl p-3 text-slate-800 focus:bg-white focus:ring-2 focus:ring-violet-500 focus:outline-none font-mono leading-relaxed"
+              />
+
+              {/* Dynamic Variable Chips */}
+              <div className="pt-1 flex flex-wrap items-center gap-1.5 text-[11px]">
+                <span className="text-slate-500 font-bold">Variabel Tersedia:</span>
+                {['[TeacherName]', '[Subject]', '[ClassName]', '[Room]', '[Time]', '[PeriodLabel]', '[SchoolName]'].map((v) => (
+                  <span
+                    key={v}
+                    onClick={() => {
+                      const cur = formData.aiVoiceTemplateTeacherReminder ?? formData.waTemplateTeacherReminder ?? DEFAULT_TEACHER_SPEECH_TEMPLATE;
+                      setFormData({
+                        ...formData,
+                        aiVoiceTemplateTeacherReminder: `${cur} ${v}`,
+                        waTemplateTeacherReminder: `${cur} ${v}`
+                      });
+                    }}
+                    className="bg-violet-100/70 hover:bg-violet-200 text-violet-800 border border-violet-300/60 font-mono font-bold px-2 py-0.5 rounded-md cursor-pointer transition shadow-2xs"
+                    title={`Klik untuk menyisipkan ${v}`}
+                  >
+                    {v}
+                  </span>
+                ))}
+              </div>
+            </div>
+
+            {/* Interactive Live Testing Sandbox for Teacher AI Voice */}
+            <div className="bg-gradient-to-r from-violet-600 to-indigo-700 text-white rounded-2xl p-4 sm:p-5 shadow-sm space-y-3">
+              <div className="flex items-center justify-between gap-2 flex-wrap">
+                <div className="flex items-center gap-2">
+                  <Headphones className="w-4 h-4 text-violet-200" />
+                  <span className="text-xs font-bold uppercase tracking-wider text-violet-200">
+                    Live Testing Suara AI Pengingat Guru
+                  </span>
+                </div>
+                <span className="text-[11px] bg-white/10 px-2.5 py-0.5 rounded-full font-medium">
+                  Lonceng Harmonis + Suara Wanita
+                </span>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-12 gap-3 items-center">
+                <div className="sm:col-span-8">
+                  <label className="block text-[11px] text-violet-200 font-medium mb-1">
+                    Pilih Guru untuk Simulasi Pengingat KBM:
+                  </label>
+                  <select
+                    value={selectedTestTeacherId || (sortedTeachers[0]?.id || '')}
+                    onChange={(e) => setSelectedTestTeacherId(e.target.value)}
+                    className="w-full text-xs font-bold bg-white text-slate-900 border border-violet-300 rounded-xl px-3 py-2.5 focus:ring-2 focus:ring-white focus:outline-none"
+                  >
+                    {sortedTeachers.map((t) => (
+                      <option key={t.id} value={t.id}>
+                        {t.name} — ({t.subject1 || 'Mata Pelajaran'})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="sm:col-span-4 flex items-end">
+                  <button
+                    type="button"
+                    onClick={handleTestTeacherVoice}
+                    disabled={isTestingTeacherVoice}
+                    className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-white text-violet-900 hover:bg-violet-50 font-black rounded-xl text-xs transition shadow-md cursor-pointer disabled:opacity-75 disabled:cursor-not-allowed mt-4 sm:mt-0"
+                  >
+                    <Volume2 className={`w-4 h-4 text-violet-600 ${isTestingTeacherVoice ? 'animate-pulse text-amber-500' : ''}`} />
+                    <span>{isTestingTeacherVoice ? 'Memutar Suara AI...' : 'Uji Coba Suara AI Guru'}</span>
+                  </button>
+                </div>
+              </div>
+
+              {testTeacherVoicePlayingText && (
+                <div className="bg-black/25 border border-white/20 rounded-xl p-3 text-xs space-y-1 mt-2">
+                  <p className="text-[11px] text-violet-200 font-bold flex items-center gap-1">
+                    <Volume2 className="w-3 h-3 animate-pulse" />
+                    Kalimat yang Diucapkan AI:
+                  </p>
+                  <p className="italic text-white leading-relaxed font-sans">
+                    "{testTeacherVoicePlayingText}"
+                  </p>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* ======================================================== */}
+          {/* SUB-BAGIAN 2: NOTIFIKASI & SUARA AI UNTUK ROLE ORANG TUA */}
+          {/* ======================================================== */}
+          <div className="bg-gradient-to-br from-emerald-50/70 via-white to-teal-50/40 border border-emerald-200/80 rounded-3xl p-5 sm:p-6 space-y-5">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-emerald-100 pb-4">
+              <div className="flex items-center gap-3">
+                <div className="w-9 h-9 rounded-xl bg-emerald-600 text-white flex items-center justify-center font-bold shadow-xs">
+                  <GraduationCap className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-extrabold text-slate-900">
+                    2. Notifikasi & Suara AI untuk Role Orang Tua (Wali Murid)
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    Konfigurasi pesan teks dan pembacaan Suara AI untuk status kehadiran Datang Tepat Waktu, Terlambat, Belum Absen/Alpa, dan Pulang.
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-3 flex-wrap">
+                {/* Master Switch Notifikasi Orang Tua */}
+                <label className="relative inline-flex items-center cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={formData.aiVoiceParentEnabled ?? formData.waParentNotificationEnabled ?? true}
+                    onChange={(e) => {
+                      const val = e.target.checked;
+                      setFormData({
+                        ...formData,
+                        aiVoiceParentEnabled: val,
+                        waParentNotificationEnabled: val
+                      });
+                      setParentVoiceEnabled(val);
+                    }}
+                    className="sr-only peer"
+                  />
+                  <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-600"></div>
+                  <span className="ml-2 text-xs font-bold text-slate-800">
+                    {(formData.aiVoiceParentEnabled ?? formData.waParentNotificationEnabled ?? true) ? 'Notifikasi Aktif' : 'Non-aktif'}
+                  </span>
+                </label>
+
+                {/* Reset All Parent Templates Button */}
                 <button
                   type="button"
                   onClick={handleResetAllParentTemplates}
-                  className="inline-flex items-center gap-1.5 text-xs font-bold text-emerald-800 hover:text-emerald-950 bg-white hover:bg-emerald-100/70 px-3 py-1.5 rounded-xl border border-emerald-300 transition-all cursor-pointer shadow-2xs"
-                  title="Kembalikan semua template pesan presensi orang tua (Hadir, Terlambat, Pulang, Alpa) ke format default awal"
+                  className="px-3 py-1.5 bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 rounded-xl text-xs font-bold transition flex items-center gap-1.5 shadow-2xs cursor-pointer"
                 >
                   <RotateCcw className="w-3.5 h-3.5 text-emerald-600" />
-                  <span>Reset Default Pesan</span>
+                  <span>Reset Semua Format Orang Tua</span>
                 </button>
-
-                {/* Saklar / Toggle Switch Menonaktifkan / Mengaktifkan Pesan WhatsApp ke Orang Tua */}
-                <label className="relative inline-flex items-center cursor-pointer shrink-0">
-                  <input
-                    type="checkbox"
-                    checked={formData.waParentNotificationEnabled !== false}
-                    onChange={(e) => setFormData({ ...formData, waParentNotificationEnabled: e.target.checked })}
-                    className="sr-only peer"
-                  />
-                  <div className="w-12 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-600"></div>
-                  <span className="ml-2 text-xs font-bold text-slate-800">
-                    {formData.waParentNotificationEnabled !== false ? 'Aktif' : 'Non-aktif'}
-                  </span>
-                </label>
               </div>
             </div>
 
-            {formData.waParentNotificationEnabled === false && (
-              <div className="bg-amber-50 border border-amber-200 text-amber-900 rounded-xl p-3 text-xs flex items-center gap-2">
-                <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
-                <span>
-                  <strong>Notifikasi WhatsApp ke Orang Tua sedang Dinonaktifkan.</strong> Sistem tetap mencatat riwayat presensi siswa, namun tidak akan mengirimkan pesan WhatsApp ke nomor orang tua/wali saat scan masuk, pulang, maupun alpa.
+            {/* Audio Speech Switch for Attendance Events */}
+            <div className="bg-white border border-emerald-100 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-2xs">
+              <div>
+                <span className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
+                  <Volume2 className="w-4 h-4 text-emerald-600" />
+                  Putar Suara AI Saat Presensi Kehadiran Siswa
+                </span>
+                <p className="text-[11px] text-slate-500 mt-0.5">
+                  AI akan mengumumkan status kehadiran siswa dengan suara natural dan nada lonceng harmonis saat scan presensi tercatat.
+                </p>
+              </div>
+              <label className="relative inline-flex items-center cursor-pointer select-none self-start sm:self-auto">
+                <input
+                  type="checkbox"
+                  checked={formData.aiVoiceParentSpeechEnabled ?? true}
+                  onChange={(e) => {
+                    const val = e.target.checked;
+                    setFormData({
+                      ...formData,
+                      aiVoiceParentSpeechEnabled: val
+                    });
+                  }}
+                  className="sr-only peer"
+                />
+                <div className="w-10 h-5 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-emerald-600"></div>
+                <span className="ml-2 text-xs font-bold text-slate-700">
+                  {(formData.aiVoiceParentSpeechEnabled ?? true) ? '🔊 Suara AI Presensi Aktif' : '🔇 Hening'}
+                </span>
+              </label>
+            </div>
+
+            {/* 4 BENTO CARDS FOR PARENT NOTIFICATION ROLES */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+
+              {/* CARD 1: DATANG TEPAT WAKTU (HADIR) */}
+              <div className="bg-white border border-emerald-200/90 rounded-2xl p-4 space-y-3.5 shadow-xs relative overflow-hidden flex flex-col justify-between">
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between border-b border-slate-100 pb-2.5">
+                    <div className="flex items-center gap-2">
+                      <span className="w-2.5 h-2.5 rounded-full bg-emerald-500"></span>
+                      <h4 className="text-xs font-extrabold text-emerald-950 uppercase tracking-wider">
+                        A. Datang Tepat Waktu (Hadir)
+                      </h4>
+                    </div>
+                    <span className="bg-emerald-100 text-emerald-800 text-[10px] font-bold px-2 py-0.5 rounded-md">
+                      Status: Hadir
+                    </span>
+                  </div>
+
+                  {/* Pesan Teks */}
+                  <div className="space-y-1">
+                    <label className="text-[11px] font-bold text-slate-700 flex items-center justify-between">
+                      <span>Format Pesan Notifikasi:</span>
+                      <button
+                        type="button"
+                        onClick={() => handleResetSingleParentTemplate('ARRIVAL')}
+                        className="text-[10px] text-emerald-700 hover:underline font-semibold"
+                      >
+                        Reset Default
+                      </button>
+                    </label>
+                    <textarea
+                      rows={2}
+                      value={formData.parentTemplateArrival ?? formData.waTemplateArrival ?? DEFAULT_PARENT_ARRIVAL_MESSAGE}
+                      onChange={(e) => setFormData({
+                        ...formData,
+                        parentTemplateArrival: e.target.value,
+                        waTemplateArrival: e.target.value
+                      })}
+                      className="w-full text-xs bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-slate-800 focus:bg-white focus:ring-2 focus:ring-emerald-500 focus:outline-none font-mono"
+                    />
+                  </div>
+
+                  {/* Kalimat Suara AI */}
+                  <div className="space-y-1">
+                    <label className="text-[11px] font-bold text-slate-700 flex items-center gap-1">
+                      <Volume2 className="w-3 h-3 text-emerald-600" />
+                      Kalimat yang Diucapkan Suara AI:
+                    </label>
+                    <textarea
+                      rows={2}
+                      value={formData.parentVoiceTemplateArrival ?? DEFAULT_PARENT_VOICE_ARRIVAL}
+                      onChange={(e) => setFormData({
+                        ...formData,
+                        parentVoiceTemplateArrival: e.target.value
+                      })}
+                      className="w-full text-xs bg-emerald-50/40 border border-emerald-200 rounded-xl p-2.5 text-emerald-950 focus:bg-white focus:ring-2 focus:ring-emerald-500 focus:outline-none font-sans"
+                    />
+                  </div>
+                </div>
+
+                <div className="pt-2 border-t border-slate-100 flex items-center justify-between gap-2">
+                  <span className="text-[10px] text-slate-400 font-medium">Melodi: Ceria (3-Akord)</span>
+                  <button
+                    type="button"
+                    onClick={() => handleTestParentVoice('ARRIVAL')}
+                    disabled={isTestingParentVoice}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition shadow-xs cursor-pointer disabled:opacity-70"
+                  >
+                    <Volume2 className={`w-3.5 h-3.5 ${activeSingleTestingKey === 'ARRIVAL' ? 'animate-pulse' : ''}`} />
+                    <span>{activeSingleTestingKey === 'ARRIVAL' ? 'Memutar...' : 'Tes Suara Hadir'}</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* CARD 2: TERLAMBAT MASUK SEKOLAH */}
+              <div className="bg-white border border-amber-200/90 rounded-2xl p-4 space-y-3.5 shadow-xs relative overflow-hidden flex flex-col justify-between">
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between border-b border-slate-100 pb-2.5">
+                    <div className="flex items-center gap-2">
+                      <span className="w-2.5 h-2.5 rounded-full bg-amber-500"></span>
+                      <h4 className="text-xs font-extrabold text-amber-950 uppercase tracking-wider">
+                        B. Terlambat Masuk Sekolah
+                      </h4>
+                    </div>
+                    <span className="bg-amber-100 text-amber-800 text-[10px] font-bold px-2 py-0.5 rounded-md">
+                      Status: Terlambat
+                    </span>
+                  </div>
+
+                  {/* Pesan Teks */}
+                  <div className="space-y-1">
+                    <label className="text-[11px] font-bold text-slate-700 flex items-center justify-between">
+                      <span>Format Pesan Notifikasi:</span>
+                      <button
+                        type="button"
+                        onClick={() => handleResetSingleParentTemplate('LATE')}
+                        className="text-[10px] text-amber-700 hover:underline font-semibold"
+                      >
+                        Reset Default
+                      </button>
+                    </label>
+                    <textarea
+                      rows={2}
+                      value={formData.parentTemplateLate ?? formData.waTemplateLate ?? DEFAULT_PARENT_LATE_MESSAGE}
+                      onChange={(e) => setFormData({
+                        ...formData,
+                        parentTemplateLate: e.target.value,
+                        waTemplateLate: e.target.value
+                      })}
+                      className="w-full text-xs bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-slate-800 focus:bg-white focus:ring-2 focus:ring-amber-500 focus:outline-none font-mono"
+                    />
+                  </div>
+
+                  {/* Kalimat Suara AI */}
+                  <div className="space-y-1">
+                    <label className="text-[11px] font-bold text-slate-700 flex items-center gap-1">
+                      <Volume2 className="w-3 h-3 text-amber-600" />
+                      Kalimat yang Diucapkan Suara AI:
+                    </label>
+                    <textarea
+                      rows={2}
+                      value={formData.parentVoiceTemplateLate ?? DEFAULT_PARENT_VOICE_LATE}
+                      onChange={(e) => setFormData({
+                        ...formData,
+                        parentVoiceTemplateLate: e.target.value
+                      })}
+                      className="w-full text-xs bg-amber-50/40 border border-amber-200 rounded-xl p-2.5 text-amber-950 focus:bg-white focus:ring-2 focus:ring-amber-500 focus:outline-none font-sans"
+                    />
+                  </div>
+                </div>
+
+                <div className="pt-2 border-t border-slate-100 flex items-center justify-between gap-2">
+                  <span className="text-[10px] text-slate-400 font-medium">Melodi: Peringatan (2-Akord)</span>
+                  <button
+                    type="button"
+                    onClick={() => handleTestParentVoice('LATE')}
+                    disabled={isTestingParentVoice}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-bold transition shadow-xs cursor-pointer disabled:opacity-70"
+                  >
+                    <Volume2 className={`w-3.5 h-3.5 ${activeSingleTestingKey === 'LATE' ? 'animate-pulse' : ''}`} />
+                    <span>{activeSingleTestingKey === 'LATE' ? 'Memutar...' : 'Tes Suara Terlambat'}</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* CARD 3: BELUM ABSEN / ALPA */}
+              <div className="bg-white border border-rose-200/90 rounded-2xl p-4 space-y-3.5 shadow-xs relative overflow-hidden flex flex-col justify-between">
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between border-b border-slate-100 pb-2.5">
+                    <div className="flex items-center gap-2">
+                      <span className="w-2.5 h-2.5 rounded-full bg-rose-500"></span>
+                      <h4 className="text-xs font-extrabold text-rose-950 uppercase tracking-wider">
+                        C. Belum Absen / Alpa (Peringatan)
+                      </h4>
+                    </div>
+                    <span className="bg-rose-100 text-rose-800 text-[10px] font-bold px-2 py-0.5 rounded-md">
+                      Status: Belum Absen
+                    </span>
+                  </div>
+
+                  {/* Pesan Teks */}
+                  <div className="space-y-1">
+                    <div className="flex items-center justify-between">
+                      <label className="text-[11px] font-bold text-slate-700">
+                        Format Pesan Notifikasi:
+                      </label>
+                      <button
+                        type="button"
+                        onClick={() => handleResetSingleParentTemplate('ABSENT')}
+                        className="text-[10px] text-rose-700 hover:underline font-semibold"
+                      >
+                        Reset Default
+                      </button>
+                    </div>
+                    <textarea
+                      rows={2}
+                      value={formData.parentTemplateAbsent ?? formData.waTemplateAbsent ?? DEFAULT_PARENT_ABSENT_MESSAGE}
+                      onChange={(e) => setFormData({
+                        ...formData,
+                        parentTemplateAbsent: e.target.value,
+                        waTemplateAbsent: e.target.value
+                      })}
+                      className="w-full text-xs bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-slate-800 focus:bg-white focus:ring-2 focus:ring-rose-500 focus:outline-none font-mono"
+                    />
+                  </div>
+
+                  {/* Indikator Sumber [Time] Otomatis Batas Alpa */}
+                  <div className="bg-rose-50/90 border border-rose-200/80 rounded-xl px-2.5 py-1.5 flex items-center justify-between text-[11px] text-rose-900">
+                    <span className="font-semibold flex items-center gap-1.5">
+                      <Clock className="w-3.5 h-3.5 text-rose-600 shrink-0" />
+                      Variabel <code className="font-mono font-bold bg-white px-1.5 py-0.5 rounded border border-rose-300">[Time]</code> diambil dari:
+                    </span>
+                    <span className="font-extrabold text-rose-700 bg-rose-100 px-2 py-0.5 rounded-md">
+                      Batas Otomatis Alpa ({formData.autoAlpaTime || '08:30'} WITA)
+                    </span>
+                  </div>
+
+                  {/* Kalimat Suara AI */}
+                  <div className="space-y-1">
+                    <label className="text-[11px] font-bold text-slate-700 flex items-center gap-1">
+                      <Volume2 className="w-3 h-3 text-rose-600" />
+                      Kalimat yang Diucapkan Suara AI:
+                    </label>
+                    <textarea
+                      rows={2}
+                      value={formData.parentVoiceTemplateAbsent ?? DEFAULT_PARENT_VOICE_ABSENT}
+                      onChange={(e) => setFormData({
+                        ...formData,
+                        parentVoiceTemplateAbsent: e.target.value
+                      })}
+                      className="w-full text-xs bg-rose-50/40 border border-rose-200 rounded-xl p-2.5 text-rose-950 focus:bg-white focus:ring-2 focus:ring-rose-500 focus:outline-none font-sans"
+                    />
+                  </div>
+                </div>
+
+                <div className="pt-2 border-t border-slate-100 flex items-center justify-between gap-2">
+                  <span className="text-[10px] text-slate-400 font-medium">Melodi: Perhatian Khusus</span>
+                  <button
+                    type="button"
+                    onClick={() => handleTestParentVoice('ABSENT')}
+                    disabled={isTestingParentVoice}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-bold transition shadow-xs cursor-pointer disabled:opacity-70"
+                  >
+                    <Volume2 className={`w-3.5 h-3.5 ${activeSingleTestingKey === 'ABSENT' ? 'animate-pulse' : ''}`} />
+                    <span>{activeSingleTestingKey === 'ABSENT' ? 'Memutar...' : 'Tes Suara Belum Absen'}</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* CARD 4: NOTIFIKASI PULANG SEKOLAH */}
+              <div className="bg-white border border-blue-200/90 rounded-2xl p-4 space-y-3.5 shadow-xs relative overflow-hidden flex flex-col justify-between">
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between border-b border-slate-100 pb-2.5">
+                    <div className="flex items-center gap-2">
+                      <span className="w-2.5 h-2.5 rounded-full bg-blue-500"></span>
+                      <h4 className="text-xs font-extrabold text-blue-950 uppercase tracking-wider">
+                        D. Notifikasi Pulang Sekolah
+                      </h4>
+                    </div>
+                    <span className="bg-blue-100 text-blue-800 text-[10px] font-bold px-2 py-0.5 rounded-md">
+                      Status: Pulang
+                    </span>
+                  </div>
+
+                  {/* Pesan Teks */}
+                  <div className="space-y-1">
+                    <label className="text-[11px] font-bold text-slate-700 flex items-center justify-between">
+                      <span>Format Pesan Notifikasi:</span>
+                      <button
+                        type="button"
+                        onClick={() => handleResetSingleParentTemplate('DEPARTURE')}
+                        className="text-[10px] text-blue-700 hover:underline font-semibold"
+                      >
+                        Reset Default
+                      </button>
+                    </label>
+                    <textarea
+                      rows={2}
+                      value={formData.parentTemplateDeparture ?? formData.waTemplateDeparture ?? DEFAULT_PARENT_DEPARTURE_MESSAGE}
+                      onChange={(e) => setFormData({
+                        ...formData,
+                        parentTemplateDeparture: e.target.value,
+                        waTemplateDeparture: e.target.value
+                      })}
+                      className="w-full text-xs bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-slate-800 focus:bg-white focus:ring-2 focus:ring-blue-500 focus:outline-none font-mono"
+                    />
+                  </div>
+
+                  {/* Kalimat Suara AI */}
+                  <div className="space-y-1">
+                    <label className="text-[11px] font-bold text-slate-700 flex items-center gap-1">
+                      <Volume2 className="w-3 h-3 text-blue-600" />
+                      Kalimat yang Diucapkan Suara AI:
+                    </label>
+                    <textarea
+                      rows={2}
+                      value={formData.parentVoiceTemplateDeparture ?? DEFAULT_PARENT_VOICE_DEPARTURE}
+                      onChange={(e) => setFormData({
+                        ...formData,
+                        parentVoiceTemplateDeparture: e.target.value
+                      })}
+                      className="w-full text-xs bg-blue-50/40 border border-blue-200 rounded-xl p-2.5 text-blue-950 focus:bg-white focus:ring-2 focus:ring-blue-500 focus:outline-none font-sans"
+                    />
+                  </div>
+                </div>
+
+                <div className="pt-2 border-t border-slate-100 flex items-center justify-between gap-2">
+                  <span className="text-[10px] text-slate-400 font-medium">Melodi: Harmonis Pulang</span>
+                  <button
+                    type="button"
+                    onClick={() => handleTestParentVoice('DEPARTURE')}
+                    disabled={isTestingParentVoice}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold transition shadow-xs cursor-pointer disabled:opacity-70"
+                  >
+                    <Volume2 className={`w-3.5 h-3.5 ${activeSingleTestingKey === 'DEPARTURE' ? 'animate-pulse' : ''}`} />
+                    <span>{activeSingleTestingKey === 'DEPARTURE' ? 'Memutar...' : 'Tes Suara Pulang'}</span>
+                  </button>
+                </div>
+              </div>
+
+            </div>
+
+            {/* Variable Tag Chips for Parent Notifications */}
+            <div className="bg-white border border-emerald-100 rounded-2xl p-3 flex flex-wrap items-center gap-1.5 text-[11px]">
+              <span className="text-slate-500 font-bold">Variabel Format Orang Tua:</span>
+              {['[ParentName]', '[StudentName]', '[ClassName]', '[Time]', '[SchoolName]'].map((v) => (
+                <span
+                  key={v}
+                  className="bg-emerald-100/70 text-emerald-800 border border-emerald-300/60 font-mono font-bold px-2 py-0.5 rounded-md"
+                >
+                  {v}
+                </span>
+              ))}
+            </div>
+
+            {/* Interactive Parent Voice Live Simulator Box */}
+            <div className="bg-gradient-to-r from-emerald-700 to-teal-800 text-white rounded-2xl p-4 sm:p-5 shadow-sm space-y-3">
+              <div className="flex items-center justify-between gap-2 flex-wrap">
+                <div className="flex items-center gap-2">
+                  <Headphones className="w-4 h-4 text-emerald-200" />
+                  <span className="text-xs font-bold uppercase tracking-wider text-emerald-200">
+                    Live Testing Suara AI Kehadiran Siswa (Orang Tua)
+                  </span>
+                </div>
+                <span className="text-[11px] bg-white/10 px-2.5 py-0.5 rounded-full font-medium">
+                  Simulasi Audio Lengkap
                 </span>
               </div>
-            )}
 
-            <div className={`space-y-3.5 text-xs transition-all ${formData.waParentNotificationEnabled === false ? 'opacity-70' : ''}`}>
-              <div>
-                <div className="flex items-center justify-between mb-1">
-                  <label className="block text-slate-700 font-bold">
-                    Pesan Notifikasi Presensi Tepat Waktu (Hadir)
+              <div className="grid grid-cols-1 sm:grid-cols-12 gap-3 items-center">
+                <div className="sm:col-span-5">
+                  <label className="block text-[11px] text-emerald-200 font-medium mb-1">
+                    Pilih Siswa:
                   </label>
+                  <select
+                    value={selectedTestStudentId || (students[0]?.id || '')}
+                    onChange={(e) => setSelectedTestStudentId(e.target.value)}
+                    className="w-full text-xs font-bold bg-white text-slate-900 border border-emerald-300 rounded-xl px-3 py-2 focus:ring-2 focus:ring-white focus:outline-none"
+                  >
+                    {students.slice(0, 30).map((s) => (
+                      <option key={s.id} value={s.id}>
+                        {s.name} (Kelas {s.className})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="sm:col-span-4">
+                  <label className="block text-[11px] text-emerald-200 font-medium mb-1">
+                    Pilih Jenis Notifikasi:
+                  </label>
+                  <select
+                    value={selectedTestParentType}
+                    onChange={(e) => setSelectedTestParentType(e.target.value as ParentAttendanceType)}
+                    className="w-full text-xs font-bold bg-white text-slate-900 border border-emerald-300 rounded-xl px-3 py-2 focus:ring-2 focus:ring-white focus:outline-none"
+                  >
+                    <option value="ARRIVAL">✅ Datang Tepat Waktu (Hadir)</option>
+                    <option value="LATE">⚠️ Terlambat Masuk Sekolah</option>
+                    <option value="ABSENT">🚨 Belum Absen / Alpa</option>
+                    <option value="DEPARTURE">🏠 Notifikasi Pulang Sekolah</option>
+                  </select>
+                </div>
+
+                <div className="sm:col-span-3 flex items-end">
                   <button
                     type="button"
-                    onClick={() => handleResetSingleParentTemplate('ARRIVAL')}
-                    className="inline-flex items-center gap-1 text-[10px] font-bold text-slate-500 hover:text-emerald-700 bg-white hover:bg-emerald-50 px-2 py-0.5 rounded-lg border border-slate-200 hover:border-emerald-300 transition-colors cursor-pointer"
-                    title="Kembalikan pesan Hadir ke format awal"
+                    onClick={() => handleTestParentVoice(selectedTestParentType)}
+                    disabled={isTestingParentVoice}
+                    className="w-full inline-flex items-center justify-center gap-2 px-3.5 py-2 bg-white text-emerald-950 hover:bg-emerald-50 font-black rounded-xl text-xs transition shadow-md cursor-pointer disabled:opacity-75 disabled:cursor-not-allowed mt-2 sm:mt-0"
                   >
-                    <RotateCcw className="w-2.5 h-2.5 text-slate-400 group-hover:text-emerald-600" />
-                    Reset
+                    <Volume2 className={`w-4 h-4 text-emerald-600 ${isTestingParentVoice ? 'animate-pulse text-amber-500' : ''}`} />
+                    <span>{isTestingParentVoice ? 'Memutar...' : 'Putar Suara AI'}</span>
                   </button>
                 </div>
-                <textarea
-                  rows={2}
-                  value={formData.waTemplateArrival}
-                  onChange={(e) => setFormData({ ...formData, waTemplateArrival: e.target.value })}
-                  className="w-full bg-slate-50 border border-slate-200 text-slate-800 rounded-xl p-2.5 focus:ring-2 focus:ring-emerald-500 font-medium shadow-xs"
-                />
               </div>
 
-              <div>
-                <div className="flex items-center justify-between mb-1">
-                  <label className="block text-slate-700 font-bold">
-                    Pesan Notifikasi Siswa Terlambat
-                  </label>
-                  <button
-                    type="button"
-                    onClick={() => handleResetSingleParentTemplate('LATE')}
-                    className="inline-flex items-center gap-1 text-[10px] font-bold text-slate-500 hover:text-emerald-700 bg-white hover:bg-emerald-50 px-2 py-0.5 rounded-lg border border-slate-200 hover:border-emerald-300 transition-colors cursor-pointer"
-                    title="Kembalikan pesan Terlambat ke format awal"
-                  >
-                    <RotateCcw className="w-2.5 h-2.5 text-slate-400 group-hover:text-emerald-600" />
-                    Reset
-                  </button>
+              {testParentVoicePlayingText && (
+                <div className="bg-black/25 border border-white/20 rounded-xl p-3 text-xs space-y-1 mt-2">
+                  <p className="text-[11px] text-emerald-200 font-bold flex items-center gap-1">
+                    <Volume2 className="w-3 h-3 animate-pulse" />
+                    Simulasi Kalimat Suara AI:
+                  </p>
+                  <p className="italic text-white leading-relaxed font-sans">
+                    "{testParentVoicePlayingText}"
+                  </p>
                 </div>
-                <textarea
-                  rows={2}
-                  value={formData.waTemplateLate}
-                  onChange={(e) => setFormData({ ...formData, waTemplateLate: e.target.value })}
-                  className="w-full bg-slate-50 border border-slate-200 text-slate-800 rounded-xl p-2.5 focus:ring-2 focus:ring-emerald-500 font-medium shadow-xs"
-                />
-              </div>
-
-              <div>
-                <div className="flex items-center justify-between mb-1">
-                  <label className="block text-slate-700 font-bold">
-                    Pesan Notifikasi Siswa Sudah Pulang
-                  </label>
-                  <button
-                    type="button"
-                    onClick={() => handleResetSingleParentTemplate('DEPARTURE')}
-                    className="inline-flex items-center gap-1 text-[10px] font-bold text-slate-500 hover:text-emerald-700 bg-white hover:bg-emerald-50 px-2 py-0.5 rounded-lg border border-slate-200 hover:border-emerald-300 transition-colors cursor-pointer"
-                    title="Kembalikan pesan Pulang ke format awal"
-                  >
-                    <RotateCcw className="w-2.5 h-2.5 text-slate-400 group-hover:text-emerald-600" />
-                    Reset
-                  </button>
-                </div>
-                <textarea
-                  rows={2}
-                  value={formData.waTemplateDeparture || DEFAULT_WA_DEPARTURE}
-                  onChange={(e) => setFormData({ ...formData, waTemplateDeparture: e.target.value })}
-                  className="w-full bg-slate-50 border border-slate-200 text-slate-800 rounded-xl p-2.5 focus:ring-2 focus:ring-emerald-500 font-medium shadow-xs"
-                />
-              </div>
-
-              <div>
-                <div className="flex items-center justify-between mb-1">
-                  <label className="block text-slate-700 font-bold">
-                    Pesan Notifikasi Siswa Belum Absen / Alpa
-                  </label>
-                  <button
-                    type="button"
-                    onClick={() => handleResetSingleParentTemplate('ABSENT')}
-                    className="inline-flex items-center gap-1 text-[10px] font-bold text-slate-500 hover:text-emerald-700 bg-white hover:bg-emerald-50 px-2 py-0.5 rounded-lg border border-slate-200 hover:border-emerald-300 transition-colors cursor-pointer"
-                    title="Kembalikan pesan Alpa ke format awal"
-                  >
-                    <RotateCcw className="w-2.5 h-2.5 text-slate-400 group-hover:text-emerald-600" />
-                    Reset
-                  </button>
-                </div>
-                <textarea
-                  rows={2}
-                  value={formData.waTemplateAbsent || DEFAULT_WA_ABSENT}
-                  onChange={(e) => setFormData({ ...formData, waTemplateAbsent: e.target.value })}
-                  className="w-full bg-slate-50 border border-slate-200 text-slate-800 rounded-xl p-2.5 focus:ring-2 focus:ring-emerald-500 font-medium shadow-xs"
-                />
-              </div>
-
-              <div className="bg-slate-50 p-3 rounded-2xl border border-slate-200/80 space-y-1.5">
-                <p className="text-[11px] font-bold text-slate-700">
-                  Variabel otomatis yang dapat digunakan pada template:
-                </p>
-                <div className="flex flex-wrap gap-1.5 font-mono text-[11px]">
-                  <span className="bg-white px-2 py-0.5 rounded border border-slate-200 text-emerald-700 font-bold">[ParentName]</span>
-                  <span className="bg-white px-2 py-0.5 rounded border border-slate-200 text-emerald-700 font-bold">[StudentName]</span>
-                  <span className="bg-white px-2 py-0.5 rounded border border-slate-200 text-emerald-700 font-bold">[ClassName]</span>
-                  <span className="bg-white px-2 py-0.5 rounded border border-slate-200 text-emerald-700 font-bold">[Time]</span>
-                </div>
-              </div>
+              )}
             </div>
           </div>
+
         </div>
 
         {/* Reset Password Akun Guru & Siswa */}

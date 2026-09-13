@@ -149,40 +149,65 @@ export const Sidebar: React.FC<SidebarProps> = ({
   return (
     <>
       {/* Mobile Top Header Bar */}
-      <div className="lg:hidden bg-indigo-800 text-white p-3.5 flex items-center justify-between sticky top-0 z-40 border-b border-indigo-900 shadow-md">
+      <div className={`lg:hidden p-3.5 flex items-center justify-between sticky top-0 z-40 shadow-md ${
+        currentRole === 'PARENT'
+          ? 'bg-slate-900/85 backdrop-blur-2xl text-white border-b border-white/15'
+          : 'bg-indigo-800 text-white border-b border-indigo-900'
+      }`}>
         <div className="flex items-center space-x-3">
           <button
             onClick={() => setIsMobileOpen(!isMobileOpen)}
-            className="p-2 bg-indigo-700/80 hover:bg-indigo-700 rounded-xl text-white transition-colors cursor-pointer"
+            className={`p-2 rounded-xl text-white transition-colors cursor-pointer ${
+              currentRole === 'PARENT'
+                ? 'bg-white/10 hover:bg-white/20 border border-white/15'
+                : 'bg-indigo-700/80 hover:bg-indigo-700'
+            }`}
             aria-label="Toggle Navigation Menu"
           >
             {isMobileOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
           </button>
           
-          <div className="flex items-center space-x-2">
-            <div className="w-7 h-7 rounded-lg bg-white p-0.5 flex items-center justify-center shrink-0">
+          <div className="flex items-center space-x-2.5">
+            <div className={`w-8 h-8 rounded-xl p-0.5 flex items-center justify-center shrink-0 ${
+              currentRole === 'PARENT'
+                ? 'bg-gradient-to-tr from-emerald-500 to-indigo-600 shadow-md ring-1 ring-white/30'
+                : 'bg-white'
+            }`}>
               {schoolProfile.schoolLogo ? (
                 <img 
                   src={schoolProfile.schoolLogo} 
                   alt="Logo" 
-                  className="w-full h-full object-contain rounded-md"
+                  className="w-full h-full object-contain rounded-lg bg-white"
                   onError={(e) => { (e.target as HTMLElement).style.display = 'none'; }}
                 />
               ) : (
-                <QrCode className="w-4 h-4 text-indigo-700" />
+                <QrCode className={`w-4 h-4 ${currentRole === 'PARENT' ? 'text-white' : 'text-indigo-700'}`} />
               )}
             </div>
             <div>
-              <h1 className="font-extrabold text-sm tracking-tight leading-none text-white">
-                SiHadir<span className="text-amber-300">QR</span>
-              </h1>
-              <p className="text-[10px] text-indigo-200 truncate max-w-[160px] font-medium">{schoolProfile.name}</p>
+              <div className="flex items-center gap-1.5">
+                <h1 className="font-extrabold text-sm tracking-tight leading-none text-white">
+                  SiHadir<span className="text-amber-300">QR</span>
+                </h1>
+                {currentRole === 'PARENT' && (
+                  <span className="bg-emerald-500/20 text-emerald-300 text-[9px] font-extrabold px-1.5 py-0.2 rounded-full border border-emerald-400/30">
+                    Portal Wali
+                  </span>
+                )}
+              </div>
+              <p className={`text-[10px] truncate max-w-[150px] font-medium mt-0.5 ${
+                currentRole === 'PARENT' ? 'text-slate-300' : 'text-indigo-200'
+              }`}>{schoolProfile.name}</p>
             </div>
           </div>
         </div>
 
         <div className="flex items-center gap-2">
-          <span className="text-[11px] font-mono bg-indigo-900/80 px-2 py-1 rounded-lg text-amber-300 font-bold border border-indigo-700">
+          <span className={`text-[11px] font-mono px-2 py-1 rounded-lg font-bold border ${
+            currentRole === 'PARENT'
+              ? 'bg-white/10 text-emerald-300 border-white/15 backdrop-blur-md'
+              : 'bg-indigo-900/80 text-amber-300 border-indigo-700'
+          }`}>
             {timeStr}
           </span>
         </div>

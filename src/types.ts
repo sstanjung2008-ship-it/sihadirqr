@@ -141,13 +141,27 @@ export interface SchoolProfile {
   waTemplateLate: string;
   waTemplateAbsent: string;
   waTemplateDeparture?: string;
-  waParentNotificationEnabled?: boolean; // Saklar aktif/non-aktif pengiriman notifikasi WhatsApp ke orang tua (Masuk, Pulang, Alpa)
+  waParentNotificationEnabled?: boolean; // Saklar aktif/non-aktif pengiriman notifikasi ke orang tua (Masuk, Pulang, Alpa)
   waTemplateTeacherReminder?: string; // Template pengingat jam mengajar KBM guru
   waTeacherReminderEnabled?: boolean; // Saklar aktif/non-aktif pengingat jam mengajar guru otomatis
   waTeacherReminderMinutesBefore?: number; // Menit sebelum JP dimulai (0 = saat JP mulai, 5 = 5 menit sebelum, dsb)
-  waApiKey?: string; // Kode API Key / Token Device Gateway WhatsApp (Fonnte/Lainnya)
+  waApiKey?: string; // Kode API Key / Token Device Gateway (opsional)
   waGatewayProvider?: string; // e.g., 'Fonnte' | 'Wablas' | 'Lainnya'
-  waGatewayEnabled?: boolean; // Status aktif pengiriman WhatsApp via API Gateway
+  waGatewayEnabled?: boolean; // Status aktif pengiriman via API Gateway
+  // Fitur Suara AI & Notifikasi Peran (Guru & Orang Tua)
+  aiVoiceTeacherReminderEnabled?: boolean; // Saklar Suara AI Pengingat Jadwal KBM Guru
+  aiVoiceTeacherReminderMinutesBefore?: number; // Menit pengingat suara sebelum jam KBM dimulai
+  aiVoiceTemplateTeacherReminder?: string; // Format kalimat Suara AI pengingat guru
+  aiVoiceParentEnabled?: boolean; // Saklar Utama Notifikasi Peran Orang Tua
+  aiVoiceParentSpeechEnabled?: boolean; // Saklar Pemutaran Suara AI saat presensi siswa (Masuk, Terlambat, Pulang, Alpa)
+  parentTemplateArrival?: string; // Template Pesan Masuk Tepat Waktu untuk Orang Tua
+  parentTemplateLate?: string; // Template Pesan Terlambat untuk Orang Tua
+  parentTemplateDeparture?: string; // Template Pesan Pulang untuk Orang Tua
+  parentTemplateAbsent?: string; // Template Pesan Belum Absen/Alpa untuk Orang Tua
+  parentVoiceTemplateArrival?: string; // Kalimat Suara AI Datang Tepat Waktu
+  parentVoiceTemplateLate?: string; // Kalimat Suara AI Terlambat
+  parentVoiceTemplateDeparture?: string; // Kalimat Suara AI Pulang
+  parentVoiceTemplateAbsent?: string; // Kalimat Suara AI Belum Absen
   activeDays?: string[]; // e.g. ['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'] Hari Aktif Belajar
   holidays?: SchoolHoliday[]; // Daftar Hari Libur Khusus / Libur Nasional
   cardOrientation?: 'PORTRAIT' | 'LANDSCAPE';

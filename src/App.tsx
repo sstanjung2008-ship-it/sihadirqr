@@ -1203,14 +1203,14 @@ export default function App() {
     const { updatedTeachers, updatedClasses } = reconcileTeachersAndClasses(updated, classes);
     setTeachersState(updatedTeachers);
     setClassesState(updatedClasses);
-    saveTeachers(updatedTeachers);
+    saveTeachers(updatedTeachers, true);
     saveSchoolClasses(updatedClasses);
   };
 
   const handleBatchResetTeachersPassword = () => {
     setTeachersState(prev => {
       const updated = prev.map(t => ({ ...t, password: '123456' }));
-      saveTeachers(updated);
+      saveTeachers(updated, true);
       return updated;
     });
   };
@@ -1218,7 +1218,7 @@ export default function App() {
   const handleBatchResetStudentsPassword = () => {
     setStudentsState(prev => {
       const updated = prev.map(s => ({ ...s, password: '123456' }));
-      saveStudents(updated);
+      saveStudents(updated, true);
       return updated;
     });
   };

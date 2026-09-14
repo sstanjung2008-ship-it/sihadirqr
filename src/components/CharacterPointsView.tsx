@@ -581,23 +581,29 @@ export const CharacterPointsView: React.FC<CharacterPointsViewProps> = ({
 
                   return (
                     <tr key={student.id} className="hover:bg-slate-50/80 transition-colors">
-                      {/* Nama Siswa */}
+                      {/* Nama Siswa (Dapat diklik untuk membuka jendela Detail Nilai Karakter) */}
                       <td className="p-4 pl-6">
-                        <div className="flex items-center space-x-3">
+                        <button
+                          type="button"
+                          onClick={() => setDetailStudent(student)}
+                          className="flex items-center space-x-3 text-left group cursor-pointer focus:outline-none"
+                          title={`Klik untuk melihat Detail Nilai Karakter ${student.name}`}
+                        >
                           <img
                             src={student.photoUrl || 'https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?w=100'}
                             alt={student.name}
-                            className="w-10 h-10 rounded-full object-cover border border-slate-200 shrink-0"
+                            className="w-10 h-10 rounded-full object-cover border border-slate-200 shrink-0 group-hover:ring-2 group-hover:ring-indigo-500 group-hover:scale-105 transition-all shadow-2xs"
                           />
                           <div>
-                            <p className="font-bold text-slate-800 text-sm leading-tight">
-                              {student.name}
+                            <p className="font-bold text-slate-800 text-sm leading-tight group-hover:text-indigo-600 group-hover:underline transition-colors flex items-center gap-1.5">
+                              <span>{student.name}</span>
+                              <Eye className="w-3.5 h-3.5 text-indigo-400 opacity-0 group-hover:opacity-100 transition-opacity shrink-0" />
                             </p>
-                            <p className="text-xs text-slate-500 mt-0.5 font-medium">
+                            <p className="text-xs text-slate-500 mt-0.5 font-medium group-hover:text-indigo-500/80 transition-colors">
                               {student.className} • NISN: {student.nisn}
                             </p>
                           </div>
-                        </div>
+                        </button>
                       </td>
 
                       {/* Karakter Positif */}
@@ -672,7 +678,7 @@ export const CharacterPointsView: React.FC<CharacterPointsViewProps> = ({
 
       {/* MODAL 1: Form Guru Mengisi Nilai Karakter */}
       {showAddModal && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 flex items-center justify-center p-4">
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-[60] flex items-center justify-center p-4">
           <div className="bg-white rounded-3xl shadow-2xl max-w-xl w-full overflow-hidden border border-slate-100 animate-in fade-in zoom-in-95 duration-200 max-h-[90vh] flex flex-col">
             {/* Modal Header */}
             <div className="bg-gradient-to-r from-indigo-900 to-slate-900 text-white p-5 flex items-center justify-between shrink-0">
@@ -1004,13 +1010,12 @@ export const CharacterPointsView: React.FC<CharacterPointsViewProps> = ({
               <div className="flex items-center gap-2">
                 <button
                   type="button"
-                  onClick={handleExportDetailPdf}
-                  disabled={isExportingDetail}
-                  className="px-3 py-1.5 bg-rose-600 hover:bg-rose-700 active:scale-95 text-white font-bold text-xs rounded-xl transition-all flex items-center gap-1.5 shadow-sm cursor-pointer disabled:opacity-50"
-                  title="Ekspor PDF Detail Nilai Karakter Siswa (Kop Resmi)"
+                  onClick={() => handleOpenAddModalForStudent(detailStudent)}
+                  className="px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-500 active:scale-95 text-white font-bold text-xs rounded-xl transition-all flex items-center gap-1.5 shadow-sm cursor-pointer"
+                  title={`Isi Nilai Karakter Siswa (${detailStudent.name})`}
                 >
-                  <Download className={`w-3.5 h-3.5 ${isExportingDetail ? 'animate-bounce' : ''}`} />
-                  <span className="hidden sm:inline">{isExportingDetail ? 'Mengekspor...' : 'Ekspor PDF'}</span>
+                  <Plus className="w-4 h-4" />
+                  <span>+ Isi Nilai</span>
                 </button>
 
                 <button
@@ -1216,7 +1221,7 @@ export const CharacterPointsView: React.FC<CharacterPointsViewProps> = ({
 
       {/* MODAL: Input / Edit Tindak Lanjut Penilaian Karakter */}
       {followUpLog && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 flex items-center justify-center p-4">
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-[60] flex items-center justify-center p-4">
           <div className="bg-white rounded-3xl shadow-2xl max-w-lg w-full overflow-hidden border border-slate-100 animate-in fade-in zoom-in-95 duration-200">
             <div className="bg-slate-900 text-white p-5 flex items-center justify-between">
               <div>

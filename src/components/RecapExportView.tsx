@@ -23,9 +23,10 @@ import {
   exportRecapStudentGradesPdf,
   exportRecapStudentGradesExcel,
   exportStudentGradesPdf,
-  exportStudentGradesExcel
+  exportStudentGradesExcel,
+  exportStudentCharacterDetailPdf
 } from '../lib/exportUtils';
-import { getStudentGradeAssessments } from '../lib/storage';
+import { getStudentGradeAssessments, getTeachers } from '../lib/storage';
 import { 
   FileText, 
   Download, 
@@ -48,7 +49,9 @@ import {
   CheckCircle,
   AlertCircle,
   TrendingUp,
-  User
+  User,
+  Clock,
+  XCircle
 } from 'lucide-react';
 
 interface RecapExportViewProps {
@@ -87,6 +90,8 @@ export const RecapExportView: React.FC<RecapExportViewProps> = ({
   const [selectedGradeType, setSelectedGradeType] = useState<'ALL' | 'HARIAN' | 'TUGAS' | 'ULANGAN'>('ALL');
   const [isExporting, setIsExporting] = useState<boolean>(false);
   const [selectedAssessmentDetail, setSelectedAssessmentDetail] = useState<StudentGradeAssessment | null>(null);
+  const [selectedCharacterStudentDetail, setSelectedCharacterStudentDetail] = useState<Student | null>(null);
+  const [isExportingCharacterDetail, setIsExportingCharacterDetail] = useState<boolean>(false);
 
   // Grade assessments state (loaded from prop or localStorage)
   const [assessmentsList, setAssessmentsList] = useState<StudentGradeAssessment[]>(() => {
@@ -1638,7 +1643,17 @@ export const RecapExportView: React.FC<RecapExportViewProps> = ({
                       <tr key={std.id} className="hover:bg-slate-50/80 transition-colors">
                         <td className="py-3.5 px-4 font-mono text-slate-400 font-semibold">{idx + 1}</td>
                         <td className="py-3.5 px-4 font-mono text-slate-600 font-semibold">{std.nisn || '-'}</td>
-                        <td className="py-3.5 px-4 font-extrabold text-slate-900">{std.name}</td>
+                        <td className="py-3.5 px-4">
+                          <button
+                            type="button"
+                            onClick={() => setSelectedCharacterStudentDetail(std)}
+                            className="font-extrabold text-slate-900 hover:text-indigo-600 hover:underline flex items-center gap-1.5 group text-left cursor-pointer transition-colors"
+                            title={`Klik untuk melihat Detail Nilai Karakter ${std.name}`}
+                          >
+                            <span>{std.name}</span>
+                            <Eye className="w-3.5 h-3.5 text-indigo-400 opacity-0 group-hover:opacity-100 transition-opacity shrink-0" />
+                          </button>
+                        </td>
                         <td className="py-3.5 px-4 font-bold text-indigo-600">{std.className}</td>
                         <td className="py-3.5 px-4 text-center font-mono text-emerald-600 font-extrabold">+{posPoints}</td>
                         <td className="py-3.5 px-4 text-center font-mono text-rose-600 font-extrabold">-{negPoints}</td>
@@ -2478,6 +2493,211 @@ export const RecapExportView: React.FC<RecapExportViewProps> = ({
               </div>
             </div>
 
+          </div>
+        </div>
+      )}
+
+      {/* DETAIL MODAL FOR STUDENT CHARACTER POINTS */}
+      {selectedCharacterStudentDetail && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 flex items-center justify-center p-4 animate-in fade-in duration-150">
+          <div className="bg-white rounded-3xl shadow-2xl max-w-3xl w-full overflow-hidden border border-slate-100 max-h-[90vh] flex flex-col">
+            {/* Modal Header */}
+            <div className="bg-gradient-to-r from-slate-900 to-indigo-900 text-white p-5 flex items-center justify-between shrink-0">
+              <div className="flex items-center space-x-3">
+                <img
+                  src={selectedCharacterStudentDetail.photoUrl || 'https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?w=100'}
+                  alt={selectedCharacterStudentDetail.name}
+                  className="w-12 h-12 rounded-full object-cover border-2 border-white/20 shrink-0"
+                />
+                <div>
+                  <h3 className="font-extrabold text-lg text-white">
+                    Detail Nilai Karakter: {selectedCharacterStudentDetail.name}
+                  </h3>
+                  <p className="text-xs text-indigo-200 font-medium">
+                    Kelas {selectedCharacterStudentDetail.className} • NISN: {selectedCharacterStudentDetail.nisn}
+                  </p>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setSelectedCharacterStudentDetail(null)}
+                className="text-slate-400 hover:text-white p-1.5 rounded-xl hover:bg-white/10 transition-colors cursor-pointer"
+              >
+                <X className="w-6 h-6" />
+              </button>
+            </div>
+
+            {/* Modal Score Overview Bar */}
+            {(() => {
+              const studentLogs = (characterLogs || []).filter(l => l.studentId === selectedCharacterStudentDetail.id);
+              const posLogs = studentLogs.filter(l => l.traitType === 'POSITIF');
+              const negLogs = studentLogs.filter(l => l.traitType === 'NEGATIF');
+              const posPoints = posLogs.reduce((sum, item) => sum + (item.points || 0), 0);
+              const negPoints = negLogs.reduce((sum, item) => sum + (item.points || 0), 0);
+              const netPoints = posPoints - negPoints;
+
+              const minA = predicateSettings.minA ?? 30;
+              const minB = predicateSettings.minB ?? 10;
+              const minC = predicateSettings.minC ?? 0;
+              const minD = predicateSettings.minD ?? -20;
+              const minE = predicateSettings.minE ?? -50;
+
+              let pred = { label: 'Baik (B)', color: 'bg-blue-100 text-blue-800 border-blue-300' };
+              if (netPoints >= minA) {
+                pred = { label: 'Sangat Baik (A)', color: 'bg-emerald-100 text-emerald-800 border-emerald-300' };
+              } else if (netPoints >= minB) {
+                pred = { label: 'Baik (B)', color: 'bg-blue-100 text-blue-800 border-blue-300' };
+              } else if (netPoints >= minC) {
+                pred = { label: 'Cukup (C)', color: 'bg-amber-100 text-amber-800 border-amber-300' };
+              } else if (netPoints >= minD) {
+                pred = { label: 'Perlu Pembinaan (D)', color: 'bg-orange-100 text-orange-800 border-orange-300' };
+              } else if (netPoints >= minE) {
+                pred = { label: 'Tidak Naik Kelas (E)', color: 'bg-rose-100 text-rose-800 border-rose-300' };
+              } else {
+                pred = { label: 'Pindah Sekolah (F)', color: 'bg-purple-100 text-purple-800 border-purple-300' };
+              }
+
+              return (
+                <div className="bg-slate-50 p-4 border-b border-slate-200 grid grid-cols-2 sm:grid-cols-4 gap-3 text-center shrink-0">
+                  <div className="bg-white p-2.5 rounded-2xl border border-blue-200">
+                    <p className="text-[11px] font-bold text-blue-700">Total Positif</p>
+                    <p className="text-lg font-black text-blue-800">+{posPoints}</p>
+                  </div>
+                  <div className="bg-white p-2.5 rounded-2xl border border-red-200">
+                    <p className="text-[11px] font-bold text-red-700">Total Negatif</p>
+                    <p className="text-lg font-black text-red-800">-{negPoints}</p>
+                  </div>
+                  <div className="bg-white p-2.5 rounded-2xl border border-indigo-200">
+                    <p className="text-[11px] font-bold text-indigo-700">Jumlah Nilai</p>
+                    <p className={`text-lg font-black ${
+                      netPoints >= 0 ? 'text-indigo-800' : 'text-red-700'
+                    }`}>
+                      {netPoints > 0 ? `+${netPoints}` : netPoints}
+                    </p>
+                  </div>
+                  <div className="bg-white p-2.5 rounded-2xl border border-amber-200 flex flex-col items-center justify-center">
+                    <p className="text-[11px] font-bold text-amber-800">Predikat</p>
+                    <span className={`mt-0.5 px-2 py-0.5 rounded-full text-xs font-extrabold border ${pred.color}`}>
+                      {pred.label}
+                    </span>
+                  </div>
+                </div>
+              );
+            })()}
+
+            {/* Log Entries Table */}
+            <div className="p-5 overflow-y-auto space-y-4">
+              <h4 className="font-bold text-slate-800 text-sm flex items-center gap-2">
+                <Clock className="w-4 h-4 text-indigo-600" />
+                Riwayat Catatan Penilaian Karakter
+              </h4>
+
+              {(() => {
+                const logs = (characterLogs || [])
+                  .filter(l => l.studentId === selectedCharacterStudentDetail.id)
+                  .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+
+                if (logs.length === 0) {
+                  return (
+                    <div className="p-8 text-center text-slate-400 border border-dashed rounded-2xl">
+                      Belum ada catatan nilai karakter untuk siswa ini.
+                    </div>
+                  );
+                }
+
+                return (
+                  <div className="space-y-3">
+                    {logs.map((log) => (
+                      <div
+                        key={log.id}
+                        className="p-4 rounded-2xl border border-slate-200 bg-white hover:border-slate-300 transition-all space-y-3"
+                      >
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                          <div className="flex items-start gap-3">
+                            <div className="shrink-0 mt-0.5">
+                              {log.traitType === 'POSITIF' ? (
+                                <div className="w-10 h-10 rounded-2xl bg-blue-100 text-blue-700 flex items-center justify-center font-bold">
+                                  <CheckCircle2 className="w-5 h-5" />
+                                </div>
+                              ) : (
+                                <div className="w-10 h-10 rounded-2xl bg-red-100 text-red-700 flex items-center justify-center font-bold">
+                                  <XCircle className="w-5 h-5" />
+                                </div>
+                              )}
+                            </div>
+
+                            <div className="space-y-1">
+                              <div className="flex items-center gap-2">
+                                <span className="font-extrabold text-slate-800 text-sm">
+                                  {log.traitName}
+                                </span>
+                                <span className={`px-2 py-0.5 rounded-md text-[10px] font-black ${
+                                  log.traitType === 'POSITIF'
+                                    ? 'bg-blue-100 text-blue-700'
+                                    : 'bg-red-100 text-red-700'
+                                }`}>
+                                  {log.traitType === 'POSITIF' ? `+${log.points}` : `-${log.points}`} Poin
+                                </span>
+                              </div>
+                              <p className="text-xs text-slate-500">
+                                Dicatat oleh <strong className="text-slate-700">{log.recordedBy}</strong> pada {log.date} ({log.time || '-'})
+                              </p>
+                            </div>
+                          </div>
+                        </div>
+
+                        {log.notes && (
+                          <div className="p-3 bg-slate-50 rounded-xl text-xs text-slate-700 border border-slate-100">
+                            <strong>Catatan:</strong> {log.notes}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                );
+              })()}
+            </div>
+
+            {/* Modal Footer */}
+            <div className="p-4 bg-slate-50 border-t border-slate-200 flex flex-col sm:flex-row justify-between items-center gap-3 shrink-0">
+              <button
+                type="button"
+                onClick={async () => {
+                  if (!selectedCharacterStudentDetail) return;
+                  setIsExportingCharacterDetail(true);
+                  try {
+                    const studentLogs = (characterLogs || []).filter(l => l.studentId === selectedCharacterStudentDetail.id);
+                    await exportStudentCharacterDetailPdf(
+                      schoolProfile,
+                      selectedCharacterStudentDetail,
+                      studentLogs,
+                      classes,
+                      predicateSettings,
+                      undefined,
+                      getTeachers()
+                    );
+                  } catch (e) {
+                    console.error('Failed to export character detail PDF:', e);
+                  } finally {
+                    setIsExportingCharacterDetail(false);
+                  }
+                }}
+                disabled={isExportingCharacterDetail}
+                className="w-full sm:w-auto px-4 py-2 bg-rose-600 hover:bg-rose-700 active:scale-95 text-white font-bold text-xs rounded-xl transition-all flex items-center justify-center gap-2 shadow-sm cursor-pointer disabled:opacity-50"
+              >
+                <Download className={`w-4 h-4 ${isExportingCharacterDetail ? 'animate-bounce' : ''}`} />
+                <span>{isExportingCharacterDetail ? 'Sedang Menyusun PDF...' : 'Cetak / Ekspor PDF (Kop Resmi)'}</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setSelectedCharacterStudentDetail(null)}
+                className="w-full sm:w-auto px-5 py-2 bg-slate-200 hover:bg-slate-300 text-slate-800 font-bold text-xs rounded-xl transition-colors cursor-pointer"
+              >
+                Tutup
+              </button>
+            </div>
           </div>
         </div>
       )}

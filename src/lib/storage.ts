@@ -382,8 +382,19 @@ export function mergeStudentLists(local: Student[], cloud: Student[]): Student[]
       } else if (!isCloudRealPhoto && isLocalRealPhoto) {
         bestPhoto = localItem.photoUrl;
       } else if (isCloudRealPhoto && isLocalRealPhoto) {
-        // If both have custom photos, cloud takes precedence (synced across devices) unless local is longer/valid
         bestPhoto = cloudItem.photoUrl || localItem.photoUrl;
+      }
+
+      // Preserve custom password across devices:
+      // A custom password (defined, non-empty, and !== '123456') must never be wiped out by default/undefined values
+      const isCloudCustomPass = !!cloudItem.password && cloudItem.password !== '123456';
+      const isLocalCustomPass = !!localItem.password && localItem.password !== '123456';
+      
+      let bestPassword = cloudItem.password || localItem.password;
+      if (isCloudCustomPass) {
+        bestPassword = cloudItem.password;
+      } else if (isLocalCustomPass) {
+        bestPassword = localItem.password;
       }
 
       // Merge other properties gracefully
@@ -399,6 +410,7 @@ export function mergeStudentLists(local: Student[], cloud: Student[]): Student[]
         birthPlaceDate: cloudItem.birthPlaceDate || localItem.birthPlaceDate,
         qrCode: cloudItem.qrCode || localItem.qrCode || `STUDENT-${localItem.nisn}`,
         photoUrl: bestPhoto,
+        password: bestPassword,
       };
 
       map.set(key, merged);
@@ -419,8 +431,65 @@ export function mergeClassLists(local: SchoolClass[], cloud: SchoolClass[]): Sch
 
 export function mergeTeacherLists(local: Teacher[], cloud: Teacher[]): Teacher[] {
   const map = new Map<string, Teacher>();
-  cloud.forEach(t => map.set(t.nip || t.id, t));
-  local.forEach(t => map.set(t.nip || t.id, t));
+  
+  // 1. Index cloud teachers
+  cloud.forEach(t => {
+    const key = (t.nip && t.nip.trim()) || t.id;
+    if (key) map.set(key, { ...t });
+  });
+
+  // 2. Merge local teachers preserving custom passwords & photos across devices
+  local.forEach(localItem => {
+    const key = (localItem.nip && localItem.nip.trim()) || localItem.id;
+    if (!key) return;
+
+    if (map.has(key)) {
+      const cloudItem = map.get(key)!;
+
+      // Preserve custom password:
+      // If either cloud or local has a custom password, prioritize it so it never reverts to default on device sync
+      const isCloudCustomPass = !!cloudItem.password && cloudItem.password !== '123456';
+      const isLocalCustomPass = !!localItem.password && localItem.password !== '123456';
+
+      let bestPassword = cloudItem.password || localItem.password;
+      if (isCloudCustomPass) {
+        bestPassword = cloudItem.password;
+      } else if (isLocalCustomPass) {
+        bestPassword = localItem.password;
+      }
+
+      // Determine best photo
+      const isCloudRealPhoto = !!cloudItem.photoUrl && !cloudItem.photoUrl.includes('unsplash.com');
+      const isLocalRealPhoto = !!localItem.photoUrl && !localItem.photoUrl.includes('unsplash.com');
+      let bestPhoto = cloudItem.photoUrl || localItem.photoUrl;
+      if (isCloudRealPhoto && !isLocalRealPhoto) {
+        bestPhoto = cloudItem.photoUrl;
+      } else if (!isCloudRealPhoto && isLocalRealPhoto) {
+        bestPhoto = localItem.photoUrl;
+      }
+
+      const merged: Teacher = {
+        ...localItem,
+        ...cloudItem,
+        name: cloudItem.name || localItem.name,
+        nip: cloudItem.nip || localItem.nip,
+        phone: cloudItem.phone || localItem.phone,
+        email: cloudItem.email || localItem.email,
+        subject1: cloudItem.subject1 || localItem.subject1,
+        subject2: cloudItem.subject2 !== undefined ? cloudItem.subject2 : localItem.subject2,
+        additionalDuty: cloudItem.additionalDuty || localItem.additionalDuty,
+        homeroomClassId: cloudItem.homeroomClassId !== undefined ? cloudItem.homeroomClassId : localItem.homeroomClassId,
+        homeroomClassName: cloudItem.homeroomClassName !== undefined ? cloudItem.homeroomClassName : localItem.homeroomClassName,
+        photoUrl: bestPhoto,
+        password: bestPassword,
+      };
+
+      map.set(key, merged);
+    } else {
+      map.set(key, { ...localItem });
+    }
+  });
+
   return Array.from(map.values());
 }
 
@@ -783,6 +852,23 @@ export async function forceDownloadAllFromCloud(): Promise<{ success: boolean; e
             localStorage.setItem(key, cloudDoc.data);
             localStorage.setItem(key + '_updatedAt', String(cloudDoc.updatedAt || Date.now()));
           }
+        } else if (key === KEYS.TEACHERS) {
+          try {
+            const cloudTeachers = JSON.parse(cloudDoc.data);
+            if (Array.isArray(cloudTeachers)) {
+              const localTeachers = getTeachers();
+              const mergedTeachers = mergeTeacherLists(localTeachers, cloudTeachers);
+              const mergedStr = JSON.stringify(mergedTeachers);
+              localStorage.setItem(key, mergedStr);
+              localStorage.setItem(key + '_updatedAt', String(cloudDoc.updatedAt || Date.now()));
+            } else {
+              localStorage.setItem(key, cloudDoc.data);
+              localStorage.setItem(key + '_updatedAt', String(cloudDoc.updatedAt || Date.now()));
+            }
+          } catch {
+            localStorage.setItem(key, cloudDoc.data);
+            localStorage.setItem(key + '_updatedAt', String(cloudDoc.updatedAt || Date.now()));
+          }
         } else if (key === KEYS.STUDENTS) {
           try {
             const cloudStudents = JSON.parse(cloudDoc.data);
@@ -896,19 +982,46 @@ export function initFirestoreRealtimeSync() {
               }
             }
 
+            // SPECIAL TEACHERS SYNC:
+            // Ensure teachers, custom passwords, and assignments sync across all devices without losing changes
+            if (key === KEYS.TEACHERS) {
+              try {
+                if (localUpdatedAt > 0 && cloudUpdatedAt > 0 && localUpdatedAt > cloudUpdatedAt) {
+                  return;
+                }
+
+                const cloudTeachers = typeof finalDataToSave === 'string' ? JSON.parse(finalDataToSave) : finalDataToSave;
+                if (Array.isArray(cloudTeachers)) {
+                  const currentLocalTeachers = getTeachers();
+                  const mergedTeachers = localUpdatedAt <= 1 ? cloudTeachers : mergeTeacherLists(currentLocalTeachers, cloudTeachers);
+                  const mergedStr = JSON.stringify(mergedTeachers);
+                  lastSavedStringCache[key] = mergedStr;
+                  localStorage.setItem(key, mergedStr);
+                  localStorage.setItem(key + '_updatedAt', String(Math.max(cloudUpdatedAt, Date.now())));
+                  notifyStorageUpdated();
+                  setCloudSyncStatus('connected');
+                  return;
+                }
+              } catch (e) {
+                console.warn('[Firestore Sync] Error updating teacher data:', e);
+              }
+            }
+
             // SPECIAL STUDENTS SYNC:
-            // Check timestamps: only merge if local has newer updates than cloud or update directly from latest snapshot.
+            // Ensure students and custom passwords sync seamlessly across devices
             if (key === KEYS.STUDENTS) {
               try {
-                // If local has newer modifications that haven't pushed yet, skip older cloud snapshot
                 if (localUpdatedAt > 0 && cloudUpdatedAt > 0 && localUpdatedAt > cloudUpdatedAt) {
                   return;
                 }
 
                 const cloudStudents = typeof finalDataToSave === 'string' ? JSON.parse(finalDataToSave) : finalDataToSave;
                 if (Array.isArray(cloudStudents)) {
-                  lastSavedStringCache[key] = finalDataToSave;
-                  localStorage.setItem(key, finalDataToSave);
+                  const currentLocalStudents = getStudents();
+                  const mergedStudents = localUpdatedAt <= 1 ? cloudStudents : mergeStudentLists(currentLocalStudents, cloudStudents);
+                  const mergedStr = JSON.stringify(mergedStudents);
+                  lastSavedStringCache[key] = mergedStr;
+                  localStorage.setItem(key, mergedStr);
                   localStorage.setItem(key + '_updatedAt', String(Math.max(cloudUpdatedAt, Date.now())));
                   notifyStorageUpdated();
                   setCloudSyncStatus('connected');
@@ -1180,13 +1293,59 @@ export function getTeachers(): Teacher[] {
   }
 }
 
-export function saveTeachers(teachers: Teacher[]): void {
+export function saveTeachers(teachers: Teacher[], instant: boolean = true): void {
   const now = Date.now();
   const dataStr = JSON.stringify(teachers);
   localStorage.setItem(KEYS.TEACHERS, dataStr);
   localStorage.setItem(KEYS.TEACHERS + '_updatedAt', String(now));
   notifyStorageUpdated();
-  syncToCloud(KEYS.TEACHERS, teachers, false, now);
+  syncToCloud(KEYS.TEACHERS, teachers, instant, now);
+}
+
+export function updateTeacherPassword(teacherIdOrNip: string, newPassword: string): boolean {
+  const teachers = getTeachers();
+  let found = false;
+  const cleanKey = teacherIdOrNip.trim();
+  const updated = teachers.map(t => {
+    if (t.id === cleanKey || t.nip?.trim() === cleanKey || t.phone?.trim() === cleanKey) {
+      found = true;
+      return { ...t, password: newPassword.trim() };
+    }
+    return t;
+  });
+  if (found) {
+    saveTeachers(updated, true);
+  }
+  return found;
+}
+
+export function updateStudentPassword(studentIdOrNisn: string, newPassword: string): boolean {
+  const students = getStudents();
+  let found = false;
+  const cleanKey = studentIdOrNisn.trim();
+  const updated = students.map(s => {
+    if (s.id === cleanKey || s.nisn?.trim() === cleanKey || s.nis?.trim() === cleanKey) {
+      found = true;
+      return { ...s, password: newPassword.trim() };
+    }
+    return s;
+  });
+  if (found) {
+    saveStudents(updated, true);
+  }
+  return found;
+}
+
+export function resetAllTeachersPassword(): void {
+  const teachers = getTeachers();
+  const updated = teachers.map(t => ({ ...t, password: '123456' }));
+  saveTeachers(updated, true);
+}
+
+export function resetAllStudentsPassword(): void {
+  const students = getStudents();
+  const updated = students.map(s => ({ ...s, password: '123456' }));
+  saveStudents(updated, true);
 }
 
 export function getLearningJournals(): LearningJournal[] {

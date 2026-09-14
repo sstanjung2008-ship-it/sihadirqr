@@ -1,4 +1,5 @@
 import { GeneratedExamPackage, GeneratedModulAjar, SchoolProfile } from '../types';
+import { generateQuestionSvg } from './questionDiagramUtils';
 
 /**
  * Downloads an HTML-formatted document as a Microsoft Word (.doc) file
@@ -308,13 +309,21 @@ export function generateExamWordHtml(
 
       pgList.forEach((item, idx) => {
         const qNum = idx + 1;
+        const svgIllustration = (item.gambarDeskripsi || item.gambarSvg) ? (item.gambarSvg || generateQuestionSvg({
+          subject: config.mataPelajaran,
+          topic: config.topik,
+          description: item.gambarDeskripsi,
+          questionNumber: qNum
+        })) : '';
+
         html += `
           <div class="question-box">
             <p><strong>${qNum}.</strong> ${item.stimulus ? `<span class="question-stimulus">${item.stimulus}</span><br/>` : ''}${item.pertanyaan}</p>
             ${item.gambarDeskripsi ? `
-              <div class="image-box">
-                <div class="image-tag">🖼️ [STIMULUS GAMBAR / DIAGRAM SOAL NO. ${qNum}]</div>
-                <div class="image-desc">${item.gambarDeskripsi}</div>
+              <div class="image-box" style="text-align:center; margin:8pt 0; padding:8pt; border:1px solid #cbd5e1; background-color:#f8fafc;">
+                ${svgIllustration ? `<div style="text-align:center; margin-bottom:6pt;">${svgIllustration}</div>` : ''}
+                <div class="image-tag" style="font-size:10pt; font-weight:bold; color:#1e3a8a;">🖼️ [STIMULUS GAMBAR / DIAGRAM SOAL NO. ${qNum}]</div>
+                <div class="image-desc" style="font-size:9.5pt; font-style:italic; color:#334155;">${item.gambarDeskripsi}</div>
               </div>
             ` : ''}
             ${item.pilihan ? `
@@ -341,12 +350,20 @@ export function generateExamWordHtml(
 
       bergambarList.forEach((item, idx) => {
         const qNum = pgList.length + idx + 1;
+        const svgIllustration = item.gambarSvg || generateQuestionSvg({
+          subject: config.mataPelajaran,
+          topic: config.topik,
+          description: item.gambarDeskripsi,
+          questionNumber: qNum
+        });
+
         html += `
           <div class="question-box">
             <p><strong>${qNum}.</strong> ${item.stimulus ? `<span class="question-stimulus">${item.stimulus}</span><br/>` : ''}${item.pertanyaan}</p>
-            <div class="image-box">
-              <div class="image-tag">📊 [DIAGRAM / GAMBAR STIMULUS SOAL NO. ${qNum}]</div>
-              <div class="image-desc">${item.gambarDeskripsi || 'Gambar ilustrasi pendukung materi'}</div>
+            <div class="image-box" style="text-align:center; margin:8pt 0; padding:8pt; border:1px solid #cbd5e1; background-color:#f8fafc;">
+              <div style="text-align:center; margin-bottom:6pt;">${svgIllustration}</div>
+              <div class="image-tag" style="font-size:10pt; font-weight:bold; color:#1e3a8a;">📊 [DIAGRAM / GAMBAR STIMULUS SOAL NO. ${qNum}]</div>
+              <div class="image-desc" style="font-size:9.5pt; font-style:italic; color:#334155;">${item.gambarDeskripsi || 'Gambar ilustrasi pendukung materi'}</div>
             </div>
             ${item.pilihan ? `
               <table class="options-table">
@@ -375,13 +392,21 @@ export function generateExamWordHtml(
 
       essayList.forEach((item, idx) => {
         const qNum = pgList.length + bergambarList.length + idx + 1;
+        const svgIllustration = (item.gambarDeskripsi || item.gambarSvg) ? (item.gambarSvg || generateQuestionSvg({
+          subject: config.mataPelajaran,
+          topic: config.topik,
+          description: item.gambarDeskripsi,
+          questionNumber: qNum
+        })) : '';
+
         html += `
           <div class="question-box">
             <p><strong>${qNum}.</strong> ${item.stimulus ? `<span class="question-stimulus">${item.stimulus}</span><br/>` : ''}${item.pertanyaan} <em>(Bobot Skor: ${item.bobotSkor || 10})</em></p>
             ${item.gambarDeskripsi ? `
-              <div class="image-box">
-                <div class="image-tag">🖼️ [ILUSTRASI / BAGAN KASUS SOAL NO. ${qNum}]</div>
-                <div class="image-desc">${item.gambarDeskripsi}</div>
+              <div class="image-box" style="text-align:center; margin:8pt 0; padding:8pt; border:1px solid #cbd5e1; background-color:#f8fafc;">
+                ${svgIllustration ? `<div style="text-align:center; margin-bottom:6pt;">${svgIllustration}</div>` : ''}
+                <div class="image-tag" style="font-size:10pt; font-weight:bold; color:#1e3a8a;">🖼️ [ILUSTRASI / BAGAN KASUS SOAL NO. ${qNum}]</div>
+                <div class="image-desc" style="font-size:9.5pt; font-style:italic; color:#334155;">${item.gambarDeskripsi}</div>
               </div>
             ` : ''}
             <div style="height:60pt; border: 1px dotted #ccc; background-color: #fafafa; margin-top:6pt; padding:4pt; font-size:9pt; color:#999;">

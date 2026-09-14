@@ -3,6 +3,101 @@ import autoTable from 'jspdf-autotable';
 import * as XLSX from 'xlsx';
 import QRCode from 'qrcode';
 import { SchoolProfile, Student, AttendanceRecord, LearningJournal, SchoolClass, CharacterTrait, StudentCharacterLog, CharacterPredicateSettings, StudentGradeAssessment, LessonPeriod, ClassScheduleSlot, Teacher } from '../types';
+import { getSchoolClasses, getTeachers } from './storage';
+
+/**
+ * Resolves Homeroom Teacher (Wali Kelas) details automatically from Class Management data (classes)
+ */
+export function resolveHomeroomTeacher(
+  classIdentifier?: string, // class name (e.g. "7-A", "7A", "Kelas 7A") or class ID (e.g. "c7a")
+  classes?: SchoolClass[],
+  teachers?: Teacher[],
+  fallbackName?: string,
+  studentOrStudents?: Student | Student[]
+): { name: string; nip: string; className: string } {
+  const allCls = (classes && classes.length > 0) ? classes : getSchoolClasses();
+  const allTeachers = (teachers && teachers.length > 0) ? teachers : getTeachers();
+
+  let targetClass: SchoolClass | undefined;
+
+  // 1. If classIdentifier is given
+  if (classIdentifier && classIdentifier !== 'ALL' && classIdentifier !== 'Semua Kelas') {
+    const cleanId = classIdentifier.trim().toLowerCase();
+    const normalizedCleanId = cleanId.replace(/^(kelas\s*)/i, '').replace(/[\s\-_]/g, '');
+
+    targetClass = allCls.find(c => {
+      if (c.id.toLowerCase() === cleanId) return true;
+      if (c.name.toLowerCase().trim() === cleanId) return true;
+      if (c.name.toLowerCase().replace(/[\s\-_]/g, '') === normalizedCleanId) return true;
+      if (`kelas ${c.name}`.toLowerCase().replace(/[\s\-_]/g, '') === cleanId.replace(/[\s\-_]/g, '')) return true;
+      return false;
+    });
+  }
+
+  // 2. If targetClass not found yet, check student or students array
+  if (!targetClass && studentOrStudents) {
+    const std = Array.isArray(studentOrStudents) ? studentOrStudents[0] : studentOrStudents;
+    if (std) {
+      if (std.classId) {
+        targetClass = allCls.find(c => c.id === std.classId);
+      }
+      if (!targetClass && std.className) {
+        const cleanName = std.className.trim().toLowerCase();
+        const normName = cleanName.replace(/^(kelas\s*)/i, '').replace(/[\s\-_]/g, '');
+        targetClass = allCls.find(c => 
+          c.name.toLowerCase().trim() === cleanName ||
+          c.name.toLowerCase().replace(/[\s\-_]/g, '') === normName
+        );
+      }
+    }
+  }
+
+  let resolvedName = '';
+  let resolvedClassName = targetClass?.name || (classIdentifier && classIdentifier !== 'ALL' && classIdentifier !== 'Semua Kelas' ? classIdentifier : '');
+
+  // 3. Extract Homeroom Teacher Name directly from Class Management data (SchoolClass.homeroomTeacher)
+  if (targetClass && targetClass.homeroomTeacher && targetClass.homeroomTeacher.trim() && targetClass.homeroomTeacher !== 'Belum Ditentukan') {
+    resolvedName = targetClass.homeroomTeacher.trim();
+  }
+
+  // 4. If not found in targetClass, check if any teacher is assigned as homeroom for this class in teachers list
+  if (!resolvedName && resolvedClassName) {
+    const cleanClass = resolvedClassName.replace(/^(kelas\s*)/i, '').replace(/[\s\-_]/g, '').toLowerCase();
+    const teacherForClass = allTeachers.find(t => 
+      t.homeroomClassName && t.homeroomClassName.replace(/^(kelas\s*)/i, '').replace(/[\s\-_]/g, '').toLowerCase() === cleanClass
+    );
+    if (teacherForClass) {
+      resolvedName = teacherForClass.name;
+    }
+  }
+
+  // 5. If still empty, use valid fallbackName
+  if (!resolvedName && fallbackName && fallbackName.trim() && fallbackName !== 'Belum Ditentukan' && !fallbackName.startsWith('.')) {
+    resolvedName = fallbackName.trim();
+  }
+
+  // 6. Look up NIP from allTeachers
+  let resolvedNip = '';
+  if (resolvedName) {
+    const cleanResolved = resolvedName.toLowerCase().replace(/^(dr\.|drs\.|dra\.|ir\.|h\.|hj\.)\s*/i, '').trim();
+    const matchTeacher = allTeachers.find(t => {
+      if (t.name.toLowerCase().trim() === resolvedName.toLowerCase().trim()) return true;
+      const cleanTName = t.name.toLowerCase().replace(/^(dr\.|drs\.|dra\.|ir\.|h\.|hj\.)\s*/i, '').trim();
+      if (cleanTName === cleanResolved) return true;
+      if (cleanTName.includes(cleanResolved) || cleanResolved.includes(cleanTName)) return true;
+      return false;
+    });
+    if (matchTeacher && matchTeacher.nip) {
+      resolvedNip = matchTeacher.nip;
+    }
+  }
+
+  return {
+    name: resolvedName || '...........................................',
+    nip: resolvedNip,
+    className: resolvedClassName
+  };
+}
 
 /**
  * Convert any Google Drive sharing link (or standard URL) into a direct image embed URL.
@@ -394,7 +489,9 @@ export async function exportAttendancePdf(
   students: Student[],
   filterTitle: string,
   startDateStr: string,
-  endDateStr: string
+  endDateStr: string,
+  classes?: SchoolClass[],
+  teachers?: Teacher[]
 ) {
   const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
 
@@ -508,15 +605,38 @@ export async function exportAttendancePdf(
     year: 'numeric'
   });
 
+  // Check if students all belong to one class (or specific class filter)
+  const isSpecificClass = students.length > 0 && students.every(s => s.className === students[0].className);
+  const targetClassName = isSpecificClass ? students[0].className : '';
+  const homeroom = targetClassName ? resolveHomeroomTeacher(targetClassName, classes, teachers, undefined, students) : null;
+
   if (finalY + 40 < 280) {
     doc.setFontSize(9);
     doc.setFont('helvetica', 'normal');
-    doc.text(`${schoolProfile.district}, ${todayFormatted}`, 140, finalY);
-    doc.text('Kepala Sekolah,', 140, finalY + 5);
-    doc.setFont('helvetica', 'bold');
-    doc.text(schoolProfile.principalName, 140, finalY + 25);
-    doc.setFont('helvetica', 'normal');
-    doc.text(`NIP. ${schoolProfile.principalNip}`, 140, finalY + 30);
+
+    if (homeroom && homeroom.name && !homeroom.name.startsWith('.')) {
+      // 2 Column Signatures: Kepala Sekolah (Left) & Wali Kelas (Right)
+      doc.text('Mengetahui,', 20, finalY);
+      doc.text('Kepala Sekolah,', 20, finalY + 5);
+      doc.setFont('helvetica', 'bold');
+      doc.text(schoolProfile.principalName, 20, finalY + 25);
+      doc.setFont('helvetica', 'normal');
+      doc.text(`NIP. ${schoolProfile.principalNip || '-'}`, 20, finalY + 30);
+
+      doc.text(`${schoolProfile.district || 'Sekolah'}, ${todayFormatted}`, 135, finalY);
+      doc.text(`Wali Kelas ${targetClassName}`, 135, finalY + 5);
+      doc.setFont('helvetica', 'bold');
+      doc.text(homeroom.name, 135, finalY + 25);
+      doc.setFont('helvetica', 'normal');
+      doc.text(homeroom.nip ? `NIP. ${homeroom.nip}` : 'NIP. ....................................', 135, finalY + 30);
+    } else {
+      doc.text(`${schoolProfile.district || 'Sekolah'}, ${todayFormatted}`, 140, finalY);
+      doc.text('Kepala Sekolah,', 140, finalY + 5);
+      doc.setFont('helvetica', 'bold');
+      doc.text(schoolProfile.principalName, 140, finalY + 25);
+      doc.setFont('helvetica', 'normal');
+      doc.text(`NIP. ${schoolProfile.principalNip || '-'}`, 140, finalY + 30);
+    }
   }
 
   doc.save(`Rekap_Presensi_${filterTitle.replace(/\s+/g, '_')}_${startDateStr}.pdf`);
@@ -530,9 +650,15 @@ export async function exportMonthlyAttendanceMatrixPdf(
   className: string,
   year: number,
   month: number, // 1 to 12
-  homeroomTeacher?: { name: string; nip?: string } | null
+  homeroomTeacher?: { name: string; nip?: string } | null,
+  classes?: SchoolClass[],
+  teachers?: Teacher[]
 ) {
   const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+
+  // Auto-resolve homeroom teacher from Class Management data (Kelola Kelas)
+  const homeroom = resolveHomeroomTeacher(className, classes, teachers, homeroomTeacher?.name, students);
+  const homeroomNip = homeroom.nip || homeroomTeacher?.nip || '';
 
   const INDONESIAN_MONTHS = [
     'Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni',
@@ -589,7 +715,7 @@ export async function exportMonthlyAttendanceMatrixPdf(
 
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(8.5);
-  const homeroomStr = homeroomTeacher?.name ? ` • Wali Kelas: ${homeroomTeacher.name}` : '';
+  const homeroomStr = homeroom.name && !homeroom.name.startsWith('.') ? ` • Wali Kelas: ${homeroom.name}` : '';
   doc.text(`Kelas: ${className} • Bulan: ${monthName} ${year}${homeroomStr}`, 148.5, 40, { align: 'center' });
 
   // Prepare Days Columns
@@ -781,9 +907,9 @@ export async function exportMonthlyAttendanceMatrixPdf(
   doc.text(`${schoolProfile.district || 'Kabupaten'}, ${todayFormatted}`, 210, sigY);
   doc.text(`Wali Kelas ${className}`, 210, sigY + 4);
   doc.setFont('helvetica', 'bold');
-  doc.text(homeroomTeacher?.name || 'Wali Kelas', 210, sigY + 22);
+  doc.text(homeroom.name, 210, sigY + 22);
   doc.setFont('helvetica', 'normal');
-  doc.text(`NIP. ${homeroomTeacher?.nip || '-'}`, 210, sigY + 26);
+  doc.text(homeroomNip ? `NIP. ${homeroomNip}` : 'NIP. ....................................', 210, sigY + 26);
 
   doc.save(`Rincian_Presensi_Bulanan_${className.replace(/\s+/g, '_')}_${monthName}_${year}.pdf`);
 }
@@ -796,8 +922,11 @@ export function exportMonthlyAttendanceMatrixExcel(
   className: string,
   year: number,
   month: number,
-  homeroomTeacher?: { name: string; nip?: string } | null
+  homeroomTeacher?: { name: string; nip?: string } | null,
+  classes?: SchoolClass[],
+  teachers?: Teacher[]
 ) {
+  const homeroom = resolveHomeroomTeacher(className, classes, teachers, homeroomTeacher?.name, students);
   const INDONESIAN_MONTHS = [
     'Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni',
     'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'
@@ -1459,13 +1588,17 @@ export async function exportClassParticipationPdf(
   schoolProfile: SchoolProfile,
   schoolClass: SchoolClass,
   students: Student[],
-  journals: LearningJournal[]
+  journals: LearningJournal[],
+  classes?: SchoolClass[],
+  teachers?: Teacher[]
 ) {
   const doc = new jsPDF({
     orientation: 'landscape',
     unit: 'mm',
     format: 'a4'
   });
+
+  const homeroom = resolveHomeroomTeacher(schoolClass.id || schoolClass.name, classes || [schoolClass], teachers, schoolClass.homeroomTeacher, students);
 
   // Load Logos asynchronously
   const regencyLogoData = await loadImageAsDataUrl(schoolProfile.regencyLogo);
@@ -1501,7 +1634,7 @@ export async function exportClassParticipationPdf(
 
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(8.5);
-  doc.text(`Wali Kelas: ${schoolClass.homeroomTeacher || 'Belum Ditentukan'}   |   Jumlah Siswa: ${students.length} Siswa   |   Total Pertemuan KBM Terdata: ${journals.length} Jurnal`, 148, 41, { align: 'center' });
+  doc.text(`Wali Kelas: ${homeroom.name && !homeroom.name.startsWith('.') ? homeroom.name : (schoolClass.homeroomTeacher || 'Belum Ditentukan')}   |   Jumlah Siswa: ${students.length} Siswa   |   Total Pertemuan KBM Terdata: ${journals.length} Jurnal`, 148, 41, { align: 'center' });
 
   // Calculate student participation stats
   const tableData = students.map((std, idx) => {
@@ -1589,9 +1722,11 @@ export async function exportClassParticipationPdf(
     doc.setFontSize(8.5);
     doc.setFont('helvetica', 'normal');
     doc.text(`${schoolProfile.district || 'Sekolah'}, ${todayFormatted}`, 210, finalY);
-    doc.text('Wali Kelas,', 210, finalY + 5);
+    doc.text(`Wali Kelas ${schoolClass.name},`, 210, finalY + 5);
     doc.setFont('helvetica', 'bold');
-    doc.text(schoolClass.homeroomTeacher || '.......................', 210, finalY + 23);
+    doc.text(homeroom.name, 210, finalY + 23);
+    doc.setFont('helvetica', 'normal');
+    doc.text(homeroom.nip ? `NIP. ${homeroom.nip}` : 'NIP. ....................................', 210, finalY + 28);
 
     doc.setFont('helvetica', 'normal');
     doc.text('Mengetahui, Kepala Sekolah', 20, finalY + 5);
@@ -1614,13 +1749,17 @@ export async function exportCharacterPointsPdf(
   logs: StudentCharacterLog[],
   selectedClassFilter: string = 'ALL',
   homeroomTeacherName?: string,
-  predicateSettings: CharacterPredicateSettings = { minA: 30, minB: 10, minC: 0, minD: -20, minE: -50 }
+  predicateSettings: CharacterPredicateSettings = { minA: 30, minB: 10, minC: 0, minD: -20, minE: -50 },
+  teachers?: Teacher[]
 ) {
   const doc = new jsPDF({
     orientation: 'portrait',
     unit: 'mm',
     format: 'a4'
   });
+
+  // Resolve Wali Kelas from Class Management data (Kelola Kelas)
+  const homeroom = resolveHomeroomTeacher(selectedClassFilter, classes, teachers, homeroomTeacherName, students);
 
   // Load Logos
   const regencyLogoData = await loadImageAsDataUrl(schoolProfile.regencyLogo);
@@ -1779,14 +1918,212 @@ export async function exportCharacterPointsPdf(
   // Right Column: Wali Kelas
   const locationName = schoolProfile.district || schoolProfile.regency || 'Sekolah';
   doc.text(`${locationName}, ${todayFormatted}`, 135, finalY);
-  doc.text(`Wali Kelas ${selectedClassFilter !== 'ALL' ? selectedClassFilter : ''}`, 135, finalY + 5);
+  doc.text(`Wali Kelas ${selectedClassFilter !== 'ALL' ? (homeroom.className || selectedClassFilter) : ''}`, 135, finalY + 5);
   doc.setFont('helvetica', 'bold');
-  doc.text(targetHomeroomTeacher, 135, finalY + 25);
+  doc.text(homeroom.name, 135, finalY + 25);
   doc.setFont('helvetica', 'normal');
-  doc.text('NIP. ....................................', 135, finalY + 30);
+  doc.text(homeroom.nip ? `NIP. ${homeroom.nip}` : 'NIP. ....................................', 135, finalY + 30);
 
   const sanitizedClassName = selectedClassFilter.replace(/[^a-zA-Z0-9]/g, '_');
   doc.save(`Laporan_Nilai_Karakter_Siswa_${sanitizedClassName}.pdf`);
+}
+
+// Export Single Student Detailed Character Log (Detail Nilai Karakter Siswa) PDF with Kop Surat & Logo
+export async function exportStudentCharacterDetailPdf(
+  schoolProfile: SchoolProfile,
+  student: Student,
+  logs: StudentCharacterLog[],
+  classes: SchoolClass[] = [],
+  predicateSettings: CharacterPredicateSettings = { minA: 30, minB: 10, minC: 0, minD: -20, minE: -50 },
+  homeroomTeacherName?: string,
+  teachers?: Teacher[]
+) {
+  const doc = new jsPDF({
+    orientation: 'portrait',
+    unit: 'mm',
+    format: 'a4'
+  });
+
+  // Resolve Homeroom Teacher from Class Management Data (Kelola Kelas)
+  const homeroom = resolveHomeroomTeacher(student.className || student.classId, classes, teachers, homeroomTeacherName, student);
+
+  // Load Logos
+  const regencyLogoData = await loadImageAsDataUrl(schoolProfile.regencyLogo);
+  const schoolLogoData = await loadImageAsDataUrl(schoolProfile.schoolLogo);
+
+  // Logo Kabupaten - Sebelah Kiri Atas (Top Left)
+  if (regencyLogoData) {
+    try {
+      doc.addImage(regencyLogoData, 'PNG', 14, 8, 18, 18);
+    } catch (e) {
+      console.warn('Failed to add regency logo to PDF:', e);
+    }
+  }
+
+  // Logo Sekolah - Sebelah Kanan Atas (Top Right)
+  if (schoolLogoData) {
+    try {
+      doc.addImage(schoolLogoData, 'PNG', 178, 8, 18, 18);
+    } catch (e) {
+      console.warn('Failed to add school logo to PDF:', e);
+    }
+  }
+
+  // Header / Kop Surat (Center)
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(10);
+  doc.text(
+    schoolProfile.regency ? `PEMERINTAH KABUPATEN ${schoolProfile.regency.toUpperCase()}` : 'PEMERINTAH KABUPATEN',
+    105, 11, { align: 'center' }
+  );
+
+  doc.setFontSize(13);
+  doc.text(schoolProfile.name.toUpperCase(), 105, 16, { align: 'center' });
+
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(8.5);
+  doc.text(schoolProfile.address || 'Alamat Sekolah', 105, 21, { align: 'center' });
+  doc.text(`NPSN: ${schoolProfile.npsn || '-'} • Telp: ${schoolProfile.phone || '-'} • Email: ${schoolProfile.email || '-'}`, 105, 25, { align: 'center' });
+
+  // Double Line Separator
+  doc.setLineWidth(0.8);
+  doc.line(14, 28, 196, 28);
+  doc.setLineWidth(0.2);
+  doc.line(14, 29, 196, 29);
+
+  // Title
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(12);
+  doc.text('LEMBAR DETAIL PENILAIAN KARAKTER SISWA', 105, 36, { align: 'center' });
+
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(8.5);
+  const semesterInfo = schoolProfile.semester ? `Semester ${schoolProfile.semester}` : '';
+  const yearInfo = schoolProfile.academicYear ? `Tahun Ajaran ${schoolProfile.academicYear}` : '';
+  const periodText = [yearInfo, semesterInfo].filter(Boolean).join(' • ') || 'Periode Aktif';
+  doc.text(periodText, 105, 41, { align: 'center' });
+
+  // Student Logs Calculation
+  const studentLogs = logs.filter(l => l.studentId === student.id || (student.nisn && l.nisn === student.nisn));
+  const sortedLogs = [...studentLogs].sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+
+  const posLogs = studentLogs.filter(l => l.traitType === 'POSITIF');
+  const negLogs = studentLogs.filter(l => l.traitType === 'NEGATIF');
+  const posPoints = posLogs.reduce((sum, item) => sum + (item.points || 0), 0);
+  const negPoints = negLogs.reduce((sum, item) => sum + (item.points || 0), 0);
+  const netPoints = posPoints - negPoints;
+
+  const minA = predicateSettings.minA ?? 30;
+  const minB = predicateSettings.minB ?? 10;
+  const minC = predicateSettings.minC ?? 0;
+  const minD = predicateSettings.minD ?? -20;
+  const minE = predicateSettings.minE ?? -50;
+
+  let predikat = 'Baik (B)';
+  if (netPoints >= minA) predikat = 'Sangat Baik (A)';
+  else if (netPoints >= minB) predikat = 'Baik (B)';
+  else if (netPoints >= minC) predikat = 'Cukup (C)';
+  else if (netPoints >= minD) predikat = 'Perlu Pembinaan (D)';
+  else if (netPoints >= minE) predikat = 'Tidak Naik Kelas (E)';
+  else predikat = 'Pindah Sekolah (F)';
+
+  // Metadata Card Table
+  autoTable(doc, {
+    startY: 45,
+    theme: 'plain',
+    styles: { fontSize: 8.5, cellPadding: 1.2, textColor: [30, 41, 59] },
+    columnStyles: {
+      0: { fontStyle: 'bold', cellWidth: 26 },
+      1: { cellWidth: 3 },
+      2: { cellWidth: 64 },
+      3: { fontStyle: 'bold', cellWidth: 34 },
+      4: { cellWidth: 3 },
+      5: { cellWidth: 52 }
+    },
+    body: [
+      ['Nama Siswa', ':', student.name, 'Total Poin Positif (+)', ':', `+${posPoints} Poin (${posLogs.length} Catatan)`],
+      ['NISN / NIS', ':', `${student.nisn || '-'} / ${student.nis || '-'}`, 'Total Poin Negatif (-)', ':', `-${negPoints} Poin (${negLogs.length} Catatan)`],
+      ['Kelas', ':', student.className || '-', 'Akumulasi Total Skor', ':', `${netPoints >= 0 ? '+' : ''}${netPoints} Poin`],
+      ['Jenis Kelamin', ':', student.gender === 'L' ? 'Laki-laki' : student.gender === 'P' ? 'Perempuan' : (student.gender || '-'), 'Predikat Karakter', ':', predikat]
+    ]
+  });
+
+  const tableStartPos = (doc as any).lastAutoTable.finalY + 4;
+
+  // Log Items
+  const tableData = sortedLogs.map((log, idx) => {
+    const followUpText = [
+      log.followUpNotes ? `Catatan: ${log.followUpNotes}` : '',
+      log.followUpBy ? `Oleh: ${log.followUpBy}` : '',
+      log.followUpDate ? `Tgl: ${log.followUpDate}` : ''
+    ].filter(Boolean).join('\n');
+
+    return [
+      (idx + 1).toString(),
+      log.timestamp || '-',
+      `${log.traitName}\n[${log.traitType === 'POSITIF' ? 'POSITIF (+)' : 'NEGATIF (-)'}]`,
+      log.traitType === 'POSITIF' ? `+${log.points}` : `-${log.points}`,
+      log.evaluatorName || '-',
+      log.notes ? log.notes : '-',
+      followUpText || 'Belum ada tindak lanjut'
+    ];
+  });
+
+  autoTable(doc, {
+    startY: tableStartPos,
+    head: [['No', 'Waktu / Tanggal', 'Indikator & Sikap Karakter', 'Poin', 'Guru / Penilai', 'Keterangan / Kejadian', 'Tindak Lanjut & Pembinaan']],
+    body: tableData.length > 0 ? tableData : [['-', '-', 'Belum ada catatan riwayat penilaian karakter untuk siswa ini.', '-', '-', '-', '-']],
+    theme: 'grid',
+    headStyles: { fillColor: [30, 58, 138], textColor: 255, fontSize: 8, halign: 'center', fontStyle: 'bold', valign: 'middle' },
+    bodyStyles: { fontSize: 7.5, valign: 'middle' },
+    columnStyles: {
+      0: { halign: 'center', cellWidth: 7 },
+      1: { halign: 'center', cellWidth: 25 },
+      2: { cellWidth: 38 },
+      3: { halign: 'center', cellWidth: 13, fontStyle: 'bold' },
+      4: { cellWidth: 28 },
+      5: { cellWidth: 38 },
+      6: { cellWidth: 33 }
+    }
+  });
+
+  let finalY = (doc as any).lastAutoTable.finalY + 10;
+
+  // Page break for signatures if near bottom
+  if (finalY + 45 > 280) {
+    doc.addPage();
+    finalY = 20;
+  }
+
+  const todayFormatted = new Date().toLocaleDateString('id-ID', {
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric'
+  });
+
+  doc.setFontSize(8.5);
+  doc.setFont('helvetica', 'normal');
+
+  // Left Column: Kepala Sekolah
+  doc.text('Mengetahui,', 20, finalY);
+  doc.text(`Kepala ${schoolProfile.name}`, 20, finalY + 5);
+  doc.setFont('helvetica', 'bold');
+  doc.text(schoolProfile.principalName || 'Kepala Sekolah', 20, finalY + 25);
+  doc.setFont('helvetica', 'normal');
+  doc.text(`NIP. ${schoolProfile.principalNip || '-'}` , 20, finalY + 30);
+
+  // Right Column: Wali Kelas / Guru BK
+  const locationName = schoolProfile.district || schoolProfile.regency || 'Sekolah';
+  doc.text(`${locationName}, ${todayFormatted}`, 135, finalY);
+  doc.text(`Wali Kelas ${student.className || homeroom.className || ''}`, 135, finalY + 5);
+  doc.setFont('helvetica', 'bold');
+  doc.text(homeroom.name, 135, finalY + 25);
+  doc.setFont('helvetica', 'normal');
+  doc.text(homeroom.nip ? `NIP. ${homeroom.nip}` : 'NIP. ....................................', 135, finalY + 30);
+
+  const sanitizedStudentName = student.name.replace(/[^a-zA-Z0-9]/g, '_');
+  const sanitizedClassName = (student.className || 'Siswa').replace(/[^a-zA-Z0-9]/g, '_');
+  doc.save(`Detail_Nilai_Karakter_${sanitizedStudentName}_${sanitizedClassName}.pdf`);
 }
 
 // Export Keaktifan Excel
@@ -1921,13 +2258,17 @@ export async function exportKeaktifanPdf(
   startDateStr: string,
   endDateStr: string,
   selectedClassFilter: string = 'ALL',
-  selectedSubjectFilter: string = 'ALL'
+  selectedSubjectFilter: string = 'ALL',
+  classes?: SchoolClass[],
+  teachers?: Teacher[]
 ) {
   const doc = new jsPDF({
     orientation: 'landscape',
     unit: 'mm',
     format: 'a4'
   });
+
+  const homeroom = resolveHomeroomTeacher(selectedClassFilter, classes, teachers, undefined, students);
 
   const regencyLogoData = await loadImageAsDataUrl(schoolProfile.regencyLogo);
   const schoolLogoData = await loadImageAsDataUrl(schoolProfile.schoolLogo);
@@ -2047,9 +2388,11 @@ export async function exportKeaktifanPdf(
     doc.setFontSize(8.5);
     doc.setFont('helvetica', 'normal');
     doc.text(`${schoolProfile.district || 'Sekolah'}, ${todayFormatted}`, 210, finalY);
-    doc.text('Wali Kelas / Guru,', 210, finalY + 5);
+    doc.text(selectedClassFilter !== 'ALL' ? `Wali Kelas ${homeroom.className || selectedClassFilter},` : 'Wali Kelas / Guru,', 210, finalY + 5);
     doc.setFont('helvetica', 'bold');
-    doc.text('.......................', 210, finalY + 23);
+    doc.text(homeroom.name, 210, finalY + 23);
+    doc.setFont('helvetica', 'normal');
+    doc.text(homeroom.nip ? `NIP. ${homeroom.nip}` : 'NIP. ....................................', 210, finalY + 28);
 
     doc.setFont('helvetica', 'normal');
     doc.text('Mengetahui, Kepala Sekolah', 20, finalY + 5);
@@ -2251,11 +2594,15 @@ export async function exportRecapStudentGradesPdf(
   selectedClass: string,
   selectedSubject?: string,
   mode: 'DETAILED' | 'SUMMARY' = 'DETAILED',
-  gradeType: 'ALL' | 'HARIAN' | 'TUGAS' | 'ULANGAN' = 'ALL'
+  gradeType: 'ALL' | 'HARIAN' | 'TUGAS' | 'ULANGAN' = 'ALL',
+  classes?: SchoolClass[],
+  teachers?: Teacher[]
 ) {
   const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
   const pageWidth = 297;
   const pageHeight = 210;
+
+  const homeroom = resolveHomeroomTeacher(selectedClass, classes, teachers, undefined, filteredStudents);
 
   // Header background & line
   doc.setFillColor(248, 250, 252);

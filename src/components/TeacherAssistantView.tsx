@@ -42,6 +42,7 @@ import {
   generateExamWordHtml, 
   generateModulAjarWordHtml 
 } from '../lib/wordExportUtils';
+import { QuestionVisualStimulus } from './QuestionVisualStimulus';
 
 interface TeacherAssistantViewProps {
   schoolProfile: SchoolProfile;
@@ -1217,17 +1218,17 @@ export function TeacherAssistantView({ schoolProfile, userSession }: TeacherAssi
                               </div>
                             </div>
 
-                            {/* Soal Bergambar: Stimulus Box */}
-                            {item.gambarDeskripsi && (
-                              <div className="bg-slate-50 border border-dashed border-indigo-300 p-3.5 rounded-xl text-center space-y-1.5 my-2">
-                                <div className="inline-flex items-center gap-1.5 text-xs font-bold text-indigo-800 bg-indigo-100/60 px-2.5 py-1 rounded-md">
-                                  <ImageIcon className="w-3.5 h-3.5 text-indigo-600" />
-                                  <span>[STIMULUS GAMBAR / DIAGRAM SOAL NO. {idx + 1}]</span>
-                                </div>
-                                <p className="text-xs text-slate-600 italic">
-                                  {item.gambarDeskripsi}
-                                </p>
-                              </div>
+                            {/* Soal Bergambar: Interactive Vector Diagram & Stimulus Visual */}
+                            {(item.gambarDeskripsi || item.gambarSvg || item.gambarUrl || item.tipe === 'PG_BERGAMBAR' || item.tipe === 'ESSAY_BERGAMBAR' || item.tipe === 'BERGAMBAR') && (
+                              <QuestionVisualStimulus
+                                questionNumber={idx + 1}
+                                questionType={item.tipe}
+                                subject={generatedExam.config.mataPelajaran}
+                                topic={generatedExam.config.topik}
+                                description={item.gambarDeskripsi}
+                                svgContent={item.gambarSvg}
+                                imageUrl={item.gambarUrl}
+                              />
                             )}
 
                             {/* Opsi Pilihan Ganda */}

@@ -205,7 +205,7 @@ export default function App() {
     return students[0] || null;
   }, [currentRole, userSession, students]);
 
-  // Teacher Identification (Strictly Bound to Logged-in teacherId, NIP, phone or username)
+  // Teacher Identification (Strictly Bound to Logged-in teacherId, NIP, phone, username, or displayName)
   const currentTeacher = useMemo(() => {
     if (currentRole !== 'TEACHER') return null;
 
@@ -217,23 +217,44 @@ export default function App() {
 
     // 2. By nipOrNisn from session (exact match, trimming spaces)
     if (userSession?.nipOrNisn) {
-      const cleanNip = userSession.nipOrNisn.replace(/\s+/g, '').toLowerCase();
-      const found = teachers.find(t => t.nip.replace(/\s+/g, '').toLowerCase() === cleanNip);
+      const cleanNip = userSession.nipOrNisn.replace(/[\.,\s\-_]/g, '').toLowerCase();
+      const found = teachers.find(t => t.nip.replace(/[\.,\s\-_]/g, '').toLowerCase() === cleanNip);
       if (found) return found;
     }
 
     // 3. By username from session (phone or nip)
     if (userSession?.username) {
-      const cleanUser = userSession.username.replace(/\s+/g, '').toLowerCase();
+      const cleanUser = userSession.username.replace(/[\.,\s\-_]/g, '').toLowerCase();
       const found = teachers.find(t => 
-        t.nip.replace(/\s+/g, '').toLowerCase() === cleanUser ||
-        (t.phone && t.phone.replace(/\s+/g, '').toLowerCase() === cleanUser)
+        t.nip.replace(/[\.,\s\-_]/g, '').toLowerCase() === cleanUser ||
+        (t.phone && t.phone.replace(/[\.,\s\-_]/g, '').toLowerCase() === cleanUser)
       );
       if (found) return found;
     }
 
-    // Fallback
-    return teachers[0] || null;
+    // 4. By displayName from session
+    if (userSession?.displayName) {
+      const cleanDisplay = userSession.displayName.replace(/[\.,\s\-_]/g, '').toLowerCase();
+      const found = teachers.find(t => t.name.replace(/[\.,\s\-_]/g, '').toLowerCase() === cleanDisplay);
+      if (found) return found;
+
+      // Also try normalized academic titles
+      const normDisplay = userSession.displayName.toLowerCase().replace(/\b(dr|dra|drs|h|hj|prof|ir|s\.pd|m\.pd|s\.kom|m\.kom|s\.ag|m\.ag|s\.si|m\.si|s\.e|m\.m|s\.sos|m\.sos|s\.t|m\.t|b\.sc|m\.sc|gr|lc)\b/gi, '').replace(/[\.,\s\-_]/g, '');
+      if (normDisplay) {
+        const foundNorm = teachers.find(t => {
+          const normT = t.name.toLowerCase().replace(/\b(dr|dra|drs|h|hj|prof|ir|s\.pd|m\.pd|s\.kom|m\.kom|s\.ag|m\.ag|s\.si|m\.si|s\.e|m\.m|s\.sos|m\.sos|s\.t|m\.t|b\.sc|m\.sc|gr|lc)\b/gi, '').replace(/[\.,\s\-_]/g, '');
+          return normT && (normT === normDisplay || normT.includes(normDisplay) || normDisplay.includes(normT));
+        });
+        if (foundNorm) return foundNorm;
+      }
+    }
+
+    // Fallback only if no userSession exists (demo/preview unauthenticated mode)
+    if (!userSession || !userSession.isLoggedIn) {
+      return teachers[0] || null;
+    }
+
+    return null;
   }, [currentRole, userSession, teachers]);
 
   // Selected Child ID state (for Parent role, automatically locked to parentStudent)
@@ -666,22 +687,44 @@ export default function App() {
 
   // -------------------------------------------------------------
   // Real-Time AI Voice Reminder for Teachers with Active KBM Slots
-  // Plays pleasant chime + female AI speech:
-  // "Anda Memiliki Jam Mengajar Saat ini, Selamat Menjalankan Tugas. Terima Kasih "
+  // STRICT RULE: Suara notifikasi jadwal HANYA muncul pada akun yang sesuai dengan akun nama login pada jadwal pelajaran
   // -------------------------------------------------------------
   useEffect(() => {
     const checkAndTriggerKbmVoiceReminder = () => {
+      // If voice reminder is globally disabled in schoolProfile, do nothing
+      if (schoolProfile.aiVoiceTeacherReminderEnabled === false) return;
       if (!isKbmVoiceReminderEnabled()) return;
+
+      // 1. Must be strictly logged in as TEACHER role
+      if (currentRole !== 'TEACHER') return;
+      if (!userSession || !userSession.isLoggedIn) return;
+
+      // 2. Identify the logged-in teacher credentials
+      const loggedTeacherId = currentTeacher?.id || userSession.teacherId || '';
+      const loggedTeacherNip = currentTeacher?.nip || userSession.nipOrNisn || '';
+      const loggedTeacherName = currentTeacher?.name || userSession.displayName || '';
+      const loggedUsername = userSession.username || '';
+
+      if (!loggedTeacherId && !loggedTeacherNip && !loggedTeacherName) return;
+
+      const cleanStr = (s?: string) => (s || '').replace(/[\.,\s\-_]/g, '').toLowerCase();
+      const normalizeAcademicName = (name?: string) => {
+        if (!name) return '';
+        return name
+          .toLowerCase()
+          .replace(/\b(dr|dra|drs|h|hj|prof|ir|s\.pd|m\.pd|s\.kom|m\.kom|s\.ag|m\.ag|s\.si|m\.si|s\.e|m\.m|s\.sos|m\.sos|s\.t|m\.t|b\.sc|m\.sc|gr|lc)\b/gi, '')
+          .replace(/[\.,\s\-_]/g, '');
+      };
 
       const now = new Date();
       const dayNames = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
       const currentDayName = dayNames[now.getDay()];
 
-      // 1. Check active school day
+      // 3. Check active school day
       const activeDays = schoolProfile.activeDays || ['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
       if (!activeDays.includes(currentDayName)) return;
 
-      // 2. Check holiday
+      // 4. Check holiday
       const year = now.getFullYear();
       const month = String(now.getMonth() + 1).padStart(2, '0');
       const day = String(now.getDate()).padStart(2, '0');
@@ -696,7 +739,7 @@ export default function App() {
       });
       if (isTodayHoliday) return;
 
-      // 3. Periods for today
+      // 5. Periods for today
       const daySpecificPeriods = periods.filter(p => p.day === currentDayName || p.daySpecific === currentDayName);
       const todayPeriods = (daySpecificPeriods.length > 0 
         ? daySpecificPeriods 
@@ -723,13 +766,57 @@ export default function App() {
           matchingSlots.forEach(slot => {
             if (!slot.teacherId && !slot.teacherName) return;
 
-            // If in TEACHER role, trigger specifically for the logged-in teacher
-            if (currentRole === 'TEACHER' && currentTeacher) {
-              const isMySlot = 
-                (slot.teacherId && slot.teacherId === currentTeacher.id) ||
-                (slot.teacherName && slot.teacherName.toLowerCase() === currentTeacher.name.toLowerCase());
-              if (!isMySlot) return;
+            // STRICT FILTER: Match slot only to currently logged in teacher
+            let isMySlot = false;
+
+            // Match A: ID
+            if (loggedTeacherId && slot.teacherId && slot.teacherId === loggedTeacherId) {
+              isMySlot = true;
             }
+
+            // Match B: NIP
+            if (!isMySlot && loggedTeacherNip && slot.teacherNip && cleanStr(slot.teacherNip) === cleanStr(loggedTeacherNip)) {
+              isMySlot = true;
+            }
+
+            // Match C: Exact or cleaned Name / Academic title match
+            if (!isMySlot && slot.teacherName && loggedTeacherName) {
+              const cleanSlotName = cleanStr(slot.teacherName);
+              const cleanLoggedName = cleanStr(loggedTeacherName);
+              if (cleanSlotName === cleanLoggedName) {
+                isMySlot = true;
+              } else {
+                const normSlot = normalizeAcademicName(slot.teacherName);
+                const normLogged = normalizeAcademicName(loggedTeacherName);
+                if (normSlot && normLogged && (normSlot === normLogged || normSlot.includes(normLogged) || normLogged.includes(normSlot))) {
+                  isMySlot = true;
+                }
+              }
+            }
+
+            // Match D: Master teacher record link
+            if (!isMySlot && slot.teacherId) {
+              const masterTeacher = teachers.find(t => t.id === slot.teacherId);
+              if (masterTeacher) {
+                if (loggedTeacherId && masterTeacher.id === loggedTeacherId) isMySlot = true;
+                if (loggedTeacherNip && cleanStr(masterTeacher.nip) === cleanStr(loggedTeacherNip)) isMySlot = true;
+                if (loggedTeacherName && (
+                  cleanStr(masterTeacher.name) === cleanStr(loggedTeacherName) ||
+                  normalizeAcademicName(masterTeacher.name) === normalizeAcademicName(loggedTeacherName)
+                )) {
+                  isMySlot = true;
+                }
+                if (loggedUsername && (
+                  cleanStr(masterTeacher.nip) === cleanStr(loggedUsername) ||
+                  cleanStr(masterTeacher.phone) === cleanStr(loggedUsername)
+                )) {
+                  isMySlot = true;
+                }
+              }
+            }
+
+            // If this schedule slot does not belong to the logged-in teacher account, SKIP!
+            if (!isMySlot) return;
 
             const voiceKey = `voice-kbm-${dateStr}-${slot.id || `${slot.classId}-${slot.periodNumber}-${slot.teacherId}`}-${period.startTime}`;
             if (triggeredVoiceReminderKeysRef.current.has(voiceKey)) return;
@@ -754,7 +841,7 @@ export default function App() {
             const finalEndTime = lastPeriodInBlock?.endTime || period.endTime;
 
             const reminderInfo: KbmReminderInfo = {
-              teacherName: slot.teacherName || currentTeacher?.name || 'Bapak/Ibu Guru',
+              teacherName: slot.teacherName || loggedTeacherName || 'Bapak/Ibu Guru',
               subject: slot.subject,
               className: slot.className,
               room: slot.room,
@@ -780,9 +867,12 @@ export default function App() {
     return () => clearInterval(interval);
   }, [
     currentRole,
+    userSession,
     currentTeacher,
+    teachers,
     schoolProfile.activeDays,
     schoolProfile.holidays,
+    schoolProfile.aiVoiceTeacherReminderEnabled,
     periods,
     schedules
   ]);

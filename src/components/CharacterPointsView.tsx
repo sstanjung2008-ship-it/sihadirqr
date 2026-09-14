@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { Student, SchoolClass, CharacterTrait, StudentCharacterLog, Teacher, SchoolProfile, CharacterPredicateSettings, UserSession } from '../types';
-import { exportCharacterPointsPdf } from '../lib/exportUtils';
+import { exportCharacterPointsPdf, exportStudentCharacterDetailPdf } from '../lib/exportUtils';
 import { 
   Plus, 
   Search, 
@@ -176,6 +176,28 @@ export const CharacterPointsView: React.FC<CharacterPointsViewProps> = ({
   const [detailStudent, setDetailStudent] = useState<Student | null>(null);
   const [previewPhotoModalUrl, setPreviewPhotoModalUrl] = useState<string | null>(null);
   const [deleteConfirmLog, setDeleteConfirmLog] = useState<StudentCharacterLog | null>(null);
+  const [isExportingDetail, setIsExportingDetail] = useState<boolean>(false);
+
+  // Handle Export Detail Nilai Karakter Siswa to PDF
+  const handleExportDetailPdf = async () => {
+    if (!detailStudent || !schoolProfile) return;
+    setIsExportingDetail(true);
+    try {
+      await exportStudentCharacterDetailPdf(
+        schoolProfile,
+        detailStudent,
+        logs,
+        classes,
+        predicateSettings,
+        initialEvaluatorName
+      );
+    } catch (error) {
+      console.error('Error exporting student character detail PDF:', error);
+      alert('Gagal mengekspor PDF detail nilai karakter siswa. Pastikan format logo dan data valid.');
+    } finally {
+      setIsExportingDetail(false);
+    }
+  };
 
   // Modal Tindak Lanjut State
   const [followUpLog, setFollowUpLog] = useState<StudentCharacterLog | null>(null);
@@ -895,12 +917,26 @@ export const CharacterPointsView: React.FC<CharacterPointsViewProps> = ({
                 </div>
               </div>
 
-              <button
-                onClick={() => setDetailStudent(null)}
-                className="text-slate-400 hover:text-white p-1.5 rounded-xl hover:bg-white/10"
-              >
-                <X className="w-6 h-6" />
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleExportDetailPdf}
+                  disabled={isExportingDetail}
+                  className="px-3 py-1.5 bg-rose-600 hover:bg-rose-700 active:scale-95 text-white font-bold text-xs rounded-xl transition-all flex items-center gap-1.5 shadow-sm cursor-pointer disabled:opacity-50"
+                  title="Ekspor PDF Detail Nilai Karakter Siswa (Kop Resmi)"
+                >
+                  <Download className={`w-3.5 h-3.5 ${isExportingDetail ? 'animate-bounce' : ''}`} />
+                  <span className="hidden sm:inline">{isExportingDetail ? 'Mengekspor...' : 'Ekspor PDF'}</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setDetailStudent(null)}
+                  className="text-slate-400 hover:text-white p-1.5 rounded-xl hover:bg-white/10 transition-colors"
+                >
+                  <X className="w-6 h-6" />
+                </button>
+              </div>
             </div>
 
             {/* Modal Score Overview Bar */}
@@ -1071,10 +1107,21 @@ export const CharacterPointsView: React.FC<CharacterPointsViewProps> = ({
             </div>
 
             {/* Modal Footer */}
-            <div className="p-4 bg-slate-50 border-t border-slate-200 flex justify-end items-center shrink-0">
+            <div className="p-4 bg-slate-50 border-t border-slate-200 flex flex-col sm:flex-row justify-between items-center gap-3 shrink-0">
               <button
+                type="button"
+                onClick={handleExportDetailPdf}
+                disabled={isExportingDetail}
+                className="w-full sm:w-auto px-4 py-2 bg-rose-600 hover:bg-rose-700 active:scale-95 text-white font-bold text-xs rounded-xl transition-all flex items-center justify-center gap-2 shadow-sm cursor-pointer disabled:opacity-50"
+              >
+                <Download className={`w-4 h-4 ${isExportingDetail ? 'animate-bounce' : ''}`} />
+                <span>{isExportingDetail ? 'Sedang Menyusun PDF...' : 'Cetak / Ekspor PDF (Kop Resmi)'}</span>
+              </button>
+
+              <button
+                type="button"
                 onClick={() => setDetailStudent(null)}
-                className="px-5 py-2 bg-slate-200 hover:bg-slate-300 text-slate-800 font-bold text-xs rounded-xl transition-colors cursor-pointer"
+                className="w-full sm:w-auto px-5 py-2 bg-slate-200 hover:bg-slate-300 text-slate-800 font-bold text-xs rounded-xl transition-colors cursor-pointer"
               >
                 Tutup
               </button>

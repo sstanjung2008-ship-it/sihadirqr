@@ -153,7 +153,6 @@ app.post("/api/gemini/generate-questions", async (req, res) => {
     const ai = getGeminiClient();
 
     if (!ai) {
-      // High-quality fallback generator when Gemini API key is not configured
       const fallbackResult = generateFallbackExam({
         jenjang,
         kelas,
@@ -175,49 +174,49 @@ app.post("/api/gemini/generate-questions", async (req, res) => {
       return res.json(fallbackResult);
     }
 
-    const prompt = `Anda adalah Pakar Asesmen Pendidikan Nasional & Pembuat Soal Ujian Kurikulum Merdeka Terstandar Indonesia.
-Buatlah paket instrumen ujian lengkap yang terdiri dari:
-1. Naskah Soal Ujian dengan rincian:
-   - ${totalPG} Soal Pilihan Ganda (Teks Biasa)
-   - ${totalPGBergambar} Soal Pilihan Ganda Bergambar / Stimulus Visual (Grafik, Bagan, Diagram, Ilustrasi)
-   - ${totalEssay} Soal Essay/Uraian (Teks Analisis)
-   - ${totalEssayBergambar} Soal Essay/Uraian Bergambar / Kasus Visual
-2. Kunci Jawaban Lengkap & Pembahasan Solutif serta Rubrik Penskoran
-3. Kisi-kisi Penulisan Soal lengkap berstandar Kurikulum Merdeka (Capaian Pembelajaran, Materi, Indikator Soal, Level Kognitif C1-C6/HOTS, Bentuk Soal, No Soal, Bobot)
+    const prompt = `Anda adalah Pakar Penilaian dan Asesmen Pendidikan Nasional Kurikulum Merdeka Indonesia.
+Buatlah paket naskah soal ujian yang SANGAT KREATIF, BERVARIASI, KONTEKSTUAL, dan MEMILIKI PERBEDAAN JELAS ANTAR BUTIR SOAL.
 
-DATA SPESIFIKASI SOAL:
-- Jenjang: ${jenjang}
-- Kelas: ${kelas}
+SPESIFIKASI INSTRUMEN:
 - Mata Pelajaran: ${mataPelajaran}
+- Jenjang / Kelas: ${jenjang} / ${kelas}
 - Topik / Materi Pembelajaran: ${topik}
-- Tingkat Kesulitan / Kognitif: ${tingkatKesulitan}
+- Tingkat Kesulitan: ${tingkatKesulitan}
 - Jenis Ujian: ${tipeUjian}
 - Alokasi Waktu: ${alokasiWaktu}
-- Catatan / Petunjuk Khusus: ${petunjukKhusus || "Sesuai CP & standar asesmen Kurikulum Merdeka terkini"}
+- Catatan / Petunjuk Khusus: ${petunjukKhusus || "Konteks dunia nyata, beragam stimulus cerita, fenomena alam/sosial, studi kasus autentik, numerasi/literasi"}
 
-KETENTUAN WAJIB TIAP KATEGORI SOAL:
-- Soal Pilihan Ganda Teks Biasa (${totalPG} butir): Opsi 4 pilihan (A, B, C, D) untuk SD/SMP atau 5 pilihan (A, B, C, D, E) untuk SMA/SMK. Kunci jawaban & pembahasan rinci.
-- Soal Pilihan Ganda Bergambar (${totalPGBergambar} butir): Berupa soal PG dengan stimulus visual. WAJIB sertakan "gambarDeskripsi" yang mendeskripsikan secara sangat rinci diagram, grafik, peta, tabel data, atau ilustrasi ilmiah yang menjadi acuan stimulus soal, beserta opsi pilihan ganda dan kunci jawaban.
-- Soal Essay / Uraian Teks Biasa (${totalEssay} butir): Pertanyaan pemecahan masalah/analisis mendalam tanpa gambar, dilengkapi kunci jawaban, rubrik penilaian, dan bobot skor (misal 10 poin).
-- Soal Essay / Uraian Bergambar (${totalEssayBergambar} butir): Pertanyaan analisis mendalam berbasis stimulus visual. WAJIB sertakan "gambarDeskripsi" lengkap (bagan/diagram/kasus visual), kunci jawaban analisis bertahap, rubrik penskoran terperinci, dan bobot skor.
-- Kisi-kisi Soal: Mencakup semua butir soal (${totalSemua} butir) urut nomor 1 s.d. ${totalSemua} dengan level kognitif (C1/C2/C3/C4/C5/C6 atau HOTS/MOTS/LOTS).
+JUMLAH BUTIR SOAL YANG WAJIB DIBUAT (TOTAL = ${totalSemua} BUTIR):
+1. ${totalPG} butir Soal Pilihan Ganda Teks Biasa (tipe: "PG")
+2. ${totalPGBergambar} butir Soal Pilihan Ganda Bergambar / Stimulus Visual (tipe: "PG_BERGAMBAR")
+3. ${totalEssay} butir Soal Essay / Uraian Teks Analisis (tipe: "ESSAY")
+4. ${totalEssayBergambar} butir Soal Essay / Uraian Bergambar / Kasus Visual (tipe: "ESSAY_BERGAMBAR")
 
-KEMBALIKAN HANYA FORMAT JSON MURNI SESUAI STRUKTUR BERIKUT:
+PRINSIP KREATIF & DIVERSIFIKASI SOAL (SANGAT PENTING):
+- DILARANG membuat soal yang mirip atau berulang kalimatnya. Tiap butir soal HARUS mengangkat skenario kasus, tokoh, fenomena alam, data observasi, eksperimen laboratorium, atau kutipan bacaan yang berbeda-beda!
+- Gunakan variasi level kognitif seimbang (C1 Mengetahui, C2 Memahami, C3 Menerapkan, C4 Menganalisis, C5 Mengevaluasi, C6 Mencipta / HOTS).
+- Untuk soal bergambar (PG_BERGAMBAR dan ESSAY_BERGAMBAR):
+  * Sediakan field "gambarDeskripsi" yang sangat detail, spesifik, dan memaparkan grafik, diagram alur, skema alat, rantai makanan, atau infografis data.
+  * Opsi: Sediakan juga field "gambarSvg" berupa string XML SVG yang valid dan rapi (viewBox 0 0 450 220) bila relevan.
+- Opsi pilihan ganda: A, B, C, D (untuk SD/SMP) atau A, B, C, D, E (untuk SMA/SMK). Pengecoh (distractor) harus masuk akal dan ilmiah.
+- Buat Kisi-kisi lengkap untuk seluruh butir 1 s.d. ${totalSemua}.
+
+FORMAT OUTPUT: WAJIB JSON MURNI TANPA TEKS LAIN DENGAN SKEMA:
 {
   "judul": "${tipeUjian.toUpperCase()} ${mataPelajaran.toUpperCase()}",
   "petunjukUmum": [
-    "Berdoalah sebelum mengerjakan soal.",
-    "Periksa dan bacalah soal-soal dengan teliti sebelum menjawab.",
-    "Tuliskan identitas nama dan kelas pada lembar jawaban yang tersedia.",
-    "Dahulukan menjawab soal yang dianggap mudah.",
-    "Periksa kembali jawaban sebelum diserahkan kepada pengawas."
+    "Berdoalah sebelum memulai mengerjakan naskah soal ujian.",
+    "Periksa dan bacalah lembar soal dengan teliti sebelum menjawab.",
+    "Tuliskan identitas nama lengkap dan kelas pada lembar jawaban yang tersedia.",
+    "Dahulukan menjawab butir soal yang dianggap lebih mudah.",
+    "Periksa kembali seluruh lembar jawaban sebelum diserahkan kepada pengawas."
   ],
   "kisiKisi": [
     {
       "no": 1,
       "capaianPembelajaran": "...",
-      "materi": "...",
-      "indikatorSoal": "Peserta didik dapat menganalisis...",
+      "materi": "${topik}",
+      "indikatorSoal": "Disajikan ..., peserta didik dapat ...",
       "levelKognitif": "C4 (HOTS)",
       "bentukSoal": "Pilihan Ganda",
       "nomorSoal": "1",
@@ -230,7 +229,7 @@ KEMBALIKAN HANYA FORMAT JSON MURNI SESUAI STRUKTUR BERIKUT:
       "no": 1,
       "tipe": "PG",
       "pertanyaan": "...",
-      "stimulus": "Perhatikan teks bacaan berikut...",
+      "stimulus": "Konteks / Narasi studi kasus awal...",
       "pilihan": {
         "A": "...",
         "B": "...",
@@ -238,18 +237,18 @@ KEMBALIKAN HANYA FORMAT JSON MURNI SESUAI STRUKTUR BERIKUT:
         "D": "..."
       },
       "kunciJawaban": "A",
-      "pembahasan": "Penjelasan detail mengapa pilihan A benar...",
+      "pembahasan": "Penjelasan detail dan logis mengapa kunci jawaban tersebut benar...",
       "levelKognitif": "C3",
       "indikatorSoal": "...",
       "bobotSkor": 1
     },
     {
-      "id": "q-pg-img-1",
+      "id": "q-2",
       "no": 2,
-      "tipe": "PG",
-      "pertanyaan": "Berdasarkan diagram alur pada gambar di atas, fungsi utama komponen X adalah...",
-      "stimulus": "Diberikan diagram ilustrasi...",
-      "gambarDeskripsi": "[Diagram Alur]: Menampilkan siklus pertukaran gas...",
+      "tipe": "PG_BERGAMBAR",
+      "pertanyaan": "Berdasarkan grafik/diagram stimulus visual di atas, ...",
+      "stimulus": "Perhatikan grafik hasil pengamatan berikut:",
+      "gambarDeskripsi": "[Diagram / Grafik Terperinci]: Menampilkan perbandingan...",
       "pilihan": {
         "A": "...",
         "B": "...",
@@ -263,29 +262,29 @@ KEMBALIKAN HANYA FORMAT JSON MURNI SESUAI STRUKTUR BERIKUT:
       "bobotSkor": 2
     },
     {
-      "id": "q-essay-1",
+      "id": "q-3",
       "no": 3,
       "tipe": "ESSAY",
-      "pertanyaan": "Jelaskan proses terjadinya...",
-      "stimulus": "",
-      "kunciJawaban": "Langkah 1: ... Langkah 2: ...",
-      "pembahasan": "Siswa mampu menguraikan dengan 3 poin kunci...",
-      "rubrikPenskoran": "Skor 10 jika menjawab 3 faktor lengkap, Skor 6 jika 2 faktor, Skor 3 jika 1 faktor.",
+      "pertanyaan": "Jelaskan dan analisislah mengapa...",
+      "stimulus": "Diberikan permasalahan kontekstual: ...",
+      "kunciJawaban": "Poin 1: ... Poin 2: ... Poin 3: ...",
+      "pembahasan": "Rubrik penilaian mengacu pada ketepatan argumentasi...",
+      "rubrikPenskoran": "Skor 10 jika memuat 3 faktor lengkap, Skor 6 jika 2 faktor, Skor 3 jika 1 faktor.",
       "levelKognitif": "C5 (HOTS)",
       "indikatorSoal": "...",
       "bobotSkor": 10
     },
     {
-      "id": "q-essay-img-1",
+      "id": "q-4",
       "no": 4,
-      "tipe": "ESSAY",
-      "pertanyaan": "Berdasarkan grafik pengamatan pada gambar di atas, analisislah anomali data pada titik T2 dan simpulkan penyebabnya!",
-      "stimulus": "Cermati grafik eksperimen di bawah ini:",
-      "gambarDeskripsi": "[Grafik Hasil Percobaan]: Menunjukkan perbandingan laju reaksi antara perlakuan kontrol dan perlakuan uji suhu tinggi...",
-      "kunciJawaban": "Analisis: Pada titik T2 terjadi penurunan laju...",
-      "pembahasan": "Peserta didik menguraikan hubungan antara variabel suhu dan laju reaksi...",
-      "rubrikPenskoran": "Skor 10: Analisis anomali tepat dan alasan ilmiah akurat. Skor 5: Hanya menyebutkan penurunan tanpa analisis.",
-      "levelKognitif": "C5 (HOTS)",
+      "tipe": "ESSAY_BERGAMBAR",
+      "pertanyaan": "Cermati skema diagram kasus pada gambar di atas! Analisislah titik kritis pada fase X dan usulkan langkah solusi ilmiah!",
+      "stimulus": "Perhatikan skema alur kasus visual berikut:",
+      "gambarDeskripsi": "[Bagan Alur Kasus]: Menunjukkan siklus...",
+      "kunciJawaban": "Analisis: ... Solusi: ...",
+      "pembahasan": "...",
+      "rubrikPenskoran": "Skor 10: Analisis mendalam dan solusi terstruktur...",
+      "levelKognitif": "C6 (HOTS)",
       "indikatorSoal": "...",
       "bobotSkor": 10
     }
@@ -295,10 +294,11 @@ KEMBALIKAN HANYA FORMAT JSON MURNI SESUAI STRUKTUR BERIKUT:
     let data: any = null;
     try {
       const response = await ai.models.generateContent({
-        model: "gemini-2.5-flash",
+        model: "gemini-3.8-flash",
         contents: prompt,
         config: {
           responseMimeType: "application/json",
+          temperature: 0.85,
         }
       });
 
@@ -356,7 +356,6 @@ KEMBALIKAN HANYA FORMAT JSON MURNI SESUAI STRUKTUR BERIKUT:
     return res.json(data);
   } catch (err: any) {
     console.error("Error in generate-questions handler:", err);
-    // Return fallback so the teacher never faces a broken UI
     const fallback = generateFallbackExam(req.body || {});
     return res.json(fallback);
   }
@@ -538,10 +537,11 @@ KEMBALIKAN HANYA FORMAT JSON MURNI SESUAI STRUKTUR BERIKUT:
     let data: any = null;
     try {
       const response = await ai.models.generateContent({
-        model: "gemini-2.5-flash",
+        model: "gemini-3.8-flash",
         contents: prompt,
         config: {
           responseMimeType: "application/json",
+          temperature: 0.7,
         }
       });
 
@@ -595,7 +595,7 @@ KEMBALIKAN HANYA FORMAT JSON MURNI SESUAI STRUKTUR BERIKUT:
   }
 });
 
-// Helper Fallback Generator for Exam Questions
+// Helper Fallback Generator for Exam Questions with High Diversity & Creativity
 function generateFallbackExam(config: any) {
   const jenjang = config.jenjang || "SMP";
   const kelas = config.kelas || "Kelas 7";
@@ -611,89 +611,134 @@ function generateFallbackExam(config: any) {
   const kisiKisi: any[] = [];
   let currentNum = 1;
 
-  // 1. Pilihan Ganda (Teks Biasa)
-  const samplePGPrompts = [
-    {
-      q: `Konsep utama yang mendasari materi ${topik} dalam pembelajaran ${mapel} berkaitan erat dengan...`,
-      opts: {
-        A: `Penerapan prinsip keteraturan dan hubungan logis antar elemen dalam ${topik}.`,
-        B: "Penghapusan seluruh variabel perantara tanpa verifikasi data primer.",
-        C: "Penggunaan asumsi tunggal tanpa mempertimbangkan konteks lingkungan.",
-        D: "Pemisahan seluruh komponen sehingga tidak saling memengaruhi."
-      },
-      kunci: "A",
-      pembahasan: `Pilihan A tepat karena materi ${topik} menekankan pada keteraturan sistematis dan analisis hubungan sebab-akibat.`,
-      level: "C2 (Pemahaman)"
+  // Varied student/teacher context names and locations
+  const names = ["Rian", "Siti", "Ahmad", "Dewi", "Budi", "Lestari", "Kadek", "Fajar", "Nadia", "Farhan", "Putri", "Zaki"];
+  const locations = ["laboratorium sekolah", "lingkungan sekitar rumah", "taman sekolah", "sentra industri kreatif", "ekosistem sungai lokal", "kebun percobaan"];
+
+  // 1. Dynamic Pilihan Ganda (Teks Biasa)
+  const dynamicPGTemplates = [
+    (idx: number) => {
+      const name = names[idx % names.length];
+      const loc = locations[idx % locations.length];
+      return {
+        q: `${name} melakukan kegiatan observasi dan investigasi terstruktur mengenai "${topik}" di ${loc}. Dari serangkaian pengujian, diperoleh data bahwa variabel X mengalami kenaikan secara linear sementara variabel Y melambat. Analisis kesimpulan ilmiah yang paling tepat dan valid adalah...`,
+        stimulus: `Studi Kasus Investigasi Autentik Materi ${topik}:`,
+        opts: {
+          A: `Terjadi regulasi timbal balik yang proporsional dalam dinamika komponen ${topik} untuk mempertahankan kestabilan sistem.`,
+          B: `Variabel pengujian tidak memiliki relasi fungsional sama sekali dengan karakteristik pokok ${topik}.`,
+          C: `Hasil pengamatan harus dieliminasi karena menyimpang dari asumsi teoritis awal tanpa uji ulang.`,
+          D: `Semua parameter pengujian selalu konstan dan tidak dipengaruhi oleh perubahan lingkungan luar.`
+        },
+        kunci: "A",
+        pembahasan: `Pilihan A tepat karena fenomena dalam ${topik} menunjukkan hubungan sebab-akibat yang saling mengompensasi demi tercapainya ekuilibrium sistem.`,
+        level: "C4 (HOTS - Analisis Data Observasi)",
+        indikator: `Disajikan narasi investigasi kontekstual, peserta didik mampu menganalisis korelasi antarvariabel pada materi ${topik}.`
+      };
     },
-    {
-      q: `Seorang siswa melakukan analisis terhadap fenomena yang terjadi pada ${topik}. Hasil pengamatan menunjukkan adanya perubahan signifikan ketika diberikan perlakuan khusus. Kesimpulan yang paling valid adalah...`,
-      opts: {
-        A: "Perubahan tersebut tidak memiliki hubungan sebab-akibat dengan variabel yang diuji.",
-        B: "Variabel perlakuan berpengaruh secara langsung terhadap dinamika sistem materi yang diamati.",
-        C: "Hasil pengamatan harus diabaikan karena tidak sesuai hipotesis awal.",
-        D: "Semua parameter pengamatan selalu bernilai konstan dalam setiap kondisi."
-      },
-      kunci: "B",
-      pembahasan: "Pilihan B benar karena kesimpulan ilmiah didasarkan pada hubungan langsung antara variabel perlakuan dan respon sistem.",
-      level: "C4 (HOTS - Analisis)"
+    (idx: number) => {
+      return {
+        q: `Dalam penerapan konsep "${topik}" pada kehidupan masyarakat modern, tantangan utama yang sering dihadapi adalah ketidakseimbangan antara efisiensi proses dan daya dukung lingkungan. Upaya paling solutif dan berkelanjutan yang dapat diterapkan adalah...`,
+        stimulus: `Konteks Isu Faktual & Keberlanjutan Pembelajaran ${mapel}:`,
+        opts: {
+          A: `Mengintegrasikan prinsip inovasi ramah lingkungan dan optimasi pemanfaatan sumber daya secara terukur pada ${topik}.`,
+          B: `Mengeksploitasi seluruh komponen tanpa mempertimbangkan dampak jangka panjang bagi ekosistem.`,
+          C: `Menghentikan seluruh aktivitas implementasi agar tidak menimbulkan risiko perubahan kondisi awal.`,
+          D: `Mengabaikan evaluasi berkala dan menyerahkan seluruh kendali pada mekanisme alami tanpa monitoring.`
+        },
+        kunci: "A",
+        pembahasan: `Pilihan A benar karena prinsip pembelajaran modern menekankan keberlanjutan (sustainability) dan efisiensi berbasis solusi ilmiah.`,
+        level: "C5 (HOTS - Evaluasi Kebijakan Solutif)",
+        indikator: `Peserta didik mampu mengevaluasi alternatif solusi berkelanjutan terkait implementasi ${topik}.`
+      };
     },
-    {
-      q: `Dalam kehidupan sehari-hari, penerapan prinsip ${topik} dapat dimanfaatkan untuk...`,
-      opts: {
-        A: "Meningkatkan efisiensi kerja dan memecahkan permasalahan secara sistematis.",
-        B: "Menghindari seluruh proses pengukuran dan evaluasi berkala.",
-        C: "Membatasi perkembangan kreativitas dan pemikiran kritis.",
-        D: "Mengurangi interaksi antar anggota tim dalam pemecahan masalah."
-      },
-      kunci: "A",
-      pembahasan: "Penerapan konsep materi bertujuan memberikan solusi aplikatif yang efektif bagi kehidupan nyata.",
-      level: "C3 (Aplikasi)"
+    (idx: number) => {
+      return {
+        q: `Perhatikan beberapa tahapan kerja sistematis berikut ini:\n(1) Mengidentifikasi karakteristik dan parameter kunci materi ${topik}.\n(2) Menyusun klasifikasi dan pengelompokan data berdasarkan kriteria valid.\n(3) Menganalisis korelasi fungsional antar komponen pengamatan.\n(4) Merumuskan simpulan evaluatif dan rekomendasi tindak lanjut.\nUrutan prosedur analisis saintifik yang paling runtut dan logis adalah...`,
+        stimulus: `Prosedur Metodologi Ilmiah Materi ${topik}:`,
+        opts: {
+          A: "(1) → (2) → (3) → (4)",
+          B: "(2) → (1) → (4) → (3)",
+          C: "(3) → (1) → (2) → (4)",
+          D: "(4) → (3) → (2) → (1)"
+        },
+        kunci: "A",
+        pembahasan: `Urutan metode saintifik Kurikulum Merdeka yang tepat dimulai dari identifikasi awal (1), klasifikasi terstruktur (2), analisis relasi data (3), hingga penarikan simpulan evaluatif (4).`,
+        level: "C3 (Aplikasi Prosedural)",
+        indikator: `Peserta didik mampu menentukan urutan langkah kerja ilmiah dalam menganalisis fenomena ${topik}.`
+      };
     },
-    {
-      q: `Perhatikan beberapa pernyataan berikut:\n(1) Mengidentifikasi karakteristik utama komponen.\n(2) Melakukan klasifikasi berdasarkan kriteria tertentu.\n(3) Menghitung korelasi matematis antar faktor.\n(4) Membuat kesimpulan evaluatif.\nLangkah kerja yang tepat dalam menganalisis ${topik} secara berurutan adalah...`,
-      opts: {
-        A: "(1) - (2) - (3) - (4)",
-        B: "(2) - (1) - (4) - (3)",
-        C: "(4) - (3) - (2) - (1)",
-        D: "(3) - (1) - (4) - (2)"
-      },
-      kunci: "A",
-      pembahasan: "Urutan metode ilmiah yang sistematis dimulai dari identifikasi, klasifikasi, komparasi/analisis, dan diakhiri kesimpulan evaluatif.",
-      level: "C4 (HOTS - Sintesis)"
+    (idx: number) => {
+      const name = names[(idx + 3) % names.length];
+      return {
+        q: `${name} menemukan sebuah anomali ketika membandingkan dua kelompok data perlakuan pada materi ${topik}. Kelompok A menunjukkan respon cepat, sedangkan Kelompok B menunjukkan respon lambat namun berdaya tahan tinggi. Faktor dominan yang mendasari perbedaan karakteristik tersebut adalah...`,
+        stimulus: `Diberikan Komparasi Karakteristik Sistem ${topik}:`,
+        opts: {
+          A: `Perbedaan komposisi internal dan laju kinetika adaptasi pada masing-masing kelompok perlakuan.`,
+          B: `Ketidaksengajaan dalam penulisan label tanpa memengaruhi substansi materi.`,
+          C: `Hilangnya sifat dasar materi secara permanen akibat perubahan suhu sesaat.`,
+          D: `Tidak adanya pengaruh faktor penentu dalam pembentukan karakteristik kelompok.`
+        },
+        kunci: "A",
+        pembahasan: `Respon dinamik yang berbeda pada perlakuan materi ${topik} dipengaruhi oleh struktur komposisi dan mekanisme adaptasi internal.`,
+        level: "C4 (HOTS - Diferensiasi Karakteristik)",
+        indikator: `Peserta didik mampu membedakan faktor penyebab variasi respon pada sistem ${topik}.`
+      };
     },
-    {
-      q: `Apabila salah satu faktor pendukung dalam sistem ${topik} mengalami penurunan drastis, dampak langsung yang paling mungkin terjadi pada keseimbangan sistem adalah...`,
-      opts: {
-        A: "Sistem akan mengalami disrupsi fungsional dan membutuhkan penyesuaian adaptif.",
-        B: "Sistem akan langsung berhenti total tanpa kemungkinan pemulihan.",
-        C: "Tidak ada pengaruh apapun karena setiap komponen bersifat terisolasi.",
-        D: "Kinerja sistem otomatis berlipat ganda secara spontan."
-      },
-      kunci: "A",
-      pembahasan: "Dalam sistem terpadu, penurunan satu faktor memicu adaptasi atau regulasi kompensasi untuk memulihkan ekuilibrium.",
-      level: "C4 (HOTS - Evaluasi)"
+    (idx: number) => {
+      return {
+        q: `Karakteristik esensial yang membedakan konsep ${topik} dengan konsep pendukung lainnya dalam disiplin ${mapel} terletak pada kemampuannya untuk...`,
+        stimulus: `Konsep Esensial Pembelajaran ${mapel}:`,
+        opts: {
+          A: `Menjelaskan hubungan keteraturan gejala secara komprehensif dan dapat diuji kebenarannya secara empiris.`,
+          B: `Mengabaikan hukum-hukum keteraturan alam yang telah terbukti secara ilmiah.`,
+          C: `Mengganti fakta eksperimen dengan opini subjektif tanpa dasar teori.`,
+          D: `Membatasi ruang eksplorasi peserta didik pada satu sudut pandang sempit.`
+        },
+        kunci: "A",
+        pembahasan: `Pilihan A tepat karena esensi materi ${topik} berlandaskan pada prinsip keteraturan saintifik yang dapat dibuktikan secara empiris.`,
+        level: "C2 (Pemahaman Konsep Kunci)",
+        indikator: `Peserta didik mampu menjelaskan karakteristik esensial dari materi ${topik}.`
+      };
+    },
+    (idx: number) => {
+      const name = names[(idx + 5) % names.length];
+      return {
+        q: `Jika dalam suatu sistem terpadu materi ${topik}, terjadi penurunan kapasitas input hingga 40%, tindakan penyesuaian adaptif (mitigasi) yang paling tepat dilakukan ${name} untuk menjaga stabilitas luaran (output) adalah...`,
+        stimulus: `Simulasi Kasus Problem-Solving ${topik}:`,
+        opts: {
+          A: `Meningkatkan efisiensi konversi internal dan mereduksi kehilangan energi/sumber daya pada setiap simpul.`,
+          B: `Meningkatkan beban kerja komponen lain di luar ambang batas toleransi maksimum.`,
+          C: `Membiarkan sistem beroperasi tanpa penyesuaian hingga terjadi penurunan fungsi permanen.`,
+          D: `Menghapus fungsi monitoring data agar indikator penurunan tidak tercatat.`
+        },
+        kunci: "A",
+        pembahasan: `Pilihan A merupakan langkah problem solving ideal: optimalisasi efisiensi konversi internal dapat mengimbangi penurunan laju input bahan.`,
+        level: "C6 (HOTS - Problem Solving & Mitigasi)",
+        indikator: `Peserta didik mampu merumuskan langkah mitigasi adaptif saat terjadi penurunan parameter input ${topik}.`
+      };
     }
   ];
 
   for (let i = 0; i < jumlahPG; i++) {
-    const template = samplePGPrompts[i % samplePGPrompts.length];
+    const generator = dynamicPGTemplates[i % dynamicPGTemplates.length];
+    const itemData = generator(i);
     const qItem = {
       id: `q-pg-${currentNum}`,
       no: currentNum,
       tipe: "PG",
-      pertanyaan: template.q,
-      stimulus: `Diberikan konteks pembelajaran ${mapel} pada materi ${topik}:`,
-      pilihan: template.opts,
-      kunciJawaban: template.kunci,
-      pembahasan: template.pembahasan,
-      levelKognitif: template.level,
-      indikatorSoal: `Peserta didik dapat memahami dan menganalisis konsep ${topik} pada aspek indikator ke-${i + 1}.`,
+      pertanyaan: itemData.q,
+      stimulus: itemData.stimulus,
+      pilihan: itemData.opts,
+      kunciJawaban: itemData.kunci,
+      pembahasan: itemData.pembahasan,
+      levelKognitif: itemData.level,
+      indikatorSoal: itemData.indikator,
       bobotSkor: 1
     };
     soalList.push(qItem);
     kisiKisi.push({
       no: currentNum,
-      capaianPembelajaran: `Menguasai dan mengaplikasikan konsep ${topik} dalam pembelajaran ${mapel}.`,
+      capaianPembelajaran: `Menguasai, menganalisis, dan mengevaluasi konsep ${topik} dalam pembelajaran ${mapel}.`,
       materi: topik,
       indikatorSoal: qItem.indikatorSoal,
       levelKognitif: qItem.levelKognitif,
@@ -704,50 +749,73 @@ function generateFallbackExam(config: any) {
     currentNum++;
   }
 
-  // 2. Pilihan Ganda Bergambar / Stimulus Visual
-  const samplePGBergambarPrompts = [
-    {
-      q: `Perhatikan diagram alur pada gambar di atas! Bagian yang ditunjukkan oleh label [X] memiliki peran krusial dalam mekanisme ${topik}, yaitu sebagai...`,
-      desc: `[Diagram Struktur / Skema Alur]: Menunjukkan bagan alur proses ${topik} yang menghubungkan input awal, proses transformasi pada simpul [X], dan menghasilkan output optimal [Y].`,
-      opts: {
-        A: "Pusat regulasi dan konversi data/energi utama dalam siklus proses.",
-        B: "Pintu pembuangan akhir yang tidak memengaruhi proses sebelumnya.",
-        C: "Komponen pasif tanpa fungsi interaksi antar sistem.",
-        D: "Media penyimpan cadangan yang hanya aktif saat kondisi darurat."
-      },
-      kunci: "A",
-      pembahasan: "Simpul [X] pada diagram bertindak sebagai pusat kendali/reaksi utama yang memproses input menjadi output fungsional.",
-      level: "C4 (HOTS - Interpretasi Gambar)"
+  // 2. Dynamic Pilihan Ganda Bergambar / Stimulus Visual
+  const dynamicPGBergambarTemplates = [
+    (idx: number) => {
+      return {
+        q: `Perhatikan bagan alur proses pada diagram di atas! Bagian yang ditunjukkan oleh label [X] memegang peranan kunci dalam siklus materi ${topik}, yaitu sebagai...`,
+        desc: `[Diagram Alur Terstruktur & Siklus Transformasi]: Menampilkan bagan relasi antar subsistem materi ${topik}. Input awal masuk ke simpul regulator [X], bertransformasi melalui fase katalisis [Y], dan menghasilkan produk akhir optimal [Z].`,
+        opts: {
+          A: "Pusat regulasi dan pemrosesan utama yang menentukan efisiensi konversi siklus.",
+          B: "Saluran pembuangan residu akhir yang tidak berinteraksi dengan proses.",
+          C: "Komponen isolator pasif tanpa fungsi pertukaran data atau energi.",
+          D: "Penghambat laju reaksi yang menghentikan seluruh aktivitas sistem."
+        },
+        kunci: "A",
+        pembahasan: "Simpul [X] bertindak sebagai pusat kendali/reaksi utama yang memproses input menjadi luaran fungsional terarah.",
+        level: "C4 (HOTS - Interpretasi Diagram)",
+        indikator: `Disajikan diagram stimulus visual, peserta didik mampu menginterpretasikan fungsi komponen kunci [X] pada ${topik}.`
+      };
     },
-    {
-      q: `Cermati grafik tren hubungan data pada gambar di atas! Kesimpulan yang paling tepat mengenai korelasi antar variabel pada grafik terkait ${topik} adalah...`,
-      desc: `[Grafik Garis / Batang Komparasi Data]: Menampilkan sumbu X (Waktu/Variabel Bebas) dan sumbu Y (Kinerja/Respon). Garis kurva menunjukkan kenaikan eksponensial di awal yang kemudian mencapai fase stabil (plato).`,
-      opts: {
-        A: "Hubungan berbanding lurus hingga mencapai titik saturasi optimal.",
-        B: "Kedua variabel saling bertolak belakang secara berkesinambungan.",
-        C: "Variabel Y tidak dipengaruhi oleh perubahan variabel X.",
-        D: "Kurva menunjukkan fluktuasi acak tanpa pola teratur."
-      },
-      kunci: "A",
-      pembahasan: "Grafik memperlihatkan peningkatan proporsional yang berangsur stabil saat mendekati kapasitas maksimum.",
-      level: "C4 (HOTS - Analisis Data Visual)"
+    (idx: number) => {
+      return {
+        q: `Cermati grafik perbandingan respon data pada gambar di atas! Kesimpulan yang paling tepat mengenai dinamika hubungan antar variabel pada grafik terkait ${topik} adalah...`,
+        desc: `[Grafik Garis Komparasi Eksperimental]: Sumbu horizontal (X) memuat variabel waktu/perlakuan, sumbu vertikal (Y) memuat laju performa ${topik}. Kurva perlakuan A menunjukkan peningkatan linier stabil, sedangkan kurva B mencapai titik jenuh (plato).`,
+        opts: {
+          A: "Perlakuan A memiliki efisiensi stabil berkesinambungan, sedangkan perlakuan B mengalami kejenuhan kapasitas optimal.",
+          B: "Kedua perlakuan tidak menunjukkan adanya interaksi teratur dengan variabel waktu.",
+          C: "Perlakuan B lebih unggul di segala rentang waktu dibandingkan perlakuan A.",
+          D: "Grafik membuktikan bahwa variabel waktu tidak memengaruhi respon sistem sama sekali."
+        },
+        kunci: "A",
+        pembahasan: "Kurva perlakuan A linier sedangkan B mendatar (saturasi), membuktikan adanya batas daya tampung pada perlakuan B.",
+        level: "C4 (HOTS - Analisis Grafik Numerik)",
+        indikator: `Disajikan grafik kurva eksperimen, peserta didik mampu menyimpulkan perbedaan karakteristik respon data pada materi ${topik}.`
+      };
+    },
+    (idx: number) => {
+      return {
+        q: `Berdasarkan skema anatomi/struktur penampang pada gambar di atas, keterkaitan antara struktur lapisan luar dan fungsi perlindungan pada materi ${topik} dapat dianalisis sebagai...`,
+        desc: `[Skema Struktur Penampang Bertingkat]: Menampilkan ilustrasi cross-section lapisan materi ${topik} dengan label Lapisan Pelindung Eksternal, Membran Semi-permeabel, dan Inti Aktif.`,
+        opts: {
+          A: "Lapisan eksternal tersusun rapat untuk meminimalkan interferensi lingkungan luar terhadap stabilitas inti.",
+          B: "Lapisan luar bersifat terbuka bebas tanpa selektivitas zat perantara.",
+          C: "Struktur penampang tidak memiliki pembagian fungsi fungsional antar lapisan.",
+          D: "Inti aktif bekerja mandiri tanpa memerlukan sokongan dari lapisan luar."
+        },
+        kunci: "A",
+        pembahasan: "Struktur luar yang padat berfungsi sebagai barrier protektif bagi integritas komponen inti dalam sistem.",
+        level: "C4 (HOTS - Analisis Struktur Visual)",
+        indikator: `Disajikan gambar penampang struktur, peserta didik mampu menganalisis hubungan struktur dan fungsi pada ${topik}.`
+      };
     }
   ];
 
   for (let i = 0; i < jumlahPGBergambar; i++) {
-    const template = samplePGBergambarPrompts[i % samplePGBergambarPrompts.length];
+    const generator = dynamicPGBergambarTemplates[i % dynamicPGBergambarTemplates.length];
+    const itemData = generator(i);
     const qItem = {
       id: `q-pg-img-${currentNum}`,
       no: currentNum,
-      tipe: "PG",
-      pertanyaan: template.q,
-      stimulus: `Perhatikan stimulus infografis / gambar diagram ${topik} berikut ini:`,
-      gambarDeskripsi: template.desc,
-      pilihan: template.opts,
-      kunciJawaban: template.kunci,
-      pembahasan: template.pembahasan,
-      levelKognitif: template.level,
-      indikatorSoal: `Disajikan gambar/diagram stimulus, peserta didik mampu menginterpretasikan dan menganalisis peran komponen ${topik}.`,
+      tipe: "PG_BERGAMBAR",
+      pertanyaan: itemData.q,
+      stimulus: `Perhatikan stimulus infografis / diagram visual materi ${topik} berikut:`,
+      gambarDeskripsi: itemData.desc,
+      pilihan: itemData.opts,
+      kunciJawaban: itemData.kunci,
+      pembahasan: itemData.pembahasan,
+      levelKognitif: itemData.level,
+      indikatorSoal: itemData.indikator,
       bobotSkor: 2
     };
     soalList.push(qItem);
@@ -764,37 +832,45 @@ function generateFallbackExam(config: any) {
     currentNum++;
   }
 
-  // 3. Soal Essay / Uraian (Teks Biasa)
-  const sampleEssayPrompts = [
-    {
-      q: `Jelaskan secara komprehensif bagaimana prinsip ${topik} bekerja dan sebutkan minimal 3 (tiga) contoh konkret penerapannya dalam kehidupan nyata peserta didik di lingkungan sekitar!`,
-      kunci: `Kunci Jawaban & Poin Utama:\n1. Definisi & Konsep Dasar: Menjelaskan mekanisme kerja ${topik} secara logis dan runtut.\n2. Hubungan Sebab-Akibat: Mengaitkan antar komponen dengan tepat.\n3. Tiga Contoh Nyata: Memberikan 3 contoh relevan di lingkungan sekolah, rumah, atau masyarakat.`,
-      pembahasan: "Siswa dinilai berdasarkan kejelasan alur logika, ketepatan terminologi ilmiah, serta relevansi contoh nyata yang dipaparkan.",
-      rubrik: "Skor 10: Menjawab 3 poin lengkap & argumen mendalam. Skor 7: Menjawab 2 poin tepat. Skor 4: Hanya 1 poin benar. Skor 1: Menjawab kurang relevan.",
-      level: "C5 (HOTS - Evaluasi & Sintesis)"
+  // 3. Dynamic Soal Essay / Uraian (Teks Biasa)
+  const dynamicEssayTemplates = [
+    (idx: number) => {
+      return {
+        q: `Jelaskan secara komprehensif mekanisme kerja konsep "${topik}" dan analisislah minimal 3 (tiga) implikasi nyata penerapannya dalam memecahkan permasalahan kontekstual di lingkungan sekitar peserta didik!`,
+        kunci: `Kunci Jawaban & Indikator Penilaian:\n1. Definisi & Mekanisme Fundamental: Menguraikan prinsip kerja ${topik} secara runtut dan tepat secara ilmiah.\n2. Analisis Implikasi Kontekstual: Mengaitkan 3 contoh nyata (misal: di lingkungan sekolah, rumah, dan masyarakat).\n3. Kesimpulan Reflektif: Memberikan simpulan mengenai signifikansi konsep bagi perbaikan kualitas hidup.`,
+        pembahasan: "Penilaian ditekankan pada kedalaman argumentasi, koherensi logika berpikir ilmiah, dan keakuratan terminologi konsep.",
+        rubrik: "Skor 10: Uraian mekanisme lengkap & 3 contoh implikasi nyata sangat logis. Skor 7: Mekanisme benar & 2 contoh implikasi. Skor 4: Hanya menyebutkan definisi umum. Skor 1: Jawaban tidak relevan.",
+        level: "C5 (HOTS - Evaluasi & Sintesis Ilmiah)",
+        indikator: `Peserta didik mampu menguraikan mekanisme konseptual dan merumuskan 3 implikasi nyata terkait materi ${topik}.`
+      };
     },
-    {
-      q: `Dalam sebuah eksperimen/kasus studi mengenai ${topik}, ditemukan kendala di mana hasil yang diperoleh tidak sesuai dengan target standar yang diharapkan. Analisislah kemungkinan faktor penyebab kegagalan tersebut dan usulkan 2 (dua) langkah perbaikan (solusi) yang efektif!`,
-      kunci: `Kunci Jawaban:\n1. Identifikasi Faktor Penyebab: Ketidaktelitian pengukuran, variabel kontrol tidak terjaga, atau pengaruh lingkungan luar.\n2. Solusi 1: Kalibrasi instrumen dan standarisasi prosedur operasional.\n3. Solusi 2: Evaluasi berkala dan pengujian berulang (replikasi data).`,
-      pembahasan: "Mengukur kemampuan pemecahan masalah kritis (problem-solving) dan pemikiran reflektif peserta didik.",
-      rubrik: "Skor 10: Mengidentifikasi minimal 2 penyebab dan 2 solusi konkret yang logis. Skor 5: Hanya menyebutkan penyebab atau solusi saja.",
-      level: "C6 (HOTS - Kreasi & Problem Solving)"
+    (idx: number) => {
+      const name = names[(idx + 2) % names.length];
+      return {
+        q: `Dalam sebuah eksperimen mandiri mengenai "${topik}", ${name} mendapati bahwa hasil pengukuran berulang menunjukkan tingkat deviasi (kesalahan acak) yang tinggi. Rancanglah rencana perbaikan metodologi yang mencakup: (a) identifikasi sumber ketidakpastian, (b) 2 langkah standardisasi instrumen, dan (c) prosedur verifikasi keabsahan data!`,
+        kunci: `Kunci Jawaban Solutif:\n(a) Sumber Ketidakpastian: Fluktuasi suhu lingkungan, ketidaktelitian paralaks pembacaan, dan toleransi alat ukur.\n(b) Langkah Standardisasi: Kalibrasi ulang alat ukur dengan standar baku dan penyusunan SOP pengukuran berkala.\n(c) Prosedur Verifikasi: Melakukan replikasi minimal 3 kali pengulangan (triplo) dan menghitung rerata serta standar deviasi.`,
+        pembahasan: "Mengukur keterampilan merancang eksperimen (experimental design) dan pemikiran reflektif berbasis bukti.",
+        rubrik: "Skor 10: Menjawab poin a, b, dan c secara runtut dan ilmiah. Skor 6: Menjawab 2 poin tepat. Skor 3: Hanya menjawab 1 poin secara parsial.",
+        level: "C6 (HOTS - Perancangan Eksperimen & Solusi)",
+        indikator: `Peserta didik mampu merancang perbaikan metodologi penelitian ilmiah pada topik ${topik}.`
+      };
     }
   ];
 
   for (let i = 0; i < jumlahEssay; i++) {
-    const template = sampleEssayPrompts[i % sampleEssayPrompts.length];
+    const generator = dynamicEssayTemplates[i % dynamicEssayTemplates.length];
+    const itemData = generator(i);
     const qItem = {
       id: `q-essay-${currentNum}`,
       no: currentNum,
       tipe: "ESSAY",
-      pertanyaan: template.q,
+      pertanyaan: itemData.q,
       stimulus: "",
-      kunciJawaban: template.kunci,
-      pembahasan: template.pembahasan,
-      rubrikPenskoran: template.rubrik,
-      levelKognitif: template.level,
-      indikatorSoal: `Peserta didik mampu menguraikan, menganalisis, dan merumuskan solusi permasalahan terkait ${topik} secara tertulis.`,
+      kunciJawaban: itemData.kunci,
+      pembahasan: itemData.pembahasan,
+      rubrikPenskoran: itemData.rubrik,
+      levelKognitif: itemData.level,
+      indikatorSoal: itemData.indikator,
       bobotSkor: 10
     };
     soalList.push(qItem);
@@ -811,32 +887,36 @@ function generateFallbackExam(config: any) {
     currentNum++;
   }
 
-  // 4. Soal Essay Bergambar / Kasus Visual
-  const sampleEssayBergambarPrompts = [
-    {
-      q: `Perhatikan skema siklus dan data eksperimen pada gambar di atas! Analisislah mengapa terjadi fluktuasi pada tahap transisi ke-3 dan rumuskan solusi untuk mengoptimalkan efisiensi sistem materi ${topik}!`,
-      desc: `[Diagram Siklus Terpadu & Grafik Parameter]: Menampilkan hubungan antara 3 komponen utama dalam sistem ${topik} beserta grafik fluktuasi performa di mana terdapat penurunan efisiensi pada fase transisi.`,
-      kunci: `Kunci Jawaban:\n1. Analisis Gambar: Fluktuasi terjadi akibat ketidakseimbangan beban kerja pada komponen kedua.\n2. Solusi Optimasi: Melakukan regulasi umpan balik negatif dan stabilisasi input materi agar efisiensi kembali optimal.`,
-      pembahasan: "Peserta didik mengintegrasikan analisis visual data dengan pemahaman konsep konseptual untuk merumuskan rekomendasi pemecahan masalah.",
-      rubrik: "Skor 10: Analisis visual akurat dan solusi yang diajukan berbasis prinsip ilmiah. Skor 6: Solusi benar tetapi analisis gambar kurang detail.",
-      level: "C6 (HOTS - Kreasi & Desain Solusi)"
+  // 4. Dynamic Soal Essay Bergambar / Kasus Visual
+  const dynamicEssayBergambarTemplates = [
+    (idx: number) => {
+      return {
+        q: `Cermati bagan siklus terpadu dan grafik data pengamatan pada gambar di atas! Analisislah penyebab terjadinya penurunan laju efisiensi pada fase transisi ke-2, serta rumuskan model rekomendasi perbaikan berbasis sains/teknologi untuk mengoptimalkan kinerja sistem ${topik}!`,
+        desc: `[Diagram Siklus Terpadu & Grafik Parameter Uji]: Menampilkan skema relasi interaktif 3 komponen utama materi ${topik} yang disertai grafik fluktuasi laju kerja. Terlihat penurunan tajam efisiensi pada fase transisi kedua sebelum kembali stabil di akhir siklus.`,
+        kunci: `Kunci Jawaban Terstruktur:\n1. Analisis Visual Gambar: Penurunan laju efisiensi pada fase transisi ke-2 dipicu oleh keterbatasan laju transfer massa/energi antar subsistem.\n2. Rekomendasi Solutif Ilmiah: Memasang mekanisme buffer adaptif atau pengatur umpan balik (feedback loop) otomatis agar transisi berjalan mulus tanpa kehilangan energi.`,
+        pembahasan: "Menguji kompetensi tingkat tinggi dalam memadukan interpretasi visual grafik dengan perumusan desain solusi rekayasa.",
+        rubrik: "Skor 10: Analisis visual mendalam dan rekomendasi solusi ilmiah sangat aplikatif. Skor 6: Solusi baik namun analisis visual kurang spesifik. Skor 3: Hanya menjelaskan gambar tanpa solusi.",
+        level: "C6 (HOTS - Kreasi & Desain Model Rekomendasi)",
+        indikator: `Disajikan stimulus diagram kasus visual, peserta didik mampu mengevaluasi anomali dan merancang rekomendasi model perbaikan pada materi ${topik}.`
+      };
     }
   ];
 
   for (let i = 0; i < jumlahEssayBergambar; i++) {
-    const template = sampleEssayBergambarPrompts[i % sampleEssayBergambarPrompts.length];
+    const generator = dynamicEssayBergambarTemplates[i % dynamicEssayBergambarTemplates.length];
+    const itemData = generator(i);
     const qItem = {
       id: `q-essay-img-${currentNum}`,
       no: currentNum,
-      tipe: "ESSAY",
-      pertanyaan: template.q,
-      stimulus: `Perhatikan stimulus infografis/diagram kasus visual berikut:`,
-      gambarDeskripsi: template.desc,
-      kunciJawaban: template.kunci,
-      pembahasan: template.pembahasan,
-      rubrikPenskoran: template.rubrik,
-      levelKognitif: template.level,
-      indikatorSoal: `Disajikan bagan/grafik kasus visual, peserta didik mampu mengevaluasi dan merumuskan solusi komprehensif terkait ${topik}.`,
+      tipe: "ESSAY_BERGAMBAR",
+      pertanyaan: itemData.q,
+      stimulus: `Perhatikan stimulus studi kasus visual diagram ${topik} berikut:`,
+      gambarDeskripsi: itemData.desc,
+      kunciJawaban: itemData.kunci,
+      pembahasan: itemData.pembahasan,
+      rubrikPenskoran: itemData.rubrik,
+      levelKognitif: itemData.level,
+      indikatorSoal: itemData.indikator,
       bobotSkor: 10
     };
     soalList.push(qItem);
@@ -876,11 +956,11 @@ function generateFallbackExam(config: any) {
     },
     tanggalDibuat: new Date().toISOString(),
     petunjukUmum: [
-      "Berdoalah sebelum memulai mengerjakan soal ujian.",
-      "Tuliskan nama lengkap, kelas, dan nomor peserta pada lembar jawaban.",
+      "Berdoalah sebelum memulai mengerjakan naskah soal ujian.",
+      "Tuliskan nama lengkap, kelas, dan nomor peserta pada lembar jawaban yang tersedia.",
       "Bacalah setiap butir soal dengan cermat dan teliti sebelum menentukan jawaban.",
       "Dahulukan menjawab butir soal yang Anda anggap lebih mudah.",
-      "Periksa kembali kelengkapan lembar jawaban Anda sebelum diserahkan kepada guru/pengawas."
+      "Periksa kembali kelengkapan seluruh lembar jawaban Anda sebelum diserahkan kepada guru/pengawas."
     ],
     kisiKisi,
     soalList

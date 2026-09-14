@@ -82,6 +82,7 @@ export const CharacterPointsView: React.FC<CharacterPointsViewProps> = ({
   const [inputClassId, setInputClassId] = useState<string>('');
   const [inputTraitType, setInputTraitType] = useState<'POSITIF' | 'NEGATIF'>('POSITIF');
   const [inputTraitId, setInputTraitId] = useState<string>('');
+  const [inputTraitSearch, setInputTraitSearch] = useState<string>('');
   const [inputEvaluatorName, setInputEvaluatorName] = useState<string>(initialEvaluatorName);
   const [inputPhotoUrl, setInputPhotoUrl] = useState<string>('');
   const [inputNotes, setInputNotes] = useState<string>('');
@@ -303,6 +304,7 @@ export const CharacterPointsView: React.FC<CharacterPointsViewProps> = ({
     }
     
     setInputTraitType('POSITIF');
+    setInputTraitSearch('');
     const firstPosTrait = traits.find(t => t.type === 'POSITIF');
     setInputTraitId(firstPosTrait?.id || traits[0]?.id || '');
     setInputPhotoUrl('');
@@ -314,6 +316,7 @@ export const CharacterPointsView: React.FC<CharacterPointsViewProps> = ({
   // Handle changing character type filter (POSITIF / NEGATIF) in modal
   const handleTraitTypeChange = (type: 'POSITIF' | 'NEGATIF') => {
     setInputTraitType(type);
+    setInputTraitSearch('');
     const matchingTraits = traits.filter(t => t.type === type);
     if (matchingTraits.length > 0) {
       setInputTraitId(matchingTraits[0].id);
@@ -321,6 +324,21 @@ export const CharacterPointsView: React.FC<CharacterPointsViewProps> = ({
       setInputTraitId('');
     }
   };
+
+  // Filtered traits for Modal selection based on type and search query
+  const filteredModalTraits = useMemo(() => {
+    return traits.filter(t => {
+      if (t.type !== inputTraitType) return false;
+      if (!inputTraitSearch.trim()) return true;
+      const q = inputTraitSearch.toLowerCase().trim();
+      return (
+        t.name.toLowerCase().includes(q) ||
+        (t.category && t.category.toLowerCase().includes(q)) ||
+        String(t.points).includes(q) ||
+        (t.description && t.description.toLowerCase().includes(q))
+      );
+    });
+  }, [traits, inputTraitType, inputTraitSearch]);
 
   // Submit New Character Point Log
   const handleSubmitLog = (e: React.FormEvent) => {
@@ -733,27 +751,93 @@ export const CharacterPointsView: React.FC<CharacterPointsViewProps> = ({
                 </div>
               </div>
 
-              {/* Select Character Trait from Master Catalog (Filtered by inputTraitType) */}
+              {/* Select Character Trait from Master Catalog (Filtered by inputTraitType & Search) */}
               <div>
-                <label className="block text-xs font-extrabold uppercase tracking-wider text-slate-600 mb-1">
-                  2. Pilih Input Karakter Siswa ({inputTraitType === 'POSITIF' ? 'Positif' : 'Negatif'}) <span className="text-rose-500">*</span>
-                </label>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="block text-xs font-extrabold uppercase tracking-wider text-slate-600">
+                    2. Pilih Input Karakter Siswa ({inputTraitType === 'POSITIF' ? 'Positif' : 'Negatif'}) <span className="text-rose-500">*</span>
+                  </label>
+                  <span className="text-[11px] font-semibold text-slate-500 bg-slate-100 px-2 py-0.5 rounded-md">
+                    {filteredModalTraits.length} Karakter Tersedia
+                  </span>
+                </div>
+
+                {/* Search Input for Character Name / Category / Points */}
+                <div className="relative mb-2">
+                  <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="text"
+                    value={inputTraitSearch}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setInputTraitSearch(val);
+                      const q = val.toLowerCase().trim();
+                      const matches = traits.filter(t => {
+                        if (t.type !== inputTraitType) return false;
+                        if (!q) return true;
+                        return (
+                          t.name.toLowerCase().includes(q) || 
+                          (t.category && t.category.toLowerCase().includes(q)) || 
+                          String(t.points).includes(q)
+                        );
+                      });
+                      if (matches.length > 0 && !matches.some(m => m.id === inputTraitId)) {
+                        setInputTraitId(matches[0].id);
+                      }
+                    }}
+                    placeholder={`Cari nama karakter ${inputTraitType === 'POSITIF' ? 'positif' : 'negatif'} (contoh: Disiplin, Jujur, Terlambat)...`}
+                    className="w-full pl-8 pr-7 py-2 bg-slate-50 border border-slate-300 rounded-xl text-slate-800 text-xs font-medium focus:outline-none focus:ring-2 focus:ring-indigo-500 placeholder:text-slate-400 shadow-2xs"
+                  />
+                  {inputTraitSearch && (
+                    <button
+                      type="button"
+                      onClick={() => setInputTraitSearch('')}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 text-xs font-bold p-1 rounded-full hover:bg-slate-200 cursor-pointer"
+                      title="Hapus pencarian"
+                    >
+                      ✕
+                    </button>
+                  )}
+                </div>
+
                 <select
                   required
                   value={inputTraitId}
                   onChange={(e) => setInputTraitId(e.target.value)}
                   className="w-full px-4 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-slate-800 font-bold text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
                 >
-                  {traits.filter(t => t.type === inputTraitType).length === 0 ? (
-                    <option value="">-- Tidak ada data karakter {inputTraitType.toLowerCase()} --</option>
+                  {filteredModalTraits.length === 0 ? (
+                    <option value="">-- Tidak ada karakter yang cocok dengan "{inputTraitSearch}" --</option>
                   ) : (
-                    traits.filter(t => t.type === inputTraitType).map(t => (
+                    filteredModalTraits.map(t => (
                       <option key={t.id} value={t.id}>
                         [{t.type === 'POSITIF' ? `+${t.points}` : `-${t.points}`} Poin] {t.name} ({t.category || 'Umum'})
                       </option>
                     ))
                   )}
                 </select>
+
+                {/* Quick Selection Badges if few results or search query */}
+                {inputTraitSearch && filteredModalTraits.length > 0 && filteredModalTraits.length <= 8 && (
+                  <div className="flex flex-wrap gap-1.5 mt-2">
+                    {filteredModalTraits.map(t => (
+                      <button
+                        key={t.id}
+                        type="button"
+                        onClick={() => setInputTraitId(t.id)}
+                        className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-all cursor-pointer border ${
+                          inputTraitId === t.id
+                            ? t.type === 'POSITIF'
+                              ? 'bg-blue-600 text-white border-blue-600 shadow-2xs'
+                              : 'bg-red-600 text-white border-red-600 shadow-2xs'
+                            : 'bg-white hover:bg-slate-100 text-slate-700 border-slate-200'
+                        }`}
+                      >
+                        {t.name} ({t.type === 'POSITIF' ? `+${t.points}` : `-${t.points}`})
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
 
               {/* Selected Trait Info Badge */}

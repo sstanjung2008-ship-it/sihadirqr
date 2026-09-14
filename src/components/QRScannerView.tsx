@@ -1033,35 +1033,15 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
                 <p className="text-[11px] text-slate-400 mt-0.5">Klik nama untuk langsung simulasi scan</p>
               </div>
 
-              {/* Filter Kelas & Cari Nama */}
-              <div className="flex flex-wrap items-center gap-2 self-start sm:self-auto">
-                {/* Search Input */}
-                <div className="relative flex-1 sm:w-48">
-                  <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
-                  <input
-                    type="text"
-                    value={simSearchQuery}
-                    onChange={(e) => setSimSearchQuery(e.target.value)}
-                    placeholder="Cari nama siswa..."
-                    className="w-full pl-8 pr-2.5 py-1 bg-slate-50 border border-slate-200 text-slate-800 text-xs font-medium rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 placeholder:text-slate-400"
-                  />
-                  {simSearchQuery && (
-                    <button
-                      onClick={() => setSimSearchQuery('')}
-                      className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 text-[10px] font-bold"
-                    >
-                      ✕
-                    </button>
-                  )}
-                </div>
-
-                {/* Filter Kelas */}
-                <div className="flex items-center gap-1">
+              {/* Filter Kelas & Cari Nama (Pilihan Kelas di atas, Cari Nama di bawah pada mode mobile) */}
+              <div className="flex flex-col sm:flex-row sm:items-center gap-2 w-full sm:w-auto">
+                {/* 1. Filter Pilihan Kelas */}
+                <div className="flex items-center gap-1.5 w-full sm:w-auto">
                   <Filter className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
                   <select
                     value={simClassFilter}
                     onChange={(e) => setSimClassFilter(e.target.value)}
-                    className="bg-slate-50 border border-slate-200 text-slate-800 text-xs font-bold rounded-xl px-2.5 py-1 focus:outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer"
+                    className="w-full sm:w-auto bg-slate-50 border border-slate-200 text-slate-800 text-xs font-bold rounded-xl px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer shadow-2xs"
                   >
                     <option value="ALL">Semua Kelas ({students.length})</option>
                     {classList.map((c) => (
@@ -1070,6 +1050,26 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
                       </option>
                     ))}
                   </select>
+                </div>
+
+                {/* 2. Cari Nama Siswa (Berada di bawah pilihan kelas pada mode mobile) */}
+                <div className="relative w-full sm:w-48">
+                  <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="text"
+                    value={simSearchQuery}
+                    onChange={(e) => setSimSearchQuery(e.target.value)}
+                    placeholder="Cari nama siswa..."
+                    className="w-full pl-8 pr-7 py-1.5 bg-slate-50 border border-slate-200 text-slate-800 text-xs font-medium rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 placeholder:text-slate-400 shadow-2xs"
+                  />
+                  {simSearchQuery && (
+                    <button
+                      onClick={() => setSimSearchQuery('')}
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 text-xs font-bold p-0.5"
+                    >
+                      ✕
+                    </button>
+                  )}
                 </div>
               </div>
             </div>

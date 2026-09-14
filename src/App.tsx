@@ -73,6 +73,7 @@ import { ParentAccountView } from './components/ParentAccountView';
 import { TeacherAccountView } from './components/TeacherAccountView';
 import { TeacherAssistantView } from './components/TeacherAssistantView';
 import { ParentBottomNav } from './components/ParentBottomNav';
+import { TeacherBottomNav } from './components/TeacherBottomNav';
 import { LoginView } from './components/LoginView';
 import { PWAInstallBanner } from './components/PWAInstallBanner';
 import { KbmVoiceReminderBanner } from './components/KbmVoiceReminderBanner';
@@ -1377,7 +1378,7 @@ export default function App() {
         )}
 
         {/* Main View Router */}
-        <main className={`flex-1 p-4 sm:p-6 lg:p-8 max-w-7xl w-full mx-auto ${currentRole === 'PARENT' ? 'pb-28 lg:pb-8' : ''}`}>
+        <main className={`flex-1 p-4 sm:p-6 lg:p-8 max-w-7xl w-full mx-auto ${(currentRole === 'PARENT' || currentRole === 'TEACHER') ? 'pb-28 lg:pb-8' : ''}`}>
           {activeTab === 'scanner' && (
             <QRScannerView
               students={students}
@@ -1628,6 +1629,17 @@ export default function App() {
           activeTab={activeTab}
           onTabChange={handleTabChange}
           unreadLeavesCount={leaveRequests.filter(l => l.status === 'PENDING').length}
+        />
+      )}
+
+      {/* Mobile Glass Bottom Navigation Bar for Teacher Role */}
+      {currentRole === 'TEACHER' && (
+        <TeacherBottomNav
+          activeTab={activeTab}
+          onTabChange={handleTabChange}
+          unreadLeavesCount={leaveRequests.filter(l => l.status === 'PENDING').length}
+          teacherName={currentTeacher?.name}
+          homeroomClassName={currentTeacher?.homeroomClassName}
         />
       )}
 

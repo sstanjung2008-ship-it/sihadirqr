@@ -1666,6 +1666,18 @@ export function resetToDefaultData(): void {
 // ONLINE PRESENCE TRACKING SYSTEM (GURU, TU & ORANG TUA REAL-TIME)
 // -------------------------------------------------------------
 
+function normalizeDigits(str?: string): string {
+  if (!str) return '';
+  const digits = str.replace(/\D/g, '');
+  if (digits.startsWith('62')) return '0' + digits.slice(2);
+  return digits;
+}
+
+function normalizeAlphaNum(str?: string): string {
+  if (!str) return '';
+  return str.toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
 export function getOnlinePresenceList(): UserPresence[] {
   try {
     const raw = localStorage.getItem(KEYS.ONLINE_PRESENCE);
@@ -1680,7 +1692,7 @@ export function getOnlinePresenceList(): UserPresence[] {
   }
 }
 
-export function saveOnlinePresenceList(list: UserPresence[], instant: boolean = false): void {
+export function saveOnlinePresenceList(list: UserPresence[], instant: boolean = true): void {
   const now = Date.now();
   // Keep records from last 10 minutes in storage, but clean stale records
   const cleanList = list.filter(item => item && (now - (item.lastActive || 0) < 600000));
@@ -1736,23 +1748,27 @@ export function updateUserHeartbeat(session: UserSession | null, isLoggingOut: b
     }
   }
 
-  saveOnlinePresenceList(updatedList, isLoggingOut);
+  saveOnlinePresenceList(updatedList, true);
 }
 
 export function isTeacherOnline(teacher: Teacher, presenceList?: UserPresence[]): boolean {
   const list = presenceList || getOnlinePresenceList();
   const now = Date.now();
-  const cleanNip = (teacher.nip || '').trim().toLowerCase();
-  const cleanPhone = (teacher.phone || '').trim().toLowerCase();
+  const cleanNip = normalizeAlphaNum(teacher.nip);
+  const cleanPhone = normalizeDigits(teacher.phone);
   const cleanName = (teacher.name || '').trim().toLowerCase();
 
   return list.some(p => {
     if (!p.isOnline || (now - (p.lastActive || 0) > 180000)) return false;
     if (p.role !== 'TEACHER' && p.role !== 'ADMIN') return false;
-    if (p.userId === teacher.id) return true;
-    const pIdent = (p.identifier || '').trim().toLowerCase();
-    if (cleanNip && pIdent === cleanNip) return true;
-    if (cleanPhone && pIdent === cleanPhone) return true;
+    if (p.userId && p.userId === teacher.id) return true;
+    
+    const pIdentNorm = normalizeAlphaNum(p.identifier);
+    const pUserNorm = normalizeAlphaNum(p.userId);
+    const pPhoneNorm = normalizeDigits(p.identifier) || normalizeDigits(p.userId);
+
+    if (cleanNip && (pIdentNorm === cleanNip || pUserNorm === cleanNip)) return true;
+    if (cleanPhone && pPhoneNorm && (pPhoneNorm === cleanPhone || pPhoneNorm.includes(cleanPhone) || cleanPhone.includes(pPhoneNorm))) return true;
     if (p.displayName && p.displayName.trim().toLowerCase() === cleanName) return true;
     return false;
   });
@@ -1761,20 +1777,30 @@ export function isTeacherOnline(teacher: Teacher, presenceList?: UserPresence[])
 export function isParentOnline(student: Student, presenceList?: UserPresence[]): boolean {
   const list = presenceList || getOnlinePresenceList();
   const now = Date.now();
-  const cleanNisn = (student.nisn || '').trim().toLowerCase();
-  const cleanNis = (student.nis || '').trim().toLowerCase();
-  const cleanPhone = (student.parentPhone || '').trim().toLowerCase();
+  const cleanNisn = normalizeAlphaNum(student.nisn);
+  const cleanNis = normalizeAlphaNum(student.nis);
+  const cleanPhone = normalizeDigits(student.parentPhone);
   const cleanParentName = (student.parentName || '').trim().toLowerCase();
+  const cleanStudentName = (student.name || '').trim().toLowerCase();
 
   return list.some(p => {
     if (!p.isOnline || (now - (p.lastActive || 0) > 180000)) return false;
     if (p.role !== 'PARENT') return false;
-    if (p.userId === student.id) return true;
-    const pIdent = (p.identifier || '').trim().toLowerCase();
-    if (cleanNisn && pIdent === cleanNisn) return true;
-    if (cleanNis && pIdent === cleanNis) return true;
-    if (cleanPhone && pIdent === cleanPhone) return true;
-    if (p.displayName && (p.displayName.trim().toLowerCase() === cleanParentName || p.displayName.includes(student.name))) return true;
+    if (p.userId && p.userId === student.id) return true;
+
+    const pIdentNorm = normalizeAlphaNum(p.identifier);
+    const pUserNorm = normalizeAlphaNum(p.userId);
+    const pPhoneNorm = normalizeDigits(p.identifier) || normalizeDigits(p.userId);
+
+    if (cleanNisn && (pIdentNorm === cleanNisn || pUserNorm === cleanNisn)) return true;
+    if (cleanNis && (pIdentNorm === cleanNis || pUserNorm === cleanNis)) return true;
+    if (cleanPhone && pPhoneNorm && (pPhoneNorm === cleanPhone || pPhoneNorm.includes(cleanPhone) || cleanPhone.includes(pPhoneNorm))) return true;
+    
+    if (p.displayName) {
+      const pNameLower = p.displayName.toLowerCase();
+      if (cleanParentName && pNameLower.includes(cleanParentName)) return true;
+      if (cleanStudentName && pNameLower.includes(cleanStudentName)) return true;
+    }
     return false;
   });
 }

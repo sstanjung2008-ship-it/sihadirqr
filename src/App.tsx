@@ -47,10 +47,13 @@ import {
   getUserSession,
   saveUserSession,
   initFirestoreRealtimeSync,
-  reconcileTeachersAndClasses
+  reconcileTeachersAndClasses,
+  getOnlinePresenceList,
+  updateUserHeartbeat
 } from './lib/storage';
 import { sendWhatsAppGatewayMessage } from './lib/exportUtils';
 import { ShieldCheck, CheckCircle2 } from 'lucide-react';
+import { UserPresence } from './types';
 
 import { Sidebar } from './components/Sidebar';
 import { QRScannerView } from './components/QRScannerView';
@@ -171,6 +174,7 @@ export default function App() {
   const [predicateSettings, setPredicateSettingsState] = useState<CharacterPredicateSettings>(getCharacterPredicateSettings());
   const [periods, setPeriodsState] = useState<LessonPeriod[]>(getLessonPeriods());
   const [schedules, setSchedulesState] = useState<ClassScheduleSlot[]>(getClassSchedules());
+  const [onlinePresenceList, setOnlinePresenceList] = useState<UserPresence[]>(() => getOnlinePresenceList());
 
   // Parent Child Identification (Strictly Bound to Logged-in NISN, studentId, or username)
   const parentStudent = useMemo(() => {
@@ -315,8 +319,8 @@ export default function App() {
     setPeriodsState(getLessonPeriods());
     setSchedulesState(getClassSchedules());
     setUserSessionState(getUserSession());
+    setOnlinePresenceList(getOnlinePresenceList());
   };
-
 
   useEffect(() => {
     initFirestoreRealtimeSync();
@@ -334,11 +338,72 @@ export default function App() {
       setClassesState(updatedClasses);
     }
 
+    const handlePresence = (e?: any) => {
+      if (e?.detail?.list) {
+        setOnlinePresenceList(e.detail.list);
+      } else {
+        setOnlinePresenceList(getOnlinePresenceList());
+      }
+    };
+
     window.addEventListener('sihadir_storage_updated', refreshDataFromStorage);
+    window.addEventListener('sihadir_presence_updated', handlePresence);
     return () => {
       window.removeEventListener('sihadir_storage_updated', refreshDataFromStorage);
+      window.removeEventListener('sihadir_presence_updated', handlePresence);
     };
   }, []);
+
+  // Heartbeat & Online Presence Tracking loop for logged-in accounts (Admin, Guru, TU, Ortu)
+  useEffect(() => {
+    if (!userSession || !userSession.isLoggedIn) {
+      return;
+    }
+
+    // Immediately register presence on login/mount
+    updateUserHeartbeat(userSession, false);
+
+    // Send heartbeat every 20 seconds to keep presence active
+    const heartbeatTimer = setInterval(() => {
+      updateUserHeartbeat(userSession, false);
+    }, 20000);
+
+    // Refresh presence on user actions (throttled to at most once every 10 seconds)
+    let lastActivityTime = Date.now();
+    const handleUserActivity = () => {
+      const now = Date.now();
+      if (now - lastActivityTime > 10000) {
+        lastActivityTime = now;
+        updateUserHeartbeat(userSession, false);
+      }
+    };
+
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        lastActivityTime = Date.now();
+        updateUserHeartbeat(userSession, false);
+      }
+    };
+
+    const handleUnload = () => {
+      updateUserHeartbeat(userSession, true);
+    };
+
+    window.addEventListener('pointerdown', handleUserActivity);
+    window.addEventListener('keydown', handleUserActivity);
+    window.addEventListener('focus', handleUserActivity);
+    document.addEventListener('visibilitychange', handleVisibility);
+    window.addEventListener('beforeunload', handleUnload);
+
+    return () => {
+      clearInterval(heartbeatTimer);
+      window.removeEventListener('pointerdown', handleUserActivity);
+      window.removeEventListener('keydown', handleUserActivity);
+      window.removeEventListener('focus', handleUserActivity);
+      document.removeEventListener('visibilitychange', handleVisibility);
+      window.removeEventListener('beforeunload', handleUnload);
+    };
+  }, [userSession]);
 
   // Automatic ALPA status assignment when autoAlpaTime is reached
   useEffect(() => {
@@ -896,6 +961,7 @@ export default function App() {
   const handleLoginSuccess = (session: UserSession) => {
     setUserSessionState(session);
     saveUserSession(session);
+    updateUserHeartbeat(session, false);
     setCurrentRole(session.role);
     if (session.role === 'PARENT' && session.studentId) {
       setSelectedChildId(session.studentId);
@@ -905,6 +971,9 @@ export default function App() {
   };
 
   const handleLogout = () => {
+    if (userSession) {
+      updateUserHeartbeat(userSession, true);
+    }
     setUserSessionState(null);
     saveUserSession(null);
   };
@@ -1458,6 +1527,7 @@ export default function App() {
               teachers={teachers}
               classes={classes}
               schoolProfile={schoolProfile}
+              onlinePresenceList={onlinePresenceList}
               onAddTeacher={handleAddTeacher}
               onUpdateTeacher={handleUpdateTeacher}
               onDeleteTeacher={handleDeleteTeacher}
@@ -1471,6 +1541,7 @@ export default function App() {
               classes={classes}
               schoolProfile={schoolProfile}
               teachers={teachers}
+              onlinePresenceList={onlinePresenceList}
               onAddStudent={handleAddStudent}
               onBatchAddStudents={handleBatchAddStudents}
               onUpdateStudent={handleUpdateStudent}

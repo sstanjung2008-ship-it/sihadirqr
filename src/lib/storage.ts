@@ -55,6 +55,25 @@ const notifyStorageUpdated = () => {
   }, 0);
 };
 
+// Helper to prevent any promise from hanging indefinitely
+function withTimeout<T>(promise: Promise<T>, ms: number = 6000, fallbackVal: T): Promise<T> {
+  let timeoutHandle: any;
+  const timeoutPromise = new Promise<T>((resolve) => {
+    timeoutHandle = setTimeout(() => resolve(fallbackVal), ms);
+  });
+  return Promise.race([
+    promise.then((res) => {
+      clearTimeout(timeoutHandle);
+      return res;
+    }).catch((err) => {
+      clearTimeout(timeoutHandle);
+      console.warn('[Cloud Storage Timeout/Error]:', err);
+      return fallbackVal;
+    }),
+    timeoutPromise
+  ]);
+}
+
 // Max chunk size per Firestore document: 450 KB (well below the 1MB Firestore threshold)
 const FIRESTORE_MAX_CHUNK_SIZE = 450 * 1024;
 
@@ -63,12 +82,16 @@ export async function writeCloudDocument(key: string, dataStr: string, timestamp
   if (totalLength <= FIRESTORE_MAX_CHUNK_SIZE) {
     // Normal single document
     const docRef = doc(db, 'sihadir_app_data', key);
-    await setDoc(docRef, {
-      data: dataStr,
-      updatedAt: timestamp,
-      isChunked: false,
-      totalChunks: 1,
-    });
+    await withTimeout(
+      setDoc(docRef, {
+        data: dataStr,
+        updatedAt: timestamp,
+        isChunked: false,
+        totalChunks: 1,
+      }),
+      6000,
+      undefined
+    );
   } else {
     // Multi-chunk document sharding
     const numChunks = Math.ceil(totalLength / FIRESTORE_MAX_CHUNK_SIZE);
@@ -77,37 +100,45 @@ export async function writeCloudDocument(key: string, dataStr: string, timestamp
       chunks.push(dataStr.slice(i * FIRESTORE_MAX_CHUNK_SIZE, (i + 1) * FIRESTORE_MAX_CHUNK_SIZE));
     }
 
-    // Write chunks 1 to numChunks - 1 first
+    // Write chunks 1 to numChunks - 1 first in parallel with timeout
     const chunkPromises = [];
     for (let i = 1; i < numChunks; i++) {
       const chunkDocRef = doc(db, 'sihadir_app_data', `${key}_chunk_${i}`);
       chunkPromises.push(
-        setDoc(chunkDocRef, {
-          data: chunks[i],
-          updatedAt: timestamp,
-          chunkIndex: i,
-          parentKey: key,
-        })
+        withTimeout(
+          setDoc(chunkDocRef, {
+            data: chunks[i],
+            updatedAt: timestamp,
+            chunkIndex: i,
+            parentKey: key,
+          }),
+          6000,
+          undefined
+        )
       );
     }
     await Promise.all(chunkPromises);
 
     // Finally write the root document (chunk 0) which acts as the commit pointer
     const rootDocRef = doc(db, 'sihadir_app_data', key);
-    await setDoc(rootDocRef, {
-      data: chunks[0],
-      updatedAt: timestamp,
-      isChunked: true,
-      totalChunks: numChunks,
-    });
+    await withTimeout(
+      setDoc(rootDocRef, {
+        data: chunks[0],
+        updatedAt: timestamp,
+        isChunked: true,
+        totalChunks: numChunks,
+      }),
+      6000,
+      undefined
+    );
   }
 }
 
 export async function readCloudDocument(key: string): Promise<{ data: string; updatedAt: number } | null> {
   try {
     const rootDocRef = doc(db, 'sihadir_app_data', key);
-    const snap = await getDoc(rootDocRef);
-    if (!snap.exists()) return null;
+    const snap = await withTimeout(getDoc(rootDocRef), 6000, null);
+    if (!snap || !snap.exists()) return null;
 
     const payload = snap.data();
     if (!payload) return null;
@@ -127,12 +158,16 @@ export async function readCloudDocument(key: string): Promise<{ data: string; up
     for (let i = 1; i < totalChunks; i++) {
       const chunkDocRef = doc(db, 'sihadir_app_data', `${key}_chunk_${i}`);
       chunkPromises.push(
-        getDoc(chunkDocRef).then((cSnap) => {
-          if (cSnap.exists() && cSnap.data()?.data) {
-            return String(cSnap.data().data);
-          }
-          return '';
-        }).catch(() => '')
+        withTimeout(
+          getDoc(chunkDocRef).then((cSnap) => {
+            if (cSnap && cSnap.exists() && cSnap.data()?.data) {
+              return String(cSnap.data().data);
+            }
+            return '';
+          }),
+          6000,
+          ''
+        )
       );
     }
 
@@ -298,36 +333,51 @@ export function compressBase64Image(
     if (typeof window === 'undefined' || typeof document === 'undefined') {
       return resolve(dataUrl);
     }
-    const img = new Image();
-    img.onload = () => {
-      try {
-        let w = img.width;
-        let h = img.height;
-        if (w <= 0 || h <= 0) return resolve(dataUrl);
 
-        if (w > maxWidth || h > maxHeight) {
-          const ratio = Math.min(maxWidth / w, maxHeight / h);
-          w = Math.max(1, Math.round(w * ratio));
-          h = Math.max(1, Math.round(h * ratio));
+    // Safety timeout to prevent hanging on corrupted or slow base64 images
+    const safetyTimer = setTimeout(() => {
+      resolve(dataUrl);
+    }, 1000);
+
+    try {
+      const img = new Image();
+      img.onload = () => {
+        clearTimeout(safetyTimer);
+        try {
+          let w = img.width;
+          let h = img.height;
+          if (w <= 0 || h <= 0) return resolve(dataUrl);
+
+          if (w > maxWidth || h > maxHeight) {
+            const ratio = Math.min(maxWidth / w, maxHeight / h);
+            w = Math.max(1, Math.round(w * ratio));
+            h = Math.max(1, Math.round(h * ratio));
+          }
+
+          const canvas = document.createElement('canvas');
+          canvas.width = w;
+          canvas.height = h;
+          const ctx = canvas.getContext('2d');
+          if (!ctx) return resolve(dataUrl);
+
+          ctx.fillStyle = '#ffffff';
+          ctx.fillRect(0, 0, w, h);
+          ctx.drawImage(img, 0, 0, w, h);
+          const compressed = canvas.toDataURL('image/jpeg', quality);
+          resolve(compressed.length < dataUrl.length ? compressed : dataUrl);
+        } catch {
+          resolve(dataUrl);
         }
-
-        const canvas = document.createElement('canvas');
-        canvas.width = w;
-        canvas.height = h;
-        const ctx = canvas.getContext('2d');
-        if (!ctx) return resolve(dataUrl);
-
-        ctx.fillStyle = '#ffffff';
-        ctx.fillRect(0, 0, w, h);
-        ctx.drawImage(img, 0, 0, w, h);
-        const compressed = canvas.toDataURL('image/jpeg', quality);
-        resolve(compressed.length < dataUrl.length ? compressed : dataUrl);
-      } catch {
+      };
+      img.onerror = () => {
+        clearTimeout(safetyTimer);
         resolve(dataUrl);
-      }
-    };
-    img.onerror = () => resolve(dataUrl);
-    img.src = dataUrl;
+      };
+      img.src = dataUrl;
+    } catch {
+      clearTimeout(safetyTimer);
+      resolve(dataUrl);
+    }
   });
 }
 
@@ -637,138 +687,199 @@ export function mergeSchoolProfile(local: SchoolProfile, cloud: SchoolProfile): 
   };
 }
 
-// Comprehensive multi-device smart synchronization
+// Comprehensive multi-device smart synchronization (Concurrent & High-Speed)
 export async function smartSyncAndMergeAllWithCloud(): Promise<{ success: boolean; studentCount: number; message: string }> {
   try {
     setCloudSyncStatus('syncing');
 
-    // 0. Sync School Profile (Jam Masuk, Jam Pulang, Batas Alpa, Mata Pelajaran, dll)
-    try {
-      const profileCloud = await readCloudDocument(KEYS.PROFILE);
-      const currentLocalProfile = getSchoolProfile();
-      const localUpdatedAt = Number(localStorage.getItem(KEYS.PROFILE + '_updatedAt') || '0');
+    // 1. Fetch all cloud documents simultaneously with timeout protection (under 3s)
+    const [
+      profileCloud,
+      studentCloud,
+      classCloud,
+      teacherCloud,
+      attCloud,
+      leavesCloud,
+      waLogsCloud,
+      journalsCloud,
+      traitsCloud,
+      logsCloud,
+      predicatesCloud,
+      gradesCloud,
+      periodsCloud,
+      schedulesCloud,
+    ] = await Promise.all([
+      readCloudDocument(KEYS.PROFILE),
+      readCloudDocument(KEYS.STUDENTS),
+      readCloudDocument(KEYS.CLASSES),
+      readCloudDocument(KEYS.TEACHERS),
+      readCloudDocument(KEYS.ATTENDANCE),
+      readCloudDocument(KEYS.LEAVES),
+      readCloudDocument(KEYS.WA_LOGS),
+      readCloudDocument(KEYS.LEARNING_JOURNALS),
+      readCloudDocument(KEYS.CHARACTER_TRAITS),
+      readCloudDocument(KEYS.CHARACTER_LOGS),
+      readCloudDocument(KEYS.CHARACTER_PREDICATES),
+      readCloudDocument(KEYS.GRADES),
+      readCloudDocument(KEYS.PERIODS),
+      readCloudDocument(KEYS.SCHEDULES),
+    ]);
 
-      if (profileCloud && profileCloud.data) {
+    const now = Date.now();
+
+    // 2. In-Memory Merging - Step A: Profile
+    const currentLocalProfile = getSchoolProfile();
+    let mergedProfile = currentLocalProfile;
+    if (profileCloud && profileCloud.data) {
+      try {
         const cloudProfileData = typeof profileCloud.data === 'string' ? JSON.parse(profileCloud.data) : profileCloud.data;
-        const cloudUpdatedAt = profileCloud.updatedAt || 0;
-        
-        const mergedProfile = mergeSchoolProfile(currentLocalProfile, cloudProfileData);
-        const finalTimestamp = Math.max(cloudUpdatedAt, localUpdatedAt, Date.now());
-
-        localStorage.setItem(KEYS.PROFILE, JSON.stringify(mergedProfile));
-        localStorage.setItem(KEYS.PROFILE + '_updatedAt', String(finalTimestamp));
-        
-        // Save merged profile back to Firestore
-        await writeCloudDocument(KEYS.PROFILE, JSON.stringify(mergedProfile), finalTimestamp);
-      } else {
-        await writeCloudDocument(KEYS.PROFILE, JSON.stringify(currentLocalProfile), localUpdatedAt || Date.now());
+        mergedProfile = mergeSchoolProfile(currentLocalProfile, cloudProfileData);
+      } catch (e) {
+        console.warn('[Sync] Profile parse error:', e);
       }
-    } catch (e) {
-      console.warn('Error syncing profile with cloud:', e);
     }
+    const profileStr = JSON.stringify(mergedProfile);
+    localStorage.setItem(KEYS.PROFILE, profileStr);
+    localStorage.setItem(KEYS.PROFILE + '_updatedAt', String(now));
 
-    // 1. Sync Students with auto-compression and multi-chunk support
-    const studentCloud = await readCloudDocument(KEYS.STUDENTS);
-    let currentLocalStudents = getStudents();
+    // Step B: Students & Photo Sanitization
     let cloudStudents: Student[] = [];
-
     if (studentCloud && studentCloud.data) {
       try {
         cloudStudents = JSON.parse(studentCloud.data);
       } catch (e) {
-        console.warn('Error parsing cloud students:', e);
+        console.warn('[Sync] Student parse error:', e);
       }
     }
-
+    const currentLocalStudents = getStudents();
     const mergedStudents = mergeStudentLists(currentLocalStudents, cloudStudents);
-    
-    // Auto-compress any student photo on save to keep it ultra lightweight
     const optimizedStudents = await sanitizeAndCompressStudentPhotos(mergedStudents);
     const studentsJsonStr = JSON.stringify(optimizedStudents);
-    
     localStorage.setItem(KEYS.STUDENTS, studentsJsonStr);
-    localStorage.setItem(KEYS.STUDENTS + '_updatedAt', String(Date.now()));
-    await writeCloudDocument(KEYS.STUDENTS, studentsJsonStr, Date.now());
+    localStorage.setItem(KEYS.STUDENTS + '_updatedAt', String(now));
 
-    // 2. Sync Classes
-    const classCloud = await readCloudDocument(KEYS.CLASSES);
-    let currentLocalClasses = getSchoolClasses();
+    // Step C: Classes & Teachers
     let cloudClasses: SchoolClass[] = [];
     if (classCloud && classCloud.data) {
       try {
         cloudClasses = JSON.parse(classCloud.data);
       } catch {}
     }
+    const currentLocalClasses = getSchoolClasses();
     const mergedClasses = mergeClassLists(currentLocalClasses, cloudClasses);
 
-    // 3. Sync Teachers
-    const teacherCloud = await readCloudDocument(KEYS.TEACHERS);
-    let currentLocalTeachers = getTeachers();
     let cloudTeachers: Teacher[] = [];
     if (teacherCloud && teacherCloud.data) {
       try {
         cloudTeachers = JSON.parse(teacherCloud.data);
       } catch {}
     }
+    const currentLocalTeachers = getTeachers();
     const mergedTeachers = mergeTeacherLists(currentLocalTeachers, cloudTeachers);
 
-    // Reconcile Wali Kelas data between teachers and classes
     const reconciled = reconcileTeachersAndClasses(mergedTeachers, mergedClasses);
     const finalClasses = reconciled.updatedClasses;
     const finalTeachers = reconciled.updatedTeachers;
 
-    localStorage.setItem(KEYS.CLASSES, JSON.stringify(finalClasses));
-    await writeCloudDocument(KEYS.CLASSES, JSON.stringify(finalClasses), Date.now());
+    const classesJsonStr = JSON.stringify(finalClasses);
+    const teachersJsonStr = JSON.stringify(finalTeachers);
+    localStorage.setItem(KEYS.CLASSES, classesJsonStr);
+    localStorage.setItem(KEYS.CLASSES + '_updatedAt', String(now));
+    localStorage.setItem(KEYS.TEACHERS, teachersJsonStr);
+    localStorage.setItem(KEYS.TEACHERS + '_updatedAt', String(now));
 
-    localStorage.setItem(KEYS.TEACHERS, JSON.stringify(finalTeachers));
-    await writeCloudDocument(KEYS.TEACHERS, JSON.stringify(finalTeachers), Date.now());
-
-    // 4. Sync Attendance Records
-    const attCloud = await readCloudDocument(KEYS.ATTENDANCE);
-    let currentLocalAtt = getAttendanceRecords();
+    // Step D: Attendance Records
     let cloudAtt: AttendanceRecord[] = [];
     if (attCloud && attCloud.data) {
       try {
         cloudAtt = JSON.parse(attCloud.data);
       } catch {}
     }
+    const currentLocalAtt = getAttendanceRecords();
     const mergedAtt = mergeAttendanceLists(currentLocalAtt, cloudAtt);
-    localStorage.setItem(KEYS.ATTENDANCE, JSON.stringify(mergedAtt));
-    await writeCloudDocument(KEYS.ATTENDANCE, JSON.stringify(mergedAtt), Date.now());
+    const attJsonStr = JSON.stringify(mergedAtt);
+    localStorage.setItem(KEYS.ATTENDANCE, attJsonStr);
+    localStorage.setItem(KEYS.ATTENDANCE + '_updatedAt', String(now));
 
-    // 5. Sync Leave Requests, Journals, Traits, Logs, Grades
-    const syncGeneric = async <T extends { id: string }>(
-      key: string,
-      getLocal: () => T[]
-    ) => {
-      const cDoc = await readCloudDocument(key);
-      let localItems = getLocal();
-      let cItems: T[] = [];
-      if (cDoc && cDoc.data) {
+    // Step E: Generic Entity Merging
+    const mergeAndStoreGeneric = (key: string, cloudDoc: any, getLocal: () => any[]) => {
+      let cloudItems: any[] = [];
+      if (cloudDoc && cloudDoc.data) {
         try {
-          cItems = JSON.parse(cDoc.data);
+          cloudItems = JSON.parse(cloudDoc.data);
         } catch {}
       }
-      const merged = mergeGenericListsById(localItems, cItems);
-      localStorage.setItem(key, JSON.stringify(merged));
-      await writeCloudDocument(key, JSON.stringify(merged), Date.now());
+      const localItems = getLocal();
+      const merged = mergeGenericListsById(localItems, cloudItems);
+      const jsonStr = JSON.stringify(merged);
+      localStorage.setItem(key, jsonStr);
+      localStorage.setItem(key + '_updatedAt', String(now));
+      return jsonStr;
     };
 
-    await syncGeneric(KEYS.LEAVES, getLeaveRequests);
-    await syncGeneric(KEYS.LEARNING_JOURNALS, getLearningJournals);
-    await syncGeneric(KEYS.CHARACTER_TRAITS, getCharacterTraits);
-    await syncGeneric(KEYS.CHARACTER_LOGS, getStudentCharacterLogs);
-    await syncGeneric(KEYS.GRADES, getStudentGradeAssessments);
-    await syncGeneric(KEYS.PERIODS, getLessonPeriods);
-    await syncGeneric(KEYS.SCHEDULES, getClassSchedules);
+    const leavesJsonStr = mergeAndStoreGeneric(KEYS.LEAVES, leavesCloud, getLeaveRequests);
+    const waLogsJsonStr = mergeAndStoreGeneric(KEYS.WA_LOGS, waLogsCloud, getWaLogs);
+    const journalsJsonStr = mergeAndStoreGeneric(KEYS.LEARNING_JOURNALS, journalsCloud, getLearningJournals);
+    const traitsJsonStr = mergeAndStoreGeneric(KEYS.CHARACTER_TRAITS, traitsCloud, getCharacterTraits);
+    const logsJsonStr = mergeAndStoreGeneric(KEYS.CHARACTER_LOGS, logsCloud, getStudentCharacterLogs);
+    const gradesJsonStr = mergeAndStoreGeneric(KEYS.GRADES, gradesCloud, getStudentGradeAssessments);
+    const periodsJsonStr = mergeAndStoreGeneric(KEYS.PERIODS, periodsCloud, getLessonPeriods);
+    const schedulesJsonStr = mergeAndStoreGeneric(KEYS.SCHEDULES, schedulesCloud, getClassSchedules);
+
+    let cloudPredicates = null;
+    if (predicatesCloud && predicatesCloud.data) {
+      try {
+        cloudPredicates = typeof predicatesCloud.data === 'string' ? JSON.parse(predicatesCloud.data) : predicatesCloud.data;
+      } catch {}
+    }
+    const localPredicates = getCharacterPredicateSettings();
+    const mergedPredicates = { ...INITIAL_CHARACTER_PREDICATES, ...localPredicates, ...(cloudPredicates || {}) };
+    const predicatesJsonStr = JSON.stringify(mergedPredicates);
+    localStorage.setItem(KEYS.CHARACTER_PREDICATES, predicatesJsonStr);
+    localStorage.setItem(KEYS.CHARACTER_PREDICATES + '_updatedAt', String(now));
+
+    // Update local cache & notify UI instantly
+    lastSavedStringCache[KEYS.PROFILE] = profileStr;
+    lastSavedStringCache[KEYS.STUDENTS] = studentsJsonStr;
+    lastSavedStringCache[KEYS.CLASSES] = classesJsonStr;
+    lastSavedStringCache[KEYS.TEACHERS] = teachersJsonStr;
+    lastSavedStringCache[KEYS.ATTENDANCE] = attJsonStr;
+    lastSavedStringCache[KEYS.LEAVES] = leavesJsonStr;
+    lastSavedStringCache[KEYS.WA_LOGS] = waLogsJsonStr;
+    lastSavedStringCache[KEYS.LEARNING_JOURNALS] = journalsJsonStr;
+    lastSavedStringCache[KEYS.CHARACTER_TRAITS] = traitsJsonStr;
+    lastSavedStringCache[KEYS.CHARACTER_LOGS] = logsJsonStr;
+    lastSavedStringCache[KEYS.CHARACTER_PREDICATES] = predicatesJsonStr;
+    lastSavedStringCache[KEYS.GRADES] = gradesJsonStr;
+    lastSavedStringCache[KEYS.PERIODS] = periodsJsonStr;
+    lastSavedStringCache[KEYS.SCHEDULES] = schedulesJsonStr;
 
     notifyStorageUpdated();
+
+    // 3. Concurrently Push All Merged Data Back to Cloud
+    await Promise.allSettled([
+      writeCloudDocument(KEYS.PROFILE, profileStr, now),
+      writeCloudDocument(KEYS.STUDENTS, studentsJsonStr, now),
+      writeCloudDocument(KEYS.CLASSES, classesJsonStr, now),
+      writeCloudDocument(KEYS.TEACHERS, teachersJsonStr, now),
+      writeCloudDocument(KEYS.ATTENDANCE, attJsonStr, now),
+      writeCloudDocument(KEYS.LEAVES, leavesJsonStr, now),
+      writeCloudDocument(KEYS.WA_LOGS, waLogsJsonStr, now),
+      writeCloudDocument(KEYS.LEARNING_JOURNALS, journalsJsonStr, now),
+      writeCloudDocument(KEYS.CHARACTER_TRAITS, traitsJsonStr, now),
+      writeCloudDocument(KEYS.CHARACTER_LOGS, logsJsonStr, now),
+      writeCloudDocument(KEYS.CHARACTER_PREDICATES, predicatesJsonStr, now),
+      writeCloudDocument(KEYS.GRADES, gradesJsonStr, now),
+      writeCloudDocument(KEYS.PERIODS, periodsJsonStr, now),
+      writeCloudDocument(KEYS.SCHEDULES, schedulesJsonStr, now),
+    ]);
+
     setCloudSyncStatus('connected');
 
     return {
       success: true,
       studentCount: optimizedStudents.length,
-      message: `Berhasil menyinkronkan! Total ${optimizedStudents.length} siswa sekarang tersinkron di Cloud dan semua perangkat.`
+      message: `Berhasil menyinkronkan! Total ${optimizedStudents.length} siswa dan seluruh data sekolah sekarang tersinkron di Cloud dan semua perangkat.`
     };
   } catch (err: any) {
     console.error('[Smart Sync Error]:', err);
@@ -781,7 +892,7 @@ export async function smartSyncAndMergeAllWithCloud(): Promise<{ success: boolea
   }
 }
 
-// Upload all local data to Cloud database
+// Upload all local data to Cloud database (Parallelized)
 export async function forceUploadAllToCloud(): Promise<{ success: boolean; error?: string }> {
   try {
     setCloudSyncStatus('syncing');
@@ -802,12 +913,17 @@ export async function forceUploadAllToCloud(): Promise<{ success: boolean; error
       KEYS.SCHEDULES,
     ];
 
-    for (const key of ALL_KEYS) {
+    const now = Date.now();
+    const writePromises = ALL_KEYS.map((key) => {
       const raw = localStorage.getItem(key);
       if (raw) {
-        await writeCloudDocument(key, raw, Date.now());
+        lastSavedStringCache[key] = raw;
+        return writeCloudDocument(key, raw, now);
       }
-    }
+      return Promise.resolve();
+    });
+
+    await Promise.allSettled(writePromises);
     setCloudSyncStatus('connected');
     return { success: true };
   } catch (err: any) {
@@ -817,7 +933,7 @@ export async function forceUploadAllToCloud(): Promise<{ success: boolean; error
   }
 }
 
-// Download latest data from Cloud database
+// Download latest data from Cloud database (Parallelized)
 export async function forceDownloadAllFromCloud(): Promise<{ success: boolean; error?: string }> {
   try {
     setCloudSyncStatus('syncing');
@@ -838,9 +954,11 @@ export async function forceDownloadAllFromCloud(): Promise<{ success: boolean; e
       KEYS.SCHEDULES,
     ];
 
+    const results = await Promise.all(ALL_KEYS.map((key) => readCloudDocument(key)));
     let updatedCount = 0;
-    for (const key of ALL_KEYS) {
-      const cloudDoc = await readCloudDocument(key);
+
+    results.forEach((cloudDoc, idx) => {
+      const key = ALL_KEYS[idx];
       if (cloudDoc && cloudDoc.data) {
         if (key === KEYS.PROFILE) {
           try {
@@ -850,9 +968,11 @@ export async function forceDownloadAllFromCloud(): Promise<{ success: boolean; e
             const mergedStr = JSON.stringify(mergedP);
             localStorage.setItem(key, mergedStr);
             localStorage.setItem(key + '_updatedAt', String(cloudDoc.updatedAt || Date.now()));
+            lastSavedStringCache[key] = mergedStr;
           } catch {
             localStorage.setItem(key, cloudDoc.data);
             localStorage.setItem(key + '_updatedAt', String(cloudDoc.updatedAt || Date.now()));
+            lastSavedStringCache[key] = cloudDoc.data;
           }
         } else if (key === KEYS.TEACHERS) {
           try {
@@ -863,13 +983,16 @@ export async function forceDownloadAllFromCloud(): Promise<{ success: boolean; e
               const mergedStr = JSON.stringify(mergedTeachers);
               localStorage.setItem(key, mergedStr);
               localStorage.setItem(key + '_updatedAt', String(cloudDoc.updatedAt || Date.now()));
+              lastSavedStringCache[key] = mergedStr;
             } else {
               localStorage.setItem(key, cloudDoc.data);
               localStorage.setItem(key + '_updatedAt', String(cloudDoc.updatedAt || Date.now()));
+              lastSavedStringCache[key] = cloudDoc.data;
             }
           } catch {
             localStorage.setItem(key, cloudDoc.data);
             localStorage.setItem(key + '_updatedAt', String(cloudDoc.updatedAt || Date.now()));
+            lastSavedStringCache[key] = cloudDoc.data;
           }
         } else if (key === KEYS.STUDENTS) {
           try {
@@ -880,21 +1003,26 @@ export async function forceDownloadAllFromCloud(): Promise<{ success: boolean; e
               const mergedStr = JSON.stringify(mergedStudents);
               localStorage.setItem(key, mergedStr);
               localStorage.setItem(key + '_updatedAt', String(cloudDoc.updatedAt || Date.now()));
+              lastSavedStringCache[key] = mergedStr;
             } else {
               localStorage.setItem(key, cloudDoc.data);
               localStorage.setItem(key + '_updatedAt', String(cloudDoc.updatedAt || Date.now()));
+              lastSavedStringCache[key] = cloudDoc.data;
             }
           } catch {
             localStorage.setItem(key, cloudDoc.data);
             localStorage.setItem(key + '_updatedAt', String(cloudDoc.updatedAt || Date.now()));
+            lastSavedStringCache[key] = cloudDoc.data;
           }
         } else {
           localStorage.setItem(key, cloudDoc.data);
           localStorage.setItem(key + '_updatedAt', String(cloudDoc.updatedAt || Date.now()));
+          lastSavedStringCache[key] = cloudDoc.data;
         }
         updatedCount++;
       }
-    }
+    });
+
     if (updatedCount > 0) {
       notifyStorageUpdated();
     }

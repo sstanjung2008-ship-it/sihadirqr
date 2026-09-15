@@ -54,7 +54,10 @@ export const MultiDeviceSyncModal: React.FC<MultiDeviceSyncModalProps> = ({
 
   const handleSmartSync = async () => {
     setIsLoading(true);
-    setFeedback(null);
+    setFeedback({
+      type: 'info',
+      message: 'Sedang menyamakan dan menyinkronkan seluruh 425 data siswa, kelas, guru, dan absensi dengan Cloud...',
+    });
     try {
       const res = await smartSyncAndMergeAllWithCloud();
       if (res.success) {

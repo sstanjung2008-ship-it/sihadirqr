@@ -13,7 +13,8 @@ import {
   ChevronRight,
   ShieldAlert,
   BarChart3,
-  Layers
+  Layers,
+  Bell
 } from 'lucide-react';
 
 interface TeacherBottomNavProps {
@@ -33,8 +34,15 @@ export const TeacherBottomNav: React.FC<TeacherBottomNavProps> = ({
 }) => {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
 
-  // Secondary Menu Items for Guru (available via Menu/Lainnya)
+  // Secondary Menu Items for Guru (available via Menu Guru/Lainnya)
   const secondaryMenuItems = [
+    {
+      id: 'character_points',
+      label: 'Nilai Karakter',
+      desc: 'Poin & bukti foto karakter siswa',
+      icon: Award,
+      color: 'from-amber-500 to-orange-600',
+    },
     {
       id: 'schedule',
       label: 'Jadwal Pelajaran',
@@ -49,6 +57,13 @@ export const TeacherBottomNav: React.FC<TeacherBottomNavProps> = ({
       icon: FileText,
       badge: unreadLeavesCount,
       color: 'from-amber-500 to-orange-600',
+    },
+    {
+      id: 'walogs',
+      label: 'Log Pesan',
+      desc: 'Notifikasi pesan Guru & Orang Tua',
+      icon: Bell,
+      color: 'from-emerald-500 to-teal-600',
     },
     {
       id: 'chat',
@@ -93,8 +108,9 @@ export const TeacherBottomNav: React.FC<TeacherBottomNavProps> = ({
   };
 
   const isMoreMenuActive = [
+    'character_points',
     'schedule',
-    'leaves',
+    'walogs',
     'chat',
     'teacher_assistant',
     'analytics',
@@ -165,7 +181,7 @@ export const TeacherBottomNav: React.FC<TeacherBottomNavProps> = ({
                           </span>
                           {item.badge !== undefined && item.badge > 0 && (
                             <span className="px-2 py-0.5 bg-rose-500 text-white text-[10px] font-bold rounded-full animate-pulse shadow-sm">
-                              {item.badge} Baru
+                              {item.badge} Belum Disetujui
                             </span>
                           )}
                         </div>
@@ -286,38 +302,47 @@ export const TeacherBottomNav: React.FC<TeacherBottomNavProps> = ({
               </span>
             </div>
 
-            {/* Slot 4: Nilai Karakter */}
+            {/* Slot 4: Izin (Permohonan / Persetujuan Izin Siswa) */}
             <button
               type="button"
-              onClick={() => handleSelectTab('character_points')}
+              onClick={() => handleSelectTab('leaves')}
               className={`relative flex-1 flex flex-col items-center justify-center py-1.5 px-1 rounded-2xl transition-all duration-200 cursor-pointer min-h-[52px] group ${
-                activeTab === 'character_points'
+                activeTab === 'leaves'
                   ? 'bg-gradient-to-b from-white/15 to-white/5 text-white shadow-inner border border-white/25'
                   : 'text-slate-400 hover:text-slate-200 hover:bg-white/5'
               }`}
             >
-              {activeTab === 'character_points' && (
+              {activeTab === 'leaves' && (
                 <span className="absolute -top-1 w-6 h-1 rounded-full bg-gradient-to-r from-amber-400 via-orange-300 to-rose-400 shadow-[0_0_12px_rgba(251,191,36,0.8)] animate-pulse" />
               )}
-              <div
-                className={`p-1.5 rounded-xl transition-all duration-200 ${
-                  activeTab === 'character_points'
-                    ? 'bg-gradient-to-tr from-amber-500 to-orange-600 text-white shadow-md shadow-amber-500/25 scale-105'
-                    : 'text-slate-400 group-hover:text-slate-200'
-                }`}
-              >
-                <Award className="w-4 h-4" />
+              <div className="relative">
+                <div
+                  className={`p-1.5 rounded-xl transition-all duration-200 ${
+                    activeTab === 'leaves'
+                      ? 'bg-gradient-to-tr from-amber-500 to-orange-600 text-white shadow-md shadow-amber-500/25 scale-105'
+                      : 'text-slate-400 group-hover:text-slate-200'
+                  }`}
+                >
+                  <FileText className="w-4 h-4" />
+                </div>
+
+                {/* Badge Tanda Angka Pengajuan Belum Disetujui */}
+                {unreadLeavesCount > 0 && (
+                  <span className="absolute -top-1.5 -right-2.5 min-w-[18px] h-[18px] px-1 bg-rose-500 text-white text-[9px] font-black rounded-full flex items-center justify-center border-2 border-slate-900 shadow-md shadow-rose-500/50 animate-pulse">
+                    {unreadLeavesCount}
+                  </span>
+                )}
               </div>
               <span
                 className={`text-[10px] mt-1 font-semibold tracking-tight transition-colors ${
-                  activeTab === 'character_points' ? 'text-white font-extrabold' : 'text-slate-400 group-hover:text-slate-200'
+                  activeTab === 'leaves' ? 'text-white font-extrabold' : 'text-slate-400 group-hover:text-slate-200'
                 }`}
               >
-                Karakter
+                Izin
               </span>
             </button>
 
-            {/* Slot 5: Menu & Akun */}
+            {/* Slot 5: Menu Guru & Akun */}
             <button
               type="button"
               onClick={() => setIsMenuOpen(true)}
@@ -340,13 +365,6 @@ export const TeacherBottomNav: React.FC<TeacherBottomNavProps> = ({
                 >
                   <UserCircle className="w-4 h-4" />
                 </div>
-
-                {/* Badge for unread leaves / pending actions */}
-                {unreadLeavesCount > 0 && (
-                  <span className="absolute -top-1.5 -right-2 min-w-[18px] h-[18px] px-1 bg-rose-500 text-white text-[9px] font-extrabold rounded-full flex items-center justify-center border-2 border-slate-900 shadow-sm animate-pulse">
-                    {unreadLeavesCount}
-                  </span>
-                )}
               </div>
               <span
                 className={`text-[10px] mt-1 font-semibold tracking-tight transition-colors ${

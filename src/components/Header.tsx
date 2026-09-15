@@ -89,6 +89,7 @@ export const Header: React.FC<HeaderProps> = ({
         { id: 'scanner', label: 'Scan QR', icon: ScanLine },
         { id: 'leaves', label: 'Persetujuan Izin', icon: MessageSquare, badge: unreadLeavesCount },
         { id: 'recap', label: 'Rekap Laporan', icon: FileText },
+        { id: 'walogs', label: 'Log Pesan', icon: Bell },
         { id: 'teacher_assistant', label: 'Asisten Guru (AI)', icon: Sparkles },
         { id: 'account', label: 'Akun Guru', icon: UserCircle },
       ];
@@ -103,7 +104,7 @@ export const Header: React.FC<HeaderProps> = ({
       { id: 'classes', label: 'Data Kelas', icon: Building2 },
       { id: 'leaves', label: 'Permohonan Izin', icon: MessageSquare, badge: unreadLeavesCount },
       { id: 'recap', label: 'Rekap & Ekspor', icon: FileText },
-      { id: 'walogs', label: 'Log WhatsApp', icon: Bell },
+      { id: 'walogs', label: 'Log Pesan', icon: Bell },
       { id: 'teacher_assistant', label: 'Asisten Guru (AI)', icon: Sparkles },
       { id: 'settings', label: 'Pengaturan Sekolah', icon: Settings },
     ];
@@ -166,11 +167,6 @@ export const Header: React.FC<HeaderProps> = ({
             </span>
             <span className="w-2 h-2 rounded-full bg-emerald-400" />
           </button>
-
-          <div className="hidden sm:flex items-center gap-2 bg-emerald-100 text-emerald-800 px-3 py-1.5 rounded-full font-bold text-xs shadow-sm">
-            <span className="w-2 h-2 bg-emerald-500 rounded-full animate-ping"></span>
-            WhatsApp Gateway: Online
-          </div>
 
           <div className="flex items-center bg-indigo-800/90 rounded-xl p-1 border border-indigo-500/30">
             <span className="text-xs text-indigo-200 font-medium px-2 hidden sm:inline">Role:</span>

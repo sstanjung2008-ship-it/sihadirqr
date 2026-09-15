@@ -444,8 +444,35 @@ export const INITIAL_WA_LOGS: WhatsAppLog[] = [
     phone: "6281234567890",
     message: "Yth. Bpk/Ibu Bambang Pratama, memberitahukan bahwa siswa Aditya Pratama (7-A) telah Tiba di Sekolah pada 06:42 WITA dalam keadaan TEPAT WAKTU.",
     status: "TERKIRIM",
-    timestamp: new Date().toISOString(),
-    type: "HADIR"
+    timestamp: new Date(Date.now() - 3600000 * 2).toISOString(),
+    type: "HADIR",
+    recipientRole: "PARENT"
+  },
+  {
+    id: "wa-102",
+    studentId: "",
+    studentName: "",
+    teacherId: "tch-001",
+    teacherName: "Siti Rahmawati, S.Pd.",
+    className: "7-A",
+    phone: "6281234567891",
+    message: "Pengingat Jadwal KBM: Yth. Siti Rahmawati, S.Pd., jadwal mengajar Matematika di Kelas 7-A (Jam ke-1 & 2) akan dimulai dalam 10 menit. Selamat mengajar!",
+    status: "TERKIRIM",
+    timestamp: new Date(Date.now() - 3600000).toISOString(),
+    type: "JADWAL_GURU",
+    recipientRole: "TEACHER"
+  },
+  {
+    id: "wa-103",
+    studentId: "std-002",
+    studentName: "Dewi Lestari",
+    className: "7-A",
+    phone: "6282345678901",
+    message: "Yth. Bpk/Ibu Joko Lestari, memberitahukan bahwa ananda Dewi Lestari (7-A) telah selesai KBM dan Scan Pulang pada 15:05 WITA.",
+    status: "TERKIRIM",
+    timestamp: new Date(Date.now() - 1800000).toISOString(),
+    type: "PULANG",
+    recipientRole: "PARENT"
   }
 ];
 

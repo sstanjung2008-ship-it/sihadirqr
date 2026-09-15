@@ -112,6 +112,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         { id: 'leaves', label: 'Persetujuan Izin', icon: MessageSquare, desc: 'Persetujuan wali murid', badge: unreadLeavesCount },
         { id: 'recap', label: 'Rekap Laporan', icon: FileText, desc: 'Ekspor laporan bulanan' },
         { id: 'chat', label: 'Fitur Chat Wali Murid', icon: MessageSquare, desc: 'Obrolan Wali Kelas, Humas & BK' },
+        { id: 'walogs', label: 'Log Pesan', icon: Bell, desc: 'Notifikasi Guru & Orang Tua' },
         { id: 'teacher_assistant', label: 'Asisten Guru (AI)', icon: Sparkles, desc: 'Buat Soal AI & Modul Ajar Word' },
         { id: 'account', label: 'Akun Guru', icon: UserCircle, desc: 'Identitas guru & ubah password' },
       ];
@@ -132,7 +133,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       { id: 'classes', label: 'Kelola Data Kelas', icon: Building2, desc: 'Daftar & wali kelas' },
       { id: 'leaves', label: 'Permohonan Izin', icon: MessageSquare, desc: 'Verifikasi surat izin/sakit', badge: unreadLeavesCount },
       { id: 'recap', label: 'Rekap & Ekspor', icon: FileText, desc: 'Cetak laporan PDF/Excel' },
-      { id: 'walogs', label: 'Log WhatsApp', icon: Bell, desc: 'Riwayat notifikasi WA' },
+      { id: 'walogs', label: 'Log Pesan', icon: Bell, desc: 'Notifikasi Guru & Orang Tua' },
       { id: 'teacher_assistant', label: 'Asisten Guru (AI)', icon: Sparkles, desc: 'Generator Soal & Modul Ajar Word' },
       { id: 'settings', label: 'Pengaturan Sekolah', icon: Settings, desc: 'Profil & jam operasional' },
     ];
@@ -459,18 +460,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
               {syncStatus === 'quota_exceeded' ? 'File ↗' : 'Sinkron ↗'}
             </span>
           </button>
-
-          {/* WhatsApp Status Indicator */}
-          <div className="flex items-center justify-between text-[11px] bg-emerald-950/40 border border-emerald-800/50 p-2 rounded-xl text-emerald-300">
-            <div className="flex items-center space-x-2">
-              <span className="relative flex h-2 w-2">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
-              </span>
-              <span className="font-bold text-[11px]">WA Gateway: Online</span>
-            </div>
-            <span className="text-[10px] text-emerald-400 font-mono">Aktif</span>
-          </div>
         </div>
 
       </aside>

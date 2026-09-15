@@ -1,4 +1,4 @@
-import { SchoolProfile, SchoolClass, Student, AttendanceRecord, LeaveRequest, WhatsAppLog, Teacher, LearningJournal, CharacterTrait, StudentCharacterLog, CharacterPredicateSettings, UserSession, UserPresence, StudentGradeAssessment, LessonPeriod, ClassScheduleSlot, DirectChatMessage } from '../types';
+import { SchoolProfile, SchoolClass, Student, AttendanceRecord, LeaveRequest, WhatsAppLog, Teacher, LearningJournal, CharacterTrait, StudentCharacterLog, CharacterPredicateSettings, UserSession, StudentGradeAssessment, LessonPeriod, ClassScheduleSlot, DirectChatMessage } from '../types';
 import { 
   INITIAL_SCHOOL_PROFILE, 
   INITIAL_CLASSES, 
@@ -32,7 +32,6 @@ const KEYS = {
   SCHEDULES: 'sihadir_class_schedules_v2',
   SESSION: 'sihadir_user_session_v2',
   DIRECT_CHATS: 'sihadir_parent_direct_chats_v2',
-  ONLINE_PRESENCE: 'sihadir_online_presence_v2',
 };
 
 export type CloudSyncStatus = 'connected' | 'syncing' | 'offline' | 'quota_exceeded';
@@ -930,7 +929,6 @@ export function initFirestoreRealtimeSync() {
     { key: KEYS.PERIODS, getDefault: () => INITIAL_LESSON_PERIODS },
     { key: KEYS.SCHEDULES, getDefault: () => INITIAL_CLASS_SCHEDULES },
     { key: KEYS.DIRECT_CHATS, getDefault: () => ({}) },
-    { key: KEYS.ONLINE_PRESENCE, getDefault: () => [] },
   ];
 
   SYNC_KEYS.forEach(({ key }) => {
@@ -1031,23 +1029,6 @@ export function initFirestoreRealtimeSync() {
                 }
               } catch (e) {
                 console.warn('[Firestore Sync] Error updating student data:', e);
-              }
-            }
-
-            // SPECIAL ONLINE PRESENCE SYNC:
-            if (key === KEYS.ONLINE_PRESENCE) {
-              try {
-                const cloudPresence = typeof finalDataToSave === 'string' ? JSON.parse(finalDataToSave) : finalDataToSave;
-                if (Array.isArray(cloudPresence)) {
-                  lastSavedStringCache[key] = typeof finalDataToSave === 'string' ? finalDataToSave : JSON.stringify(cloudPresence);
-                  localStorage.setItem(key, typeof finalDataToSave === 'string' ? finalDataToSave : JSON.stringify(cloudPresence));
-                  localStorage.setItem(key + '_updatedAt', String(Date.now()));
-                  notifyStorageUpdated();
-                  window.dispatchEvent(new CustomEvent('sihadir_presence_updated', { detail: { list: cloudPresence } }));
-                  return;
-                }
-              } catch (e) {
-                console.warn('[Firestore Sync] Error updating presence data:', e);
               }
             }
 
@@ -1661,148 +1642,4 @@ export function resetToDefaultData(): void {
   getClassSchedules();
   notifyStorageUpdated();
 }
-
-// -------------------------------------------------------------
-// ONLINE PRESENCE TRACKING SYSTEM (GURU, TU & ORANG TUA REAL-TIME)
-// -------------------------------------------------------------
-
-function normalizeDigits(str?: string): string {
-  if (!str) return '';
-  const digits = str.replace(/\D/g, '');
-  if (digits.startsWith('62')) return '0' + digits.slice(2);
-  return digits;
-}
-
-function normalizeAlphaNum(str?: string): string {
-  if (!str) return '';
-  return str.toLowerCase().replace(/[^a-z0-9]/g, '');
-}
-
-export function getOnlinePresenceList(): UserPresence[] {
-  try {
-    const raw = localStorage.getItem(KEYS.ONLINE_PRESENCE);
-    if (!raw) return [];
-    const list: UserPresence[] = JSON.parse(raw);
-    if (!Array.isArray(list)) return [];
-    // Filter active within 3 minutes (180,000 ms) and isOnline !== false
-    const now = Date.now();
-    return list.filter(item => item && (now - (item.lastActive || 0) < 180000) && item.isOnline !== false);
-  } catch {
-    return [];
-  }
-}
-
-export function saveOnlinePresenceList(list: UserPresence[], instant: boolean = true): void {
-  const now = Date.now();
-  // Keep records from last 10 minutes in storage, but clean stale records
-  const cleanList = list.filter(item => item && (now - (item.lastActive || 0) < 600000));
-  const str = JSON.stringify(cleanList);
-  localStorage.setItem(KEYS.ONLINE_PRESENCE, str);
-  localStorage.setItem(KEYS.ONLINE_PRESENCE + '_updatedAt', String(now));
-  notifyStorageUpdated();
-  window.dispatchEvent(new CustomEvent('sihadir_presence_updated', { detail: { list: cleanList } }));
-  syncToCloud(KEYS.ONLINE_PRESENCE, cleanList, instant, now);
-}
-
-export function updateUserHeartbeat(session: UserSession | null, isLoggingOut: boolean = false): void {
-  if (!session || !session.isLoggedIn) return;
-
-  const currentList = getOnlinePresenceList();
-  const now = Date.now();
-  
-  const primaryId = session.teacherId || session.studentId || session.username || session.nipOrNisn || session.displayName;
-  if (!primaryId) return;
-
-  const identifier = (session.nipOrNisn || session.username || session.studentId || session.teacherId || '').trim();
-
-  let updatedList: UserPresence[] = [];
-
-  if (isLoggingOut) {
-    updatedList = currentList.filter(item => 
-      item.userId !== primaryId && 
-      (identifier === '' || item.identifier !== identifier) &&
-      item.displayName !== session.displayName
-    );
-  } else {
-    const existingIndex = currentList.findIndex(item => 
-      item.userId === primaryId || 
-      (identifier !== '' && item.identifier === identifier) ||
-      (item.role === session.role && item.displayName === session.displayName)
-    );
-
-    const presenceEntry: UserPresence = {
-      userId: primaryId,
-      role: session.role,
-      displayName: session.displayName,
-      identifier: identifier,
-      lastActive: now,
-      isOnline: true,
-      device: typeof navigator !== 'undefined' ? (navigator.userAgent.includes('Mobile') ? 'Mobile' : 'Desktop') : 'Web'
-    };
-
-    if (existingIndex >= 0) {
-      updatedList = [...currentList];
-      updatedList[existingIndex] = presenceEntry;
-    } else {
-      updatedList = [...currentList, presenceEntry];
-    }
-  }
-
-  saveOnlinePresenceList(updatedList, true);
-}
-
-export function isTeacherOnline(teacher: Teacher, presenceList?: UserPresence[]): boolean {
-  const list = presenceList || getOnlinePresenceList();
-  const now = Date.now();
-  const cleanNip = normalizeAlphaNum(teacher.nip);
-  const cleanPhone = normalizeDigits(teacher.phone);
-  const cleanName = (teacher.name || '').trim().toLowerCase();
-
-  return list.some(p => {
-    if (!p.isOnline || (now - (p.lastActive || 0) > 180000)) return false;
-    if (p.role !== 'TEACHER' && p.role !== 'ADMIN') return false;
-    if (p.userId && p.userId === teacher.id) return true;
-    
-    const pIdentNorm = normalizeAlphaNum(p.identifier);
-    const pUserNorm = normalizeAlphaNum(p.userId);
-    const pPhoneNorm = normalizeDigits(p.identifier) || normalizeDigits(p.userId);
-
-    if (cleanNip && (pIdentNorm === cleanNip || pUserNorm === cleanNip)) return true;
-    if (cleanPhone && pPhoneNorm && (pPhoneNorm === cleanPhone || pPhoneNorm.includes(cleanPhone) || cleanPhone.includes(pPhoneNorm))) return true;
-    if (p.displayName && p.displayName.trim().toLowerCase() === cleanName) return true;
-    return false;
-  });
-}
-
-export function isParentOnline(student: Student, presenceList?: UserPresence[]): boolean {
-  const list = presenceList || getOnlinePresenceList();
-  const now = Date.now();
-  const cleanNisn = normalizeAlphaNum(student.nisn);
-  const cleanNis = normalizeAlphaNum(student.nis);
-  const cleanPhone = normalizeDigits(student.parentPhone);
-  const cleanParentName = (student.parentName || '').trim().toLowerCase();
-  const cleanStudentName = (student.name || '').trim().toLowerCase();
-
-  return list.some(p => {
-    if (!p.isOnline || (now - (p.lastActive || 0) > 180000)) return false;
-    if (p.role !== 'PARENT') return false;
-    if (p.userId && p.userId === student.id) return true;
-
-    const pIdentNorm = normalizeAlphaNum(p.identifier);
-    const pUserNorm = normalizeAlphaNum(p.userId);
-    const pPhoneNorm = normalizeDigits(p.identifier) || normalizeDigits(p.userId);
-
-    if (cleanNisn && (pIdentNorm === cleanNisn || pUserNorm === cleanNisn)) return true;
-    if (cleanNis && (pIdentNorm === cleanNis || pUserNorm === cleanNis)) return true;
-    if (cleanPhone && pPhoneNorm && (pPhoneNorm === cleanPhone || pPhoneNorm.includes(cleanPhone) || cleanPhone.includes(pPhoneNorm))) return true;
-    
-    if (p.displayName) {
-      const pNameLower = p.displayName.toLowerCase();
-      if (cleanParentName && pNameLower.includes(cleanParentName)) return true;
-      if (cleanStudentName && pNameLower.includes(cleanStudentName)) return true;
-    }
-    return false;
-  });
-}
-
 

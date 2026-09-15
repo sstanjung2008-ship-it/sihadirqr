@@ -1583,7 +1583,7 @@ export const SchoolSettingsView: React.FC<SchoolSettingsViewProps> = ({
                 placeholder="15:00"
               />
               <p className="text-[11px] text-amber-900 font-medium leading-relaxed">
-                🎯 Menentukan jam berapa fitur <strong>Scan QR Pulang</strong> mulai bisa digunakan di scanner pada hari aktif belajar.
+                🎯 Menentukan jam berapa modul scanner secara otomatis berpindah ke <strong>Mode Scan Pulang</strong> (dan otomatis kembali ke <strong>Scan Masuk pada 01:00 WITA</strong>).
               </p>
             </div>
 

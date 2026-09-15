@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { Teacher, SchoolClass, SchoolProfile } from '../types';
 import { downloadTeacherImportTemplate } from '../lib/exportUtils';
 import { ImportTeachersModal } from './ImportTeachersModal';
@@ -31,13 +31,18 @@ import {
   Library,
   Briefcase,
   Layers,
-  GraduationCap
+  GraduationCap,
+  Activity,
+  Radio
 } from 'lucide-react';
+import { UserPresence } from '../types';
+import { isTeacherOnline, getOnlinePresenceList } from '../lib/storage';
 
 interface TeacherDirectoryViewProps {
   teachers: Teacher[];
   classes: SchoolClass[];
   schoolProfile: SchoolProfile;
+  onlinePresenceList?: UserPresence[];
   onAddTeacher: (teacher: Omit<Teacher, 'id'>) => void;
   onUpdateTeacher: (teacher: Teacher) => void;
   onDeleteTeacher: (id: string) => void;
@@ -64,16 +69,32 @@ export const TeacherDirectoryView: React.FC<TeacherDirectoryViewProps> = ({
   teachers,
   classes,
   schoolProfile,
+  onlinePresenceList: propOnlinePresenceList,
   onAddTeacher,
   onUpdateTeacher,
   onDeleteTeacher,
   onImportTeachers,
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
-  const [categoryFilter, setCategoryFilter] = useState<'ALL' | 'GURU' | 'TU'>('ALL');
+  const [categoryFilter, setCategoryFilter] = useState<'ALL' | 'GURU' | 'TU' | 'ONLINE'>('ALL');
   const [subjectFilter, setSubjectFilter] = useState('');
   const [dutyFilter, setDutyFilter] = useState('');
   const [viewMode, setViewMode] = useState<'CARD' | 'TABLE'>('CARD');
+  const [localPresenceList, setLocalPresenceList] = useState<UserPresence[]>(() => getOnlinePresenceList());
+
+  useEffect(() => {
+    const handlePresence = () => {
+      setLocalPresenceList(getOnlinePresenceList());
+    };
+    window.addEventListener('sihadir_presence_updated', handlePresence);
+    window.addEventListener('sihadir_storage_updated', handlePresence);
+    return () => {
+      window.removeEventListener('sihadir_presence_updated', handlePresence);
+      window.removeEventListener('sihadir_storage_updated', handlePresence);
+    };
+  }, []);
+
+  const activePresenceList = propOnlinePresenceList || localPresenceList;
 
   // Modal State
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -331,10 +352,12 @@ export const TeacherDirectoryView: React.FC<TeacherDirectoryViewProps> = ({
   // Filtering
   const filteredTeachers = teachers.filter((teacher) => {
     const isTu = teacher.additionalDuty === 'TU';
+    const isOnline = isTeacherOnline(teacher, activePresenceList);
 
     // 1. Category Filter
     if (categoryFilter === 'GURU' && isTu) return false;
     if (categoryFilter === 'TU' && !isTu) return false;
+    if (categoryFilter === 'ONLINE' && !isOnline) return false;
 
     // 2. Search Term
     const matchesSearch = 
@@ -371,6 +394,7 @@ export const TeacherDirectoryView: React.FC<TeacherDirectoryViewProps> = ({
   const totalAdmin = teachers.filter(t => t.additionalDuty === 'ADMIN').length;
   const totalPerpus = teachers.filter(t => t.additionalDuty === 'PERPUSTAKAAN').length;
   const totalWali = teachers.filter(t => getTeacherHomeroomInfo(t).isHomeroom || t.additionalDuty === 'WALI_KELAS').length;
+  const totalOnline = teachers.filter(t => isTeacherOnline(t, activePresenceList)).length;
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
@@ -449,6 +473,30 @@ export const TeacherDirectoryView: React.FC<TeacherDirectoryViewProps> = ({
           </div>
         </div>
 
+        {/* Sedang Online Real-time */}
+        <div 
+          onClick={() => setCategoryFilter(categoryFilter === 'ONLINE' ? 'ALL' : 'ONLINE')}
+          className={`bg-white border rounded-2xl p-4 shadow-xs transition-all cursor-pointer ${
+            categoryFilter === 'ONLINE' ? 'border-emerald-500 ring-2 ring-emerald-500/20 bg-emerald-50/30' : 'border-slate-200/80 hover:border-emerald-300'
+          }`}
+        >
+          <div className="flex items-center justify-between">
+            <div>
+              <div className="flex items-center gap-1.5">
+                <span className="relative flex h-2 w-2">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                </span>
+                <p className="text-[10px] font-extrabold text-emerald-700 uppercase tracking-wider">Sedang Online</p>
+              </div>
+              <p className="text-2xl font-black text-emerald-600 mt-0.5">{totalOnline}</p>
+            </div>
+            <div className="w-10 h-10 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center font-bold">
+              <Radio className="w-5 h-5 animate-pulse" />
+            </div>
+          </div>
+        </div>
+
         {/* Guru Pendidik */}
         <div 
           onClick={() => setCategoryFilter('GURU')}
@@ -486,7 +534,7 @@ export const TeacherDirectoryView: React.FC<TeacherDirectoryViewProps> = ({
         </div>
 
         {/* Wali Kelas */}
-        <div className="bg-white border border-slate-200/80 rounded-2xl p-4 shadow-xs">
+        <div className="bg-white border border-slate-200/80 rounded-2xl p-4 shadow-xs col-span-2 sm:col-span-1">
           <div className="flex items-center justify-between">
             <div>
               <p className="text-[10px] font-extrabold text-slate-400 uppercase tracking-wider">Wali Kelas</p>
@@ -497,26 +545,13 @@ export const TeacherDirectoryView: React.FC<TeacherDirectoryViewProps> = ({
             </div>
           </div>
         </div>
-
-        {/* Wakasek & Tim */}
-        <div className="bg-white border border-slate-200/80 rounded-2xl p-4 shadow-xs col-span-2 sm:col-span-1">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-[10px] font-extrabold text-slate-400 uppercase tracking-wider">Wakasek & Tim</p>
-              <p className="text-2xl font-black text-amber-600 mt-0.5">{totalWakil + totalHumas + totalBK}</p>
-            </div>
-            <div className="w-10 h-10 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center font-bold">
-              <ShieldCheck className="w-5 h-5" />
-            </div>
-          </div>
-        </div>
       </div>
 
       {/* Filter Tabs & Search Controls */}
       <div className="bg-white border border-slate-200/80 rounded-2xl p-4 shadow-sm space-y-3">
         {/* Category Pill Buttons */}
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 pb-3">
-          <div className="flex items-center gap-1.5 bg-slate-100 p-1 rounded-xl">
+          <div className="flex flex-wrap items-center gap-1.5 bg-slate-100 p-1 rounded-xl">
             <button
               onClick={() => setCategoryFilter('ALL')}
               className={`px-3 py-1.5 rounded-lg text-xs font-extrabold transition-all cursor-pointer ${
@@ -524,6 +559,18 @@ export const TeacherDirectoryView: React.FC<TeacherDirectoryViewProps> = ({
               }`}
             >
               Semua ({teachers.length})
+            </button>
+            <button
+              onClick={() => setCategoryFilter('ONLINE')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-extrabold transition-all cursor-pointer flex items-center gap-1.5 ${
+                categoryFilter === 'ONLINE' ? 'bg-emerald-600 text-white shadow-xs' : 'text-emerald-700 hover:text-emerald-900 bg-emerald-50/60'
+              }`}
+            >
+              <span className="relative flex h-2 w-2">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+              </span>
+              Sedang Online ({totalOnline})
             </button>
             <button
               onClick={() => setCategoryFilter('GURU')}
@@ -666,18 +713,35 @@ export const TeacherDirectoryView: React.FC<TeacherDirectoryViewProps> = ({
           {filteredTeachers.map((teacher) => {
             const isTu = teacher.additionalDuty === 'TU';
             const homeroomInfo = getTeacherHomeroomInfo(teacher);
+            const isOnline = isTeacherOnline(teacher, activePresenceList);
 
             return (
               <div
                 key={teacher.id}
                 className={`bg-white border rounded-3xl p-5 shadow-xs hover:shadow-md transition-all space-y-4 relative flex flex-col justify-between group ${
-                  isTu ? 'border-teal-200/80 hover:border-teal-400' : 'border-slate-200/80 hover:border-indigo-300'
+                  isOnline ? 'ring-2 ring-emerald-500/30 border-emerald-300' : isTu ? 'border-teal-200/80 hover:border-teal-400' : 'border-slate-200/80 hover:border-indigo-300'
                 }`}
               >
                 <div className="space-y-3">
                   {/* Header Badge & Action */}
                   <div className="flex items-start justify-between gap-2">
-                    <div className="flex flex-wrap gap-1.5">
+                    <div className="flex flex-wrap gap-1.5 items-center">
+                      {/* Online Status Badge */}
+                      {isOnline ? (
+                        <span className="inline-flex items-center gap-1.5 bg-emerald-50 text-emerald-700 border border-emerald-200 text-[10px] font-extrabold px-2.5 py-1 rounded-xl shadow-2xs">
+                          <span className="relative flex h-2 w-2">
+                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                            <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                          </span>
+                          Sedang Online
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1 bg-slate-50 text-slate-400 border border-slate-200 text-[10px] font-semibold px-2 py-0.5 rounded-lg">
+                          <span className="w-1.5 h-1.5 rounded-full bg-slate-300"></span>
+                          Offline
+                        </span>
+                      )}
+
                       {isTu ? (
                         <span className="inline-flex items-center gap-1 bg-teal-50 text-teal-800 border border-teal-200 text-[10px] font-black px-2.5 py-1 rounded-xl shadow-2xs">
                           <Briefcase className="w-3 h-3 text-teal-600" />
@@ -715,7 +779,7 @@ export const TeacherDirectoryView: React.FC<TeacherDirectoryViewProps> = ({
                         </span>
                       ) : (
                         <span className="inline-flex items-center gap-1 bg-slate-100 text-slate-600 border border-slate-200 text-[10px] font-bold px-2.5 py-1 rounded-xl">
-                          Guru Mata Pelajaran
+                          Guru Mapel
                         </span>
                       )}
                     </div>
@@ -742,19 +806,29 @@ export const TeacherDirectoryView: React.FC<TeacherDirectoryViewProps> = ({
 
                   {/* Profile Avatar & Info */}
                   <div className="flex items-start gap-3 pt-1">
-                    <div className={`w-12 h-12 rounded-2xl text-white flex items-center justify-center font-black text-lg shadow-sm shrink-0 uppercase ${
-                      isTu 
-                        ? 'bg-gradient-to-br from-teal-500 to-teal-700' 
-                        : 'bg-gradient-to-br from-indigo-500 to-indigo-700'
-                    }`}>
-                      {teacher.name.charAt(0)}
+                    <div className="relative shrink-0">
+                      <div className={`w-12 h-12 rounded-2xl text-white flex items-center justify-center font-black text-lg shadow-sm uppercase ${
+                        isTu 
+                          ? 'bg-gradient-to-br from-teal-500 to-teal-700' 
+                          : 'bg-gradient-to-br from-indigo-500 to-indigo-700'
+                      }`}>
+                        {teacher.name.charAt(0)}
+                      </div>
+                      {isOnline && (
+                        <span className="absolute -bottom-1 -right-1 flex h-4 w-4">
+                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                          <span className="relative inline-flex rounded-full h-4 w-4 bg-emerald-500 border-2 border-white"></span>
+                        </span>
+                      )}
                     </div>
                     <div className="min-w-0 flex-1">
-                      <h3 className={`font-extrabold text-slate-900 text-sm leading-snug truncate transition-colors ${
-                        isTu ? 'group-hover:text-teal-600' : 'group-hover:text-indigo-600'
-                      }`}>
-                        {teacher.name}
-                      </h3>
+                      <div className="flex items-center gap-1.5">
+                        <h3 className={`font-extrabold text-slate-900 text-sm leading-snug truncate transition-colors ${
+                          isTu ? 'group-hover:text-teal-600' : 'group-hover:text-indigo-600'
+                        }`}>
+                          {teacher.name}
+                        </h3>
+                      </div>
                       <p className="text-[11px] font-mono text-slate-500 font-semibold mt-0.5">
                         {isTu ? 'NIP/NIK' : 'NIP'}: {teacher.nip || '-'}
                       </p>
@@ -852,13 +926,28 @@ export const TeacherDirectoryView: React.FC<TeacherDirectoryViewProps> = ({
                 {filteredTeachers.map((teacher, index) => {
                   const isTu = teacher.additionalDuty === 'TU';
                   const homeroomInfo = getTeacherHomeroomInfo(teacher);
+                  const isOnline = isTeacherOnline(teacher, activePresenceList);
 
                   return (
                     <tr key={teacher.id} className="hover:bg-slate-50/80 transition-colors">
                       <td className="py-3.5 px-4 font-mono font-bold text-slate-400">{index + 1}</td>
                       <td className="py-3.5 px-4">
-                        <div className="font-extrabold text-slate-900 flex items-center gap-1.5">
-                          {teacher.name}
+                        <div className="font-extrabold text-slate-900 flex items-center gap-2">
+                          <span>{teacher.name}</span>
+                          {isOnline ? (
+                            <span className="inline-flex items-center gap-1 bg-emerald-100 text-emerald-800 font-black px-2 py-0.5 rounded-full text-[10px] border border-emerald-300 shadow-2xs">
+                              <span className="relative flex h-1.5 w-1.5">
+                                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                                <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-500"></span>
+                              </span>
+                              Online
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 text-slate-400 font-medium text-[10px]">
+                              <span className="w-1.5 h-1.5 rounded-full bg-slate-300"></span>
+                              Offline
+                            </span>
+                          )}
                         </div>
                         <div className="text-[11px] font-mono text-slate-500">
                           {isTu ? 'NIK/NIP' : 'NIP'}: {teacher.nip || '-'}

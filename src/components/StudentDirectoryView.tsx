@@ -49,14 +49,16 @@ import {
   convertGoogleDriveUrl,
   isGoogleDriveUrl
 } from '../lib/exportUtils';
-import { resetToDefaultData, getSchoolProfile } from '../lib/storage';
+import { resetToDefaultData, getSchoolProfile, isParentOnline, getOnlinePresenceList } from '../lib/storage';
 import { QRCodeSVG } from 'qrcode.react';
+import { UserPresence } from '../types';
 
 interface StudentDirectoryViewProps {
   students: Student[];
   classes: SchoolClass[];
   schoolProfile?: SchoolProfile;
   teachers?: Teacher[];
+  onlinePresenceList?: UserPresence[];
   onAddStudent: (student: Student) => void;
   onBatchAddStudents?: (students: Student[], newClasses?: SchoolClass[]) => void;
   onUpdateStudent: (student: Student) => void;
@@ -69,6 +71,7 @@ export const StudentDirectoryView: React.FC<StudentDirectoryViewProps> = ({
   classes,
   schoolProfile: propSchoolProfile,
   teachers = [],
+  onlinePresenceList: propOnlinePresenceList,
   onAddStudent,
   onBatchAddStudents,
   onUpdateStudent,
@@ -79,7 +82,23 @@ export const StudentDirectoryView: React.FC<StudentDirectoryViewProps> = ({
 
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedClass, setSelectedClass] = useState('ALL');
+  const [onlyOnlineParents, setOnlyOnlineParents] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
+  const [localPresenceList, setLocalPresenceList] = useState<UserPresence[]>(() => getOnlinePresenceList());
+
+  useEffect(() => {
+    const handlePresence = () => {
+      setLocalPresenceList(getOnlinePresenceList());
+    };
+    window.addEventListener('sihadir_presence_updated', handlePresence);
+    window.addEventListener('sihadir_storage_updated', handlePresence);
+    return () => {
+      window.removeEventListener('sihadir_presence_updated', handlePresence);
+      window.removeEventListener('sihadir_storage_updated', handlePresence);
+    };
+  }, []);
+
+  const activePresenceList = propOnlinePresenceList || localPresenceList;
   const ITEMS_PER_PAGE = 10;
 
   const sortedClasses = useMemo(() => {
@@ -293,6 +312,10 @@ export const StudentDirectoryView: React.FC<StudentDirectoryViewProps> = ({
     address: 'Jl. Utama No. 1'
   });
 
+  const totalOnlineParents = useMemo(() => {
+    return students.filter(s => isParentOnline(s, activePresenceList)).length;
+  }, [students, activePresenceList]);
+
   const filteredStudents = useMemo(() => {
     return students
       .filter(s => {
@@ -300,10 +323,11 @@ export const StudentDirectoryView: React.FC<StudentDirectoryViewProps> = ({
                               s.nisn.includes(searchQuery) ||
                               s.nis.includes(searchQuery);
         const matchesClass = selectedClass === 'ALL' || s.className === selectedClass;
-        return matchesSearch && matchesClass;
+        const matchesOnline = !onlyOnlineParents || isParentOnline(s, activePresenceList);
+        return matchesSearch && matchesClass && matchesOnline;
       })
       .sort((a, b) => a.name.localeCompare(b.name, 'id', { numeric: true, sensitivity: 'base' }));
-  }, [students, searchQuery, selectedClass]);
+  }, [students, searchQuery, selectedClass, onlyOnlineParents, activePresenceList]);
 
   const totalPages = Math.ceil(filteredStudents.length / ITEMS_PER_PAGE) || 1;
 
@@ -747,6 +771,27 @@ export const StudentDirectoryView: React.FC<StudentDirectoryViewProps> = ({
               ))}
             </select>
 
+            {/* Filter Ortu Online */}
+            <button
+              type="button"
+              onClick={() => {
+                setOnlyOnlineParents(!onlyOnlineParents);
+                setCurrentPage(1);
+              }}
+              className={`font-bold px-3 py-2 rounded-xl text-xs flex items-center gap-1.5 transition-all cursor-pointer shadow-xs shrink-0 border ${
+                onlyOnlineParents
+                  ? 'bg-emerald-600 text-white border-emerald-600 ring-2 ring-emerald-400/30'
+                  : 'bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border-emerald-200'
+              }`}
+              title="Tampilkan hanya siswa yang akun orang tua / wali muridnya sedang aktif online"
+            >
+              <span className="relative flex h-2 w-2">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+              </span>
+              <span>Ortu Online ({totalOnlineParents})</span>
+            </button>
+
             {/* Tombol Unduh Excel Cepat */}
             <button
               type="button"
@@ -832,31 +877,60 @@ export const StudentDirectoryView: React.FC<StudentDirectoryViewProps> = ({
         </div>
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-          {paginatedStudents.map((student) => (
-            <div
-              key={student.id}
-              className="bg-white border border-slate-200/80 hover:border-indigo-300 rounded-3xl p-5 shadow-sm transition-all duration-200 flex flex-col justify-between space-y-4 group"
-            >
-              <div className="flex items-start gap-3.5">
-                <img
-                  src={student.photoUrl}
-                  alt={student.name}
-                  className="w-16 h-16 rounded-2xl object-cover ring-2 ring-indigo-100 group-hover:ring-indigo-300 shadow-sm"
-                />
-                <div className="min-w-0 flex-1">
-                  <span className="bg-indigo-50 text-indigo-700 font-bold text-[10px] px-2.5 py-0.5 rounded-full border border-indigo-100">
-                    Kelas {student.className}
-                  </span>
-                  <h3 className="text-sm font-extrabold text-slate-900 truncate mt-1.5">{student.name}</h3>
-                  <p className="text-[11px] text-slate-500 font-mono mt-0.5">
-                    NISN: {student.nisn} | NIS: {student.nis}
-                  </p>
-                  <p className="text-[11px] text-slate-500 mt-0.5 truncate flex items-center gap-1">
-                    <Phone className="w-3 h-3 text-slate-400 shrink-0" />
-                    Wali: {student.parentName} ({student.parentPhone})
-                  </p>
+          {paginatedStudents.map((student) => {
+            const isOnline = isParentOnline(student, activePresenceList);
+
+            return (
+              <div
+                key={student.id}
+                className={`bg-white border rounded-3xl p-5 shadow-sm transition-all duration-200 flex flex-col justify-between space-y-4 group ${
+                  isOnline ? 'border-emerald-300 ring-2 ring-emerald-500/20' : 'border-slate-200/80 hover:border-indigo-300'
+                }`}
+              >
+                <div className="flex items-start gap-3.5">
+                  <div className="relative shrink-0">
+                    <img
+                      src={student.photoUrl}
+                      alt={student.name}
+                      className="w-16 h-16 rounded-2xl object-cover ring-2 ring-indigo-100 group-hover:ring-indigo-300 shadow-sm"
+                    />
+                    {isOnline && (
+                      <span className="absolute -bottom-1 -right-1 flex h-4 w-4">
+                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                        <span className="relative inline-flex rounded-full h-4 w-4 bg-emerald-500 border-2 border-white shadow-xs"></span>
+                      </span>
+                    )}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <span className="bg-indigo-50 text-indigo-700 font-bold text-[10px] px-2.5 py-0.5 rounded-full border border-indigo-100">
+                        Kelas {student.className}
+                      </span>
+                      {isOnline ? (
+                        <span className="inline-flex items-center gap-1 bg-emerald-50 text-emerald-800 border border-emerald-200 text-[10px] font-extrabold px-2 py-0.5 rounded-full shadow-2xs">
+                          <span className="relative flex h-1.5 w-1.5">
+                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                            <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-500"></span>
+                          </span>
+                          Ortu Online
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1 text-slate-400 text-[10px] font-medium">
+                          <span className="w-1.5 h-1.5 rounded-full bg-slate-300"></span>
+                          Ortu Offline
+                        </span>
+                      )}
+                    </div>
+                    <h3 className="text-sm font-extrabold text-slate-900 truncate mt-1.5">{student.name}</h3>
+                    <p className="text-[11px] text-slate-500 font-mono mt-0.5">
+                      NISN: {student.nisn} | NIS: {student.nis}
+                    </p>
+                    <p className="text-[11px] text-slate-500 mt-0.5 truncate flex items-center gap-1">
+                      <Phone className="w-3 h-3 text-slate-400 shrink-0" />
+                      Wali: {student.parentName} ({student.parentPhone})
+                    </p>
+                  </div>
                 </div>
-              </div>
 
               {/* Action Buttons */}
               <div className="space-y-1.5 pt-3 border-t border-slate-100">
@@ -911,7 +985,8 @@ export const StudentDirectoryView: React.FC<StudentDirectoryViewProps> = ({
                 </div>
               </div>
             </div>
-          ))}
+            );
+          })}
         </div>
       )}
 

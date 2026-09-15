@@ -11,6 +11,16 @@ export interface UserSession {
   photoUrl?: string;
 }
 
+export interface UserPresence {
+  userId: string; // e.g. teacherId, studentId, or username
+  role: UserRole;
+  displayName: string;
+  identifier: string; // nip, nisn, phone, or username
+  lastActive: number; // timestamp in ms
+  isOnline: boolean;
+  device?: string;
+}
+
 export type AttendanceStatus = 'HADIR' | 'TERLAMBAT' | 'IZIN' | 'SAKIT' | 'ALPA';
 
 export interface Student {

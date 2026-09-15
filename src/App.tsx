@@ -47,7 +47,8 @@ import {
   getUserSession,
   saveUserSession,
   initFirestoreRealtimeSync,
-  reconcileTeachersAndClasses
+  reconcileTeachersAndClasses,
+  KEYS
 } from './lib/storage';
 import { sendWhatsAppGatewayMessage } from './lib/exportUtils';
 import { ShieldCheck, CheckCircle2 } from 'lucide-react';
@@ -326,10 +327,10 @@ export default function App() {
     const { updatedTeachers, updatedClasses, teachersChanged, classesChanged } = reconcileTeachersAndClasses(rawTeachers, rawClasses);
 
     if (teachersChanged) {
-      saveTeachers(updatedTeachers);
+      localStorage.setItem(KEYS.TEACHERS, JSON.stringify(updatedTeachers));
     }
     if (classesChanged) {
-      saveSchoolClasses(updatedClasses);
+      localStorage.setItem(KEYS.CLASSES, JSON.stringify(updatedClasses));
     }
 
     setSchoolProfileState(rawProfile);
@@ -352,16 +353,16 @@ export default function App() {
   useEffect(() => {
     initFirestoreRealtimeSync();
 
-    // Initial reconciliation on boot to make sure teachers & classes match
+    // Initial reconciliation on boot to make sure in-memory state is consistent without overwriting Cloud Firestore
     const initialRawClasses = getSchoolClasses();
     const initialRawTeachers = getTeachers();
     const { updatedTeachers, updatedClasses, teachersChanged, classesChanged } = reconcileTeachersAndClasses(initialRawTeachers, initialRawClasses);
     if (teachersChanged) {
-      saveTeachers(updatedTeachers);
+      localStorage.setItem(KEYS.TEACHERS, JSON.stringify(updatedTeachers));
       setTeachersState(updatedTeachers);
     }
     if (classesChanged) {
-      saveSchoolClasses(updatedClasses);
+      localStorage.setItem(KEYS.CLASSES, JSON.stringify(updatedClasses));
       setClassesState(updatedClasses);
     }
 

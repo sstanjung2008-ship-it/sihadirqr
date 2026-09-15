@@ -72,7 +72,8 @@ export const LoginView: React.FC<LoginViewProps> = ({
 
     // 1. ADMIN LOGIC
     if (cleanInputUser.toLowerCase() === 'admin') {
-      if (password === 'admin123') {
+      const expectedAdminPassword = schoolProfile.adminPassword || 'admin123';
+      if (password === expectedAdminPassword) {
         const session: UserSession = {
           isLoggedIn: true,
           role: 'ADMIN',
@@ -83,14 +84,15 @@ export const LoginView: React.FC<LoginViewProps> = ({
         onLoginSuccess(session);
         return;
       } else {
-        setErrorMessage('Password Admin salah! (Gunakan password admin yang benar)');
+        setErrorMessage('Password Admin salah! Silakan periksa kembali password yang telah diatur.');
         return;
       }
     }
 
     // 2. SCANNER / SATPAM LOGIC
     if (cleanInputUser.toLowerCase() === 'satpam' || cleanInputUser.toLowerCase() === 'pos') {
-      if (password === '123456' || password === 'satpam') {
+      const expectedScannerPassword = schoolProfile.scannerPassword || '123456';
+      if (password === expectedScannerPassword || password === 'satpam' || (expectedScannerPassword === '123456' && password === '123456')) {
         const session: UserSession = {
           isLoggedIn: true,
           role: 'SCANNER_POS',

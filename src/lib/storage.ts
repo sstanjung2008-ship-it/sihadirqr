@@ -15,7 +15,7 @@ import {
 } from '../data/mockData';
 import { db, doc, setDoc, getDoc, onSnapshot } from './firebase';
 
-const KEYS = {
+export const KEYS = {
   PROFILE: 'sihadir_school_profile_v2',
   CLASSES: 'sihadir_school_classes_v2',
   STUDENTS: 'sihadir_school_students_v2',
@@ -625,6 +625,8 @@ export function mergeSchoolProfile(local: SchoolProfile, cloud: SchoolProfile): 
     ...INITIAL_SCHOOL_PROFILE,
     ...local,
     ...cloud,
+    adminPassword: cloud.adminPassword || local.adminPassword || INITIAL_SCHOOL_PROFILE.adminPassword || 'admin123',
+    scannerPassword: cloud.scannerPassword || local.scannerPassword || INITIAL_SCHOOL_PROFILE.scannerPassword || '123456',
     subjects: mergedSubjects,
     holidays: (cloud.holidays && Array.isArray(cloud.holidays) && cloud.holidays.length > 0) ? cloud.holidays : (local.holidays || []),
     activeDays: (cloud.activeDays && Array.isArray(cloud.activeDays) && cloud.activeDays.length > 0) ? cloud.activeDays : (local.activeDays || ['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu']),
@@ -1110,6 +1112,8 @@ export function getSchoolProfile(): SchoolProfile {
     return {
       ...INITIAL_SCHOOL_PROFILE,
       ...parsed,
+      adminPassword: parsed.adminPassword || INITIAL_SCHOOL_PROFILE.adminPassword || 'admin123',
+      scannerPassword: parsed.scannerPassword || INITIAL_SCHOOL_PROFILE.scannerPassword || '123456',
       startTime: parsed.startTime || INITIAL_SCHOOL_PROFILE.startTime || '07:00',
       endTime: parsed.endTime || INITIAL_SCHOOL_PROFILE.endTime || '15:00',
       autoAlpaTime: parsed.autoAlpaTime || INITIAL_SCHOOL_PROFILE.autoAlpaTime || '08:30',

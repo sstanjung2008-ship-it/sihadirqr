@@ -491,7 +491,11 @@ export const SchoolSettingsView: React.FC<SchoolSettingsViewProps> = ({
     .sort((a, b) => a.date.localeCompare(b.date));
 
   // Password Reset State
-  const [passwordRoleTab, setPasswordRoleTab] = useState<'TEACHER' | 'STUDENT'>('TEACHER');
+  const [passwordRoleTab, setPasswordRoleTab] = useState<'ADMIN_SCANNER' | 'TEACHER' | 'STUDENT'>('ADMIN_SCANNER');
+  const [adminPasswordInput, setAdminPasswordInput] = useState<string>(schoolProfile.adminPassword || 'admin123');
+  const [scannerPasswordInput, setScannerPasswordInput] = useState<string>(schoolProfile.scannerPassword || '123456');
+  const [showAdminPassword, setShowAdminPassword] = useState<boolean>(false);
+  const [showScannerPassword, setShowScannerPassword] = useState<boolean>(false);
   const [selectedTeacherId, setSelectedTeacherId] = useState<string>('');
   const [selectedStudentId, setSelectedStudentId] = useState<string>('');
   const [newPasswordInput, setNewPasswordInput] = useState<string>('123456');
@@ -500,6 +504,61 @@ export const SchoolSettingsView: React.FC<SchoolSettingsViewProps> = ({
   const [studentSearchTerm, setStudentSearchTerm] = useState<string>('');
   const [teacherSearchTerm, setTeacherSearchTerm] = useState<string>('');
   const [passwordResetNotice, setPasswordResetNotice] = useState<{ type: 'success' | 'error'; msg: string } | null>(null);
+
+  useEffect(() => {
+    if (schoolProfile.adminPassword) {
+      setAdminPasswordInput(schoolProfile.adminPassword);
+    }
+    if (schoolProfile.scannerPassword) {
+      setScannerPasswordInput(schoolProfile.scannerPassword);
+    }
+  }, [schoolProfile.adminPassword, schoolProfile.scannerPassword]);
+
+  const handleSaveAdminPassword = (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    const trimmed = adminPasswordInput.trim();
+    if (!trimmed) {
+      setPasswordResetNotice({ type: 'error', msg: 'Password Admin tidak boleh kosong!' });
+      return;
+    }
+    if (trimmed.length < 4) {
+      setPasswordResetNotice({ type: 'error', msg: 'Password Admin minimal 4 karakter!' });
+      return;
+    }
+
+    const updatedProfile = {
+      ...formData,
+      adminPassword: trimmed
+    };
+    setFormData(updatedProfile);
+    onSaveProfile(updatedProfile);
+    setPasswordResetNotice({
+      type: 'success',
+      msg: `Password Akun Admin berhasil disimpan dan disinkronkan ke Cloud: "${trimmed}".`
+    });
+    setTimeout(() => setPasswordResetNotice(null), 5000);
+  };
+
+  const handleSaveScannerPassword = (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    const trimmed = scannerPasswordInput.trim();
+    if (!trimmed) {
+      setPasswordResetNotice({ type: 'error', msg: 'Password Pos Scanner tidak boleh kosong!' });
+      return;
+    }
+
+    const updatedProfile = {
+      ...formData,
+      scannerPassword: trimmed
+    };
+    setFormData(updatedProfile);
+    onSaveProfile(updatedProfile);
+    setPasswordResetNotice({
+      type: 'success',
+      msg: `Password Pos Scanner Satpam berhasil disimpan dan disinkronkan ke Cloud: "${trimmed}".`
+    });
+    setTimeout(() => setPasswordResetNotice(null), 5000);
+  };
 
   const handleSelectTeacherForReset = (id: string) => {
     setSelectedTeacherId(id);
@@ -2535,15 +2594,30 @@ export const SchoolSettingsView: React.FC<SchoolSettingsViewProps> = ({
             <div>
               <h2 className="text-sm font-bold text-slate-800 flex items-center gap-2">
                 <KeyRound className="w-4 h-4 text-indigo-600" />
-                Pengaturan & Reset Password Akun Login (Guru & Siswa)
+                Pengaturan & Reset Password Akun Login (Admin, Guru & Siswa)
               </h2>
               <p className="text-xs text-slate-500 mt-0.5">
-                Atur ulang kata sandi login untuk akun Guru (No. HP / WA atau NIP) dan Siswa / Wali Murid (NISN).
+                Atur kata sandi login untuk Administrator Utama, Pos Scanner Satpam, Guru (No. HP/WA / NIP), dan Siswa/Wali Murid (NISN).
               </p>
             </div>
 
             {/* Role Tab Toggle */}
-            <div className="flex bg-slate-100 p-1 rounded-2xl shrink-0 self-start sm:self-auto">
+            <div className="flex flex-wrap bg-slate-100 p-1 rounded-2xl shrink-0 self-start sm:self-auto gap-1">
+              <button
+                type="button"
+                onClick={() => {
+                  setPasswordRoleTab('ADMIN_SCANNER');
+                  setPasswordResetNotice(null);
+                }}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                  passwordRoleTab === 'ADMIN_SCANNER'
+                    ? 'bg-white text-indigo-600 shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                <ShieldCheck className="w-3.5 h-3.5" />
+                Admin & Scanner
+              </button>
               <button
                 type="button"
                 onClick={() => {
@@ -2552,7 +2626,7 @@ export const SchoolSettingsView: React.FC<SchoolSettingsViewProps> = ({
                   setNewPasswordInput('123456');
                   setPasswordResetNotice(null);
                 }}
-                className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
                   passwordRoleTab === 'TEACHER'
                     ? 'bg-white text-indigo-600 shadow-xs'
                     : 'text-slate-600 hover:text-slate-900'
@@ -2569,7 +2643,7 @@ export const SchoolSettingsView: React.FC<SchoolSettingsViewProps> = ({
                   setNewPasswordInput('123456');
                   setPasswordResetNotice(null);
                 }}
-                className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
                   passwordRoleTab === 'STUDENT'
                     ? 'bg-white text-indigo-600 shadow-xs'
                     : 'text-slate-600 hover:text-slate-900'
@@ -2594,6 +2668,128 @@ export const SchoolSettingsView: React.FC<SchoolSettingsViewProps> = ({
                 <ShieldAlert className="w-4 h-4 text-rose-600 shrink-0" />
               )}
               <span className="flex-1">{passwordResetNotice.msg}</span>
+            </div>
+          )}
+
+          {/* TAB ADMIN & POS SCANNER */}
+          {passwordRoleTab === 'ADMIN_SCANNER' && (
+            <div className="space-y-4 text-xs">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {/* Admin Password Card */}
+                <div className="bg-slate-50 border border-slate-200/80 rounded-2xl p-4 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <span className="font-bold text-slate-800 flex items-center gap-1.5">
+                      <Lock className="w-3.5 h-3.5 text-indigo-600" />
+                      Password Akun Admin Utama
+                    </span>
+                    <span className="text-[10px] font-mono bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded-full font-bold">
+                      Username: admin
+                    </span>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className="block text-slate-600 font-medium">Kata Sandi Baru</label>
+                    <div className="relative">
+                      <input
+                        type={showAdminPassword ? 'text' : 'password'}
+                        value={adminPasswordInput}
+                        onChange={(e) => setAdminPasswordInput(e.target.value)}
+                        placeholder="Masukkan password admin..."
+                        className="w-full bg-white border border-slate-200 text-slate-800 rounded-xl p-2.5 pr-10 font-mono font-bold focus:ring-2 focus:ring-indigo-500"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowAdminPassword(!showAdminPassword)}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 cursor-pointer"
+                      >
+                        {showAdminPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                      </button>
+                    </div>
+                    <p className="text-[11px] text-slate-400">
+                      Default: <code className="font-mono bg-white border border-slate-200 px-1 py-0.5 rounded text-indigo-600 font-bold">admin123</code>
+                    </p>
+                  </div>
+
+                  <div className="flex items-center justify-between gap-2 pt-2 border-t border-slate-200/60">
+                    <button
+                      type="button"
+                      onClick={() => setAdminPasswordInput('admin123')}
+                      className="bg-white hover:bg-slate-100 text-slate-600 border border-slate-200 font-bold px-3 py-1.5 rounded-xl text-xs transition-all cursor-pointer"
+                    >
+                      Default
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleSaveAdminPassword}
+                      className="bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold px-3.5 py-1.5 rounded-xl text-xs flex items-center gap-1.5 shadow-sm transition-all cursor-pointer"
+                    >
+                      <Save className="w-3.5 h-3.5" />
+                      Simpan Password Admin
+                    </button>
+                  </div>
+                </div>
+
+                {/* Scanner / Satpam Password Card */}
+                <div className="bg-slate-50 border border-slate-200/80 rounded-2xl p-4 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <span className="font-bold text-slate-800 flex items-center gap-1.5">
+                      <Lock className="w-3.5 h-3.5 text-sky-600" />
+                      Password Pos Scanner Satpam
+                    </span>
+                    <span className="text-[10px] font-mono bg-sky-50 text-sky-700 px-2 py-0.5 rounded-full font-bold">
+                      Username: satpam / pos
+                    </span>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className="block text-slate-600 font-medium">Kata Sandi Baru</label>
+                    <div className="relative">
+                      <input
+                        type={showScannerPassword ? 'text' : 'password'}
+                        value={scannerPasswordInput}
+                        onChange={(e) => setScannerPasswordInput(e.target.value)}
+                        placeholder="Masukkan password scanner/satpam..."
+                        className="w-full bg-white border border-slate-200 text-slate-800 rounded-xl p-2.5 pr-10 font-mono font-bold focus:ring-2 focus:ring-sky-500"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowScannerPassword(!showScannerPassword)}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 cursor-pointer"
+                      >
+                        {showScannerPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                      </button>
+                    </div>
+                    <p className="text-[11px] text-slate-400">
+                      Default: <code className="font-mono bg-white border border-slate-200 px-1 py-0.5 rounded text-sky-600 font-bold">123456</code>
+                    </p>
+                  </div>
+
+                  <div className="flex items-center justify-between gap-2 pt-2 border-t border-slate-200/60">
+                    <button
+                      type="button"
+                      onClick={() => setScannerPasswordInput('123456')}
+                      className="bg-white hover:bg-slate-100 text-slate-600 border border-slate-200 font-bold px-3 py-1.5 rounded-xl text-xs transition-all cursor-pointer"
+                    >
+                      Default
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleSaveScannerPassword}
+                      className="bg-sky-600 hover:bg-sky-700 text-white font-extrabold px-3.5 py-1.5 rounded-xl text-xs flex items-center gap-1.5 shadow-sm transition-all cursor-pointer"
+                    >
+                      <Save className="w-3.5 h-3.5" />
+                      Simpan Password Scanner
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <div className="bg-amber-50 border border-amber-200/80 rounded-2xl p-3.5 flex items-start gap-2.5 text-amber-900">
+                <AlertCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                <p className="text-[11px] leading-relaxed">
+                  Password yang disimpan akan langsung dienkripsi lokal dan otomatis disinkronkan ke Cloud Firestore sehingga tetap berlaku di semua HP, komputer, dan perangkat lain saat melakukan pembaruan/push kode.
+                </p>
+              </div>
             </div>
           )}
 

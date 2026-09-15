@@ -31,6 +31,8 @@ export const INITIAL_SCHOOL_PROFILE: SchoolProfile = {
   waApiKey: "",
   waGatewayProvider: "Fonnte",
   waGatewayEnabled: true,
+  adminPassword: "admin123",
+  scannerPassword: "123456",
   activeDays: ["Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu"],
   holidays: [
     {

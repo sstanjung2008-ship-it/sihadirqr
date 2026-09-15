@@ -166,6 +166,8 @@ export interface SchoolProfile {
   holidays?: SchoolHoliday[]; // Daftar Hari Libur Khusus / Libur Nasional
   cardOrientation?: 'PORTRAIT' | 'LANDSCAPE';
   subjects?: string[];
+  adminPassword?: string; // Kata sandi login Administrator Sekolah (Default: admin123)
+  scannerPassword?: string; // Kata sandi login Pos Scanner Satpam (Default: 123456)
 }
 
 export interface Teacher {

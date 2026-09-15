@@ -7,7 +7,7 @@ interface ParentBottomNavProps {
   unreadLeavesCount?: number;
 }
 
-export const ParentBottomNav: React.FC<ParentBottomNavProps> = ({
+export const ParentBottomNav: React.FC<ParentBottomNavProps> = React.memo(({
   activeTab,
   onTabChange,
   unreadLeavesCount = 0,
@@ -49,9 +49,9 @@ export const ParentBottomNav: React.FC<ParentBottomNavProps> = ({
   return (
     <nav
       aria-label="Navigasi Bawah Orang Tua"
-      className="lg:hidden fixed bottom-3 inset-x-3 z-40 max-w-md mx-auto"
+      className="lg:hidden fixed bottom-3 inset-x-3 z-40 max-w-md mx-auto pointer-events-auto"
     >
-      <div className="relative rounded-3xl p-1.5 bg-slate-900/85 backdrop-blur-2xl border border-white/20 shadow-[0_12px_40px_rgba(0,0,0,0.45)] ring-1 ring-black/10">
+      <div className="relative rounded-3xl p-1.5 bg-slate-900/90 backdrop-blur-2xl border border-white/20 shadow-[0_12px_40px_rgba(0,0,0,0.45)] ring-1 ring-black/10">
         <div className="flex items-center justify-around gap-1">
           {navItems.map((item) => {
             const Icon = item.icon;
@@ -62,7 +62,7 @@ export const ParentBottomNav: React.FC<ParentBottomNavProps> = ({
                 key={item.id}
                 type="button"
                 onClick={() => onTabChange(item.id)}
-                className={`relative flex-1 flex flex-col items-center justify-center py-2 px-1 rounded-2xl transition-all duration-200 cursor-pointer min-h-[52px] group ${
+                className={`relative flex-1 flex flex-col items-center justify-center py-2 px-1 rounded-2xl transition-transform duration-100 touch-manipulation select-none active:scale-95 cursor-pointer min-h-[52px] group ${
                   isActive
                     ? 'bg-gradient-to-b from-white/15 to-white/5 text-white shadow-inner border border-white/25'
                     : 'text-slate-400 hover:text-slate-200 hover:bg-white/5'
@@ -76,7 +76,7 @@ export const ParentBottomNav: React.FC<ParentBottomNavProps> = ({
                 {/* Icon Wrapper */}
                 <div className="relative">
                   <div
-                    className={`p-1.5 rounded-xl transition-all duration-200 ${
+                    className={`p-1.5 rounded-xl transition-all duration-150 ${
                       isActive
                         ? `bg-gradient-to-tr ${item.glowColor} text-white shadow-md shadow-emerald-500/20 scale-105`
                         : 'text-slate-400 group-hover:text-slate-200'
@@ -110,4 +110,4 @@ export const ParentBottomNav: React.FC<ParentBottomNavProps> = ({
       </div>
     </nav>
   );
-};
+});

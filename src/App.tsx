@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { 
   UserRole, 
   SchoolProfile, 
@@ -93,28 +93,44 @@ export default function App() {
     return userSession?.role === 'SCANNER_POS' ? 'scanner' : 'dashboard';
   });
 
+  const activeTabRef = useRef<string>(activeTab);
+  activeTabRef.current = activeTab;
+  const currentRoleRef = useRef<UserRole>(currentRole);
+  currentRoleRef.current = currentRole;
+
   // Track tab changes in browser history for Hardware Back Button & Browser Back Button support
-  const handleTabChange = (tabId: string, replace: boolean = false) => {
+  const handleTabChange = useCallback((tabId: string, replace: boolean = false) => {
+    if (activeTabRef.current === tabId) return;
     setActiveTab(tabId);
-    if (replace) {
-      window.history.replaceState({ tab: tabId, role: currentRole }, '', `#${tabId}`);
-    } else {
-      // Only push new history entry if different from current history state
-      if (window.history.state?.tab !== tabId) {
-        window.history.pushState({ tab: tabId, role: currentRole }, '', `#${tabId}`);
+    activeTabRef.current = tabId;
+
+    try {
+      if (replace) {
+        window.history.replaceState({ tab: tabId, role: currentRoleRef.current }, '', `#${tabId}`);
+      } else {
+        // Only push new history entry if different from current history state
+        if (window.history.state?.tab !== tabId) {
+          window.history.pushState({ tab: tabId, role: currentRoleRef.current }, '', `#${tabId}`);
+        }
       }
+    } catch {
+      // Ignore iframe history restrictions
     }
-  };
+  }, []);
 
   // Hardware/Device & Browser Back Button Handler (popstate)
   useEffect(() => {
     // Initialize initial state if empty
-    if (!window.history.state || !window.history.state.tab) {
-      window.history.replaceState(
-        { tab: activeTab, role: currentRole },
-        '',
-        `#${activeTab}`
-      );
+    try {
+      if (!window.history.state || !window.history.state.tab) {
+        window.history.replaceState(
+          { tab: activeTabRef.current, role: currentRoleRef.current },
+          '',
+          `#${activeTabRef.current}`
+        );
+      }
+    } catch {
+      // Ignore
     }
 
     const handlePopState = (event: PopStateEvent) => {
@@ -127,7 +143,11 @@ export default function App() {
         if (topCloseBtn && typeof topCloseBtn.click === 'function') {
           topCloseBtn.click();
           // Keep history balanced
-          window.history.pushState({ tab: activeTab, role: currentRole }, '', `#${activeTab}`);
+          try {
+            window.history.pushState({ tab: activeTabRef.current, role: currentRoleRef.current }, '', `#${activeTabRef.current}`);
+          } catch {
+            // Ignore
+          }
           return;
         }
       }
@@ -135,18 +155,29 @@ export default function App() {
       // 2. Navigate back to previous tab
       if (event.state && event.state.tab) {
         setActiveTab(event.state.tab);
-        if (event.state.role && event.state.role !== currentRole) {
+        activeTabRef.current = event.state.tab;
+        if (event.state.role && event.state.role !== currentRoleRef.current) {
           setCurrentRole(event.state.role);
+          currentRoleRef.current = event.state.role;
         }
       } else {
         // Default to home / dashboard instead of letting the browser exit the app
-        const defaultTab = currentRole === 'SCANNER_POS' ? 'scanner' : 'dashboard';
-        if (activeTab !== defaultTab) {
+        const defaultTab = currentRoleRef.current === 'SCANNER_POS' ? 'scanner' : 'dashboard';
+        if (activeTabRef.current !== defaultTab) {
           setActiveTab(defaultTab);
-          window.history.replaceState({ tab: defaultTab, role: currentRole }, '', `#${defaultTab}`);
+          activeTabRef.current = defaultTab;
+          try {
+            window.history.replaceState({ tab: defaultTab, role: currentRoleRef.current }, '', `#${defaultTab}`);
+          } catch {
+            // Ignore
+          }
         } else {
           // If already at default tab, re-push state to prevent accidental app exit on mobile WebView/PWA
-          window.history.pushState({ tab: defaultTab, role: currentRole }, '', `#${defaultTab}`);
+          try {
+            window.history.pushState({ tab: defaultTab, role: currentRoleRef.current }, '', `#${defaultTab}`);
+          } catch {
+            // Ignore
+          }
         }
       }
     };
@@ -155,7 +186,7 @@ export default function App() {
     return () => {
       window.removeEventListener('popstate', handlePopState);
     };
-  }, [activeTab, currentRole]);
+  }, []);
 
   // Core Data States
   const [schoolProfile, setSchoolProfileState] = useState<SchoolProfile>(getSchoolProfile());

@@ -744,88 +744,46 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
         </div>
       </div>
 
-      {/* Auto Switch Indicator & Mode Selection Tabs */}
-      <div className="space-y-2">
-        {/* Status Bar Auto Switch Mode */}
-        <div className="bg-slate-900 text-white rounded-2xl p-3.5 sm:px-4 sm:py-3 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 border border-slate-800 shadow-sm">
-          <div className="flex items-center gap-2.5 text-xs">
-            <span className="relative flex h-2.5 w-2.5">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-              <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
+      {/* Mode Selection Tabs (Scan Masuk vs Scan Pulang) */}
+      <div className="bg-white border border-slate-200/80 rounded-2xl p-2 shadow-xs flex flex-col sm:flex-row items-center gap-2">
+        <button
+          type="button"
+          onClick={() => {
+            setScanMode('MASUK');
+            setIsManualOverride(true);
+          }}
+          className={`flex-1 w-full py-3 px-4 rounded-xl font-extrabold text-xs flex items-center justify-center gap-2 transition-all cursor-pointer ${
+            scanMode === 'MASUK'
+              ? isMasukClosedNow
+                ? 'bg-rose-600 text-white shadow-md shadow-rose-600/20'
+                : 'bg-amber-500 text-white shadow-md shadow-amber-500/20'
+              : 'bg-slate-50 text-slate-600 hover:bg-slate-100 border border-slate-200/60'
+          }`}
+        >
+          <Sun className="w-4 h-4 text-amber-200" />
+          <span>☀️ MODE SCAN MASUK (TIBA SEKOLAH / PAGI)</span>
+          {isMasukClosedNow && (
+            <span className="bg-rose-950/80 text-rose-100 border border-rose-300/40 text-[10px] px-2 py-0.5 rounded-full font-black ml-1">
+              🔒 TUTUP ({autoAlpaTimeStr} WITA)
             </span>
-            <div>
-              <span className="font-extrabold text-emerald-400 inline-flex items-center gap-1.5 mr-2">
-                <Zap className="w-3.5 h-3.5 fill-emerald-400" /> Auto Switch Jadwal:
-              </span>
-              <span className="text-slate-300">
-                ☀️ <strong>Masuk</strong> (01:00 – {endTimeStr} WITA) ➔ 🏠 <strong>Pulang</strong> ({endTimeStr} – 01:00 WITA)
-              </span>
-            </div>
-          </div>
+          )}
+        </button>
 
-          <div className="flex items-center gap-2 self-end sm:self-auto">
-            {isManualOverride ? (
-              <button
-                type="button"
-                onClick={() => {
-                  setIsManualOverride(false);
-                  setScanMode(getAutoScanMode());
-                }}
-                className="inline-flex items-center gap-1.5 px-3 py-1 rounded-xl bg-amber-500/20 text-amber-300 hover:bg-amber-500/30 border border-amber-500/40 text-[11px] font-extrabold cursor-pointer transition-colors"
-                title="Klik untuk mengembalikan ke pergantian otomatis"
-              >
-                <RotateCw className="w-3 h-3" />
-                Mode Manual (Klik Sinkronkan Auto)
-              </button>
-            ) : (
-              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 text-[11px] font-extrabold">
-                <CheckCircle2 className="w-3 h-3" /> Otomatis Aktif
-              </span>
-            )}
-          </div>
-        </div>
-
-        {/* Mode Selection Tabs (Scan Masuk vs Scan Pulang) */}
-        <div className="bg-white border border-slate-200/80 rounded-2xl p-2 shadow-xs flex flex-col sm:flex-row items-center gap-2">
-          <button
-            type="button"
-            onClick={() => {
-              setScanMode('MASUK');
-              setIsManualOverride(true);
-            }}
-            className={`flex-1 w-full py-3 px-4 rounded-xl font-extrabold text-xs flex items-center justify-center gap-2 transition-all cursor-pointer ${
-              scanMode === 'MASUK'
-                ? isMasukClosedNow
-                  ? 'bg-rose-600 text-white shadow-md shadow-rose-600/20'
-                  : 'bg-amber-500 text-white shadow-md shadow-amber-500/20'
-                : 'bg-slate-50 text-slate-600 hover:bg-slate-100 border border-slate-200/60'
-            }`}
-          >
-            <Sun className="w-4 h-4 text-amber-200" />
-            <span>☀️ MODE SCAN MASUK (TIBA SEKOLAH / PAGI)</span>
-            {isMasukClosedNow && (
-              <span className="bg-rose-950/80 text-rose-100 border border-rose-300/40 text-[10px] px-2 py-0.5 rounded-full font-black ml-1">
-                🔒 TUTUP ({autoAlpaTimeStr} WITA)
-              </span>
-            )}
-          </button>
-
-          <button
-            type="button"
-            onClick={() => {
-              setScanMode('PULANG');
-              setIsManualOverride(true);
-            }}
-            className={`flex-1 w-full py-3 px-4 rounded-xl font-extrabold text-xs flex items-center justify-center gap-2 transition-all cursor-pointer ${
-              scanMode === 'PULANG'
-                ? 'bg-emerald-600 text-white shadow-md shadow-emerald-600/20'
-                : 'bg-slate-50 text-slate-600 hover:bg-slate-100 border border-slate-200/60'
-            }`}
-          >
-            <Home className="w-4 h-4 text-emerald-200" />
-            <span>🏠 MODE SCAN PULANG (SAAT PULANG / SORE)</span>
-          </button>
-        </div>
+        <button
+          type="button"
+          onClick={() => {
+            setScanMode('PULANG');
+            setIsManualOverride(true);
+          }}
+          className={`flex-1 w-full py-3 px-4 rounded-xl font-extrabold text-xs flex items-center justify-center gap-2 transition-all cursor-pointer ${
+            scanMode === 'PULANG'
+              ? 'bg-emerald-600 text-white shadow-md shadow-emerald-600/20'
+              : 'bg-slate-50 text-slate-600 hover:bg-slate-100 border border-slate-200/60'
+          }`}
+        >
+          <Home className="w-4 h-4 text-emerald-200" />
+          <span>🏠 MODE SCAN PULANG (SAAT PULANG / SORE)</span>
+        </button>
       </div>
 
       {scanMode === 'MASUK' && isMasukClosedNow && (
@@ -874,20 +832,6 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
               Hari ini dikonfigurasi sebagai hari libur/non-aktif belajar. Aturan keterlambatan & penetapan status Alpa otomatis ({schoolProfile.autoAlpaTime || '08:30'} WITA) dimatikan.
             </span>
           </div>
-        </div>
-      )}
-
-      {scanMode === 'PULANG' && (
-        <div className="bg-emerald-50 border border-emerald-200 text-emerald-950 p-3 rounded-2xl text-xs font-semibold flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 shadow-xs animate-fadeIn">
-          <div className="flex items-center gap-2">
-            <Clock className="w-4 h-4 text-emerald-600 shrink-0" />
-            <span>
-              Aturan Jam Pulang Sekolah: <strong>{schoolProfile.endTime || '15:00'} WITA</strong>. Fitur Scan QR Pulang aktif bekerja mulai jam tersebut.
-            </span>
-          </div>
-          <span className="bg-emerald-600 text-white text-[10px] font-extrabold px-2.5 py-0.5 rounded-full uppercase tracking-wide shrink-0">
-            Mode Scan Pulang Aktif
-          </span>
         </div>
       )}
 

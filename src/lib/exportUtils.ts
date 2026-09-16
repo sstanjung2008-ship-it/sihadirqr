@@ -1294,11 +1294,11 @@ export async function exportLearningJournalPdf(
   // Title
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(12);
-  doc.text('REKAP JURNAL KEGIATAN BELAJAR MENGAJAR (KBM)', 148, 36, { align: 'center' });
+  doc.text('REKAP JURNAL KELAS', 148, 36, { align: 'center' });
 
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(8.5);
-  doc.text(`Periode: ${filterTitle}   |   Kelas: ${classNameFilter}   |   Total Kegiatan: ${journals.length} Jurnal`, 148, 41, { align: 'center' });
+  doc.text(`Periode: ${filterTitle}   |   ${classNameFilter}   |   Total Kegiatan: ${journals.length} Jurnal`, 148, 41, { align: 'center' });
 
   // Sort journals chronologically
   const sortedJournals = [...journals].sort((a, b) => {
@@ -1371,20 +1371,20 @@ export async function exportLearningJournalPdf(
 
   doc.setFontSize(9);
 
-  // Signatures Section: Guru Mata Pelajaran / Pengajar (Left) and Kepala Sekolah (Right)
-  const teacherNameDisplay = teacherInfo?.name || (journals.length > 0 && journals.every(j => j.teacherName === journals[0].teacherName) ? journals[0].teacherName : null);
-  const teacherNipDisplay = teacherInfo?.nip ? `NIP. ${teacherInfo.nip}` : '';
+  // Signatures Section: Wali Kelas (Left) and Kepala Sekolah (Right)
+  const homeroomNameDisplay = homeroomTeacherInfo?.name || null;
+  const homeroomNipDisplay = homeroomTeacherInfo?.nip ? `NIP. ${homeroomTeacherInfo.nip}` : '';
 
-  // 2 Column Layout: Guru Pengajar (Left), Kepala Sekolah (Right)
+  // 2 Column Layout: Wali Kelas (Left), Kepala Sekolah (Right)
   doc.setFont('helvetica', 'normal');
   doc.text('Mengetahui,', 30, sigY);
-  doc.text('Guru Mata Pelajaran / Pengajar,', 30, sigY + 5);
+  doc.text('Wali Kelas,', 30, sigY + 5);
 
   doc.setFont('helvetica', 'bold');
-  if (teacherNameDisplay) {
-    doc.text(teacherNameDisplay, 30, sigY + 23);
+  if (homeroomNameDisplay) {
+    doc.text(homeroomNameDisplay, 30, sigY + 23);
     doc.setFont('helvetica', 'normal');
-    doc.text(teacherNipDisplay || 'NIP. .....................................', 30, sigY + 28);
+    doc.text(homeroomNipDisplay || 'NIP. .....................................', 30, sigY + 28);
   } else {
     doc.text('( ..................................................... )', 30, sigY + 23);
     doc.setFont('helvetica', 'normal');
@@ -1402,7 +1402,8 @@ export async function exportLearningJournalPdf(
   doc.text(`NIP. ${schoolProfile.principalNip}`, 220, sigY + 28);
 
   const sanitizedTitle = filterTitle.replace(/[^a-zA-Z0-9]/g, '_');
-  doc.save(`Rekap_Jurnal_KBM_${sanitizedTitle}.pdf`);
+  const sanitizedClass = classNameFilter.replace(/[^a-zA-Z0-9]/g, '_');
+  doc.save(`Rekap_Jurnal_Kelas_${sanitizedClass}_${sanitizedTitle}.pdf`);
 }
 
 // Export Specialized Teacher Journal PDF (Rekap Jurnal Guru)

@@ -809,18 +809,6 @@ export const LearningJournalView: React.FC<LearningJournalViewProps> = ({
             </button>
             <button
               type="button"
-              onClick={() => setActiveSubTab('kbm')}
-              className={`w-full px-4 py-2.5 rounded-xl text-xs font-extrabold transition-all cursor-pointer flex items-center gap-2.5 justify-start ${
-                activeSubTab === 'kbm'
-                  ? 'bg-amber-500 text-slate-950 shadow-md font-black'
-                  : 'text-slate-300 hover:text-white hover:bg-slate-800/80'
-              }`}
-            >
-              <BookOpen className="w-4 h-4 text-amber-300 shrink-0" />
-              <span>Jurnal Guru</span>
-            </button>
-            <button
-              type="button"
               onClick={() => setActiveSubTab('grades')}
               className={`w-full px-4 py-2.5 rounded-xl text-xs font-extrabold transition-all cursor-pointer flex items-center gap-2.5 justify-start ${
                 activeSubTab === 'grades'
@@ -830,6 +818,18 @@ export const LearningJournalView: React.FC<LearningJournalViewProps> = ({
             >
               <GraduationCap className="w-4 h-4 text-amber-300 shrink-0" />
               <span>Input Nilai Siswa</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveSubTab('kbm')}
+              className={`w-full px-4 py-2.5 rounded-xl text-xs font-extrabold transition-all cursor-pointer flex items-center gap-2.5 justify-start ${
+                activeSubTab === 'kbm'
+                  ? 'bg-amber-500 text-slate-950 shadow-md font-black'
+                  : 'text-slate-300 hover:text-white hover:bg-slate-800/80'
+              }`}
+            >
+              <BookOpen className="w-4 h-4 text-amber-300 shrink-0" />
+              <span>Jurnal Guru</span>
             </button>
             <button
               type="button"
@@ -1699,8 +1699,8 @@ export const LearningJournalView: React.FC<LearningJournalViewProps> = ({
                     <FileText className="w-6 h-6" />
                   </div>
                   <div>
-                    <h3 className="text-lg font-black tracking-tight text-white">Download Rekap Jurnal KBM (PDF)</h3>
-                    <p className="text-xs text-indigo-200 mt-0.5 font-medium">Pilih periode mingguan atau bulanan untuk ekspor PDF rekap KBM</p>
+                    <h3 className="text-lg font-black tracking-tight text-white">Rekap Jurnal Kelas</h3>
+                    <p className="text-xs text-indigo-200 mt-0.5 font-medium">Pilih periode mingguan atau bulanan untuk ekspor PDF Rekap Jurnal Kelas</p>
                   </div>
                 </div>
                 <button
@@ -1856,8 +1856,8 @@ export const LearningJournalView: React.FC<LearningJournalViewProps> = ({
                   )}
                   <span>
                     {exportJournalsList.length > 0
-                      ? `Terdapat ${exportJournalsList.length} Jurnal KBM siap diunduh.`
-                      : 'Tidak ada jurnal KBM untuk kriteria ini.'}
+                      ? `Terdapat ${exportJournalsList.length} Jurnal Kelas siap diunduh.`
+                      : 'Tidak ada data Jurnal Kelas untuk kriteria ini.'}
                   </span>
                 </div>
                 <span className="font-extrabold text-xs px-2.5 py-1 bg-white rounded-lg border border-slate-200 shadow-xs">
@@ -1891,7 +1891,7 @@ export const LearningJournalView: React.FC<LearningJournalViewProps> = ({
                 className="bg-emerald-600 hover:bg-emerald-700 text-white px-5 py-2.5 rounded-xl text-xs font-extrabold flex items-center gap-2 shadow-lg shadow-emerald-600/20 cursor-pointer transition-all hover:scale-[1.02] disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 <Download className="w-4 h-4 text-emerald-200" />
-                Download PDF Rekap KBM
+                Download Jurnal Kelas
               </button>
             </div>
 

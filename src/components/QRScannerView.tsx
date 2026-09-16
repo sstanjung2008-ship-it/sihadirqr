@@ -1115,9 +1115,17 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
                   className="flex items-center gap-2.5 p-2 bg-slate-50 hover:bg-indigo-50/80 border border-slate-200 hover:border-indigo-300 rounded-2xl text-left transition-all group cursor-pointer"
                 >
                   <img
-                    src={std.photoUrl}
+                    src={std.photoUrl || (std.gender === 'P'
+                      ? 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=300&auto=format&fit=crop&q=80'
+                      : 'https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?w=300&auto=format&fit=crop&q=80')}
                     alt={std.name}
-                    className="w-8 h-8 rounded-xl object-cover border border-slate-200 group-hover:border-indigo-400 shrink-0"
+                    referrerPolicy="no-referrer"
+                    onError={(e) => {
+                      (e.target as HTMLImageElement).src = std.gender === 'P'
+                        ? 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=300&auto=format&fit=crop&q=80'
+                        : 'https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?w=300&auto=format&fit=crop&q=80';
+                    }}
+                    className="w-8 h-8 rounded-xl object-cover border border-slate-200 group-hover:border-indigo-400 shrink-0 bg-slate-100"
                   />
                   <div className="min-w-0 flex-1">
                     <p className="text-xs font-bold text-slate-800 truncate group-hover:text-indigo-900">
@@ -1224,9 +1232,17 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
               {/* Student Profile Card */}
               <div className="flex items-center gap-4 bg-slate-50 p-3.5 rounded-2xl border border-slate-200/80 mb-4">
                 <img
-                  src={lastScannedResult.student.photoUrl}
+                  src={lastScannedResult.student.photoUrl || (lastScannedResult.student.gender === 'P'
+                    ? 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=300&auto=format&fit=crop&q=80'
+                    : 'https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?w=300&auto=format&fit=crop&q=80')}
                   alt={lastScannedResult.student.name}
-                  className="w-16 h-16 rounded-2xl object-cover ring-2 ring-indigo-200 shadow-sm"
+                  referrerPolicy="no-referrer"
+                  onError={(e) => {
+                    (e.target as HTMLImageElement).src = lastScannedResult.student.gender === 'P'
+                      ? 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=300&auto=format&fit=crop&q=80'
+                      : 'https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?w=300&auto=format&fit=crop&q=80';
+                  }}
+                  className="w-16 h-16 rounded-2xl object-cover ring-2 ring-indigo-200 shadow-sm bg-slate-100"
                 />
                 <div className="min-w-0 flex-1">
                   <h4 className="text-base font-extrabold text-slate-900 truncate">{lastScannedResult.student.name}</h4>

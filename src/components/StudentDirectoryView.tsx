@@ -839,9 +839,17 @@ export const StudentDirectoryView: React.FC<StudentDirectoryViewProps> = ({
             >
               <div className="flex items-start gap-3.5">
                 <img
-                  src={student.photoUrl}
+                  src={student.photoUrl || (student.gender === 'P'
+                    ? 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=300&auto=format&fit=crop&q=80'
+                    : 'https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?w=300&auto=format&fit=crop&q=80')}
                   alt={student.name}
-                  className="w-16 h-16 rounded-2xl object-cover ring-2 ring-indigo-100 group-hover:ring-indigo-300 shadow-sm"
+                  referrerPolicy="no-referrer"
+                  onError={(e) => {
+                    (e.target as HTMLImageElement).src = student.gender === 'P'
+                      ? 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=300&auto=format&fit=crop&q=80'
+                      : 'https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?w=300&auto=format&fit=crop&q=80';
+                  }}
+                  className="w-16 h-16 rounded-2xl object-cover ring-2 ring-indigo-100 group-hover:ring-indigo-300 shadow-sm bg-slate-100"
                 />
                 <div className="min-w-0 flex-1">
                   <span className="bg-indigo-50 text-indigo-700 font-bold text-[10px] px-2.5 py-0.5 rounded-full border border-indigo-100">

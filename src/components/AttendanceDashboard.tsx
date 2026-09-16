@@ -1206,9 +1206,17 @@ export const AttendanceDashboard: React.FC<AttendanceDashboardProps> = ({
                       <td className="py-3.5 px-5">
                         <div className="flex items-center gap-3">
                           <img
-                            src={student.photoUrl}
+                            src={student.photoUrl || (student.gender === 'P'
+                              ? 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=300&auto=format&fit=crop&q=80'
+                              : 'https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?w=300&auto=format&fit=crop&q=80')}
                             alt={student.name}
-                            className="w-9 h-9 rounded-xl object-cover ring-2 ring-indigo-100 shadow-sm"
+                            referrerPolicy="no-referrer"
+                            onError={(e) => {
+                              (e.target as HTMLImageElement).src = student.gender === 'P'
+                                ? 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=300&auto=format&fit=crop&q=80'
+                                : 'https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?w=300&auto=format&fit=crop&q=80';
+                            }}
+                            className="w-9 h-9 rounded-xl object-cover ring-2 ring-indigo-100 shadow-sm bg-slate-100"
                           />
                           <div>
                             <p className="font-bold text-slate-900">{student.name}</p>

@@ -274,7 +274,7 @@ export const ImportStudentsModal: React.FC<ImportStudentsModalProps> = ({
                 Belum punya format file Excel yang sesuai?
               </h4>
               <p className="text-xs text-slate-600 mt-0.5">
-                Unduh file contoh format Excel berikut. Isi data siswa Anda lalu upload di bawah.
+                Unduh file contoh format Excel berikut (dilengkapi kolom <strong>Link Foto</strong> Google Drive / direct link). Isi data siswa Anda lalu upload di bawah.
               </p>
             </div>
           </div>
@@ -337,7 +337,7 @@ export const ImportStudentsModal: React.FC<ImportStudentsModalProps> = ({
                 )}
                 {invalidCount > 0 && (
                   <span className="bg-rose-100 text-rose-800 px-2.5 py-1 rounded-lg">
-                    Invalidd: {invalidCount}
+                    Invalid: {invalidCount}
                   </span>
                 )}
               </div>
@@ -367,6 +367,7 @@ export const ImportStudentsModal: React.FC<ImportStudentsModalProps> = ({
                         className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
                       />
                     </th>
+                    <th className="p-3">Foto</th>
                     <th className="p-3">Nama Siswa</th>
                     <th className="p-3">NISN / NIS</th>
                     <th className="p-3">Kelas</th>
@@ -392,6 +393,25 @@ export const ImportStudentsModal: React.FC<ImportStudentsModalProps> = ({
                           onChange={() => handleToggleSelectRow(idx)}
                           className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer disabled:opacity-40"
                         />
+                      </td>
+                      <td className="p-3">
+                        <div className="w-8 h-8 rounded-full overflow-hidden bg-slate-100 border border-slate-200 flex items-center justify-center shrink-0">
+                          {row.photoUrl ? (
+                            <img
+                              src={row.photoUrl}
+                              alt={row.name}
+                              referrerPolicy="no-referrer"
+                              className="w-full h-full object-cover"
+                              onError={(e) => {
+                                (e.target as HTMLImageElement).src = row.gender === 'P'
+                                  ? 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=300&auto=format&fit=crop&q=80'
+                                  : 'https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?w=300&auto=format&fit=crop&q=80';
+                              }}
+                            />
+                          ) : (
+                            <span className="text-[9px] font-bold text-slate-400">Auto</span>
+                          )}
+                        </div>
                       </td>
                       <td className="p-3 font-extrabold text-slate-900">{row.name}</td>
                       <td className="p-3 font-mono text-[11px]">

@@ -1116,19 +1116,17 @@ export function initFirestoreRealtimeSync() {
             // Ensure teachers, custom passwords, and assignments sync across all devices without losing changes
             if (key === KEYS.TEACHERS) {
               try {
-                if (localUpdatedAt > 0 && cloudUpdatedAt > 0 && localUpdatedAt > cloudUpdatedAt) {
-                  return;
-                }
-
                 const cloudTeachers = typeof finalDataToSave === 'string' ? JSON.parse(finalDataToSave) : finalDataToSave;
                 if (Array.isArray(cloudTeachers)) {
                   const currentLocalTeachers = getTeachers();
                   const mergedTeachers = localUpdatedAt <= 1 ? cloudTeachers : mergeTeacherLists(currentLocalTeachers, cloudTeachers);
                   const mergedStr = JSON.stringify(mergedTeachers);
-                  lastSavedStringCache[key] = mergedStr;
-                  localStorage.setItem(key, mergedStr);
-                  localStorage.setItem(key + '_updatedAt', String(Math.max(cloudUpdatedAt, Date.now())));
-                  notifyStorageUpdated();
+                  if (currentLocalStr !== mergedStr) {
+                    lastSavedStringCache[key] = mergedStr;
+                    localStorage.setItem(key, mergedStr);
+                    localStorage.setItem(key + '_updatedAt', String(Math.max(cloudUpdatedAt, localUpdatedAt, Date.now())));
+                    notifyStorageUpdated();
+                  }
                   setCloudSyncStatus('connected');
                   return;
                 }
@@ -1138,22 +1136,20 @@ export function initFirestoreRealtimeSync() {
             }
 
             // SPECIAL STUDENTS SYNC:
-            // Ensure students and custom passwords sync seamlessly across devices
+            // Ensure students, profile photos, and custom passwords sync seamlessly across devices
             if (key === KEYS.STUDENTS) {
               try {
-                if (localUpdatedAt > 0 && cloudUpdatedAt > 0 && localUpdatedAt > cloudUpdatedAt) {
-                  return;
-                }
-
                 const cloudStudents = typeof finalDataToSave === 'string' ? JSON.parse(finalDataToSave) : finalDataToSave;
                 if (Array.isArray(cloudStudents)) {
                   const currentLocalStudents = getStudents();
                   const mergedStudents = localUpdatedAt <= 1 ? cloudStudents : mergeStudentLists(currentLocalStudents, cloudStudents);
                   const mergedStr = JSON.stringify(mergedStudents);
-                  lastSavedStringCache[key] = mergedStr;
-                  localStorage.setItem(key, mergedStr);
-                  localStorage.setItem(key + '_updatedAt', String(Math.max(cloudUpdatedAt, Date.now())));
-                  notifyStorageUpdated();
+                  if (currentLocalStr !== mergedStr) {
+                    lastSavedStringCache[key] = mergedStr;
+                    localStorage.setItem(key, mergedStr);
+                    localStorage.setItem(key + '_updatedAt', String(Math.max(cloudUpdatedAt, localUpdatedAt, Date.now())));
+                    notifyStorageUpdated();
+                  }
                   setCloudSyncStatus('connected');
                   return;
                 }

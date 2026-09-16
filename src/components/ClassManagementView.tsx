@@ -919,7 +919,7 @@ export const ClassManagementView: React.FC<ClassManagementViewProps> = ({
                 className="bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold px-4 py-2.5 rounded-2xl shadow-lg shadow-emerald-600/30 flex items-center gap-2 text-xs transition-all cursor-pointer hover:scale-[1.02] disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 <Download className="w-4 h-4 text-emerald-200" />
-                Download Jurnal KBM
+                Jurnal Kelas
               </button>
             ) : (
               <button
@@ -1738,7 +1738,7 @@ export const ClassManagementView: React.FC<ClassManagementViewProps> = ({
                 className="bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold px-3.5 py-2 rounded-xl shadow-md flex items-center gap-2 text-xs transition-all cursor-pointer hover:scale-[1.02] disabled:opacity-50 disabled:cursor-not-allowed self-start sm:self-auto"
               >
                 <Download className="w-4 h-4 text-emerald-200" />
-                Download Jurnal KBM
+                Jurnal Kelas
               </button>
             </div>
 

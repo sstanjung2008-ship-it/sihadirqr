@@ -1069,7 +1069,8 @@ export function downloadStudentImportTemplate() {
       'Tempat, Tgl Lahir': 'Mataram, 15 Januari 2008',
       'Alamat': 'Jl. Pendidikan No. 12, Mataram',
       'No HP Ortu': '081234567890',
-      'Nama Orang Tua / Wali': 'Bpk. Hendra'
+      'Nama Orang Tua / Wali': 'Bpk. Hendra',
+      'Link Foto': 'https://drive.google.com/file/d/1AbCdEfGhIjKlMnOpQrStUvWxYz/view?usp=sharing'
     },
     {
       'NISN': '0087654321',
@@ -1080,7 +1081,8 @@ export function downloadStudentImportTemplate() {
       'Tempat, Tgl Lahir': 'Praya, 20 Agustus 2008',
       'Alamat': 'Jl. Mawar No. 45, Praya',
       'No HP Ortu': '081987654321',
-      'Nama Orang Tua / Wali': 'Ibu Aminah'
+      'Nama Orang Tua / Wali': 'Ibu Aminah',
+      'Link Foto': 'https://drive.google.com/file/d/1XyZaBcDeFgHiJkLmNoPqRsTuVw/view?usp=sharing'
     },
     {
       'NISN': '0089876543',
@@ -1091,7 +1093,8 @@ export function downloadStudentImportTemplate() {
       'Tempat, Tgl Lahir': 'Selo, 10 Maret 2008',
       'Alamat': 'Jl. Merdeka No. 88, Selo',
       'No HP Ortu': '085234567890',
-      'Nama Orang Tua / Wali': 'Bpk. Agus'
+      'Nama Orang Tua / Wali': 'Bpk. Agus',
+      'Link Foto': ''
     }
   ];
 
@@ -1107,6 +1110,7 @@ export function downloadStudentImportTemplate() {
     { wch: 32 }, // Alamat
     { wch: 18 }, // No HP Ortu
     { wch: 24 }, // Nama Ortu
+    { wch: 45 }, // Link Foto (Google Drive / Direct URL)
   ];
 
   const workbook = XLSX.utils.book_new();

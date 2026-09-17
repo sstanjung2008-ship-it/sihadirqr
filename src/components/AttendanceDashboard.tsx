@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   AttendanceRecord, 
   Student, 
@@ -119,6 +119,29 @@ export const AttendanceDashboard: React.FC<AttendanceDashboardProps> = ({
   const [editReturnStatus, setEditReturnStatus] = useState<AttendanceRecord['returnStatus']>('PULANG');
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
   const [showBulkAlpaModal, setShowBulkAlpaModal] = useState<boolean>(false);
+  const [highlightedCharLogId, setHighlightedCharLogId] = useState<string | null>(null);
+
+  // Listen to deep linking notification event for PARENT role
+  useEffect(() => {
+    const handleOpenCharDetail = (e: any) => {
+      if (currentRole === 'PARENT') {
+        const { characterLogId } = e.detail || {};
+        setParentView('dashbor');
+        if (characterLogId) {
+          setHighlightedCharLogId(characterLogId);
+        }
+        setTimeout(() => {
+          const el = document.getElementById('parent-character-recap');
+          if (el) {
+            el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          }
+        }, 150);
+      }
+    };
+
+    window.addEventListener('sihadir_open_character_detail', handleOpenCharDetail);
+    return () => window.removeEventListener('sihadir_open_character_detail', handleOpenCharDetail);
+  }, [currentRole]);
 
   const sortedClasses = [...classes].sort((a, b) =>
     a.name.localeCompare(b.name, 'id', { numeric: true, sensitivity: 'base' })
@@ -856,7 +879,7 @@ export const AttendanceDashboard: React.FC<AttendanceDashboardProps> = ({
             </div>
 
             {/* 2. REKAP NILAI KARAKTER SISWA */}
-            <div className="bg-white border border-slate-200/80 rounded-3xl shadow-sm overflow-hidden">
+            <div id="parent-character-recap" className="bg-white border border-slate-200/80 rounded-3xl shadow-sm overflow-hidden scroll-mt-20">
               <div className="p-5 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-amber-50/40">
                 <div>
                   <h2 className="text-sm font-extrabold text-amber-950 flex items-center gap-2">
@@ -921,10 +944,27 @@ export const AttendanceDashboard: React.FC<AttendanceDashboardProps> = ({
                         </td>
                       </tr>
                     ) : (
-                      childCharacterLogs.map((log) => (
-                        <tr key={log.id} className="hover:bg-slate-50/80 transition-colors">
+                      childCharacterLogs.map((log) => {
+                        const isHighlighted = log.id === highlightedCharLogId;
+                        return (
+                        <tr 
+                          key={log.id} 
+                          id={`parent-char-log-${log.id}`} 
+                          className={`transition-colors ${
+                            isHighlighted 
+                              ? 'bg-amber-100/80 font-bold ring-2 ring-amber-400' 
+                              : 'hover:bg-slate-50/80'
+                          }`}
+                        >
                           <td className="py-3 px-4 font-mono text-slate-600 whitespace-nowrap">
-                            {log.timestamp || log.date}
+                            <div className="flex items-center gap-1.5">
+                              <span>{log.timestamp || log.date}</span>
+                              {isHighlighted && (
+                                <span className="px-2 py-0.5 rounded-full text-[9px] font-black bg-amber-600 text-white animate-pulse">
+                                  Dipilih
+                                </span>
+                              )}
+                            </div>
                           </td>
                           <td className="py-3 px-4 font-extrabold text-slate-900">
                             {log.traitName}
@@ -961,7 +1001,8 @@ export const AttendanceDashboard: React.FC<AttendanceDashboardProps> = ({
                             </div>
                           </td>
                         </tr>
-                      ))
+                        );
+                      })
                     )}
                   </tbody>
                 </table>

@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { UserRole, SchoolProfile, UserSession } from '../types';
+import React, { useState, useEffect, useMemo } from 'react';
+import { UserRole, SchoolProfile, UserSession, SchoolClass } from '../types';
 import { 
   QrCode, 
   UserCheck, 
@@ -30,9 +30,11 @@ import {
   CalendarDays,
   UserCircle
 } from 'lucide-react';
-import { getCloudSyncStatus, CloudSyncStatus, getStudents } from '../lib/storage';
+import { getCloudSyncStatus, CloudSyncStatus, getStudents, getLeaveRequests, getDirectChats, getAttendanceRecords, getTeachers, getStudentCharacterLogs, getSchoolClasses } from '../lib/storage';
 import { MultiDeviceSyncModal } from './MultiDeviceSyncModal';
 import { PWAInstallButton } from './PWAInstallButton';
+import { NotificationModal } from './NotificationModal';
+import { playBkNotificationChime } from '../lib/kbmVoiceReminder';
 
 interface SidebarProps {
   currentRole: UserRole;
@@ -61,7 +63,214 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const [isMobileOpen, setIsMobileOpen] = useState(false);
   const [syncStatus, setSyncStatus] = useState<CloudSyncStatus>(() => getCloudSyncStatus());
   const [showSyncModal, setShowSyncModal] = useState(false);
+  const [showNotificationModal, setShowNotificationModal] = useState(false);
   const currentStudentCount = studentCount !== undefined ? studentCount : getStudents().length;
+
+  // Check if active user is a Teacher with BK role
+  const isTeacherBk = useMemo(() => {
+    if (currentRole !== 'TEACHER') return false;
+    const teachers = getTeachers();
+    const currentTeacher = teachers.find(t => 
+      (userSession?.teacherId && t.id === userSession.teacherId) ||
+      (userSession?.nipOrNisn && t.nip === userSession.nipOrNisn) ||
+      (userSession?.displayName && t.name.toLowerCase() === userSession.displayName.toLowerCase())
+    );
+
+    return !!(
+      (currentTeacher && (
+        currentTeacher.additionalDuty?.toUpperCase().includes('BK') ||
+        currentTeacher.additionalDuty?.toUpperCase().includes('BIMBINGAN') ||
+        currentTeacher.additionalDuty?.toUpperCase().includes('KONSELING') ||
+        currentTeacher.subject1?.toUpperCase().includes('BK') ||
+        currentTeacher.subject1?.toUpperCase().includes('BIMBINGAN') ||
+        currentTeacher.subject2?.toUpperCase().includes('BK') ||
+        currentTeacher.subject2?.toUpperCase().includes('BIMBINGAN')
+      )) ||
+      userSession?.displayName?.toLowerCase().includes('bk') ||
+      userSession?.username?.toLowerCase().includes('bk')
+    );
+  }, [currentRole, userSession]);
+
+  // Check if current user is a Teacher with Wali Kelas (Homeroom) role from Classes & Teachers management
+  const { isHomeroomTeacher, homeroomClasses, homeroomStudentIds, homeroomStudentNames } = useMemo(() => {
+    if (currentRole !== 'TEACHER') {
+      return { 
+        isHomeroomTeacher: false, 
+        homeroomClasses: [] as SchoolClass[], 
+        homeroomStudentIds: new Set<string>(), 
+        homeroomStudentNames: new Set<string>() 
+      };
+    }
+
+    const teachers = getTeachers();
+    const currentTeacher = teachers.find(t => 
+      (userSession?.teacherId && t.id === userSession.teacherId) ||
+      (userSession?.nipOrNisn && t.nip === userSession.nipOrNisn) ||
+      (userSession?.displayName && t.name.toLowerCase() === userSession.displayName.toLowerCase())
+    );
+
+    const allClasses = getSchoolClasses();
+    const allStudents = getStudents();
+
+    // Find classes managed by this homeroom teacher
+    const myClasses = allClasses.filter(c => {
+      if (!c.homeroomTeacher) return false;
+      const hName = c.homeroomTeacher.trim().toLowerCase();
+      if (currentTeacher) {
+        if (currentTeacher.name && hName === currentTeacher.name.trim().toLowerCase()) return true;
+        if (currentTeacher.nip && (hName === currentTeacher.nip.trim().toLowerCase() || c.homeroomTeacher === currentTeacher.id)) return true;
+        if (currentTeacher.homeroomClassId && (c.id === currentTeacher.homeroomClassId || c.name === currentTeacher.homeroomClassName)) return true;
+      }
+      if (userSession?.displayName && hName === userSession.displayName.trim().toLowerCase()) return true;
+      return false;
+    });
+
+    const isWali = myClasses.length > 0 || !!(currentTeacher?.additionalDuty?.toUpperCase().includes('WALI'));
+
+    // Extract all students belonging to these managed homeroom classes
+    const studentIdSet = new Set<string>();
+    const studentNameSet = new Set<string>();
+
+    allStudents.forEach(s => {
+      const matchClass = myClasses.some(c => 
+        c.id === s.classId || 
+        c.name.trim().toLowerCase() === s.className?.trim().toLowerCase() ||
+        (c.id && s.className === c.id)
+      );
+      if (matchClass) {
+        if (s.id) studentIdSet.add(s.id);
+        if (s.nisn) studentIdSet.add(s.nisn);
+        if (s.name) studentNameSet.add(s.name.trim().toLowerCase());
+      }
+    });
+
+    return {
+      isHomeroomTeacher: isWali,
+      homeroomClasses: myClasses,
+      homeroomStudentIds: studentIdSet,
+      homeroomStudentNames: studentNameSet
+    };
+  }, [currentRole, userSession]);
+
+  // Real-time audio chime for Guru BK and Wali Kelas when character assessment is added
+  useEffect(() => {
+    if (currentRole !== 'TEACHER' || (!isTeacherBk && !isHomeroomTeacher)) return;
+
+    let prevCount = getStudentCharacterLogs().length;
+
+    const handleStorageUpdate = () => {
+      const currentLogs = getStudentCharacterLogs();
+      if (currentLogs.length > prevCount) {
+        if (isTeacherBk) {
+          // Play notification chime for BK teacher
+          playBkNotificationChime();
+        } else if (isHomeroomTeacher && homeroomClasses.length > 0) {
+          // Check if any new log is for a student in this homeroom teacher's class
+          const newLogs = currentLogs.slice(prevCount);
+          const hasStudentInClass = newLogs.some(c => {
+            const matchStudentId = c.studentId && homeroomStudentIds.has(c.studentId);
+            const matchNisn = c.nisn && homeroomStudentIds.has(c.nisn);
+            const matchName = c.studentName && homeroomStudentNames.has(c.studentName.trim().toLowerCase());
+            const matchClassName = homeroomClasses.some(hc => 
+              hc.name.trim().toLowerCase() === c.className?.trim().toLowerCase() || 
+              hc.id === c.classId || 
+              hc.name.trim().toLowerCase() === c.classId?.trim().toLowerCase()
+            );
+            return matchStudentId || matchNisn || matchName || matchClassName;
+          });
+
+          if (hasStudentInClass) {
+            playBkNotificationChime();
+          }
+        }
+      }
+      prevCount = currentLogs.length;
+    };
+
+    window.addEventListener('sihadir_storage_updated', handleStorageUpdate);
+    return () => window.removeEventListener('sihadir_storage_updated', handleStorageUpdate);
+  }, [currentRole, isTeacherBk, isHomeroomTeacher, homeroomClasses, homeroomStudentIds, homeroomStudentNames]);
+
+  // Calculate unread badge count for mobile notification bell
+  const notifBadgeCount = useMemo(() => {
+    if (currentRole !== 'TEACHER' && currentRole !== 'PARENT') return 0;
+    const storageKey = `sihadir_last_read_notif_${currentRole}_${userSession?.username || 'user'}`;
+    const lastRead = Number(localStorage.getItem(storageKey)) || 0;
+
+    if (currentRole === 'TEACHER') {
+      const pendingLeaves = getLeaveRequests().filter(l => l.status === 'PENDING').length;
+      const directChats = getDirectChats();
+      let parentChatCount = 0;
+      Object.values(directChats).forEach(msgs => {
+        parentChatCount += msgs.filter(m => m.senderRole === 'PARENT' && (!m.read && (new Date(m.timestamp).getTime() > lastRead))).length;
+      });
+
+      // For Guru BK & Wali Kelas: include unread student character logs in badge count
+      const charLogs = getStudentCharacterLogs();
+      const unreadCharLogIds = new Set<string>();
+
+      if (isTeacherBk) {
+        charLogs.forEach(c => {
+          if (new Date(c.timestamp || c.date).getTime() > lastRead) {
+            unreadCharLogIds.add(c.id);
+          }
+        });
+      }
+
+      if (isHomeroomTeacher && homeroomClasses.length > 0) {
+        charLogs.forEach(c => {
+          const matchStudentId = c.studentId && homeroomStudentIds.has(c.studentId);
+          const matchNisn = c.nisn && homeroomStudentIds.has(c.nisn);
+          const matchName = c.studentName && homeroomStudentNames.has(c.studentName.trim().toLowerCase());
+          const matchClassName = homeroomClasses.some(hc => 
+            hc.name.trim().toLowerCase() === c.className?.trim().toLowerCase() || 
+            hc.id === c.classId || 
+            hc.name.trim().toLowerCase() === c.classId?.trim().toLowerCase()
+          );
+          if ((matchStudentId || matchNisn || matchName || matchClassName) && new Date(c.timestamp || c.date).getTime() > lastRead) {
+            unreadCharLogIds.add(c.id);
+          }
+        });
+      }
+
+      return pendingLeaves + parentChatCount + unreadCharLogIds.size;
+    }
+
+    if (currentRole === 'PARENT') {
+      const students = getStudents();
+      let student = students.find(s => s.id === userSession?.studentId || s.nisn === userSession?.nipOrNisn);
+      if (!student && userSession?.displayName) {
+        student = students.find(s => s.name.toLowerCase().includes(userSession.displayName.toLowerCase()) || 
+                                     s.parentName?.toLowerCase().includes(userSession.displayName.toLowerCase()));
+      }
+      if (!student && students.length > 0) {
+        student = students[0];
+      }
+      if (!student) return 0;
+
+      const todayStr = new Date().toISOString().split('T')[0];
+      let count = 0;
+      
+      const todayAtt = getAttendanceRecords().find(a => a.studentId === student!.id && a.date === todayStr);
+      if (todayAtt && (!lastRead || lastRead < new Date().setHours(0, 0, 0, 0))) {
+        count += 1;
+      }
+
+      const directChats = getDirectChats();
+      Object.entries(directChats).forEach(([threadKey, msgs]) => {
+        if (threadKey.includes(student!.id) || threadKey.includes(student!.nisn) || threadKey.includes('parent')) {
+          count += msgs.filter(m => m.senderRole === 'STAFF' && (!m.read && new Date(m.timestamp).getTime() > lastRead)).length;
+        }
+      });
+
+      const leaves = getLeaveRequests().filter(l => (l.studentId === student!.id || l.studentName === student!.name) && new Date(l.createdAt || l.startDate).getTime() > lastRead);
+      count += leaves.length;
+
+      return count;
+    }
+
+    return 0;
+  }, [currentRole, userSession, unreadLeavesCount, isTeacherBk, isHomeroomTeacher, homeroomClasses, homeroomStudentIds, homeroomStudentNames]);
 
   useEffect(() => {
     const handleStatus = (e: any) => {
@@ -204,6 +413,24 @@ export const Sidebar: React.FC<SidebarProps> = ({
         </div>
 
         <div className="flex items-center gap-2">
+          {/* Bell Notification Icon for Teacher and Parent in Mobile Mode */}
+          {(currentRole === 'TEACHER' || currentRole === 'PARENT') && (
+            <button
+              type="button"
+              onClick={() => setShowNotificationModal(true)}
+              className="relative p-2 rounded-xl bg-transparent hover:bg-white/10 text-yellow-400 active:scale-95 transition-all cursor-pointer flex items-center justify-center"
+              title="Pusat Notifikasi"
+              aria-label="Pusat Notifikasi"
+            >
+              <Bell className="w-5 h-5 text-yellow-400 stroke-[2.5]" />
+              {notifBadgeCount > 0 && (
+                <span className="absolute -top-1 -right-1 flex h-4 min-w-4 px-1 items-center justify-center rounded-full bg-rose-500 text-[9px] font-black text-white shadow-xs animate-pulse ring-2 ring-slate-900">
+                  {notifBadgeCount > 99 ? '99+' : notifBadgeCount}
+                </span>
+              )}
+            </button>
+          )}
+
           <span className={`text-[11px] font-mono px-2 py-1 rounded-lg font-bold border ${
             currentRole === 'PARENT'
               ? 'bg-white/10 text-emerald-300 border-white/15 backdrop-blur-md'
@@ -293,16 +520,42 @@ export const Sidebar: React.FC<SidebarProps> = ({
         {/* Middle Section: SINGLE COLUMN FEATURE MENU LIST */}
         <div className="flex-1 overflow-y-auto p-3 space-y-1 custom-scrollbar">
           {currentRole === 'TEACHER' && (
-            <div className="mx-1 mb-2.5 p-3 bg-indigo-950/80 border border-indigo-800/80 rounded-2xl flex items-center gap-2.5 shadow-md">
-              <div className="w-8 h-8 rounded-xl bg-indigo-600/40 border border-indigo-500/50 flex items-center justify-center shrink-0 text-indigo-300">
-                <GraduationCap className="w-4 h-4" />
-              </div>
-              <div className="min-w-0">
-                <p className="text-[10px] text-indigo-300 font-bold uppercase tracking-wider leading-none">Akun Guru:</p>
-                <p className="text-xs font-black text-white truncate mt-0.5">{userSession?.displayName || 'Guru'}</p>
-                {userSession?.nipOrNisn && (
-                  <p className="text-[10px] text-amber-400 font-mono font-bold mt-0.5">NIP: {userSession.nipOrNisn}</p>
-                )}
+            <div className="mx-1 mb-2.5 p-3 bg-indigo-950/80 border border-indigo-800/80 rounded-2xl shadow-md">
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <div className="w-8 h-8 rounded-xl bg-indigo-600/40 border border-indigo-500/50 flex items-center justify-center shrink-0 text-indigo-300">
+                    <GraduationCap className="w-4 h-4" />
+                  </div>
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <p className="text-[10px] text-indigo-300 font-bold uppercase tracking-wider leading-none">
+                        {isHomeroomTeacher && homeroomClasses.length > 0 
+                          ? `Wali Kelas ${homeroomClasses.map(c => c.name).join(', ')}` 
+                          : isTeacherBk 
+                            ? 'Guru BK' 
+                            : 'Akun Guru'}
+                      </p>
+                    </div>
+                    <p className="text-xs font-black text-white truncate mt-0.5">{userSession?.displayName || 'Guru'}</p>
+                    {userSession?.nipOrNisn && (
+                      <p className="text-[10px] text-amber-400 font-mono font-bold mt-0.5">NIP: {userSession.nipOrNisn}</p>
+                    )}
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setShowNotificationModal(true)}
+                  className="relative p-2 rounded-xl bg-indigo-900/60 hover:bg-indigo-800/80 text-indigo-200 hover:text-white border border-indigo-700/60 transition-colors cursor-pointer shrink-0"
+                  title="Pusat Notifikasi"
+                >
+                  <Bell className="w-4 h-4" />
+                  {notifBadgeCount > 0 && (
+                    <span className="absolute -top-1 -right-1 flex h-4 min-w-4 px-1 items-center justify-center rounded-full bg-rose-500 text-[9px] font-black text-white shadow-xs animate-pulse">
+                      {notifBadgeCount}
+                    </span>
+                  )}
+                </button>
               </div>
             </div>
           )}
@@ -496,6 +749,18 @@ export const Sidebar: React.FC<SidebarProps> = ({
         onClose={() => setShowSyncModal(false)}
         currentStudentCount={currentStudentCount}
         syncStatus={syncStatus}
+      />
+
+      {/* Notification Center Modal for Teachers and Parents */}
+      <NotificationModal
+        isOpen={showNotificationModal}
+        onClose={() => setShowNotificationModal(false)}
+        currentRole={currentRole}
+        userSession={userSession}
+        onTabChange={(tab) => {
+          onTabChange(tab);
+          setIsMobileOpen(false);
+        }}
       />
     </>
   );

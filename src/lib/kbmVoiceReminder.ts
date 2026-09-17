@@ -177,7 +177,7 @@ export function setParentVoiceEnabled(enabled: boolean): void {
 // WEB AUDIO API - HARMONIC CHIMES
 // ==========================================
 
-export function playAudioChime(type: 'TEACHER' | 'SUCCESS' | 'WARNING' | 'ALERT' | 'DEPARTURE' = 'TEACHER'): Promise<void> {
+export function playAudioChime(type: 'TEACHER' | 'SUCCESS' | 'WARNING' | 'ALERT' | 'DEPARTURE' | 'BK_NOTIFICATION' = 'TEACHER'): Promise<void> {
   return new Promise((resolve) => {
     try {
       const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
@@ -195,6 +195,15 @@ export function playAudioChime(type: 'TEACHER' | 'SUCCESS' | 'WARNING' | 'ALERT'
       let notes: { freq: number; time: number; duration: number }[] = [];
 
       switch (type) {
+        case 'BK_NOTIFICATION':
+          // Nada Khusus BK: Nada Melodik 3-Akord Ceria & Bersih (E5 -> G#5 -> B5 -> E6)
+          notes = [
+            { freq: 659.25, time: 0.0, duration: 0.25 },
+            { freq: 830.61, time: 0.12, duration: 0.28 },
+            { freq: 987.77, time: 0.24, duration: 0.35 },
+            { freq: 1318.51, time: 0.38, duration: 0.75 }
+          ];
+          break;
         case 'TEACHER':
           // Nada Arpeggio 4-Akord Elegan (C5 -> E5 -> G5 -> C6)
           notes = [
@@ -269,6 +278,11 @@ export function playAudioChime(type: 'TEACHER' | 'SUCCESS' | 'WARNING' | 'ALERT'
 // Backward compatibility helper
 export function playKbmChime(): Promise<void> {
   return playAudioChime('TEACHER');
+}
+
+// Chime Nada Suara Notifikasi Penilaian Karakter untuk Guru BK
+export function playBkNotificationChime(): Promise<void> {
+  return playAudioChime('BK_NOTIFICATION');
 }
 
 // ==========================================

@@ -184,9 +184,51 @@ export const CharacterPointsView: React.FC<CharacterPointsViewProps> = ({
 
   // Modal Detail Nilai State
   const [detailStudent, setDetailStudent] = useState<Student | null>(null);
+  const [highlightedLogId, setHighlightedLogId] = useState<string | null>(null);
   const [previewPhotoModalUrl, setPreviewPhotoModalUrl] = useState<string | null>(null);
   const [deleteConfirmLog, setDeleteConfirmLog] = useState<StudentCharacterLog | null>(null);
   const [isExportingDetail, setIsExportingDetail] = useState<boolean>(false);
+
+  // Listen to deep linking notification event
+  useEffect(() => {
+    const handleOpenCharacterDetail = (e: any) => {
+      const { studentId, studentName, characterLogId } = e.detail || {};
+      let matchedStudent: Student | undefined;
+
+      if (studentId) {
+        matchedStudent = students.find(s => s.id === studentId || s.nisn === studentId);
+      }
+      if (!matchedStudent && studentName) {
+        const cleanName = studentName.trim().toLowerCase();
+        matchedStudent = students.find(s => s.name.toLowerCase() === cleanName || s.name.toLowerCase().includes(cleanName));
+      }
+      if (!matchedStudent && characterLogId) {
+        const targetLog = logs.find(l => l.id === characterLogId);
+        if (targetLog) {
+          matchedStudent = students.find(s => s.id === targetLog.studentId || s.nisn === targetLog.nisn || s.name.toLowerCase() === targetLog.studentName.toLowerCase());
+        }
+      }
+
+      if (matchedStudent) {
+        setDetailStudent(matchedStudent);
+        if (characterLogId) {
+          setHighlightedLogId(characterLogId);
+        }
+        // Smoothly scroll to highlighted element if present
+        setTimeout(() => {
+          if (characterLogId) {
+            const el = document.getElementById(`char-log-${characterLogId}`);
+            if (el) {
+              el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }
+          }
+        }, 200);
+      }
+    };
+
+    window.addEventListener('sihadir_open_character_detail', handleOpenCharacterDetail);
+    return () => window.removeEventListener('sihadir_open_character_detail', handleOpenCharacterDetail);
+  }, [students, logs]);
 
   // Handle Export Detail Nilai Karakter Siswa to PDF
   const handleExportDetailPdf = async () => {
@@ -1039,8 +1081,11 @@ export const CharacterPointsView: React.FC<CharacterPointsViewProps> = ({
 
                 <button
                   type="button"
-                  onClick={() => setDetailStudent(null)}
-                  className="text-slate-400 hover:text-white p-1.5 rounded-xl hover:bg-white/10 transition-colors"
+                  onClick={() => {
+                    setDetailStudent(null);
+                    setHighlightedLogId(null);
+                  }}
+                  className="text-slate-400 hover:text-white p-1.5 rounded-xl hover:bg-white/10 transition-colors cursor-pointer"
                 >
                   <X className="w-6 h-6" />
                 </button>
@@ -1092,10 +1137,17 @@ export const CharacterPointsView: React.FC<CharacterPointsViewProps> = ({
                 </div>
               ) : (
                 <div className="space-y-3">
-                  {getStudentScoreSummary(detailStudent.id).logs.map((log) => (
+                  {getStudentScoreSummary(detailStudent.id).logs.map((log) => {
+                    const isHighlighted = log.id === highlightedLogId;
+                    return (
                     <div
                       key={log.id}
-                      className="p-4 rounded-2xl border border-slate-200 bg-white hover:border-slate-300 transition-all space-y-3"
+                      id={`char-log-${log.id}`}
+                      className={`p-4 rounded-2xl border transition-all space-y-3 ${
+                        isHighlighted
+                          ? 'border-indigo-400 bg-indigo-50/60 ring-2 ring-indigo-500 shadow-md'
+                          : 'border-slate-200 bg-white hover:border-slate-300'
+                      }`}
                     >
                       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                         <div className="flex items-start gap-3">
@@ -1112,7 +1164,7 @@ export const CharacterPointsView: React.FC<CharacterPointsViewProps> = ({
                           </div>
 
                           <div className="space-y-1">
-                            <div className="flex items-center gap-2">
+                            <div className="flex items-center gap-2 flex-wrap">
                               <span className="font-extrabold text-slate-800 text-sm">
                                 {log.traitName}
                               </span>
@@ -1121,6 +1173,11 @@ export const CharacterPointsView: React.FC<CharacterPointsViewProps> = ({
                               }`}>
                                 {log.traitType === 'POSITIF' ? `+${log.points} Poin` : `-${log.points} Poin`}
                               </span>
+                              {isHighlighted && (
+                                <span className="bg-indigo-600 text-white text-[10px] font-black px-2.5 py-0.5 rounded-full shadow-xs animate-pulse">
+                                  Dipilih dari Notifikasi
+                                </span>
+                              )}
                             </div>
 
                             <div className="text-xs text-slate-500 flex flex-wrap items-center gap-x-3 gap-y-1">
@@ -1209,7 +1266,8 @@ export const CharacterPointsView: React.FC<CharacterPointsViewProps> = ({
                         </div>
                       )}
                     </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </div>

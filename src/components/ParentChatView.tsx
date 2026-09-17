@@ -408,51 +408,50 @@ export const ParentChatView: React.FC<ParentChatViewProps> = ({
   return (
     <div className="max-w-7xl mx-auto space-y-6">
       
-      {/* Top Banner Header with Strict Confidentiality Badge */}
-      <div className="bg-gradient-to-r from-indigo-950 via-indigo-900 to-slate-900 rounded-3xl p-6 text-white shadow-xl relative overflow-hidden border border-indigo-800/80">
-        <div className="absolute top-0 right-0 -mt-8 -mr-8 w-64 h-64 bg-indigo-500/10 rounded-full blur-3xl pointer-events-none"></div>
-        
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 relative z-10">
-          <div>
-            <div className="inline-flex items-center gap-2 bg-emerald-500/20 text-emerald-300 border border-emerald-400/30 px-3 py-1 rounded-full text-xs font-bold mb-2">
-              <Lock className="w-3.5 h-3.5 text-emerald-400" />
-              <span>Privasi Terenkripsi: Khusus Akun Guru & Wali Murid Terpilih</span>
-            </div>
-            <h1 className="text-2xl font-black tracking-tight text-white flex items-center gap-2.5">
-              <MessageSquare className="w-7 h-7 text-amber-300" />
-              {isStaffView ? 'Konsultasi & Chat Pribadi Guru - Wali Murid' : 'Chat Pribadi Guru & Wali Kelas'}
-            </h1>
-            <p className="text-xs text-indigo-200 mt-1 max-w-2xl font-medium leading-relaxed">
-              {isStaffView 
-                ? `Setiap percakapan bersifat privat dan diisolasi khusus untuk akun Anda (${loggedTeacher.name}). Guru lain tidak dapat melihat riwayat pesan konsultasi ini.`
-                : 'Pilih Guru yang ingin Anda hubungi secara privat (Wali Kelas, Humas, BK, atau Guru Mata Pelajaran). Pesan hanya dapat dibaca oleh Anda dan Guru yang dipilih.'
-              }
-            </p>
-          </div>
-
-          {/* Active Interlocutor & Student Identity Card */}
-          {activeStudent && (
-            <div className="bg-white/10 backdrop-blur-md border border-white/15 rounded-2xl p-3.5 flex items-center gap-3 shrink-0">
-              <img 
-                src={activeStudent.photoUrl} 
-                alt={activeStudent.name} 
-                className="w-11 h-11 rounded-xl object-cover border-2 border-emerald-400 shadow-sm"
-                onError={(e) => {
-                  (e.target as HTMLElement).style.display = 'none';
-                }}
-              />
-              <div className="text-xs">
-                <span className="text-[10px] text-emerald-300 font-extrabold uppercase tracking-wider block flex items-center gap-1">
-                  <ShieldCheck className="w-3 h-3 text-emerald-400" />
-                  {isStaffView ? 'Wali Murid Siswa Terpilih' : 'Siswa / Ananda'}
-                </span>
-                <span className="font-black text-white text-sm block">{activeStudent.name}</span>
-                <span className="text-[11px] text-amber-300 font-bold">Kelas {activeStudent.className} • Wali: {activeStudent.parentName || 'Orang Tua'}</span>
+      {/* Top Banner Header with Strict Confidentiality Badge (Teacher & Staff View only) */}
+      {isStaffView && (
+        <div className="bg-gradient-to-r from-indigo-950 via-indigo-900 to-slate-900 rounded-3xl p-6 text-white shadow-xl relative overflow-hidden border border-indigo-800/80">
+          <div className="absolute top-0 right-0 -mt-8 -mr-8 w-64 h-64 bg-indigo-500/10 rounded-full blur-3xl pointer-events-none"></div>
+          
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 relative z-10">
+            <div>
+              <div className="inline-flex items-center gap-2 bg-emerald-500/20 text-emerald-300 border border-emerald-400/30 px-3 py-1 rounded-full text-xs font-bold mb-2">
+                <Lock className="w-3.5 h-3.5 text-emerald-400" />
+                <span>Privasi Terenkripsi: Khusus Akun Guru & Wali Murid Terpilih</span>
               </div>
+              <h1 className="text-2xl font-black tracking-tight text-white flex items-center gap-2.5">
+                <MessageSquare className="w-7 h-7 text-amber-300" />
+                Konsultasi & Chat Pribadi Guru - Wali Murid
+              </h1>
+              <p className="text-xs text-indigo-200 mt-1 max-w-2xl font-medium leading-relaxed">
+                Setiap percakapan bersifat privat dan diisolasi khusus untuk akun Anda ({loggedTeacher.name}). Guru lain tidak dapat melihat riwayat pesan konsultasi ini.
+              </p>
             </div>
-          )}
+
+            {/* Active Interlocutor & Student Identity Card */}
+            {activeStudent && (
+              <div className="bg-white/10 backdrop-blur-md border border-white/15 rounded-2xl p-3.5 flex items-center gap-3 shrink-0">
+                <img 
+                  src={activeStudent.photoUrl} 
+                  alt={activeStudent.name} 
+                  className="w-11 h-11 rounded-xl object-cover border-2 border-emerald-400 shadow-sm"
+                  onError={(e) => {
+                    (e.target as HTMLElement).style.display = 'none';
+                  }}
+                />
+                <div className="text-xs">
+                  <span className="text-[10px] text-emerald-300 font-extrabold uppercase tracking-wider block flex items-center gap-1">
+                    <ShieldCheck className="w-3 h-3 text-emerald-400" />
+                    Wali Murid Siswa Terpilih
+                  </span>
+                  <span className="font-black text-white text-sm block">{activeStudent.name}</span>
+                  <span className="text-[11px] text-amber-300 font-bold">Kelas {activeStudent.className} • Wali: {activeStudent.parentName || 'Orang Tua'}</span>
+                </div>
+              </div>
+            )}
+          </div>
         </div>
-      </div>
+      )}
 
       {/* Main Grid: Left Contacts / Teacher Selection (4 Cols) & Right Chat Canvas (8 Cols) */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">

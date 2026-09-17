@@ -299,11 +299,15 @@ export const StudentDirectoryView: React.FC<StudentDirectoryViewProps> = ({
         const matchesSearch = s.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
                               s.nisn.includes(searchQuery) ||
                               s.nis.includes(searchQuery);
-        const matchesClass = selectedClass === 'ALL' || s.className === selectedClass;
+        const matchesClass = selectedClass === 'ALL' || 
+          s.className === selectedClass || 
+          s.classId === selectedClass ||
+          classes.find(c => c.name === selectedClass)?.id === s.classId ||
+          classes.find(c => c.id === selectedClass)?.name === s.className;
         return matchesSearch && matchesClass;
       })
       .sort((a, b) => a.name.localeCompare(b.name, 'id', { numeric: true, sensitivity: 'base' }));
-  }, [students, searchQuery, selectedClass]);
+  }, [students, searchQuery, selectedClass, classes]);
 
   const totalPages = Math.ceil(filteredStudents.length / ITEMS_PER_PAGE) || 1;
 

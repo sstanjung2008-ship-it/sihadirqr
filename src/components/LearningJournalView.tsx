@@ -156,14 +156,40 @@ export const LearningJournalView: React.FC<LearningJournalViewProps> = ({
     return teachers[0]?.name || '';
   }, [userSession, teachers]);
 
+  // Find matched teacher object from Database Guru & TU
+  const matchedTeacherData = useMemo(() => {
+    const currentName = userSession?.displayName || initialTeacherName;
+    if (userSession?.teacherId) {
+      const byId = teachers.find(t => t.id === userSession.teacherId);
+      if (byId) return byId;
+    }
+    if (currentName) {
+      const byName = teachers.find(t => t.name.trim().toLowerCase() === currentName.trim().toLowerCase());
+      if (byName) return byName;
+    }
+    if (userSession?.username) {
+      const byNip = teachers.find(t => t.nip && t.nip.trim() === userSession.username.trim());
+      if (byNip) return byNip;
+    }
+    if (userSession?.nipOrNisn) {
+      const byNip2 = teachers.find(t => t.nip && t.nip.trim() === userSession.nipOrNisn.trim());
+      if (byNip2) return byNip2;
+    }
+    return teachers[0] || null;
+  }, [userSession, initialTeacherName, teachers]);
+
+  const defaultTeacherSubject = useMemo(() => {
+    return matchedTeacherData?.subject1 || schoolProfile.subjects?.[0] || 'Matematika';
+  }, [matchedTeacherData, schoolProfile.subjects]);
+
   const [selectedClassId, setSelectedClassId] = useState<string>(classes[0]?.id || '');
-  const [selectedSubject, setSelectedSubject] = useState<string>(schoolProfile.subjects?.[0] || 'Matematika');
+  const [teacherName, setTeacherName] = useState<string>(initialTeacherName);
+  const [selectedSubject, setSelectedSubject] = useState<string>(defaultTeacherSubject);
   const [customSubject, setCustomSubject] = useState<string>('');
   const [selectedPeriods, setSelectedPeriods] = useState<number[]>([1, 2]);
   const [material, setMaterial] = useState<string>('');
   const [materialLimit, setMaterialLimit] = useState<string>('');
   const [notesOrTask, setNotesOrTask] = useState<string>('');
-  const [teacherName, setTeacherName] = useState<string>(initialTeacherName);
   const [journalDate, setJournalDate] = useState<string>(todayStr);
 
   // Journal Persistence & Edit States
@@ -178,26 +204,25 @@ export const LearningJournalView: React.FC<LearningJournalViewProps> = ({
     }
   }, [initialTeacherName]);
 
-  // Auto-set subject to teacher's subject1 or first available subject in list (only when creating new journal)
+  // Auto-set subject to teacher's primary subject (subject1) from Database Guru & TU
   React.useEffect(() => {
     if (isSaved) return; // Do not overwrite when in saved/edit mode
     const currentName = teacherName || initialTeacherName || userSession?.displayName;
     if (!currentName) {
-      const defaultSub = schoolProfile.subjects?.[0] || 'Matematika';
-      setSelectedSubject(defaultSub);
+      setSelectedSubject(schoolProfile.subjects?.[0] || 'Matematika');
       return;
     }
-    const matchedTeacher = teachers.find(
-      t => t.name.toLowerCase() === currentName.toLowerCase() ||
-           (userSession?.teacherId && t.id === userSession.teacherId) ||
+    const matched = teachers.find(
+      t => (userSession?.teacherId && t.id === userSession.teacherId) ||
+           (t.name && t.name.toLowerCase() === currentName.toLowerCase()) ||
            (t.nip && userSession?.username && t.nip.trim() === userSession.username.trim()) ||
            (t.nip && userSession?.nipOrNisn && t.nip.trim() === userSession.nipOrNisn.trim())
     );
-    if (matchedTeacher && matchedTeacher.subject1) {
-      setSelectedSubject(matchedTeacher.subject1);
-    } else {
-      const defaultSub = schoolProfile.subjects?.[0] || 'Matematika';
-      setSelectedSubject(defaultSub);
+    if (matched && matched.subject1) {
+      setSelectedSubject(matched.subject1);
+      setCustomSubject('');
+    } else if (!selectedSubject) {
+      setSelectedSubject(schoolProfile.subjects?.[0] || 'Matematika');
     }
   }, [teacherName, initialTeacherName, userSession, teachers, schoolProfile.subjects, isSaved]);
 
@@ -206,23 +231,25 @@ export const LearningJournalView: React.FC<LearningJournalViewProps> = ({
       "Matematika", "Bahasa Indonesia", "Bahasa Inggris", "IPA", "IPS", 
       "Pendidikan Agama", "PJOK", "Seni Budaya", "Informatika", "PPKn"
     ];
-    const list = [...defaultList];
+    let list = [...defaultList];
 
-    // Find matched teacher
+    // Find matched teacher from Database Guru & TU
     const currentName = teacherName || initialTeacherName || userSession?.displayName;
-    const matchedTeacher = teachers.find(
-      t => (currentName && t.name.toLowerCase() === currentName.toLowerCase()) ||
-           (userSession?.teacherId && t.id === userSession.teacherId) ||
+    const matched = teachers.find(
+      t => (userSession?.teacherId && t.id === userSession.teacherId) ||
+           (t.name && currentName && t.name.toLowerCase() === currentName.toLowerCase()) ||
            (t.nip && userSession?.username && t.nip.trim() === userSession.username.trim()) ||
            (t.nip && userSession?.nipOrNisn && t.nip.trim() === userSession.nipOrNisn.trim())
     );
 
-    if (matchedTeacher) {
-      if (matchedTeacher.subject2 && !list.includes(matchedTeacher.subject2)) {
-        list.unshift(matchedTeacher.subject2);
+    if (matched) {
+      // Prioritize primary subject (subject1) first, then secondary subject (subject2)
+      if (matched.subject2 && !list.includes(matched.subject2)) {
+        list.unshift(matched.subject2);
       }
-      if (matchedTeacher.subject1 && !list.includes(matchedTeacher.subject1)) {
-        list.unshift(matchedTeacher.subject1);
+      if (matched.subject1) {
+        list = list.filter(s => s !== matched.subject1);
+        list.unshift(matched.subject1);
       }
     }
 
@@ -255,7 +282,7 @@ export const LearningJournalView: React.FC<LearningJournalViewProps> = ({
   const [studentRatings, setStudentRatings] = useState<Record<string, { status: LearningParticipationStatus; notes: string }>>({});
 
   // Feedback Notification
-  const [successToast, setSuccessToast] = useState<string | null>(null);
+  const [successToast, setSuccessToast] = useState<{ title?: string; message: string } | null>(null);
 
   // Detail Modal for History
   const [selectedHistoryJournal, setSelectedHistoryJournal] = useState<LearningJournal | null>(null);
@@ -516,14 +543,20 @@ export const LearningJournalView: React.FC<LearningJournalViewProps> = ({
 
   // Get current class object
   const currentClass = useMemo(() => {
-    return classes.find(c => c.id === selectedClassId) || classes[0];
-  }, [classes, selectedClassId]);
+    return classes.find(c => c.id === selectedClassId || c.name === selectedClassId) || sortedClasses[0] || classes[0];
+  }, [classes, selectedClassId, sortedClasses]);
 
   // Students belonging to the currently selected class (sorted Ascending by name)
   const currentClassStudents = useMemo(() => {
     if (!currentClass) return [];
     return students
-      .filter(s => s.classId === currentClass.id || s.className === currentClass.name)
+      .filter(s => 
+        s.classId === currentClass.id || 
+        s.className === currentClass.name ||
+        s.classId === currentClass.name ||
+        s.className === currentClass.id ||
+        (s.className && currentClass.name && s.className.trim().toLowerCase() === currentClass.name.trim().toLowerCase())
+      )
       .sort((a, b) => a.name.localeCompare(b.name, 'id', { numeric: true, sensitivity: 'base' }));
   }, [students, currentClass]);
 
@@ -533,9 +566,9 @@ export const LearningJournalView: React.FC<LearningJournalViewProps> = ({
       setStudentRatings(prev => {
         const initial: Record<string, { status: LearningParticipationStatus; notes: string }> = { ...prev };
         currentClassStudents.forEach(std => {
-          // preserve existing if already touched, else default 'Sangat aktif'
+          // preserve existing if already touched, else default 'Cukup aktif'
           if (!initial[std.id]) {
-            initial[std.id] = { status: 'Sangat aktif', notes: '' };
+            initial[std.id] = { status: 'Cukup aktif', notes: '' };
           }
         });
         return initial;
@@ -586,7 +619,7 @@ export const LearningJournalView: React.FC<LearningJournalViewProps> = ({
     setStudentRatings(prev => ({
       ...prev,
       [studentId]: {
-        status: prev[studentId]?.status || 'Sangat aktif',
+        status: prev[studentId]?.status || 'Cukup aktif',
         notes
       }
     }));
@@ -618,18 +651,16 @@ export const LearningJournalView: React.FC<LearningJournalViewProps> = ({
     }
     setCustomSubject('');
 
-    // Reset student ratings
+    // Reset student ratings to default 'Cukup aktif'
     if (currentClassStudents.length > 0) {
       const initial: Record<string, { status: LearningParticipationStatus; notes: string }> = {};
       currentClassStudents.forEach(std => {
-        initial[std.id] = { status: 'Sangat aktif', notes: '' };
+        initial[std.id] = { status: 'Cukup aktif', notes: '' };
       });
       setStudentRatings(initial);
     }
 
     setActiveSubTab('create');
-    setSuccessToast('Formulir siap untuk pengisian Jurnal KBM baru.');
-    setTimeout(() => setSuccessToast(null), 2500);
   };
 
   // Load an existing journal into the form for editing
@@ -669,8 +700,6 @@ export const LearningJournalView: React.FC<LearningJournalViewProps> = ({
 
     setActiveSubTab('create');
     setSelectedHistoryJournal(null);
-    setSuccessToast(`Memuat data Jurnal KBM (${journal.className} - ${journal.subject}) untuk diedit.`);
-    setTimeout(() => setSuccessToast(null), 3000);
   };
 
   // Handle Form Submission
@@ -684,8 +713,8 @@ export const LearningJournalView: React.FC<LearningJournalViewProps> = ({
       return;
     }
 
-    if (!material.trim()) {
-      alert('Silakan isi Materi yang diajarkan dalam pembelajaran!');
+    if (!material || !material.trim()) {
+      alert('⚠️ PERHATIAN: Materi yang Diajarkan / Pokok Bahasan WAJIB DIISI!\n\nData Jurnal KBM tidak dapat disimpan sebelum materi pembelajaran diisi.');
       return;
     }
 
@@ -703,7 +732,7 @@ export const LearningJournalView: React.FC<LearningJournalViewProps> = ({
       studentId: std.id,
       studentName: std.name,
       nisn: std.nisn,
-      status: studentRatings[std.id]?.status || 'Sangat aktif',
+      status: studentRatings[std.id]?.status || 'Cukup aktif',
       notes: studentRatings[std.id]?.notes?.trim() || undefined
     }));
 
@@ -736,7 +765,7 @@ export const LearningJournalView: React.FC<LearningJournalViewProps> = ({
     const toastMsg = existingJournal
       ? `Perubahan Jurnal KBM ${finalSubject} (${currentClass.name}) berhasil disimpan!`
       : `Jurnal KBM ${finalSubject} (${currentClass.name}) berhasil disimpan! Data tersimpan dan dapat diedit.`;
-    setSuccessToast(toastMsg);
+    setSuccessToast({ title: 'BERHASIL DISIMPAN!', message: toastMsg });
     setTimeout(() => setSuccessToast(null), 4000);
 
     // Note: Form data (material, limit, notes, ratings) remains on screen!
@@ -758,13 +787,13 @@ export const LearningJournalView: React.FC<LearningJournalViewProps> = ({
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
       
-      {/* Success Toast Notification */}
+      {/* Toast Notification */}
       {successToast && (
-        <div className="fixed top-5 right-5 z-50 bg-emerald-600 text-white px-5 py-3.5 rounded-2xl shadow-2xl flex items-center gap-3 border border-emerald-400 animate-bounce">
+        <div className="fixed top-5 right-5 z-50 bg-emerald-600 text-white px-5 py-3.5 rounded-2xl shadow-2xl flex items-center gap-3 border border-emerald-400 animate-in fade-in slide-in-from-top-4 duration-300">
           <CheckCircle2 className="w-6 h-6 text-emerald-200 shrink-0" />
           <div>
-            <h4 className="font-extrabold text-sm">BERHASIL DISIMPAN!</h4>
-            <p className="text-xs text-emerald-100">{successToast}</p>
+            <h4 className="font-extrabold text-sm">{successToast.title || 'BERHASIL DISIMPAN!'}</h4>
+            <p className="text-xs text-emerald-100">{successToast.message}</p>
           </div>
         </div>
       )}
@@ -792,9 +821,8 @@ export const LearningJournalView: React.FC<LearningJournalViewProps> = ({
             <button
               type="button"
               onClick={() => {
-                if (activeSubTab === 'create' && isSaved) {
-                  handleResetToNewJournal();
-                } else {
+                setActiveSubTab('create');
+                if (isSaved) {
                   handleResetToNewJournal();
                 }
               }}
@@ -953,16 +981,54 @@ export const LearningJournalView: React.FC<LearningJournalViewProps> = ({
                 />
               </div>
 
-              {/* Nama Guru Pengajar (Akun Login) */}
+              {/* Nama Guru Pengajar (Akun Login / Database Guru & TU) */}
               <div>
-                <label className="block text-xs font-extrabold text-slate-700 mb-1.5 flex items-center gap-1.5">
-                  <User className="w-3.5 h-3.5 text-indigo-600" />
-                  Nama Guru Pengajar (Akun Login)
+                <label className="block text-xs font-extrabold text-slate-700 mb-1.5 flex items-center justify-between">
+                  <span className="flex items-center gap-1.5">
+                    <User className="w-3.5 h-3.5 text-indigo-600" />
+                    Nama Guru Pengajar
+                  </span>
+                  {matchedTeacherData?.subject1 && (
+                    <span className="text-[10px] font-bold text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded-md border border-indigo-200">
+                      Mapel: {matchedTeacherData.subject1}
+                    </span>
+                  )}
                 </label>
-                <div className="w-full bg-slate-100/90 border border-slate-200/80 text-slate-800 text-xs font-bold rounded-xl p-3 flex items-center gap-2">
-                  <User className="w-4 h-4 text-indigo-600 shrink-0" />
-                  <span className="truncate">{activeLoggedInTeacherName || 'Guru Pengajar'}</span>
-                </div>
+
+                {userSession?.role === 'ADMIN' || userSession?.role === 'HEADMASTER' ? (
+                  <select
+                    value={teacherName || activeLoggedInTeacherName}
+                    disabled={isSaved && !isEditing}
+                    onChange={(e) => {
+                      const newName = e.target.value;
+                      setTeacherName(newName);
+                      const found = teachers.find(t => t.name === newName);
+                      if (found && found.subject1) {
+                        setSelectedSubject(found.subject1);
+                        setCustomSubject('');
+                      }
+                    }}
+                    className="w-full bg-slate-50 border border-slate-300 text-slate-900 text-xs font-bold rounded-xl p-3 focus:ring-2 focus:ring-indigo-500 cursor-pointer disabled:bg-slate-100 disabled:text-slate-600 disabled:cursor-not-allowed"
+                  >
+                    {teachers.map(t => (
+                      <option key={t.id} value={t.name}>
+                        {t.name} ({t.subject1 || 'Guru'})
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <div className="w-full bg-slate-100/90 border border-slate-200/80 text-slate-800 text-xs font-bold rounded-xl p-3 flex items-center justify-between">
+                    <div className="flex items-center gap-2 truncate">
+                      <User className="w-4 h-4 text-indigo-600 shrink-0" />
+                      <span className="truncate">{activeLoggedInTeacherName || 'Guru Pengajar'}</span>
+                    </div>
+                    {matchedTeacherData?.nip && (
+                      <span className="text-[10px] text-slate-500 shrink-0">
+                        NIP: {matchedTeacherData.nip}
+                      </span>
+                    )}
+                  </div>
+                )}
               </div>
 
               {/* Pilih Kelas */}
@@ -985,11 +1051,18 @@ export const LearningJournalView: React.FC<LearningJournalViewProps> = ({
                 </select>
               </div>
 
-              {/* Pilih Mata Pelajaran */}
+              {/* Pilih Mata Pelajaran (Otomatis Mapel Utama dari Database Guru & TU) */}
               <div>
-                <label className="block text-xs font-extrabold text-slate-700 mb-1.5 flex items-center gap-1.5">
-                  <BookOpen className="w-3.5 h-3.5 text-indigo-600" />
-                  Mata Pelajaran
+                <label className="block text-xs font-extrabold text-slate-700 mb-1.5 flex items-center justify-between">
+                  <span className="flex items-center gap-1.5">
+                    <BookOpen className="w-3.5 h-3.5 text-indigo-600" />
+                    Mata Pelajaran
+                  </span>
+                  {matchedTeacherData?.subject1 && selectedSubject === matchedTeacherData.subject1 && (
+                    <span className="text-[10px] font-extrabold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200">
+                      ✓ Mapel Utama Guru
+                    </span>
+                  )}
                 </label>
                 <select
                   value={selectedSubject}
@@ -998,7 +1071,9 @@ export const LearningJournalView: React.FC<LearningJournalViewProps> = ({
                   className="w-full bg-slate-50 border border-slate-300 text-slate-900 text-xs font-bold rounded-xl p-3 focus:ring-2 focus:ring-indigo-500 cursor-pointer disabled:bg-slate-100 disabled:text-slate-600 disabled:cursor-not-allowed"
                 >
                   {availableSubjectsList.map(sub => (
-                    <option key={sub} value={sub}>{sub}</option>
+                    <option key={sub} value={sub}>
+                      {sub === matchedTeacherData?.subject1 ? `${sub} (Mapel Utama Guru)` : sub === matchedTeacherData?.subject2 ? `${sub} (Mapel Tambahan Guru)` : sub}
+                    </option>
                   ))}
                   <option value="LAINNYA">+ Ketik Mata Pelajaran Lain</option>
                 </select>
@@ -1067,19 +1142,30 @@ export const LearningJournalView: React.FC<LearningJournalViewProps> = ({
             {/* Input Materi Yang Diajarkan */}
             <div className="space-y-4">
               <div>
-                <label className="block text-xs font-extrabold text-slate-800 mb-1.5 flex items-center gap-1.5">
-                  <BookOpen className="w-4 h-4 text-indigo-600" />
-                  Materi yang Diajarkan / Pokok Bahasan
-                </label>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="text-xs font-extrabold text-slate-800 flex items-center gap-1.5">
+                    <BookOpen className="w-4 h-4 text-indigo-600" />
+                    <span>Materi yang Diajarkan / Pokok Bahasan</span>
+                    <span className="text-rose-600 font-black text-sm">*</span>
+                  </label>
+                  <span className="px-2 py-0.5 rounded-full bg-rose-100 text-rose-800 text-[10px] font-black border border-rose-200">
+                    Wajib Diisi
+                  </span>
+                </div>
                 <textarea
                   required
                   rows={2}
                   disabled={isSaved && !isEditing}
                   value={material}
                   onChange={(e) => setMaterial(e.target.value)}
-                  placeholder="Contoh: Bab 3 - Persamaan Kuadrat dan Aplikasi Kontekstual dalam Kehidupan Sehari-hari..."
-                  className="w-full bg-slate-50 border border-slate-300 text-slate-900 text-xs font-medium rounded-2xl p-3.5 focus:ring-2 focus:ring-indigo-500 focus:bg-white disabled:bg-slate-100 disabled:text-slate-700 disabled:cursor-not-allowed"
+                  placeholder="Tuliskan materi atau pokok bahasan KBM yang diajarkan (Wajib diisi agar jurnal dapat disimpan)..."
+                  className="w-full bg-slate-50 border border-slate-300 text-slate-900 text-xs font-medium rounded-2xl p-3.5 focus:ring-2 focus:ring-indigo-500 focus:bg-white focus:border-indigo-500 disabled:bg-slate-100 disabled:text-slate-700 disabled:cursor-not-allowed"
                 />
+                {!material.trim() && (isEditing || !isSaved) && (
+                  <p className="text-[11px] text-rose-600 font-semibold mt-1 flex items-center gap-1">
+                    <span>* Materi pokok bahasan wajib diisi, jurnal tidak dapat disimpan jika kosong.</span>
+                  </p>
+                )}
               </div>
 
               {/* Input Batasan Materi */}
@@ -1127,7 +1213,7 @@ export const LearningJournalView: React.FC<LearningJournalViewProps> = ({
                   Kehadiran & Keaktifan Pembelajaran Siswa ({currentClassStudents.length} Siswa)
                 </h2>
                 <p className="text-xs text-slate-500 mt-0.5">
-                  Isi nilai kehadiran & keaktifan belajar setiap siswa di kelas saat mata pelajaran berlangsung.
+                  Isi nilai kehadiran & keaktifan belajar setiap siswa di kelas (Default awal: <strong>Cukup Aktif</strong>).
                 </p>
               </div>
 
@@ -1137,18 +1223,19 @@ export const LearningJournalView: React.FC<LearningJournalViewProps> = ({
                 <button
                   type="button"
                   disabled={isSaved && !isEditing}
-                  onClick={() => handleBulkSetStatus('Sangat aktif')}
-                  className="bg-emerald-100 hover:bg-emerald-200 text-emerald-800 text-[11px] font-bold px-3 py-1.5 rounded-xl border border-emerald-300 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                  onClick={() => handleBulkSetStatus('Cukup aktif')}
+                  className="bg-indigo-600 hover:bg-indigo-700 text-white text-[11px] font-black px-3.5 py-1.5 rounded-xl shadow-xs border border-indigo-500 transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5"
                 >
-                  Set Semua Sangat Aktif
+                  <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                  Set Semua Cukup Aktif (Default)
                 </button>
                 <button
                   type="button"
                   disabled={isSaved && !isEditing}
-                  onClick={() => handleBulkSetStatus('Cukup aktif')}
-                  className="bg-indigo-100 hover:bg-indigo-200 text-indigo-800 text-[11px] font-bold px-3 py-1.5 rounded-xl border border-indigo-300 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                  onClick={() => handleBulkSetStatus('Sangat aktif')}
+                  className="bg-emerald-100 hover:bg-emerald-200 text-emerald-800 text-[11px] font-bold px-3 py-1.5 rounded-xl border border-emerald-300 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  Set Semua Cukup Aktif
+                  Set Semua Sangat Aktif
                 </button>
               </div>
             </div>
@@ -1161,7 +1248,7 @@ export const LearningJournalView: React.FC<LearningJournalViewProps> = ({
             ) : (
               <div className="space-y-3">
                 {currentClassStudents.map((std, idx) => {
-                  const rating = studentRatings[std.id] || { status: 'Sangat aktif', notes: '' };
+                  const rating = studentRatings[std.id] || { status: 'Cukup aktif', notes: '' };
                   const isLocked = isSaved && !isEditing;
 
                   return (
@@ -1564,7 +1651,7 @@ export const LearningJournalView: React.FC<LearningJournalViewProps> = ({
           journals={journals}
           activeLoggedInTeacherName={activeLoggedInTeacherName}
           onShowSuccessToast={(msg) => {
-            setSuccessToast(msg);
+            setSuccessToast({ title: 'NILAI BERHASIL DISIMPAN!', message: msg });
             setTimeout(() => setSuccessToast(null), 4000);
           }}
           userSession={userSession}

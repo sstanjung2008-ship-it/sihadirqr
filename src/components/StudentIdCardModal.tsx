@@ -162,21 +162,21 @@ export const StudentIdCardModal: React.FC<StudentIdCardModalProps> = ({
                   </div>
 
                   <div className="flex items-start">
-                    <span className="w-16 text-[10px] font-extrabold text-slate-400 tracking-wider uppercase shrink-0">NIS</span>
+                    <span className="w-16 text-[10px] font-extrabold text-slate-400 tracking-wider uppercase shrink-0">NISN</span>
                     <span className="font-bold text-slate-400 mr-1.5">:</span>
-                    <span className="font-black text-indigo-700 text-[11px] font-mono flex-1">{student.nis}</span>
+                    <span className="font-black text-indigo-700 text-[11px] font-mono flex-1">{student.nisn || '-'}</span>
                   </div>
 
                   <div className="flex items-start">
                     <span className="w-16 text-[10px] font-extrabold text-slate-400 tracking-wider uppercase shrink-0">TTL</span>
                     <span className="font-bold text-slate-400 mr-1.5">:</span>
-                    <span className="font-extrabold text-slate-800 text-[10px] uppercase flex-1">{student.birthPlaceDate}</span>
+                    <span className="font-extrabold text-slate-800 text-[10px] uppercase flex-1">{student.birthPlaceDate || '-'}</span>
                   </div>
 
                   <div className="flex items-start">
                     <span className="w-16 text-[10px] font-extrabold text-slate-400 tracking-wider uppercase shrink-0">ALAMAT</span>
                     <span className="font-bold text-slate-400 mr-1.5">:</span>
-                    <span className="font-bold text-slate-700 text-[10px] uppercase flex-1 line-clamp-2">{student.address}</span>
+                    <span className="font-bold text-slate-700 text-[10px] uppercase flex-1 line-clamp-2">{student.address || '-'}</span>
                   </div>
                 </div>
 
@@ -266,21 +266,21 @@ export const StudentIdCardModal: React.FC<StudentIdCardModalProps> = ({
                   </div>
 
                   <div className="flex items-start">
-                    <span className="w-16 text-[11px] font-extrabold text-slate-400 tracking-wider uppercase shrink-0">NIS</span>
+                    <span className="w-16 text-[11px] font-extrabold text-slate-400 tracking-wider uppercase shrink-0">NISN</span>
                     <span className="font-bold text-slate-400 mr-2">:</span>
-                    <span className="font-black text-indigo-700 text-xs font-mono flex-1">{student.nis}</span>
+                    <span className="font-black text-indigo-700 text-xs font-mono flex-1">{student.nisn || '-'}</span>
                   </div>
 
                   <div className="flex items-start">
                     <span className="w-16 text-[11px] font-extrabold text-slate-400 tracking-wider uppercase shrink-0">TTL</span>
                     <span className="font-bold text-slate-400 mr-2">:</span>
-                    <span className="font-extrabold text-slate-800 text-[11px] uppercase flex-1">{student.birthPlaceDate}</span>
+                    <span className="font-extrabold text-slate-800 text-[11px] uppercase flex-1">{student.birthPlaceDate || '-'}</span>
                   </div>
 
                   <div className="flex items-start">
                     <span className="w-16 text-[11px] font-extrabold text-slate-400 tracking-wider uppercase shrink-0">ALAMAT</span>
                     <span className="font-bold text-slate-400 mr-2">:</span>
-                    <span className="font-bold text-slate-700 text-[11px] uppercase flex-1 line-clamp-2">{student.address}</span>
+                    <span className="font-bold text-slate-700 text-[11px] uppercase flex-1 line-clamp-2">{student.address || '-'}</span>
                   </div>
                 </div>
 

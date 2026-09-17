@@ -136,12 +136,21 @@ export const StudentGradesSection: React.FC<StudentGradesSectionProps> = ({
     return (gradeSubject === 'LAINNYA' ? gradeCustomSubject : gradeSubject).trim();
   }, [gradeSubject, gradeCustomSubject]);
 
+  // Selected class object
+  const selectedClassObj = useMemo(() => {
+    return classes.find(c => c.id === gradeClassId || c.name === gradeClassId);
+  }, [classes, gradeClassId]);
+
   // Students in selected class
   const classStudents = useMemo(() => {
     return students
-      .filter(s => s.classId === gradeClassId)
+      .filter(s => 
+        s.classId === gradeClassId || 
+        s.className === gradeClassId ||
+        (selectedClassObj && (s.classId === selectedClassObj.id || s.className === selectedClassObj.name))
+      )
       .sort((a, b) => a.name.localeCompare(b.name, 'id'));
-  }, [students, gradeClassId]);
+  }, [students, gradeClassId, selectedClassObj]);
 
   // Filtered students by search query
   const displayedStudents = useMemo(() => {

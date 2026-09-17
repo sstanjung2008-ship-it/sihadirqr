@@ -46,7 +46,11 @@ export function getCloudSyncStatus(): CloudSyncStatus {
 
 const setCloudSyncStatus = (status: CloudSyncStatus) => {
   currentSyncStatus = status;
-  window.dispatchEvent(new CustomEvent('sihadir_cloud_status_changed', { detail: { status } }));
+  if (typeof window !== 'undefined') {
+    setTimeout(() => {
+      window.dispatchEvent(new CustomEvent('sihadir_cloud_status_changed', { detail: { status } }));
+    }, 0);
+  }
 };
 
 const notifyStorageUpdated = () => {

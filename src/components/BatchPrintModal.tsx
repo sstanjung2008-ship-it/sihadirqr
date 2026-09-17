@@ -325,10 +325,9 @@ export const BatchPrintModal: React.FC<BatchPrintModalProps> = ({
                       />
                       <div className="flex-1 min-w-0 text-[10px] space-y-0.5">
                         <p className="font-black text-slate-900 uppercase truncate text-[11px]">{std.name}</p>
-                        <p className="text-indigo-700 font-bold font-mono">NISN: {std.nisn}</p>
-                        <p className="text-slate-600 font-semibold">NIS: {std.nis}</p>
-                        <p className="text-slate-600 font-semibold">Kelas: {std.className}</p>
-                        <p className="text-slate-500 text-[9px] truncate">TTL: {std.birthPlaceDate || '-'}</p>
+                        <p className="text-indigo-700 font-bold font-mono">NISN: {std.nisn || '-'}</p>
+                        <p className="text-slate-600 font-semibold truncate">TTL: {std.birthPlaceDate || '-'}</p>
+                        <p className="text-slate-500 text-[9px] line-clamp-1">Alamat: {std.address || '-'}</p>
                       </div>
                       <div className="p-1 bg-white border border-slate-200 rounded-xl shrink-0 flex items-center justify-center">
                         <QRCodeSVG value={std.qrCode} size={64} level="M" />
@@ -350,8 +349,9 @@ export const BatchPrintModal: React.FC<BatchPrintModalProps> = ({
                       />
                       <div className="w-full text-[10px] my-1 space-y-0.5">
                         <p className="font-black text-slate-900 uppercase truncate text-[11px]">{std.name}</p>
-                        <p className="text-indigo-700 font-bold font-mono">NISN: {std.nisn}</p>
-                        <p className="text-slate-600 font-semibold">Kelas: {std.className}</p>
+                        <p className="text-indigo-700 font-bold font-mono text-[10px]">NISN: {std.nisn || '-'}</p>
+                        <p className="text-slate-600 font-semibold text-[9px] truncate">TTL: {std.birthPlaceDate || '-'}</p>
+                        <p className="text-slate-500 text-[9px] truncate">Alamat: {std.address || '-'}</p>
                       </div>
                       <div className="p-1 bg-white border border-slate-200 rounded-xl shrink-0">
                         <QRCodeSVG value={std.qrCode} size={54} level="M" />

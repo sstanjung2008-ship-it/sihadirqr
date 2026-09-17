@@ -616,7 +616,9 @@ export const INITIAL_CHARACTER_TRAITS: any[] = [
   { id: "trait-009", name: "Bermain HP / Tidur Saat KBM", type: "NEGATIF", points: 10, category: "Pelanggaran" },
   { id: "trait-010", name: "Tidak Mengerjakan Tugas / PR", type: "NEGATIF", points: 10, category: "Tanggung Jawab" },
   { id: "trait-011", name: "Membolos Jam Pelajaran", type: "NEGATIF", points: 15, category: "Pelanggaran Berat" },
-  { id: "trait-012", name: "Merusak Fasilitas / Coreti Meja", type: "NEGATIF", points: 15, category: "Ketertiban" }
+  { id: "trait-012", name: "Merusak Fasilitas / Coreti Meja", type: "NEGATIF", points: 15, category: "Ketertiban" },
+  { id: "trait-013", name: "Sangat Aktif saat KBM", type: "POSITIF", points: 1, category: "Keaktifan" },
+  { id: "trait-014", name: "Tidak Hadir di Kelas saat KBM", type: "NEGATIF", points: 2, category: "Kedisiplinan" }
 ];
 
 export const INITIAL_STUDENT_CHARACTER_LOGS: any[] = [

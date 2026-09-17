@@ -241,52 +241,51 @@ export async function exportSingleStudentCardPdf(
     doc.setDrawColor(224, 231, 255);
     doc.rect(3, 15.5, 19, 25);
 
-    // Bio Text
+    // Bio Text (Nama, NISN, TTL, Alamat)
     doc.setTextColor(15, 23, 42);
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(7.5);
-    doc.text(doc.splitTextToSize(student.name.toUpperCase(), 36)[0], 24, 18.5);
+    doc.text(doc.splitTextToSize(student.name.toUpperCase(), 34)[0], 23.5, 17.5);
 
     doc.setFontSize(5.8);
     doc.setFont('helvetica', 'normal');
     doc.setTextColor(51, 65, 85);
 
-    doc.text(`NISN   : ${student.nisn}`, 24, 22.5);
-    doc.text(`NIS      : ${student.nis}`, 24, 26.5);
-    doc.text(`TTL      : ${student.birthPlaceDate || '-'}`, 24, 30.5);
+    doc.text(`NISN   : ${student.nisn || '-'}`, 23.5, 21.5);
+    doc.text(`TTL      : ${student.birthPlaceDate || '-'}`, 23.5, 25.5);
 
-    const addrLines = doc.splitTextToSize(`Alamat : ${student.address || '-'}`, 36);
-    doc.text(addrLines.slice(0, 2), 24, 34.5);
+    const addrLines = doc.splitTextToSize(`Alamat : ${student.address || '-'}`, 34);
+    doc.text(addrLines.slice(0, 2), 23.5, 29.5);
 
-    // QR Code (Enlarged 125%: 20.5mm -> 25.6mm)
+    // QR Code (Enlarged: 24mm x 24mm)
     if (qrDataUrl) {
-      try { doc.addImage(qrDataUrl, 'PNG', 57, 14, 25.6, 25.6); } catch {}
+      try { doc.addImage(qrDataUrl, 'PNG', 58.5, 14.5, 24, 24); } catch {}
     }
     doc.setDrawColor(203, 213, 225);
-    doc.rect(57, 14, 25.6, 25.6);
+    doc.rect(58.5, 14.5, 24, 24);
 
   } else {
     // Portrait Layout (54mm x 85.6mm)
     if (studentPhoto) {
-      try { doc.addImage(studentPhoto, 'JPEG', (width - 20) / 2, 15, 20, 25); } catch {}
+      try { doc.addImage(studentPhoto, 'JPEG', (width - 19) / 2, 14.5, 19, 24); } catch {}
     }
 
     doc.setTextColor(15, 23, 42);
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(7.5);
-    doc.text(doc.splitTextToSize(student.name.toUpperCase(), 48)[0], width / 2, 44, { align: 'center' });
+    doc.text(doc.splitTextToSize(student.name.toUpperCase(), 48)[0], width / 2, 42, { align: 'center' });
 
     doc.setFontSize(5.5);
     doc.setFont('helvetica', 'normal');
     doc.setTextColor(51, 65, 85);
-    doc.text(`NISN: ${student.nisn} | NIS: ${student.nis}`, width / 2, 48, { align: 'center' });
-    doc.text(`TTL: ${student.birthPlaceDate || '-'}`, width / 2, 52, { align: 'center' });
+    doc.text(`NISN: ${student.nisn || '-'}`, width / 2, 46, { align: 'center' });
+    doc.text(`TTL: ${student.birthPlaceDate || '-'}`, width / 2, 50, { align: 'center' });
 
-    const addrLines = doc.splitTextToSize(`Alamat: ${student.address || '-'}`, 46);
-    doc.text(addrLines.slice(0, 2), width / 2, 56, { align: 'center' });
+    const addrLines = doc.splitTextToSize(`Alamat: ${student.address || '-'}`, 48);
+    doc.text(addrLines.slice(0, 2), width / 2, 54, { align: 'center' });
 
     if (qrDataUrl) {
-      try { doc.addImage(qrDataUrl, 'PNG', (width - 22.5) / 2, 59.5, 22.5, 22.5); } catch {}
+      try { doc.addImage(qrDataUrl, 'PNG', (width - 22) / 2, 59, 22, 22); } catch {}
     }
   }
 
@@ -373,45 +372,45 @@ export async function exportBatchStudentCardsPdf(
         try { doc.addImage(stdPhoto, 'JPEG', x + 2.5, y + 13, 18, 23); } catch {}
       }
 
+      // Bio Text (Nama, NISN, TTL, Alamat)
       doc.setTextColor(15, 23, 42);
       doc.setFont('helvetica', 'bold');
       doc.setFontSize(7.5);
-      doc.text(doc.splitTextToSize(std.name.toUpperCase(), 38)[0], x + 22.5, y + 16);
+      doc.text(doc.splitTextToSize(std.name.toUpperCase(), 35)[0], x + 22.5, y + 16);
 
       doc.setFontSize(5.5);
       doc.setFont('helvetica', 'normal');
       doc.setTextColor(51, 65, 85);
-      doc.text(`NISN   : ${std.nisn}`, x + 22.5, y + 20);
-      doc.text(`NIS      : ${std.nis}`, x + 22.5, y + 23.5);
-      doc.text(`TTL      : ${std.birthPlaceDate || '-'}`, x + 22.5, y + 27);
+      doc.text(`NISN   : ${std.nisn || '-'}`, x + 22.5, y + 20);
+      doc.text(`TTL      : ${std.birthPlaceDate || '-'}`, x + 22.5, y + 23.5);
 
-      const addrLines = doc.splitTextToSize(`Alamat : ${std.address || '-'}`, 39);
-      doc.text(addrLines.slice(0, 2), x + 22.5, y + 30.5);
+      const addrLines = doc.splitTextToSize(`Alamat : ${std.address || '-'}`, 35);
+      doc.text(addrLines.slice(0, 2), x + 22.5, y + 27);
 
       if (qrDataUrl) {
-        try { doc.addImage(qrDataUrl, 'PNG', x + cardW - 26.25, y + 12.5, 23.75, 23.75); } catch {}
+        try { doc.addImage(qrDataUrl, 'PNG', x + cardW - 26, y + 13, 23.5, 23.5); } catch {}
       }
     } else {
       if (stdPhoto) {
-        try { doc.addImage(stdPhoto, 'JPEG', x + (cardW - 20) / 2, y + 13, 20, 25); } catch {}
+        try { doc.addImage(stdPhoto, 'JPEG', x + (cardW - 18) / 2, y + 13, 18, 23); } catch {}
       }
 
       doc.setTextColor(15, 23, 42);
       doc.setFont('helvetica', 'bold');
       doc.setFontSize(7);
-      doc.text(doc.splitTextToSize(std.name.toUpperCase(), 48)[0], x + cardW / 2, y + 41, { align: 'center' });
+      doc.text(doc.splitTextToSize(std.name.toUpperCase(), 48)[0], x + cardW / 2, y + 39.5, { align: 'center' });
 
       doc.setFontSize(5.5);
       doc.setFont('helvetica', 'normal');
       doc.setTextColor(51, 65, 85);
-      doc.text(`NISN: ${std.nisn} | NIS: ${std.nis}`, x + cardW / 2, y + 45, { align: 'center' });
-      doc.text(`TTL: ${std.birthPlaceDate || '-'}`, x + cardW / 2, y + 49, { align: 'center' });
+      doc.text(`NISN: ${std.nisn || '-'}`, x + cardW / 2, y + 43.5, { align: 'center' });
+      doc.text(`TTL: ${std.birthPlaceDate || '-'}`, x + cardW / 2, y + 47.5, { align: 'center' });
 
       const addrLines = doc.splitTextToSize(`Alamat: ${std.address || '-'}`, 48);
-      doc.text(addrLines.slice(0, 2), x + cardW / 2, y + 53, { align: 'center' });
+      doc.text(addrLines.slice(0, 2), x + cardW / 2, y + 51.5, { align: 'center' });
 
       if (qrDataUrl) {
-        try { doc.addImage(qrDataUrl, 'PNG', x + (cardW - 21.25) / 2, y + 59.5, 21.25, 21.25); } catch {}
+        try { doc.addImage(qrDataUrl, 'PNG', x + (cardW - 22) / 2, y + 57, 22, 22); } catch {}
       }
     }
 

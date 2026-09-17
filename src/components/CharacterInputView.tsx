@@ -1,5 +1,17 @@
 import React, { useState } from 'react';
-import { CharacterTrait, CharacterType, CharacterPredicateSettings } from '../types';
+import { 
+  CharacterTrait, 
+  CharacterType, 
+  CharacterPredicateSettings,
+  Student,
+  SchoolClass,
+  StudentCharacterLog,
+  AttendanceRecord,
+  Teacher,
+  UserSession,
+  LearningJournal
+} from '../types';
+import { AutoCharacterAssessmentModal } from './AutoCharacterAssessmentModal';
 import { 
   Plus, 
   Trash2, 
@@ -14,28 +26,46 @@ import {
   Info,
   Settings,
   X,
-  Sliders
+  Sliders,
+  Zap
 } from 'lucide-react';
 
 interface CharacterInputViewProps {
   traits: CharacterTrait[];
+  students?: Student[];
+  classes?: SchoolClass[];
+  characterLogs?: StudentCharacterLog[];
+  attendanceRecords?: AttendanceRecord[];
+  learningJournals?: LearningJournal[];
+  teachers?: Teacher[];
+  userSession?: UserSession | null;
   predicateSettings?: CharacterPredicateSettings;
   onAddTrait: (trait: CharacterTrait) => void;
   onUpdateTrait: (trait: CharacterTrait) => void;
   onDeleteTrait: (id: string) => void;
   onSavePredicateSettings?: (settings: CharacterPredicateSettings) => void;
+  onApplyAutoCharacterLogs?: (logs: StudentCharacterLog[]) => void;
 }
 
 export const CharacterInputView: React.FC<CharacterInputViewProps> = ({
   traits,
+  students = [],
+  classes = [],
+  characterLogs = [],
+  attendanceRecords = [],
+  learningJournals = [],
+  teachers = [],
+  userSession,
   predicateSettings = { minA: 30, minB: 10, minC: 0, minD: -20, minE: -50 },
   onAddTrait,
   onUpdateTrait,
   onDeleteTrait,
-  onSavePredicateSettings
+  onSavePredicateSettings,
+  onApplyAutoCharacterLogs
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [filterType, setFilterType] = useState<'ALL' | CharacterType>('ALL');
+  const [showAutoAssessmentModal, setShowAutoAssessmentModal] = useState<boolean>(false);
   
   // Form State
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -171,6 +201,14 @@ export const CharacterInputView: React.FC<CharacterInputViewProps> = ({
         </div>
 
         <div className="flex flex-wrap items-center gap-2.5 shrink-0">
+          <button
+            onClick={() => setShowAutoAssessmentModal(true)}
+            className="inline-flex items-center justify-center gap-2 px-4 py-3 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-slate-950 font-extrabold rounded-2xl shadow-lg shadow-amber-500/30 transition-all transform active:scale-95 cursor-pointer shrink-0"
+          >
+            <Zap className="w-5 h-5 fill-slate-950 text-slate-950" />
+            <span>Nilai Otomatis</span>
+          </button>
+
           <button
             onClick={handleOpenPredicateModal}
             className="inline-flex items-center justify-center gap-2 px-4 py-3 bg-white/10 hover:bg-white/20 text-white font-extrabold rounded-2xl border border-white/20 backdrop-blur-md shadow-md transition-all transform active:scale-95 cursor-pointer shrink-0"
@@ -721,6 +759,27 @@ export const CharacterInputView: React.FC<CharacterInputViewProps> = ({
             </div>
           </div>
         </div>
+      )}
+
+      {/* MODAL: Penilaian Karakter Otomatis Presensi & Jurnal KBM */}
+      {showAutoAssessmentModal && (
+        <AutoCharacterAssessmentModal
+          isOpen={showAutoAssessmentModal}
+          onClose={() => setShowAutoAssessmentModal(false)}
+          students={students}
+          classes={classes}
+          traits={traits}
+          characterLogs={characterLogs}
+          attendanceRecords={attendanceRecords}
+          learningJournals={learningJournals}
+          teachers={teachers}
+          userSession={userSession}
+          onApplyLogs={(newLogs) => {
+            if (onApplyAutoCharacterLogs) {
+              onApplyAutoCharacterLogs(newLogs);
+            }
+          }}
+        />
       )}
     </div>
   );

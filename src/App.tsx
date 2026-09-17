@@ -998,6 +998,71 @@ export default function App() {
     saveAttendanceRecords(updated);
   };
 
+  // Delete multiple attendance records (e.g. Alpa massal)
+  const handleDeleteAttendanceRecords = (recordIds: string[]) => {
+    const idSet = new Set(recordIds);
+    setAttendanceRecordsState(prev => {
+      const updated = prev.filter(r => !idSet.has(r.id));
+      saveAttendanceRecords(updated);
+      return updated;
+    });
+  };
+
+  // Bulk update attendance status (e.g. convert Alpa to Hadir/Izin/Sakit)
+  const handleBulkUpdateAttendanceRecords = (
+    updates: {
+      studentId: string;
+      studentName: string;
+      nisn: string;
+      className: string;
+      date: string;
+      newStatus: AttendanceRecord['status'];
+      notes?: string;
+      existingRecordId?: string;
+    }[]
+  ) => {
+    setAttendanceRecordsState(prev => {
+      const updated = [...prev];
+      const nowTime = new Date().toTimeString().substring(0, 5);
+
+      updates.forEach(u => {
+        const existingIdx = updated.findIndex(r => 
+          (u.existingRecordId && r.id === u.existingRecordId) || 
+          (r.studentId === u.studentId && r.date === u.date)
+        );
+
+        if (existingIdx >= 0) {
+          updated[existingIdx] = {
+            ...updated[existingIdx],
+            status: u.newStatus,
+            notes: u.notes !== undefined ? u.notes : updated[existingIdx].notes,
+            time: u.newStatus === 'HADIR' ? (updated[existingIdx].time && updated[existingIdx].time !== '-' ? updated[existingIdx].time : nowTime) : updated[existingIdx].time,
+          };
+        } else {
+          // Create new record
+          const newRecord: AttendanceRecord = {
+            id: `att-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`,
+            studentId: u.studentId,
+            studentName: u.studentName,
+            nisn: u.nisn,
+            className: u.className,
+            date: u.date,
+            time: u.newStatus === 'HADIR' ? nowTime : '-',
+            status: u.newStatus,
+            method: 'MANUAL',
+            scannedBy: userSession?.displayName ? `Admin (${userSession.displayName})` : 'Admin Sekolah',
+            notes: u.notes,
+            parentNotified: false
+          };
+          updated.unshift(newRecord);
+        }
+      });
+
+      saveAttendanceRecords(updated);
+      return updated;
+    });
+  };
+
   // Student CRUD
   const handleAddStudent = (newStudent: Student) => {
     setStudentsState(prev => {
@@ -1290,6 +1355,13 @@ export default function App() {
     saveStudentCharacterLogs(updated);
   };
 
+  const handleAddMultipleCharacterLogs = (newLogs: StudentCharacterLog[]) => {
+    if (!newLogs || newLogs.length === 0) return;
+    const updated = [...newLogs, ...characterLogs];
+    setCharacterLogsState(updated);
+    saveStudentCharacterLogs(updated);
+  };
+
   const handleUpdateCharacterLog = (updatedLog: StudentCharacterLog) => {
     const updated = characterLogs.map(l => l.id === updatedLog.id ? updatedLog : l);
     setCharacterLogsState(updated);
@@ -1427,6 +1499,8 @@ export default function App() {
               classes={classes}
               attendanceRecords={attendanceRecords}
               onUpdateStatus={handleUpdateAttendanceStatus}
+              onDeleteAttendanceRecords={handleDeleteAttendanceRecords}
+              onBulkUpdateAttendanceRecords={handleBulkUpdateAttendanceRecords}
               currentRole={currentRole}
               selectedChildId={effectiveChildId}
               learningJournals={journals}
@@ -1587,11 +1661,19 @@ export default function App() {
           {activeTab === 'character_input' && (
             <CharacterInputView
               traits={traits}
+              students={students}
+              classes={classes}
+              characterLogs={characterLogs}
+              attendanceRecords={attendanceRecords}
+              learningJournals={journals}
+              teachers={teachers}
+              userSession={userSession}
               predicateSettings={predicateSettings}
               onAddTrait={handleAddTrait}
               onUpdateTrait={handleUpdateTrait}
               onDeleteTrait={handleDeleteTrait}
               onSavePredicateSettings={handleSavePredicateSettings}
+              onApplyAutoCharacterLogs={handleAddMultipleCharacterLogs}
             />
           )}
 
@@ -1602,7 +1684,10 @@ export default function App() {
               traits={traits}
               logs={characterLogs}
               teachers={teachers}
+              attendanceRecords={attendanceRecords}
+              learningJournals={journals}
               onAddLog={handleAddCharacterLog}
+              onApplyMultipleLogs={handleAddMultipleCharacterLogs}
               onUpdateLog={handleUpdateCharacterLog}
               onDeleteLog={handleDeleteCharacterLog}
               currentUserRole={currentRole}

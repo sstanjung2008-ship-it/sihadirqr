@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { Student, SchoolClass, CharacterTrait, StudentCharacterLog, Teacher, SchoolProfile, CharacterPredicateSettings, UserSession } from '../types';
+import { Student, SchoolClass, CharacterTrait, StudentCharacterLog, Teacher, SchoolProfile, CharacterPredicateSettings, UserSession, AttendanceRecord, LearningJournal } from '../types';
 import { exportCharacterPointsPdf, exportStudentCharacterDetailPdf } from '../lib/exportUtils';
+import { AutoCharacterAssessmentModal } from './AutoCharacterAssessmentModal';
 import { 
   Plus, 
   Search, 
@@ -19,7 +20,8 @@ import {
   Filter,
   ShieldCheck,
   Download,
-  FileText
+  FileText,
+  Zap
 } from 'lucide-react';
 
 interface CharacterPointsViewProps {
@@ -28,7 +30,10 @@ interface CharacterPointsViewProps {
   traits: CharacterTrait[];
   logs: StudentCharacterLog[];
   teachers: Teacher[];
+  attendanceRecords?: AttendanceRecord[];
+  learningJournals?: LearningJournal[];
   onAddLog: (log: StudentCharacterLog) => void;
+  onApplyMultipleLogs?: (logs: StudentCharacterLog[]) => void;
   onUpdateLog?: (log: StudentCharacterLog) => void;
   onDeleteLog: (logId: string) => void;
   currentUserRole?: string;
@@ -43,7 +48,10 @@ export const CharacterPointsView: React.FC<CharacterPointsViewProps> = ({
   traits,
   logs,
   teachers,
+  attendanceRecords = [],
+  learningJournals = [],
   onAddLog,
+  onApplyMultipleLogs,
   onUpdateLog,
   onDeleteLog,
   currentUserRole,
@@ -54,6 +62,7 @@ export const CharacterPointsView: React.FC<CharacterPointsViewProps> = ({
   const [selectedClassId, setSelectedClassId] = useState<string>('ALL');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [isExporting, setIsExporting] = useState<boolean>(false);
+  const [showAutoAssessmentModal, setShowAutoAssessmentModal] = useState<boolean>(false);
 
   // Auto detect initial evaluator name from logged in user session
   const initialEvaluatorName = useMemo(() => {
@@ -497,14 +506,24 @@ export const CharacterPointsView: React.FC<CharacterPointsViewProps> = ({
           </p>
         </div>
 
-        <button
-          onClick={handleDownloadPdf}
-          disabled={isExporting}
-          className="inline-flex items-center justify-center gap-2 px-5 py-3 bg-emerald-500 hover:bg-emerald-400 disabled:bg-slate-500 text-white font-extrabold rounded-2xl shadow-lg transition-all transform active:scale-95 cursor-pointer shrink-0"
-        >
-          <Download className="w-5 h-5" />
-          <span>{isExporting ? 'Mencetak PDF...' : 'Download PDF'}</span>
-        </button>
+        <div className="flex flex-wrap items-center gap-2.5 shrink-0">
+          <button
+            onClick={() => setShowAutoAssessmentModal(true)}
+            className="inline-flex items-center justify-center gap-2 px-5 py-3 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-slate-950 font-extrabold rounded-2xl shadow-lg shadow-amber-500/30 transition-all transform active:scale-95 cursor-pointer shrink-0"
+          >
+            <Zap className="w-5 h-5 fill-slate-950 text-slate-950" />
+            <span>Nilai Otomatis</span>
+          </button>
+
+          <button
+            onClick={handleDownloadPdf}
+            disabled={isExporting}
+            className="inline-flex items-center justify-center gap-2 px-5 py-3 bg-emerald-500 hover:bg-emerald-400 disabled:bg-slate-500 text-white font-extrabold rounded-2xl shadow-lg transition-all transform active:scale-95 cursor-pointer shrink-0"
+          >
+            <Download className="w-5 h-5" />
+            <span>{isExporting ? 'Mencetak PDF...' : 'Download PDF'}</span>
+          </button>
+        </div>
       </div>
 
       {/* Filters and Search Bar */}
@@ -1471,6 +1490,29 @@ export const CharacterPointsView: React.FC<CharacterPointsViewProps> = ({
             </div>
           </div>
         </div>
+      )}
+
+      {/* Modal Penilaian Otomatis Presensi & Jurnal KBM */}
+      {showAutoAssessmentModal && (
+        <AutoCharacterAssessmentModal
+          isOpen={showAutoAssessmentModal}
+          onClose={() => setShowAutoAssessmentModal(false)}
+          students={students}
+          classes={classes}
+          traits={traits}
+          characterLogs={logs}
+          attendanceRecords={attendanceRecords}
+          learningJournals={learningJournals}
+          teachers={teachers}
+          userSession={userSession}
+          onApplyLogs={(newLogs) => {
+            if (onApplyMultipleLogs) {
+              onApplyMultipleLogs(newLogs);
+            } else {
+              newLogs.forEach(log => onAddLog(log));
+            }
+          }}
+        />
       )}
     </div>
   );

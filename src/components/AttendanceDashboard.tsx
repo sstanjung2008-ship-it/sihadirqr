@@ -43,9 +43,12 @@ import {
   ArrowRight,
   ArrowLeft,
   LayoutDashboard,
-  BarChart3
+  BarChart3,
+  UserX,
+  Trash2
 } from 'lucide-react';
 import { createWhatsAppUrl } from '../lib/exportUtils';
+import { BulkAlpaManagementModal } from './BulkAlpaManagementModal';
 
 interface AttendanceDashboardProps {
   students: Student[];
@@ -59,6 +62,17 @@ interface AttendanceDashboardProps {
     returnStatus?: AttendanceRecord['returnStatus'],
     fullRecord?: AttendanceRecord
   ) => void;
+  onDeleteAttendanceRecords?: (recordIds: string[]) => void;
+  onBulkUpdateAttendanceRecords?: (updates: {
+    studentId: string;
+    studentName: string;
+    nisn: string;
+    className: string;
+    date: string;
+    newStatus: AttendanceRecord['status'];
+    notes?: string;
+    existingRecordId?: string;
+  }[]) => void;
   currentRole: UserRole;
   selectedChildId?: string;
   learningJournals?: LearningJournal[];
@@ -76,6 +90,8 @@ export const AttendanceDashboard: React.FC<AttendanceDashboardProps> = ({
   classes,
   attendanceRecords,
   onUpdateStatus,
+  onDeleteAttendanceRecords,
+  onBulkUpdateAttendanceRecords,
   currentRole,
   selectedChildId,
   learningJournals = [],
@@ -102,6 +118,7 @@ export const AttendanceDashboard: React.FC<AttendanceDashboardProps> = ({
   const [editReturnTime, setEditReturnTime] = useState<string>('');
   const [editReturnStatus, setEditReturnStatus] = useState<AttendanceRecord['returnStatus']>('PULANG');
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
+  const [showBulkAlpaModal, setShowBulkAlpaModal] = useState<boolean>(false);
 
   const sortedClasses = [...classes].sort((a, b) =>
     a.name.localeCompare(b.name, 'id', { numeric: true, sensitivity: 'base' })
@@ -1079,6 +1096,24 @@ export const AttendanceDashboard: React.FC<AttendanceDashboardProps> = ({
                   Reset Filter
                 </button>
               )}
+
+              {/* KHUSUS ADMIN: Tombol Kelola / Hapus Alpa Massal */}
+              {currentRole === 'ADMIN' && (
+                <button
+                  type="button"
+                  onClick={() => setShowBulkAlpaModal(true)}
+                  className="bg-gradient-to-r from-rose-600 to-red-600 hover:from-rose-700 hover:to-red-700 text-white font-extrabold px-3.5 py-1.5 rounded-xl text-xs flex items-center gap-1.5 transition-all cursor-pointer shadow-sm shadow-rose-600/25 active:scale-95 shrink-0"
+                  title="Kelola & Hapus Data Siswa Alpa secara Massal (Khusus Admin)"
+                >
+                  <UserX className="w-3.5 h-3.5 text-rose-200 shrink-0" />
+                  <span>Kelola / Hapus Alpa Massal</span>
+                  {countAlpa > 0 && (
+                    <span className="bg-white text-rose-700 text-[10px] font-black px-1.5 py-0.2 rounded-full shadow-2xs">
+                      {countAlpa}
+                    </span>
+                  )}
+                </button>
+              )}
             </div>
           </div>
 
@@ -1424,6 +1459,29 @@ export const AttendanceDashboard: React.FC<AttendanceDashboardProps> = ({
             </div>
           </div>
         </div>
+      )}
+
+      {/* Modal Kelola & Hapus Alpa Massal (Khusus Admin) */}
+      {currentRole === 'ADMIN' && showBulkAlpaModal && (
+        <BulkAlpaManagementModal
+          isOpen={showBulkAlpaModal}
+          onClose={() => setShowBulkAlpaModal(false)}
+          students={students}
+          classes={classes}
+          attendanceRecords={attendanceRecords}
+          initialDate={selectedDate}
+          userSession={userSession}
+          onDeleteRecords={(recordIds) => {
+            if (onDeleteAttendanceRecords) {
+              onDeleteAttendanceRecords(recordIds);
+            }
+          }}
+          onBulkUpdateStatus={(updates) => {
+            if (onBulkUpdateAttendanceRecords) {
+              onBulkUpdateAttendanceRecords(updates);
+            }
+          }}
+        />
       )}
 
     </div>

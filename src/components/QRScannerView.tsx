@@ -3,6 +3,7 @@ import { Html5Qrcode } from 'html5-qrcode';
 import { Student, SchoolProfile, AttendanceRecord, WhatsAppLog, SchoolClass } from '../types';
 import { playScanSound } from '../lib/audioBeep';
 import { createWhatsAppUrl, sendWhatsAppGatewayMessage } from '../lib/exportUtils';
+import { getSchoolCheckoutTimeForDay } from '../lib/storage';
 import { 
   ScanLine, 
   CheckCircle2, 
@@ -36,6 +37,8 @@ interface QRScannerViewProps {
   onAddAttendance: (record: AttendanceRecord, waLog?: WhatsAppLog) => void;
 }
 
+const DAY_NAMES = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
+
 export const QRScannerView: React.FC<QRScannerViewProps> = ({
   students,
   classes = [],
@@ -43,20 +46,23 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
   attendanceRecords,
   onAddAttendance,
 }) => {
-  const endTimeStr = schoolProfile.endTime || '15:00';
+  const todayName = DAY_NAMES[new Date().getDay()];
+  const todayEndTimeStr = getSchoolCheckoutTimeForDay(schoolProfile, todayName);
   const autoAlpaTimeStr = schoolProfile.autoAlpaTime || '08:30';
   const startTimeStr = schoolProfile.startTime || '07:00';
 
   /**
    * Logika Auto Switch Mode Scan:
-   * - Mode MASUK : Mulai pukul 01:00 WITA s.d sebelum waktu jam pulang sekolah (endTime, misal 15:00 WITA)
-   * - Mode PULANG: Mulai waktu jam pulang sekolah (endTime, misal 15:00 WITA) s.d pukul 00:59 WITA (sebelum 01:00 WITA)
+   * - Mode MASUK : Mulai pukul 01:00 WITA s.d sebelum waktu jam pulang sekolah hari ini (todayEndTimeStr)
+   * - Mode PULANG: Mulai waktu jam pulang sekolah hari ini s.d pukul 00:59 WITA (sebelum 01:00 WITA)
    */
   const getAutoScanMode = useCallback((checkTime: Date = new Date()): 'MASUK' | 'PULANG' => {
     const currentMinutes = checkTime.getHours() * 60 + checkTime.getMinutes();
+    const day = DAY_NAMES[checkTime.getDay()];
+    const departureTime = getSchoolCheckoutTimeForDay(schoolProfile, day);
     
-    // Parse Jam Pulang Sekolah di pengaturan sekolah (default 15:00)
-    const [eH, eM] = (schoolProfile.endTime || '15:00').split(':').map(Number);
+    // Parse Jam Pulang Sekolah untuk hari tersebut (default 15:00)
+    const [eH, eM] = departureTime.split(':').map(Number);
     const endMinutes = (isNaN(eH) ? 15 : eH) * 60 + (isNaN(eM) ? 0 : eM);
 
     // Waktu reset kembali ke scan masuk pada 01:00 WITA (1 * 60 = 60 menit)
@@ -68,7 +74,7 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
     }
     // Jika waktu antara 01:00 WITA s.d sebelum jam pulang -> mode MASUK
     return 'MASUK';
-  }, [schoolProfile.endTime]);
+  }, [schoolProfile.dailyEndTimes, schoolProfile.endTime]);
 
   const [scanMode, setScanMode] = useState<'MASUK' | 'PULANG'>(() => getAutoScanMode());
   const [isManualOverride, setIsManualOverride] = useState<boolean>(false);
@@ -107,8 +113,6 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
   }, [students, simClassFilter, simSearchQuery]);
 
   const now = new Date();
-  const dayNames = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
-  const todayName = dayNames[now.getDay()];
   const activeDays = schoolProfile.activeDays || ['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
   const isTodayActiveDay = activeDays.includes(todayName);
 
@@ -465,8 +469,9 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
 
       playScanSound('SUCCESS');
 
-      const endTimeStr = schoolProfile.endTime || '15:00';
-      const [endH, endM] = endTimeStr.split(':').map(Number);
+      const dayNowName = DAY_NAMES[now.getDay()];
+      const dayEndTimeStr = getSchoolCheckoutTimeForDay(schoolProfile, dayNowName);
+      const [endH, endM] = dayEndTimeStr.split(':').map(Number);
       const endMinutes = (endH || 15) * 60 + (endM || 0);
       const currentMinutes = now.getHours() * 60 + now.getMinutes();
       const isBeforeEndTime = currentMinutes < endMinutes;
@@ -492,7 +497,7 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
         returnTime: timeStr,
         returnStatus,
         returnScannedBy: isBeforeEndTime 
-          ? `Pos Scanner Utama (Pulang Cepat sebelum ${endTimeStr})` 
+          ? `Pos Scanner Utama (Pulang Cepat sebelum ${dayEndTimeStr})` 
           : 'Pos Scanner Utama (Pulang)',
         returnWaLogId: isParentWaEnabled ? returnWaLogId : undefined
       };
@@ -1340,7 +1345,7 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
               <div className="flex items-start gap-1.5 text-slate-700 font-medium">
                 <Home className="w-3.5 h-3.5 text-emerald-600 shrink-0 mt-0.5" />
                 <span>
-                  Jam Pulang: <strong className="text-slate-900">{schoolProfile.endTime || '15:00'} WITA</strong>
+                  Jam Pulang Hari Ini ({todayName}): <strong className="text-slate-900">{todayEndTimeStr} WITA</strong>
                 </span>
               </div>
               <div className="flex items-start gap-1.5 text-slate-700 font-medium">

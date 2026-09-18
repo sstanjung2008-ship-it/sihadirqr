@@ -129,7 +129,8 @@ export interface SchoolProfile {
   principalSignatureUrl?: string;
   schoolStampUrl?: string;
   startTime: string; // "07:00"
-  endTime?: string; // e.g. "15:00" Waktu Pulang Sekolah (Scan QR Pulang Aktif)
+  endTime?: string; // e.g. "15:00" Waktu Pulang Sekolah Global/Fallback (Scan QR Pulang Aktif)
+  dailyEndTimes?: Record<string, string>; // e.g. { 'Senin': '15:00', 'Selasa': '15:00', 'Rabu': '15:00', 'Kamis': '15:00', 'Jumat': '11:30', 'Sabtu': '13:00' }
   autoAlpaTime?: string; // e.g. "08:30" Waktu Batas Otomatis Alpa
   autoAlpaEnabled?: boolean; // Saklar aktif/non-aktif penentuan otomatis status ALPA
   lateToleranceMinutes: number; // e.g. 15 -> after 07:15 is TERLAMBAT

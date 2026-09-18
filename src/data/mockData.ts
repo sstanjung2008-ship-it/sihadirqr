@@ -15,6 +15,15 @@ export const INITIAL_SCHOOL_PROFILE: SchoolProfile = {
   principalNip: "19720415 199803 1 004",
   startTime: "07:00",
   endTime: "15:00",
+  dailyEndTimes: {
+    "Senin": "15:00",
+    "Selasa": "15:00",
+    "Rabu": "15:00",
+    "Kamis": "15:00",
+    "Jumat": "11:30",
+    "Sabtu": "13:00",
+    "Minggu": "15:00"
+  },
   autoAlpaTime: "08:30",
   autoAlpaEnabled: true,
   lateToleranceMinutes: 15,

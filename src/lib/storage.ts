@@ -686,6 +686,11 @@ export function mergeSchoolProfile(local: SchoolProfile, cloud: SchoolProfile): 
     activeDays: (cloud.activeDays && Array.isArray(cloud.activeDays) && cloud.activeDays.length > 0) ? cloud.activeDays : (local.activeDays || ['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu']),
     startTime: cloud.startTime || local.startTime || INITIAL_SCHOOL_PROFILE.startTime,
     endTime: cloud.endTime || local.endTime || INITIAL_SCHOOL_PROFILE.endTime,
+    dailyEndTimes: {
+      ...(INITIAL_SCHOOL_PROFILE.dailyEndTimes || {}),
+      ...(local.dailyEndTimes || {}),
+      ...(cloud.dailyEndTimes || {})
+    },
     autoAlpaTime: cloud.autoAlpaTime || local.autoAlpaTime || INITIAL_SCHOOL_PROFILE.autoAlpaTime,
     lateToleranceMinutes: typeof cloud.lateToleranceMinutes === 'number' ? cloud.lateToleranceMinutes : (typeof local.lateToleranceMinutes === 'number' ? local.lateToleranceMinutes : (INITIAL_SCHOOL_PROFILE.lateToleranceMinutes ?? 15)),
   };
@@ -1244,6 +1249,17 @@ export function getSchoolProfile(): SchoolProfile {
       scannerPassword: parsed.scannerPassword || INITIAL_SCHOOL_PROFILE.scannerPassword || '123456',
       startTime: parsed.startTime || INITIAL_SCHOOL_PROFILE.startTime || '07:00',
       endTime: parsed.endTime || INITIAL_SCHOOL_PROFILE.endTime || '15:00',
+      dailyEndTimes: parsed.dailyEndTimes && typeof parsed.dailyEndTimes === 'object'
+        ? { ...(INITIAL_SCHOOL_PROFILE.dailyEndTimes || {}), ...parsed.dailyEndTimes }
+        : (INITIAL_SCHOOL_PROFILE.dailyEndTimes || {
+            'Senin': parsed.endTime || '15:00',
+            'Selasa': parsed.endTime || '15:00',
+            'Rabu': parsed.endTime || '15:00',
+            'Kamis': parsed.endTime || '15:00',
+            'Jumat': '11:30',
+            'Sabtu': '13:00',
+            'Minggu': parsed.endTime || '15:00',
+          }),
       autoAlpaTime: parsed.autoAlpaTime || INITIAL_SCHOOL_PROFILE.autoAlpaTime || '08:30',
       lateToleranceMinutes: typeof parsed.lateToleranceMinutes === 'number' ? parsed.lateToleranceMinutes : (INITIAL_SCHOOL_PROFILE.lateToleranceMinutes ?? 15),
       activeDays: parsed.activeDays && Array.isArray(parsed.activeDays) && parsed.activeDays.length > 0 ? parsed.activeDays : (INITIAL_SCHOOL_PROFILE.activeDays || ['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu']),
@@ -1253,6 +1269,21 @@ export function getSchoolProfile(): SchoolProfile {
   } catch {
     return INITIAL_SCHOOL_PROFILE;
   }
+}
+
+/**
+ * Mendapatkan jam pulang sekolah untuk hari tertentu (misal: 'Senin', 'Jumat', dll).
+ * Jika tidak ada pengaturan spesifik untuk hari tersebut, akan menggunakan endTime global atau fallback '15:00'.
+ */
+export function getSchoolCheckoutTimeForDay(profile: SchoolProfile, dayName?: string): string {
+  if (!dayName) {
+    const dayNames = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
+    dayName = dayNames[new Date().getDay()];
+  }
+  if (profile.dailyEndTimes && profile.dailyEndTimes[dayName]) {
+    return profile.dailyEndTimes[dayName];
+  }
+  return profile.endTime || '15:00';
 }
 
 export function saveSchoolProfile(profile: SchoolProfile): void {

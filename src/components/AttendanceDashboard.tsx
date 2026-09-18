@@ -176,8 +176,13 @@ export const AttendanceDashboard: React.FC<AttendanceDashboardProps> = ({
   if (selectedEntryStatusFilter !== 'ALL') {
     filteredStudents = filteredStudents.filter(std => {
       const rec = studentDateStatusMap.get(std.id);
-      const status = rec ? rec.status : 'ALPA';
-      return status === selectedEntryStatusFilter;
+      if (selectedEntryStatusFilter === 'BELUM_ABSEN') {
+        return !rec;
+      }
+      if (selectedEntryStatusFilter === 'ALPA') {
+        return rec?.status === 'ALPA';
+      }
+      return rec?.status === selectedEntryStatusFilter;
     });
   }
 
@@ -1101,7 +1106,8 @@ export const AttendanceDashboard: React.FC<AttendanceDashboardProps> = ({
                   <option value="TERLAMBAT">Status Masuk: Terlambat</option>
                   <option value="SAKIT">Status Masuk: Sakit</option>
                   <option value="IZIN">Status Masuk: Izin</option>
-                  <option value="ALPA">Status Masuk: Belum Absen / Alpa</option>
+                  <option value="ALPA">Status Masuk: Alpa (Tanpa Keterangan)</option>
+                  <option value="BELUM_ABSEN">Status Masuk: Belum Absen</option>
                 </select>
               </div>
 
@@ -1273,81 +1279,87 @@ export const AttendanceDashboard: React.FC<AttendanceDashboardProps> = ({
                 ) : (
                   filteredStudents.map((student) => {
                     const rec = studentDateStatusMap.get(student.id);
-                  const status = rec ? rec.status : 'ALPA';
+                    const status = rec ? rec.status : 'BELUM_ABSEN';
 
-                  return (
-                    <tr key={student.id} className="hover:bg-slate-50/80 transition-colors">
-                      
-                      {/* Student Info */}
-                      <td className="py-3.5 px-5">
-                        <div className="flex items-center gap-3">
-                          <img
-                            src={student.photoUrl || (student.gender === 'P'
-                              ? 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=300&auto=format&fit=crop&q=80'
-                              : 'https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?w=300&auto=format&fit=crop&q=80')}
-                            alt={student.name}
-                            referrerPolicy="no-referrer"
-                            onError={(e) => {
-                              (e.target as HTMLImageElement).src = student.gender === 'P'
+                    return (
+                      <tr key={student.id} className="hover:bg-slate-50/80 transition-colors">
+                        
+                        {/* Student Info */}
+                        <td className="py-3.5 px-5">
+                          <div className="flex items-center gap-3">
+                            <img
+                              src={student.photoUrl || (student.gender === 'P'
                                 ? 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=300&auto=format&fit=crop&q=80'
-                                : 'https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?w=300&auto=format&fit=crop&q=80';
-                            }}
-                            className="w-9 h-9 rounded-xl object-cover ring-2 ring-indigo-100 shadow-sm bg-slate-100"
-                          />
-                          <div>
-                            <p className="font-bold text-slate-900">{student.name}</p>
-                            <p className="text-[10px] text-slate-400 font-mono">NISN: {student.nisn}</p>
+                                : 'https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?w=300&auto=format&fit=crop&q=80')}
+                              alt={student.name}
+                              referrerPolicy="no-referrer"
+                              onError={(e) => {
+                                (e.target as HTMLImageElement).src = student.gender === 'P'
+                                  ? 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=300&auto=format&fit=crop&q=80'
+                                  : 'https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?w=300&auto=format&fit=crop&q=80';
+                              }}
+                              className="w-9 h-9 rounded-xl object-cover ring-2 ring-indigo-100 shadow-sm bg-slate-100"
+                            />
+                            <div>
+                              <p className="font-bold text-slate-900">{student.name}</p>
+                              <p className="text-[10px] text-slate-400 font-mono">NISN: {student.nisn}</p>
+                            </div>
                           </div>
-                        </div>
-                      </td>
+                        </td>
 
-                      {/* Class */}
-                      <td className="py-3.5 px-5 font-bold text-indigo-700">
-                        {student.className}
-                      </td>
+                        {/* Class */}
+                        <td className="py-3.5 px-5 font-bold text-indigo-700">
+                          {student.className}
+                        </td>
 
-                      {/* Scan Time */}
-                      <td className="py-3.5 px-5 font-mono">
-                        {rec && rec.time !== '-' ? (
-                          <span className="text-slate-800 font-bold">{rec.time} WITA</span>
-                        ) : (
-                          <span className="text-slate-400 italic">Belum Scan</span>
-                        )}
-                      </td>
+                        {/* Scan Time */}
+                        <td className="py-3.5 px-5 font-mono">
+                          {rec && rec.time !== '-' ? (
+                            <span className="text-slate-800 font-bold">{rec.time} WITA</span>
+                          ) : (
+                            <span className="text-slate-400 italic">Belum Scan</span>
+                          )}
+                        </td>
 
-                      {/* Status Badge */}
-                      <td className="py-3.5 px-5">
-                        {status === 'HADIR' && (
-                          <span className="bg-emerald-100 text-emerald-800 border border-emerald-200 px-2.5 py-1 rounded-lg font-bold text-[10px] inline-flex items-center gap-1 shadow-2xs">
-                            <CheckCircle2 className="w-3 h-3" />
-                            HADIR
-                          </span>
-                        )}
-                        {status === 'TERLAMBAT' && (
-                          <span className="bg-amber-100 text-amber-800 border border-amber-200 px-2.5 py-1 rounded-lg font-bold text-[10px] inline-flex items-center gap-1 shadow-2xs">
-                            <Clock className="w-3 h-3" />
-                            TERLAMBAT
-                          </span>
-                        )}
-                        {status === 'SAKIT' && (
-                          <span className="bg-rose-100 text-rose-800 border border-rose-200 px-2.5 py-1 rounded-lg font-bold text-[10px] inline-flex items-center gap-1 shadow-2xs">
-                            <HeartPulse className="w-3 h-3" />
-                            SAKIT
-                          </span>
-                        )}
-                        {status === 'IZIN' && (
-                          <span className="bg-sky-100 text-sky-800 border border-sky-200 px-2.5 py-1 rounded-lg font-bold text-[10px] inline-flex items-center gap-1 shadow-2xs">
-                            <FileText className="w-3 h-3" />
-                            IZIN
-                          </span>
-                        )}
-                        {status === 'ALPA' && (
-                          <span className="bg-pink-100 text-pink-800 border border-pink-200 px-2.5 py-1 rounded-lg font-bold text-[10px] inline-flex items-center gap-1 shadow-2xs">
-                            <XCircle className="w-3 h-3 text-pink-600" />
-                            BELUM ABSEN / ALPA
-                          </span>
-                        )}
-                      </td>
+                        {/* Status Badge */}
+                        <td className="py-3.5 px-5">
+                          {status === 'HADIR' && (
+                            <span className="bg-emerald-100 text-emerald-800 border border-emerald-200 px-2.5 py-1 rounded-lg font-bold text-[10px] inline-flex items-center gap-1 shadow-2xs">
+                              <CheckCircle2 className="w-3 h-3" />
+                              HADIR
+                            </span>
+                          )}
+                          {status === 'TERLAMBAT' && (
+                            <span className="bg-amber-100 text-amber-800 border border-amber-200 px-2.5 py-1 rounded-lg font-bold text-[10px] inline-flex items-center gap-1 shadow-2xs">
+                              <Clock className="w-3 h-3" />
+                              TERLAMBAT
+                            </span>
+                          )}
+                          {status === 'SAKIT' && (
+                            <span className="bg-rose-100 text-rose-800 border border-rose-200 px-2.5 py-1 rounded-lg font-bold text-[10px] inline-flex items-center gap-1 shadow-2xs">
+                              <HeartPulse className="w-3 h-3" />
+                              SAKIT
+                            </span>
+                          )}
+                          {status === 'IZIN' && (
+                            <span className="bg-sky-100 text-sky-800 border border-sky-200 px-2.5 py-1 rounded-lg font-bold text-[10px] inline-flex items-center gap-1 shadow-2xs">
+                              <FileText className="w-3 h-3" />
+                              IZIN
+                            </span>
+                          )}
+                          {status === 'ALPA' && (
+                            <span className="bg-rose-100 text-rose-800 border border-rose-200 px-2.5 py-1 rounded-lg font-bold text-[10px] inline-flex items-center gap-1 shadow-2xs">
+                              <XCircle className="w-3 h-3 text-rose-600" />
+                              ALPA
+                            </span>
+                          )}
+                          {status === 'BELUM_ABSEN' && (
+                            <span className="bg-slate-100 text-slate-700 border border-slate-200 px-2.5 py-1 rounded-lg font-bold text-[10px] inline-flex items-center gap-1 shadow-2xs">
+                              <UserX className="w-3 h-3 text-slate-500" />
+                              BELUM ABSEN
+                            </span>
+                          )}
+                        </td>
 
                       {/* Return Status (Status Pulang) */}
                       <td className="py-3.5 px-5 font-mono">

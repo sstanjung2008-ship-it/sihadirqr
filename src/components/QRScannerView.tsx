@@ -76,6 +76,17 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
     return 'MASUK';
   }, [schoolProfile.dailyEndTimes, schoolProfile.endTime]);
 
+  const checkIsMasukScanClosed = useCallback((checkTime: Date = new Date()) => {
+    // Mode Scan Masuk DITUTUP berdasarkan Jam Pulang sekolah hari ini (todayEndTimeStr)
+    const currentMinutes = checkTime.getHours() * 60 + checkTime.getMinutes();
+    const day = DAY_NAMES[checkTime.getDay()];
+    const departureTime = getSchoolCheckoutTimeForDay(schoolProfile, day);
+    const [eH, eM] = departureTime.split(':').map(Number);
+    const endMinutes = (isNaN(eH) ? 15 : eH) * 60 + (isNaN(eM) ? 0 : eM);
+
+    return currentMinutes >= endMinutes;
+  }, [schoolProfile.dailyEndTimes, schoolProfile.endTime]);
+
   const [scanMode, setScanMode] = useState<'MASUK' | 'PULANG'>(() => getAutoScanMode());
   const [isManualOverride, setIsManualOverride] = useState<boolean>(false);
   const [isScanning, setIsScanning] = useState<boolean>(false);
@@ -85,16 +96,23 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
   // Auto switch timer yang memantau waktu secara realtime dan beralih otomatis
   useEffect(() => {
     const checkAutoMode = () => {
-      const autoMode = getAutoScanMode();
-      if (!isManualOverride) {
+      const nowTime = new Date();
+      const isClosed = checkIsMasukScanClosed(nowTime);
+      const autoMode = getAutoScanMode(nowTime);
+
+      // Jika sudah melewati jam pulang sekolah, paksa mode PULANG dan kunci scan masuk
+      if (isClosed) {
+        setScanMode('PULANG');
+        setIsManualOverride(false);
+      } else if (!isManualOverride) {
         setScanMode(autoMode);
       }
     };
 
     checkAutoMode();
-    const interval = setInterval(checkAutoMode, 5000); // Periksa setiap 5 detik
+    const interval = setInterval(checkAutoMode, 3000); // Periksa setiap 3 detik
     return () => clearInterval(interval);
-  }, [getAutoScanMode, isManualOverride]);
+  }, [getAutoScanMode, checkIsMasukScanClosed, isManualOverride]);
 
   const classList = useMemo(() => {
     if (classes && classes.length > 0) {
@@ -125,26 +143,7 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
     return h.date === todayDateStr;
   });
 
-  const isAutoAlpaActive = schoolProfile.autoAlpaEnabled !== false;
-
-  const checkIsMasukScanClosed = (checkTime: Date = new Date()) => {
-    const [sH, sM] = startTimeStr.split(':').map(Number);
-    const startMinutes = (sH || 7) * 60 + (sM || 0);
-    const currentMinutes = checkTime.getHours() * 60 + checkTime.getMinutes();
-
-    if (currentMinutes < startMinutes) {
-      return true;
-    }
-
-    if (isAutoAlpaActive) {
-      const [aH, aM] = autoAlpaTimeStr.split(':').map(Number);
-      const autoAlpaMinutes = (aH || 8) * 60 + (aM || 30);
-      return currentMinutes >= autoAlpaMinutes;
-    }
-
-    return false;
-  };
-
+  const isAutoAlpaActive = schoolProfile.autoAlpaEnabled !== false && isTodayActiveDay && !todayHoliday;
   const isMasukClosedNow = checkIsMasukScanClosed(now);
 
   const [lastScannedResult, setLastScannedResult] = useState<{
@@ -158,6 +157,8 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
   } | null>(null);
   const [scanNotification, setScanNotification] = useState<{
     type: 'SUCCESS' | 'REJECTED';
+    badgeText?: string;
+    title?: string;
     studentName: string;
     className: string;
     time: string;
@@ -403,10 +404,45 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
     }
     lastScanDebounceRef.current = { code: decodedText, timestamp: nowMs };
 
-    // Find student by qrCode string or NISN or NIS or ID
-    const matched = students.find(
-      s => s.qrCode === decodedText || s.nisn === decodedText || s.nis === decodedText || s.id === decodedText
-    );
+    const cleanDecoded = (decodedText || '').trim();
+    const normalizedDecoded = cleanDecoded.toLowerCase();
+    // Strip common prefixes like STUDENT-, STD-, SISWA-, QR-, ID-
+    const strippedCode = cleanDecoded.replace(/^(STUDENT|SISWA|STD|QR|ID)[-_:\s]*/i, '').trim();
+    const normalizedStripped = strippedCode.toLowerCase();
+
+    // Smart student lookup
+    const matched = students.find(s => {
+      if (!s) return false;
+      const sQr = (s.qrCode || '').trim();
+      const sQrLower = sQr.toLowerCase();
+      const sNisn = (s.nisn || '').trim();
+      const sNisnLower = sNisn.toLowerCase();
+      const sNis = (s.nis || '').trim();
+      const sNisLower = sNis.toLowerCase();
+      const sId = (s.id || '').trim();
+      const sIdLower = sId.toLowerCase();
+
+      // 1. Direct exact or lowercase match
+      if (sQr === cleanDecoded || sQrLower === normalizedDecoded) return true;
+      if (sNisn === cleanDecoded || sNisnLower === normalizedDecoded) return true;
+      if (sNis === cleanDecoded || sNisLower === normalizedDecoded) return true;
+      if (sId === cleanDecoded || sIdLower === normalizedDecoded) return true;
+
+      // 2. Match with stripped prefix (e.g. STUDENT-0084748523 -> 0084748523)
+      if (strippedCode) {
+        if (sNisn === strippedCode || sNisnLower === normalizedStripped) return true;
+        if (sNis === strippedCode || sNisLower === normalizedStripped) return true;
+        if (sId === strippedCode || sIdLower === normalizedStripped) return true;
+        const sQrStripped = sQr.replace(/^(STUDENT|SISWA|STD|QR|ID)[-_:\s]*/i, '').trim();
+        if (sQrStripped === strippedCode || sQrStripped.toLowerCase() === normalizedStripped) return true;
+      }
+
+      // 3. Match reverse (student qrCode has prefix, decoded is raw NISN)
+      if (sQrLower === `student-${normalizedDecoded}` || sQrLower === `std-${normalizedDecoded}`) return true;
+      if (normalizedDecoded === `student-${sNisnLower}` || normalizedDecoded === `std-${sNisnLower}`) return true;
+
+      return false;
+    });
 
     if (matched) {
       processAttendanceForStudent(matched);
@@ -415,11 +451,13 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
       const timeStr = new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
       setScanNotification({
         type: 'REJECTED',
+        badgeText: '❌ QR CODE TIDAK DITEMUKAN',
+        title: 'Data Siswa Belum Terdaftar di Sistem',
         studentName: 'QR Tidak Dikenali',
         className: '-',
         time: timeStr,
         mode: scanMode,
-        reason: `QR Code [${decodedText}] tidak ditemukan dalam sistem. Pastikan QR Code valid!`,
+        reason: `QR Code [${cleanDecoded}] tidak ditemukan dalam data siswa. Pastikan siswa telah terdaftar di menu Data Siswa atau periksa sinkronisasi Cloud.`,
         timestamp: Date.now()
       });
     }
@@ -442,10 +480,12 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
         playScanSound('ERROR');
 
         const recordedTime = existingRecord.returnTime;
-        const rejectionReason = `DITOLAK: QR Code siswa ${student.name} (${student.className}) sudah pernah digunakan untuk scan Pulang hari ini pada pukul ${recordedTime} WITA! Scan QR hanya dapat digunakan 1 kali per sesi. Data presensi pulang sudah tercatat.`;
+        const rejectionReason = `DITOLAK: Siswa ${student.name} (${student.className}) sudah pernah melakukan scan Pulang hari ini pada pukul ${recordedTime} WITA. Scan QR kepulangan hanya berlaku 1 kali per hari!`;
 
         setScanNotification({
           type: 'REJECTED',
+          badgeText: '❌ SUDAH SCAN PULANG HARI INI',
+          title: 'Presensi Pulang Sudah Pernah Tercatat',
           studentName: student.name,
           className: student.className,
           time: recordedTime,
@@ -554,6 +594,8 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
 
       setScanNotification({
         type: 'SUCCESS',
+        badgeText: '✅ QR CODE PULANG BERHASIL!',
+        title: 'Presensi Kepulangan Berhasil Dicatat',
         studentName: student.name,
         className: student.className,
         time: timeStr,
@@ -562,14 +604,16 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
       });
     } else {
       // MODE SCAN MASUK
-      // Check if Mode Scan Masuk is CLOSED (past autoAlpaTime or before startTime)
+      // Check if Mode Scan Masuk is CLOSED (past todayEndTimeStr)
       if (checkIsMasukScanClosed(now)) {
         playScanSound('ERROR');
 
-        const rejectionReason = `Scan Masuk DITOLAK! Mode Scan Masuk telah DITUTUP karena telah melewati Waktu Batas Otomatis Alpa (${autoAlpaTimeStr} WITA). Scan masuk dibuka kembali pada jam masuk sekolah (${startTimeStr} WITA).`;
+        const rejectionReason = `Scan Masuk DITOLAK! Mode Scan Masuk telah DITUTUP karena telah memasuki jam pulang sekolah (${todayEndTimeStr} WITA). Silakan gunakan Mode Scan Pulang.`;
 
         setScanNotification({
           type: 'REJECTED',
+          badgeText: '🔒 SCAN MASUK DITUTUP',
+          title: 'Waktu Masuk Berakhir (Sudah Jam Pulang)',
           studentName: student.name,
           className: student.className,
           time: timeStr,
@@ -592,33 +636,35 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
             method: 'QR_SCAN',
             scannedBy: 'Pos Scanner Utama'
           },
-          waMsg: `[SCAN DITOLAK] Mode Scan Masuk telah ditutup (Batas Otomatis Alpa: ${autoAlpaTimeStr} WITA). Dibuka kembali jam ${startTimeStr} WITA.`,
+          waMsg: `[SCAN DITOLAK] Mode Scan Masuk telah ditutup karena telah memasuki jam pulang sekolah (${todayEndTimeStr} WITA). Silakan beralih ke Mode Scan Pulang.`,
           waUrl: '',
           mode: 'MASUK',
           isRejected: true,
-          rejectionReason: `Mode Scan Masuk TUTUP (Lewat Batas Alpa ${autoAlpaTimeStr} WITA)`
+          rejectionReason: `Mode Scan Masuk TUTUP (Lewat Jam Pulang ${todayEndTimeStr} WITA)`
         });
 
         return;
       }
 
-      // Check if student has ALREADY scanned/recorded for MASUK today
+      // Check if student has ALREADY scanned/recorded for MASUK today (HADIR/TERLAMBAT/IZIN/SAKIT)
       const isAlreadyRecordedForMasuk = existingRecord && (
-        (existingRecord.time && existingRecord.time !== '-') ||
         existingRecord.status === 'HADIR' ||
         existingRecord.status === 'TERLAMBAT' ||
-        existingRecord.status === 'ALPA' ||
-        existingRecord.method === 'QR_SCAN'
+        existingRecord.status === 'IZIN' ||
+        existingRecord.status === 'SAKIT' ||
+        (existingRecord.method === 'QR_SCAN' && existingRecord.status !== 'ALPA')
       );
 
       if (isAlreadyRecordedForMasuk) {
         playScanSound('ERROR');
 
         const recordedTime = (existingRecord?.time && existingRecord.time !== '-') ? existingRecord.time : timeStr;
-        const rejectionReason = `DITOLAK: QR Code siswa ${student.name} (${student.className}) sudah pernah digunakan untuk scan Masuk hari ini pada pukul ${recordedTime} WITA! Scan QR hanya dapat digunakan 1 kali per sesi. Data presensi masuk sudah tercatat.`;
+        const rejectionReason = `DITOLAK: Siswa ${student.name} (${student.className}) sudah memiliki catatan presensi Masuk (${existingRecord?.status || 'HADIR'}) hari ini pada pukul ${recordedTime} WITA. Scan QR masuk hanya berlaku 1 kali per hari!`;
 
         setScanNotification({
           type: 'REJECTED',
+          badgeText: '❌ SUDAH SCAN MASUK HARI INI',
+          title: 'Presensi Masuk Siswa Sudah Pernah Tercatat',
           studentName: student.name,
           className: student.className,
           time: recordedTime,
@@ -630,7 +676,7 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
         setLastScannedResult({
           student,
           record: existingRecord!,
-          waMsg: `[SCAN DITOLAK] Siswa ${student.name} (${student.className}) sudah tercatat presensi Masuk pada pukul ${recordedTime} WITA. Scan QR hanya berlaku 1 kali!`,
+          waMsg: `[SCAN DITOLAK] Siswa ${student.name} (${student.className}) sudah tercatat presensi Masuk pada pukul ${recordedTime} WITA. Scan QR hanya berlaku 1 kali per sesi!`,
           waUrl: '',
           mode: 'MASUK',
           isRejected: true,
@@ -721,6 +767,8 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
 
       setScanNotification({
         type: 'SUCCESS',
+        badgeText: isLate ? '⚠️ SCAN MASUK (TERLAMBAT)' : '✅ SCAN MASUK BERHASIL!',
+        title: isLate ? 'Presensi Masuk Terlambat Dicatat' : 'Presensi Masuk Tepat Waktu Dicatat',
         studentName: student.name,
         className: student.className,
         time: timeStr,
@@ -754,22 +802,38 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
         <button
           type="button"
           onClick={() => {
+            if (isMasukClosedNow) {
+              setScanMode('PULANG');
+              setIsManualOverride(false);
+              setScanNotification({
+                type: 'REJECTED',
+                badgeText: '🔒 SCAN MASUK DITUTUP',
+                title: 'Mode Scan Masuk Tidak Dapat Digunakan',
+                studentName: '-',
+                className: '-',
+                time: new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }),
+                mode: 'MASUK',
+                reason: `Mode Scan Masuk telah ditutup karena sudah melewati jam pulang sekolah (${todayEndTimeStr} WITA). Sistem otomatis beralih ke Mode Scan Pulang.`,
+                timestamp: Date.now()
+              });
+              return;
+            }
             setScanMode('MASUK');
             setIsManualOverride(true);
           }}
           className={`flex-1 w-full py-3 px-4 rounded-xl font-extrabold text-xs flex items-center justify-center gap-2 transition-all cursor-pointer ${
             scanMode === 'MASUK'
-              ? isMasukClosedNow
-                ? 'bg-rose-600 text-white shadow-md shadow-rose-600/20'
-                : 'bg-amber-500 text-white shadow-md shadow-amber-500/20'
-              : 'bg-slate-50 text-slate-600 hover:bg-slate-100 border border-slate-200/60'
+              ? 'bg-amber-500 text-white shadow-md shadow-amber-500/20'
+              : isMasukClosedNow
+                ? 'bg-slate-100 text-slate-400 border border-slate-200 hover:bg-slate-200/60'
+                : 'bg-slate-50 text-slate-600 hover:bg-slate-100 border border-slate-200/60'
           }`}
         >
-          <Sun className="w-4 h-4 text-amber-200" />
+          <Sun className={`w-4 h-4 ${isMasukClosedNow ? 'text-slate-400' : 'text-amber-200'}`} />
           <span>☀️ MODE SCAN MASUK (TIBA SEKOLAH / PAGI)</span>
           {isMasukClosedNow && (
-            <span className="bg-rose-950/80 text-rose-100 border border-rose-300/40 text-[10px] px-2 py-0.5 rounded-full font-black ml-1">
-              🔒 TUTUP ({autoAlpaTimeStr} WITA)
+            <span className="bg-rose-100 text-rose-700 border border-rose-200 text-[10px] px-2 py-0.5 rounded-full font-black ml-1">
+              🔒 TUTUP ({todayEndTimeStr} WITA)
             </span>
           )}
         </button>
@@ -797,10 +861,10 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
             <XCircle className="w-5 h-5 text-rose-600 shrink-0 mt-0.5" />
             <div>
               <span className="font-black text-rose-900 text-sm block">
-                🔒 MODE SCAN MASUK DITUTUP (TIDAK BEKERJA)
+                🔒 MODE SCAN MASUK DITUTUP (TELAH MEMASUKI JAM PULANG)
               </span>
               <p className="text-rose-800 text-xs mt-0.5 leading-relaxed">
-                Waktu Batas Otomatis Alpa (<strong>{autoAlpaTimeStr} WITA</strong>) telah terlewati. Presensi scan masuk ditutup dan tidak dapat digunakan. Mode Scan Masuk akan dibuka kembali pada jam masuk sekolah (<strong>{startTimeStr} WITA</strong>).
+                Waktu belajar sekolah telah memasuki jam pulang (<strong>{todayEndTimeStr} WITA</strong>). Presensi scan masuk ditutup dan tidak dapat digunakan. Silakan beralih ke Mode Scan Pulang untuk mencatat kepulangan siswa.
               </p>
             </div>
           </div>
@@ -862,7 +926,7 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
                     ? 'bg-white text-rose-900'
                     : 'bg-white text-emerald-900'
                 }`}>
-                  {scanNotification.type === 'REJECTED' ? '❌ SCAN DITOLAK (SUDAH PERNAH SCAN)' : '✅ QR CODE BERHASIL DI-SCAN!'}
+                  {scanNotification.badgeText || (scanNotification.type === 'REJECTED' ? '❌ SCAN DITOLAK' : '✅ QR CODE BERHASIL DI-SCAN!')}
                 </span>
                 <span className={`text-xs font-mono font-bold px-2 py-0.5 rounded-md ${
                   scanNotification.type === 'REJECTED' ? 'bg-rose-800/80 text-rose-100' : 'bg-emerald-800/60 text-emerald-100'
@@ -871,9 +935,9 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
                 </span>
               </div>
               <h3 className="text-base sm:text-lg font-black mt-1 text-white tracking-tight">
-                {scanNotification.type === 'REJECTED'
-                  ? 'Scan QR Ditolak! Data Presensi Siswa Sudah Ada'
-                  : 'Data Presensi Siswa Berhasil Terdeteksi & Dicatat!'}
+                {scanNotification.title || (scanNotification.type === 'REJECTED'
+                  ? 'Scan QR Ditolak'
+                  : 'Data Presensi Siswa Berhasil Terdeteksi & Dicatat!')}
               </h3>
               <p className={`text-xs sm:text-sm font-medium mt-0.5 ${
                 scanNotification.type === 'REJECTED' ? 'text-rose-100 font-semibold' : 'text-emerald-100'
@@ -1349,9 +1413,14 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
                 </span>
               </div>
               <div className="flex items-start gap-1.5 text-slate-700 font-medium">
-                <Clock className="w-3.5 h-3.5 text-rose-500 shrink-0 mt-0.5" />
+                <Clock className={`w-3.5 h-3.5 shrink-0 mt-0.5 ${schoolProfile.autoAlpaEnabled !== false ? 'text-rose-500' : 'text-slate-400'}`} />
                 <span>
-                  Batas Otomatis Alpa: <strong className="text-slate-900">{schoolProfile.autoAlpaTime || '08:30'} WITA</strong> (Berlaku pada Hari Aktif)
+                  Batas Otomatis Alpa:{' '}
+                  {schoolProfile.autoAlpaEnabled !== false ? (
+                    <strong className="text-slate-900">{schoolProfile.autoAlpaTime || '08:30'} WITA (Aktif)</strong>
+                  ) : (
+                    <span className="text-slate-500 font-bold italic">Dinonaktifkan (Tidak Dibatasi)</span>
+                  )}
                 </span>
               </div>
               <div className="flex items-start gap-1.5 text-slate-700 font-medium bg-amber-50 p-2 rounded-xl border border-amber-200/70 text-[10.5px]">

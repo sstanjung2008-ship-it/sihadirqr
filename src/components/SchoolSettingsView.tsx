@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { SchoolProfile, Teacher, Student, SchoolHoliday } from '../types';
-import { Settings, Save, School, Clock, RotateCcw, CreditCard, CheckCircle2, Upload, Image as ImageIcon, Link, BookOpen, Plus, X, KeyRound, Lock, Eye, EyeOff, User, GraduationCap, Search, Check, RefreshCw, Users, ShieldAlert, ShieldCheck, AlertCircle, Calendar, Trash2, Edit3, Tag, Flag, AlertTriangle, Sparkles, Filter, Cloud, CloudDownload, CloudUpload, FileJson, Download, Volume2, VolumeX, Mic, Headphones, BellRing, UserCheck, Smile, UserX, Play, Square, MessageSquare } from 'lucide-react';
+import { Settings, Save, School, Clock, RotateCcw, CreditCard, CheckCircle2, Upload, Image as ImageIcon, Link, BookOpen, Plus, X, KeyRound, Key, Lock, Eye, EyeOff, User, GraduationCap, Search, Check, RefreshCw, Users, ShieldAlert, ShieldCheck, AlertCircle, Calendar, Trash2, Edit3, Tag, Flag, AlertTriangle, Sparkles, Filter, Cloud, CloudDownload, CloudUpload, FileJson, Download, Volume2, VolumeX, Mic, Headphones, BellRing, UserCheck, Smile, UserX, Play, Square, MessageSquare } from 'lucide-react';
 import { resetToDefaultData, forceUploadAllToCloud, forceDownloadAllFromCloud, getCloudSyncStatus, CloudSyncStatus, downloadDatabaseBackupFile } from '../lib/storage';
 import { 
   DEFAULT_TEACHER_SPEECH_TEMPLATE,
@@ -70,20 +70,20 @@ export const SchoolSettingsView: React.FC<SchoolSettingsViewProps> = ({
   const navItems = [
     { id: 'section-profil-sekolah', key: 'profil', label: 'Profil Sekolah', icon: School, color: 'text-indigo-600', activeBg: 'bg-indigo-600 text-white shadow-indigo-100' },
     { id: 'section-jam-libur', key: 'jam-libur', label: 'Jam Masuk & Libur', icon: Clock, color: 'text-amber-600', activeBg: 'bg-amber-600 text-white shadow-amber-100' },
-    { id: 'section-akademik', key: 'akademik', label: 'Akademik', icon: GraduationCap, color: 'text-blue-600', activeBg: 'bg-blue-600 text-white shadow-blue-100' },
+    { id: 'section-akademik', key: 'akademik', label: 'Akademik & Mapel', icon: GraduationCap, color: 'text-blue-600', activeBg: 'bg-blue-600 text-white shadow-blue-100' },
     { id: 'section-suara-ai', key: 'suara-ai', label: 'Suara AI & Notifikasi', icon: Volume2, color: 'text-violet-600', activeBg: 'bg-violet-600 text-white shadow-violet-100' },
-    { id: 'section-password', key: 'password', label: 'Password', icon: KeyRound, color: 'text-purple-600', activeBg: 'bg-purple-600 text-white shadow-purple-100' },
+    { id: 'section-password', key: 'password', label: 'Pengaturan & Reset Password', icon: KeyRound, color: 'text-purple-600', activeBg: 'bg-purple-600 text-white shadow-purple-100' },
+    { id: 'section-database', key: 'database', label: 'Database & Sinkronisasi', icon: Cloud, color: 'text-sky-600', activeBg: 'bg-sky-600 text-white shadow-sky-100' },
   ];
 
   const handleJumpToSection = (sectionId: string, key: string) => {
     setActiveNavTab(key);
-    const element = document.getElementById(sectionId);
-    if (element) {
-      const yOffset = -80;
-      const y = element.getBoundingClientRect().top + window.pageYOffset + yOffset;
-      window.scrollTo({ top: y, behavior: 'smooth' });
-    }
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   };
+
+  useEffect(() => {
+    setFormData({ ...schoolProfile });
+  }, [schoolProfile]);
 
   useEffect(() => {
     const handleStatus = (e: any) => {
@@ -730,6 +730,53 @@ export const SchoolSettingsView: React.FC<SchoolSettingsViewProps> = ({
     setTimeout(() => setPasswordResetNotice(null), 6000);
   };
 
+  const handleQuickResetTeacher = (t: Teacher) => {
+    if (!onUpdateTeacher) return;
+    onUpdateTeacher({ ...t, password: '123456' });
+    setPasswordResetNotice({
+      type: 'success',
+      msg: `Password akun Guru ${t.name} (NIP: ${t.nip}) berhasil direset kembali ke default: "123456".`
+    });
+    if (selectedTeacherId === t.id) {
+      setNewPasswordInput('123456');
+    }
+    setTimeout(() => setPasswordResetNotice(null), 5000);
+  };
+
+  const handleQuickResetStudent = (s: Student) => {
+    if (!onUpdateStudent) return;
+    onUpdateStudent({ ...s, password: '123456' });
+    setPasswordResetNotice({
+      type: 'success',
+      msg: `Password akun Siswa ${s.name} (${s.className} - NISN: ${s.nisn}) berhasil direset kembali ke default: "123456".`
+    });
+    if (selectedStudentId === s.id) {
+      setNewPasswordInput('123456');
+    }
+    setTimeout(() => setPasswordResetNotice(null), 5000);
+  };
+
+  const filteredTeachersForPassword = useMemo(() => {
+    return sortedTeachers.filter(t => {
+      const q = teacherSearchTerm.trim().toLowerCase();
+      if (!q) return true;
+      return (
+        t.name.toLowerCase().includes(q) ||
+        t.nip.toLowerCase().includes(q) ||
+        (t.phone && t.phone.toLowerCase().includes(q))
+      );
+    });
+  }, [sortedTeachers, teacherSearchTerm]);
+
+  const filteredStudentsForPassword = useMemo(() => {
+    return students.filter(s => {
+      const matchClass = studentClassFilter === 'ALL' || s.className === studentClassFilter;
+      const q = studentSearchTerm.trim().toLowerCase();
+      const matchQuery = !q || s.name.toLowerCase().includes(q) || s.nisn.toLowerCase().includes(q) || s.nis.toLowerCase().includes(q);
+      return matchClass && matchQuery;
+    });
+  }, [students, studentClassFilter, studentSearchTerm]);
+
   const DEFAULT_SUBJECTS = ['Matematika', 'Bahasa Indonesia', 'Bahasa Inggris', 'IPA', 'IPS', 'Pendidikan Agama', 'PJOK', 'Seni Budaya', 'Informatika', 'PPKn'];
   const currentSubjects = (formData.subjects && formData.subjects.length > 0) ? formData.subjects : DEFAULT_SUBJECTS;
 
@@ -888,12 +935,15 @@ export const SchoolSettingsView: React.FC<SchoolSettingsViewProps> = ({
 
       <form onSubmit={handleSubmit} className="space-y-6">
         
-        {/* Identitas Utama Sekolah */}
-        <div id="section-profil-sekolah" className="bg-white border border-slate-200/80 rounded-3xl p-6 shadow-sm space-y-4 scroll-mt-24">
-          <h2 className="text-sm font-bold text-slate-800 flex items-center gap-2 border-b border-slate-100 pb-3">
-            <School className="w-4 h-4 text-indigo-600" />
-            Identitas & Logo Sekolah (Muncul di Kartu Pelajar Digital)
-          </h2>
+        {/* TAB 1: PROFIL SEKOLAH */}
+        {activeNavTab === 'profil' && (
+          <div className="space-y-6 animate-fadeIn">
+            {/* Identitas Utama Sekolah */}
+            <div id="section-profil-sekolah" className="bg-white border border-slate-200/80 rounded-3xl p-6 shadow-sm space-y-4">
+              <h2 className="text-sm font-bold text-slate-800 flex items-center gap-2 border-b border-slate-100 pb-3">
+                <School className="w-4 h-4 text-indigo-600" />
+                Identitas & Logo Sekolah (Muncul di Kartu Pelajar Digital)
+              </h2>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
             <div>
@@ -1100,8 +1150,23 @@ export const SchoolSettingsView: React.FC<SchoolSettingsViewProps> = ({
           </div>
         </div>
 
-        {/* Aturan Jam Masuk, Jam Pulang & Otomatis Alpa */}
-        <div id="section-jam-libur" className="bg-white border border-slate-200/80 rounded-3xl p-6 shadow-sm space-y-5 scroll-mt-24">
+        {/* Action Button Section 1 */}
+        <div className="flex justify-end pt-2">
+          <button
+            type="submit"
+            className="bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold px-6 py-3 rounded-2xl shadow-md flex items-center gap-2 text-xs transition-all cursor-pointer"
+          >
+            <Save className="w-4 h-4" />
+            Simpan Pengaturan Profil
+          </button>
+        </div>
+      </div>
+    )}
+
+    {/* TAB 2: ATURAN JAM MASUK, JAM PULANG & HARI LIBUR */}
+    {activeNavTab === 'jam-libur' && (
+      <div className="space-y-6 animate-fadeIn">
+        <div id="section-jam-libur" className="bg-white border border-slate-200/80 rounded-3xl p-6 shadow-sm space-y-5">
           <div className="border-b border-slate-100 pb-3">
             <h2 className="text-sm font-bold text-slate-800 flex items-center gap-2">
               <Clock className="w-4 h-4 text-amber-500" />
@@ -1644,6 +1709,13 @@ export const SchoolSettingsView: React.FC<SchoolSettingsViewProps> = ({
                 }`}
                 placeholder="08:30"
               />
+              <p className="text-[10.5px] text-slate-500 leading-tight">
+                {formData.autoAlpaEnabled !== false ? (
+                  <span>Siswa yang belum melakukan presensi hingga jam ini pada hari aktif otomatis berstatus <strong className="text-rose-700">ALPA</strong>.</span>
+                ) : (
+                  <span className="text-emerald-700 font-medium">✓ Fitur Alpa Otomatis dinonaktifkan. Mode Scan Masuk tetap terbuka tanpa pembatasan jam alpa.</span>
+                )}
+              </p>
             </div>
           </div>
 
@@ -1804,8 +1876,23 @@ export const SchoolSettingsView: React.FC<SchoolSettingsViewProps> = ({
           </div>
         </div>
 
-        {/* Pengaturan Daftar Mata Pelajaran & Periode Akademik Sekolah */}
-        <div id="section-akademik" className="bg-white border border-slate-200/80 rounded-3xl p-6 shadow-sm space-y-5 scroll-mt-24">
+        {/* Action Button Section 2 */}
+        <div className="flex justify-end pt-2">
+          <button
+            type="submit"
+            className="bg-amber-600 hover:bg-amber-700 text-white font-extrabold px-6 py-3 rounded-2xl shadow-md flex items-center gap-2 text-xs transition-all cursor-pointer"
+          >
+            <Save className="w-4 h-4" />
+            Simpan Pengaturan Jam & Libur
+          </button>
+        </div>
+      </div>
+    )}
+
+    {/* TAB 3: AKADEMIK & MAPEL */}
+    {activeNavTab === 'akademik' && (
+      <div className="space-y-6 animate-fadeIn">
+        <div id="section-akademik" className="bg-white border border-slate-200/80 rounded-3xl p-6 shadow-sm space-y-5">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 pb-3">
             <div>
               <h2 className="text-sm font-bold text-slate-800 flex items-center gap-2">
@@ -1981,10 +2068,26 @@ export const SchoolSettingsView: React.FC<SchoolSettingsViewProps> = ({
           </div>
         </div>
 
+        {/* Action Button Section 3 */}
+        <div className="flex justify-end pt-2">
+          <button
+            type="submit"
+            className="bg-blue-600 hover:bg-blue-700 text-white font-extrabold px-6 py-3 rounded-2xl shadow-md flex items-center gap-2 text-xs transition-all cursor-pointer"
+          >
+            <Save className="w-4 h-4" />
+            Simpan Pengaturan Akademik
+          </button>
+        </div>
+      </div>
+    )}
+
+    {/* TAB 4: SUARA AI & NOTIFIKASI */}
+    {activeNavTab === 'suara-ai' && (
+      <div className="space-y-6 animate-fadeIn">
         {/* ========================================================= */}
         {/* FITUR SUARA AI & NOTIFIKASI PERAN (GURU & ORANG TUA)       */}
         {/* ========================================================= */}
-        <div id="section-suara-ai" className="bg-white border border-slate-200/80 rounded-3xl p-6 shadow-sm space-y-6 scroll-mt-24">
+        <div id="section-suara-ai" className="bg-white border border-slate-200/80 rounded-3xl p-6 shadow-sm space-y-6">
           
           {/* Header Section */}
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-100 pb-5">
@@ -2681,28 +2784,51 @@ export const SchoolSettingsView: React.FC<SchoolSettingsViewProps> = ({
 
         </div>
 
-        {/* Reset Password Akun Guru & Siswa */}
-        <div id="section-password" className="bg-white border border-slate-200/80 rounded-3xl p-6 shadow-sm space-y-5 scroll-mt-24">
+        {/* Action Button Section 4 */}
+        <div className="flex justify-end pt-2">
+          <button
+            type="submit"
+            className="bg-violet-600 hover:bg-violet-700 text-white font-extrabold px-6 py-3 rounded-2xl shadow-md flex items-center gap-2 text-xs transition-all cursor-pointer"
+          >
+            <Save className="w-4 h-4" />
+            Simpan Pengaturan Suara & Notifikasi
+          </button>
+        </div>
+      </div>
+    )}
+
+    {/* ========================================================================= */}
+    {/* TAB 5: HALAMAN TERPISAH PENGATURAN & RESET PASSWORD (ADMIN, GURU & SISWA) */}
+    {/* ========================================================================= */}
+    {activeNavTab === 'password' && (
+      <div id="section-password" className="space-y-6 animate-fadeIn">
+        
+        {/* Header Section Password */}
+        <div className="bg-white border border-slate-200/80 rounded-3xl p-6 shadow-sm space-y-5">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-4">
-            <div>
-              <h2 className="text-sm font-bold text-slate-800 flex items-center gap-2">
-                <KeyRound className="w-4 h-4 text-indigo-600" />
-                Pengaturan & Reset Password Akun Login (Admin, Guru & Siswa)
-              </h2>
-              <p className="text-xs text-slate-500 mt-0.5">
-                Atur kata sandi login untuk Administrator Utama, Pos Scanner Satpam, Guru (No. HP/WA / NIP), dan Siswa/Wali Murid (NISN).
-              </p>
+            <div className="flex items-start gap-3">
+              <div className="w-10 h-10 rounded-2xl bg-purple-50 border border-purple-200 flex items-center justify-center text-purple-600 shrink-0">
+                <KeyRound className="w-5 h-5" />
+              </div>
+              <div>
+                <h2 className="text-base font-extrabold text-slate-800 flex items-center gap-2">
+                  Pengaturan & Reset Password Akun Login
+                </h2>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Kelola dan atur ulang kata sandi login untuk Akun Admin Utama, Pos Scanner Satpam, Seluruh Guru (No. HP/WA), dan Seluruh Siswa/Wali Murid (NISN).
+                </p>
+              </div>
             </div>
 
             {/* Role Tab Toggle */}
-            <div className="flex flex-wrap bg-slate-100 p-1 rounded-2xl shrink-0 self-start sm:self-auto gap-1">
+            <div className="flex flex-wrap bg-slate-100 p-1.5 rounded-2xl shrink-0 self-start sm:self-auto gap-1 border border-slate-200/60">
               <button
                 type="button"
                 onClick={() => {
                   setPasswordRoleTab('ADMIN_SCANNER');
                   setPasswordResetNotice(null);
                 }}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                className={`flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
                   passwordRoleTab === 'ADMIN_SCANNER'
                     ? 'bg-white text-indigo-600 shadow-xs'
                     : 'text-slate-600 hover:text-slate-900'
@@ -2719,14 +2845,14 @@ export const SchoolSettingsView: React.FC<SchoolSettingsViewProps> = ({
                   setNewPasswordInput('123456');
                   setPasswordResetNotice(null);
                 }}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                className={`flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
                   passwordRoleTab === 'TEACHER'
                     ? 'bg-white text-indigo-600 shadow-xs'
                     : 'text-slate-600 hover:text-slate-900'
                 }`}
               >
                 <User className="w-3.5 h-3.5" />
-                Password Guru ({teachers.length})
+                Akun Guru ({teachers.length})
               </button>
               <button
                 type="button"
@@ -2736,21 +2862,21 @@ export const SchoolSettingsView: React.FC<SchoolSettingsViewProps> = ({
                   setNewPasswordInput('123456');
                   setPasswordResetNotice(null);
                 }}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                className={`flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
                   passwordRoleTab === 'STUDENT'
                     ? 'bg-white text-indigo-600 shadow-xs'
                     : 'text-slate-600 hover:text-slate-900'
                 }`}
               >
                 <GraduationCap className="w-3.5 h-3.5" />
-                Password Siswa ({students.length})
+                Akun Siswa ({students.length})
               </button>
             </div>
           </div>
 
           {/* Alert Notification */}
           {passwordResetNotice && (
-            <div className={`p-3.5 rounded-2xl text-xs font-medium flex items-center gap-2 animate-fadeIn ${
+            <div className={`p-4 rounded-2xl text-xs font-semibold flex items-center gap-3 animate-fadeIn ${
               passwordResetNotice.type === 'success' 
                 ? 'bg-emerald-50 border border-emerald-200 text-emerald-900' 
                 : 'bg-rose-50 border border-rose-200 text-rose-900'
@@ -2764,7 +2890,9 @@ export const SchoolSettingsView: React.FC<SchoolSettingsViewProps> = ({
             </div>
           )}
 
-          {/* TAB ADMIN & POS SCANNER */}
+          {/* ======================================= */}
+          {/* TAB 1: ADMIN & POS SCANNER SATPAM      */}
+          {/* ======================================= */}
           {passwordRoleTab === 'ADMIN_SCANNER' && (
             <div className="space-y-4 text-xs">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -2799,7 +2927,7 @@ export const SchoolSettingsView: React.FC<SchoolSettingsViewProps> = ({
                       </button>
                     </div>
                     <p className="text-[11px] text-slate-400">
-                      Default: <code className="font-mono bg-white border border-slate-200 px-1 py-0.5 rounded text-indigo-600 font-bold">admin123</code>
+                      Default awal: <code className="font-mono bg-white border border-slate-200 px-1 py-0.5 rounded text-indigo-600 font-bold">admin123</code>
                     </p>
                   </div>
 
@@ -2853,7 +2981,7 @@ export const SchoolSettingsView: React.FC<SchoolSettingsViewProps> = ({
                       </button>
                     </div>
                     <p className="text-[11px] text-slate-400">
-                      Default: <code className="font-mono bg-white border border-slate-200 px-1 py-0.5 rounded text-sky-600 font-bold">123456</code>
+                      Default awal: <code className="font-mono bg-white border border-slate-200 px-1 py-0.5 rounded text-sky-600 font-bold">123456</code>
                     </p>
                   </div>
 
@@ -2880,188 +3008,413 @@ export const SchoolSettingsView: React.FC<SchoolSettingsViewProps> = ({
               <div className="bg-amber-50 border border-amber-200/80 rounded-2xl p-3.5 flex items-start gap-2.5 text-amber-900">
                 <AlertCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
                 <p className="text-[11px] leading-relaxed">
-                  Password yang disimpan akan langsung dienkripsi lokal dan otomatis disinkronkan ke Cloud Firestore sehingga tetap berlaku di semua HP, komputer, dan perangkat lain saat melakukan pembaruan/push kode.
+                  Password yang disimpan akan langsung dienkripsi lokal dan otomatis disinkronkan ke Cloud Firestore sehingga tetap berlaku di semua HP, komputer, dan perangkat lain.
                 </p>
               </div>
             </div>
           )}
 
-          {/* TAB RESET GURU */}
+          {/* ======================================= */}
+          {/* TAB 2: AKUN GURU (PENGATURAN & RESET)  */}
+          {/* ======================================= */}
           {passwordRoleTab === 'TEACHER' && (
-            <div className="space-y-4 text-xs">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {/* Select Teacher */}
-                <div className="space-y-1.5">
-                  <label className="block text-slate-700 font-bold">Pilih Akun Guru (No. HP / WA)</label>
-                  <select
-                    value={selectedTeacherId}
-                    onChange={(e) => handleSelectTeacherForReset(e.target.value)}
-                    className="w-full bg-slate-50 border border-slate-200 text-slate-800 rounded-xl p-2.5 font-medium focus:ring-2 focus:ring-indigo-500 cursor-pointer"
-                  >
-                    <option value="">-- Pilih Guru / No. HP --</option>
-                    {sortedTeachers.map(t => (
-                      <option key={t.id} value={t.id}>
-                        {t.name} (WA: {t.phone || '-'} | NIP: {t.nip}) {t.password ? '🔑 [Custom Password]' : '🔒 [Default: 123456]'}
-                      </option>
-                    ))}
-                  </select>
-                  <p className="text-[11px] text-slate-400">Pilih nama guru yang akan diatur ulang passwordnya (Username Login: No. HP / WA).</p>
+            <div className="space-y-6 text-xs">
+              {/* Form Input Card */}
+              <div className="bg-slate-50 border border-slate-200/80 rounded-2xl p-4 space-y-4">
+                <h3 className="font-bold text-slate-800 flex items-center gap-1.5 text-xs">
+                  <Key className="w-4 h-4 text-indigo-600" />
+                  Form Ganti / Reset Password Guru Spesifik
+                </h3>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {/* Select Teacher */}
+                  <div className="space-y-1.5">
+                    <label className="block text-slate-700 font-bold">Pilih Akun Guru (No. HP / WA)</label>
+                    <select
+                      value={selectedTeacherId}
+                      onChange={(e) => handleSelectTeacherForReset(e.target.value)}
+                      className="w-full bg-white border border-slate-200 text-slate-800 rounded-xl p-2.5 font-medium focus:ring-2 focus:ring-indigo-500 cursor-pointer"
+                    >
+                      <option value="">-- Pilih Guru / No. HP --</option>
+                      {sortedTeachers.map(t => (
+                        <option key={t.id} value={t.id}>
+                          {t.name} (WA: {t.phone || '-'} | NIP: {t.nip}) {t.password ? '🔑 [Custom Password]' : '🔒 [Default: 123456]'}
+                        </option>
+                      ))}
+                    </select>
+                    <p className="text-[11px] text-slate-400">Username Login Guru adalah No. HP/WA atau NIP.</p>
+                  </div>
+
+                  {/* Password Input & Show/Hide */}
+                  <div className="space-y-1.5">
+                    <label className="block text-slate-700 font-bold">Password Baru Guru</label>
+                    <div className="relative">
+                      <input
+                        type={showPasswordText ? 'text' : 'password'}
+                        value={newPasswordInput}
+                        onChange={(e) => setNewPasswordInput(e.target.value)}
+                        placeholder="Masukkan password baru..."
+                        className="w-full bg-white border border-slate-200 text-slate-800 rounded-xl p-2.5 pr-10 font-mono font-bold focus:ring-2 focus:ring-indigo-500"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowPasswordText(!showPasswordText)}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 cursor-pointer"
+                      >
+                        {showPasswordText ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                      </button>
+                    </div>
+                    <p className="text-[11px] text-slate-400">Default password awal: <code className="font-mono bg-slate-100 px-1 py-0.5 rounded text-indigo-600 font-bold">123456</code></p>
+                  </div>
                 </div>
 
-                {/* Password Input & Show/Hide */}
-                <div className="space-y-1.5">
-                  <label className="block text-slate-700 font-bold">Password Baru</label>
-                  <div className="relative">
-                    <input
-                      type={showPasswordText ? 'text' : 'password'}
-                      value={newPasswordInput}
-                      onChange={(e) => setNewPasswordInput(e.target.value)}
-                      placeholder="Masukkan password baru..."
-                      className="w-full bg-slate-50 border border-slate-200 text-slate-800 rounded-xl p-2.5 pr-10 font-mono font-bold focus:ring-2 focus:ring-indigo-500"
-                    />
+                {/* Action Buttons */}
+                <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-200/60">
+                  <button
+                    type="button"
+                    onClick={handleBatchResetTeachers}
+                    className="bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 font-bold px-3.5 py-2 rounded-xl text-xs flex items-center gap-1.5 transition-all cursor-pointer"
+                    title="Kembalikan password semua guru ke 123456"
+                  >
+                    <RefreshCw className="w-3.5 h-3.5 text-rose-600" />
+                    Reset Massal Semua Password Guru ke 123456
+                  </button>
+
+                  <div className="flex items-center gap-2">
                     <button
                       type="button"
-                      onClick={() => setShowPasswordText(!showPasswordText)}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 cursor-pointer"
+                      onClick={() => setNewPasswordInput('123456')}
+                      className="bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 font-bold px-3.5 py-2 rounded-xl text-xs flex items-center gap-1.5 transition-all cursor-pointer"
                     >
-                      {showPasswordText ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                      Set Default (123456)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleSaveTeacherPassword}
+                      className="bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold px-4 py-2 rounded-xl text-xs flex items-center gap-1.5 shadow-sm transition-all cursor-pointer"
+                    >
+                      <Save className="w-3.5 h-3.5" />
+                      Simpan Password Guru
                     </button>
                   </div>
-                  <p className="text-[11px] text-slate-400">Default password awal: <code className="font-mono bg-slate-100 px-1 py-0.5 rounded text-indigo-600 font-bold">123456</code></p>
                 </div>
               </div>
 
-              {/* Action Buttons */}
-              <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-100">
-                <button
-                  type="button"
-                  onClick={handleBatchResetTeachers}
-                  className="bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold px-3.5 py-2 rounded-xl text-xs flex items-center gap-1.5 transition-all cursor-pointer"
-                  title="Kembalikan password semua guru ke 123456"
-                >
-                  <RefreshCw className="w-3.5 h-3.5 text-slate-500" />
-                  Reset Massal Semua Password Guru ke 123456
-                </button>
+              {/* Teacher Account Management Table */}
+              <div className="bg-white border border-slate-200/90 rounded-2xl p-4 space-y-3">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-2 border-b border-slate-100">
+                  <div className="flex items-center gap-2">
+                    <Users className="w-4 h-4 text-indigo-600" />
+                    <h4 className="font-bold text-slate-800">Daftar Akun Guru & Reset Cepat</h4>
+                    <span className="bg-indigo-50 text-indigo-700 text-[10px] font-bold px-2 py-0.5 rounded-full">
+                      {filteredTeachersForPassword.length} Guru
+                    </span>
+                  </div>
 
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setNewPasswordInput('123456')}
-                    className="bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 font-bold px-3.5 py-2 rounded-xl text-xs flex items-center gap-1.5 transition-all cursor-pointer"
-                  >
-                    Set Default (123456)
-                  </button>
-                  <button
-                    type="button"
-                    onClick={handleSaveTeacherPassword}
-                    className="bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold px-4 py-2 rounded-xl text-xs flex items-center gap-1.5 shadow-sm transition-all cursor-pointer"
-                  >
-                    <Save className="w-3.5 h-3.5" />
-                    Simpan Password Guru
-                  </button>
+                  <div className="relative w-full sm:w-64">
+                    <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                    <input
+                      type="text"
+                      placeholder="Cari guru / NIP / HP..."
+                      value={teacherSearchTerm}
+                      onChange={(e) => setTeacherSearchTerm(e.target.value)}
+                      className="w-full bg-slate-50 border border-slate-200 text-slate-800 pl-8 pr-3 py-1.5 rounded-xl text-xs focus:ring-2 focus:ring-indigo-500 font-medium"
+                    />
+                  </div>
+                </div>
+
+                <div className="overflow-x-auto max-h-80 overflow-y-auto">
+                  <table className="w-full text-left border-collapse">
+                    <thead className="sticky top-0 bg-slate-100 text-[11px] font-bold text-slate-600 uppercase border-b border-slate-200 z-10">
+                      <tr>
+                        <th className="py-2.5 px-3">Nama Guru & NIP</th>
+                        <th className="py-2.5 px-3">Username Login (No. HP)</th>
+                        <th className="py-2.5 px-3">Status Password</th>
+                        <th className="py-2.5 px-3 text-right">Aksi</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 text-xs">
+                      {filteredTeachersForPassword.length === 0 ? (
+                        <tr>
+                          <td colSpan={4} className="py-6 text-center text-slate-400 italic">
+                            Tidak ada data guru yang cocok dengan pencarian.
+                          </td>
+                        </tr>
+                      ) : (
+                        filteredTeachersForPassword.map((t) => (
+                          <tr key={t.id} className="hover:bg-slate-50/80 transition-colors">
+                            <td className="py-2.5 px-3">
+                              <span className="font-bold text-slate-800 block">{t.name}</span>
+                              <span className="text-[11px] text-slate-400 font-mono">NIP: {t.nip}</span>
+                            </td>
+                            <td className="py-2.5 px-3 font-mono text-slate-700">
+                              {t.phone || <span className="text-slate-400 italic">-</span>}
+                            </td>
+                            <td className="py-2.5 px-3">
+                              {t.password ? (
+                                <span className="inline-flex items-center gap-1 bg-amber-50 text-amber-800 border border-amber-200 px-2 py-0.5 rounded-md font-semibold text-[10px]">
+                                  <Key className="w-2.5 h-2.5 text-amber-600" />
+                                  Password Kustom
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center gap-1 bg-emerald-50 text-emerald-800 border border-emerald-200 px-2 py-0.5 rounded-md font-semibold text-[10px]">
+                                  <Lock className="w-2.5 h-2.5 text-emerald-600" />
+                                  Default: 123456
+                                </span>
+                              )}
+                            </td>
+                            <td className="py-2.5 px-3 text-right">
+                              <div className="inline-flex items-center gap-1.5 justify-end">
+                                <button
+                                  type="button"
+                                  onClick={() => handleSelectTeacherForReset(t.id)}
+                                  className="px-2 py-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-bold rounded-lg text-[11px] transition cursor-pointer"
+                                >
+                                  Pilih
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleQuickResetTeacher(t)}
+                                  className="px-2 py-1 bg-slate-100 hover:bg-rose-50 text-slate-700 hover:text-rose-700 border border-slate-200 font-bold rounded-lg text-[11px] transition cursor-pointer"
+                                  title="Reset password guru ini ke 123456"
+                                >
+                                  Reset ke 123456
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
                 </div>
               </div>
             </div>
           )}
 
-          {/* TAB RESET SISWA */}
+          {/* ======================================= */}
+          {/* TAB 3: AKUN SISWA (PENGATURAN & RESET) */}
+          {/* ======================================= */}
           {passwordRoleTab === 'STUDENT' && (
-            <div className="space-y-4 text-xs">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {/* Select Student */}
-                <div className="space-y-1.5">
-                  <div className="flex items-center justify-between">
-                    <label className="block text-slate-700 font-bold">Pilih Siswa / NISN Account</label>
-                    {/* Class Filter */}
+            <div className="space-y-6 text-xs">
+              {/* Form Input Card */}
+              <div className="bg-slate-50 border border-slate-200/80 rounded-2xl p-4 space-y-4">
+                <h3 className="font-bold text-slate-800 flex items-center gap-1.5 text-xs">
+                  <Key className="w-4 h-4 text-indigo-600" />
+                  Form Ganti / Reset Password Siswa Spesifik
+                </h3>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {/* Select Student */}
+                  <div className="space-y-1.5">
+                    <div className="flex items-center justify-between">
+                      <label className="block text-slate-700 font-bold">Pilih Siswa / NISN Account</label>
+                      {/* Class Filter */}
+                      <select
+                        value={studentClassFilter}
+                        onChange={(e) => {
+                          setStudentClassFilter(e.target.value);
+                          setSelectedStudentId('');
+                        }}
+                        className="text-[11px] bg-white border border-slate-200 text-slate-700 font-bold rounded-lg px-2 py-0.5 focus:ring-1 focus:ring-indigo-500 cursor-pointer"
+                      >
+                        <option value="ALL">Semua Kelas</option>
+                        {Array.from(new Set(students.map(s => s.className))).sort().map(cls => (
+                          <option key={cls} value={cls}>Kelas {cls}</option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <select
+                      value={selectedStudentId}
+                      onChange={(e) => handleSelectStudentForReset(e.target.value)}
+                      className="w-full bg-white border border-slate-200 text-slate-800 rounded-xl p-2.5 font-medium focus:ring-2 focus:ring-indigo-500 cursor-pointer"
+                    >
+                      <option value="">-- Pilih Siswa / NISN --</option>
+                      {students
+                        .filter(s => studentClassFilter === 'ALL' || s.className === studentClassFilter)
+                        .map(s => (
+                          <option key={s.id} value={s.id}>
+                            {s.name} ({s.className}) - NISN: {s.nisn} {s.password ? '🔑 [Custom Password]' : '🔒 [Default: 123456]'}
+                          </option>
+                        ))}
+                    </select>
+                    <p className="text-[11px] text-slate-400">Username Login Siswa/Wali adalah Nomor NISN siswa.</p>
+                  </div>
+
+                  {/* Password Input & Show/Hide */}
+                  <div className="space-y-1.5">
+                    <label className="block text-slate-700 font-bold">Password Baru Siswa</label>
+                    <div className="relative">
+                      <input
+                        type={showPasswordText ? 'text' : 'password'}
+                        value={newPasswordInput}
+                        onChange={(e) => setNewPasswordInput(e.target.value)}
+                        placeholder="Masukkan password baru..."
+                        className="w-full bg-white border border-slate-200 text-slate-800 rounded-xl p-2.5 pr-10 font-mono font-bold focus:ring-2 focus:ring-indigo-500"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowPasswordText(!showPasswordText)}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 cursor-pointer"
+                      >
+                        {showPasswordText ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                      </button>
+                    </div>
+                    <p className="text-[11px] text-slate-400">Default password awal: <code className="font-mono bg-slate-100 px-1 py-0.5 rounded text-indigo-600 font-bold">123456</code></p>
+                  </div>
+                </div>
+
+                {/* Action Buttons */}
+                <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-200/60">
+                  <button
+                    type="button"
+                    onClick={handleBatchResetStudents}
+                    className="bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 font-bold px-3.5 py-2 rounded-xl text-xs flex items-center gap-1.5 transition-all cursor-pointer"
+                    title="Kembalikan password semua siswa ke 123456"
+                  >
+                    <RefreshCw className="w-3.5 h-3.5 text-rose-600" />
+                    Reset Massal Semua Password Siswa ke 123456
+                  </button>
+
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setNewPasswordInput('123456')}
+                      className="bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 font-bold px-3.5 py-2 rounded-xl text-xs flex items-center gap-1.5 transition-all cursor-pointer"
+                    >
+                      Set Default (123456)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleSaveStudentPassword}
+                      className="bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold px-4 py-2 rounded-xl text-xs flex items-center gap-1.5 shadow-sm transition-all cursor-pointer"
+                    >
+                      <Save className="w-3.5 h-3.5" />
+                      Simpan Password Siswa
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* Student Account Management Table */}
+              <div className="bg-white border border-slate-200/90 rounded-2xl p-4 space-y-3">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-2 border-b border-slate-100">
+                  <div className="flex items-center gap-2">
+                    <GraduationCap className="w-4 h-4 text-indigo-600" />
+                    <h4 className="font-bold text-slate-800">Daftar Akun Siswa & Reset Cepat</h4>
+                    <span className="bg-indigo-50 text-indigo-700 text-[10px] font-bold px-2 py-0.5 rounded-full">
+                      {filteredStudentsForPassword.length} Siswa
+                    </span>
+                  </div>
+
+                  <div className="flex items-center gap-2 flex-wrap">
                     <select
                       value={studentClassFilter}
-                      onChange={(e) => {
-                        setStudentClassFilter(e.target.value);
-                        setSelectedStudentId('');
-                      }}
-                      className="text-[11px] bg-slate-100 border border-slate-200 text-slate-700 font-bold rounded-lg px-2 py-0.5 focus:ring-1 focus:ring-indigo-500 cursor-pointer"
+                      onChange={(e) => setStudentClassFilter(e.target.value)}
+                      className="text-xs bg-slate-50 border border-slate-200 text-slate-700 font-bold rounded-xl px-2.5 py-1.5 focus:ring-1 focus:ring-indigo-500 cursor-pointer"
                     >
                       <option value="ALL">Semua Kelas</option>
                       {Array.from(new Set(students.map(s => s.className))).sort().map(cls => (
                         <option key={cls} value={cls}>Kelas {cls}</option>
                       ))}
                     </select>
-                  </div>
 
-                  <select
-                    value={selectedStudentId}
-                    onChange={(e) => handleSelectStudentForReset(e.target.value)}
-                    className="w-full bg-slate-50 border border-slate-200 text-slate-800 rounded-xl p-2.5 font-medium focus:ring-2 focus:ring-indigo-500 cursor-pointer"
-                  >
-                    <option value="">-- Pilih Siswa / NISN --</option>
-                    {students
-                      .filter(s => studentClassFilter === 'ALL' || s.className === studentClassFilter)
-                      .map(s => (
-                        <option key={s.id} value={s.id}>
-                          {s.name} ({s.className}) - NISN: {s.nisn} {s.password ? '🔑 [Custom Password]' : '🔒 [Default: 123456]'}
-                        </option>
-                      ))}
-                  </select>
-                  <p className="text-[11px] text-slate-400">Dipakai siswa & wali murid saat login menggunakan NISN.</p>
+                    <div className="relative w-full sm:w-56">
+                      <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                      <input
+                        type="text"
+                        placeholder="Cari nama / NISN..."
+                        value={studentSearchTerm}
+                        onChange={(e) => setStudentSearchTerm(e.target.value)}
+                        className="w-full bg-slate-50 border border-slate-200 text-slate-800 pl-8 pr-3 py-1.5 rounded-xl text-xs focus:ring-2 focus:ring-indigo-500 font-medium"
+                      />
+                    </div>
+                  </div>
                 </div>
 
-                {/* Password Input & Show/Hide */}
-                <div className="space-y-1.5">
-                  <label className="block text-slate-700 font-bold">Password Baru Siswa</label>
-                  <div className="relative">
-                    <input
-                      type={showPasswordText ? 'text' : 'password'}
-                      value={newPasswordInput}
-                      onChange={(e) => setNewPasswordInput(e.target.value)}
-                      placeholder="Masukkan password baru..."
-                      className="w-full bg-slate-50 border border-slate-200 text-slate-800 rounded-xl p-2.5 pr-10 font-mono font-bold focus:ring-2 focus:ring-indigo-500"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setShowPasswordText(!showPasswordText)}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 cursor-pointer"
-                    >
-                      {showPasswordText ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                    </button>
-                  </div>
-                  <p className="text-[11px] text-slate-400">Default password awal: <code className="font-mono bg-slate-100 px-1 py-0.5 rounded text-indigo-600 font-bold">123456</code></p>
-                </div>
-              </div>
-
-              {/* Action Buttons */}
-              <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-100">
-                <button
-                  type="button"
-                  onClick={handleBatchResetStudents}
-                  className="bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold px-3.5 py-2 rounded-xl text-xs flex items-center gap-1.5 transition-all cursor-pointer"
-                  title="Kembalikan password semua siswa ke 123456"
-                >
-                  <RefreshCw className="w-3.5 h-3.5 text-slate-500" />
-                  Reset Massal Semua Password Siswa ke 123456
-                </button>
-
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setNewPasswordInput('123456')}
-                    className="bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 font-bold px-3.5 py-2 rounded-xl text-xs flex items-center gap-1.5 transition-all cursor-pointer"
-                  >
-                    Set Default (123456)
-                  </button>
-                  <button
-                    type="button"
-                    onClick={handleSaveStudentPassword}
-                    className="bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold px-4 py-2 rounded-xl text-xs flex items-center gap-1.5 shadow-sm transition-all cursor-pointer"
-                  >
-                    <Save className="w-3.5 h-3.5" />
-                    Simpan Password Siswa
-                  </button>
+                <div className="overflow-x-auto max-h-80 overflow-y-auto">
+                  <table className="w-full text-left border-collapse">
+                    <thead className="sticky top-0 bg-slate-100 text-[11px] font-bold text-slate-600 uppercase border-b border-slate-200 z-10">
+                      <tr>
+                        <th className="py-2.5 px-3">Nama Siswa</th>
+                        <th className="py-2.5 px-3">Kelas</th>
+                        <th className="py-2.5 px-3">Username (NISN)</th>
+                        <th className="py-2.5 px-3">Status Password</th>
+                        <th className="py-2.5 px-3 text-right">Aksi</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 text-xs">
+                      {filteredStudentsForPassword.length === 0 ? (
+                        <tr>
+                          <td colSpan={5} className="py-6 text-center text-slate-400 italic">
+                            Tidak ada data siswa yang cocok dengan filter / pencarian.
+                          </td>
+                        </tr>
+                      ) : (
+                        filteredStudentsForPassword.map((s) => (
+                          <tr key={s.id} className="hover:bg-slate-50/80 transition-colors">
+                            <td className="py-2.5 px-3 font-bold text-slate-800">
+                              {s.name}
+                            </td>
+                            <td className="py-2.5 px-3">
+                              <span className="bg-slate-100 text-slate-700 px-2 py-0.5 rounded-md font-semibold text-[11px]">
+                                {s.className}
+                              </span>
+                            </td>
+                            <td className="py-2.5 px-3 font-mono text-slate-700">
+                              {s.nisn}
+                            </td>
+                            <td className="py-2.5 px-3">
+                              {s.password ? (
+                                <span className="inline-flex items-center gap-1 bg-amber-50 text-amber-800 border border-amber-200 px-2 py-0.5 rounded-md font-semibold text-[10px]">
+                                  <Key className="w-2.5 h-2.5 text-amber-600" />
+                                  Password Kustom
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center gap-1 bg-emerald-50 text-emerald-800 border border-emerald-200 px-2 py-0.5 rounded-md font-semibold text-[10px]">
+                                  <Lock className="w-2.5 h-2.5 text-emerald-600" />
+                                  Default: 123456
+                                </span>
+                              )}
+                            </td>
+                            <td className="py-2.5 px-3 text-right">
+                              <div className="inline-flex items-center gap-1.5 justify-end">
+                                <button
+                                  type="button"
+                                  onClick={() => handleSelectStudentForReset(s.id)}
+                                  className="px-2 py-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-bold rounded-lg text-[11px] transition cursor-pointer"
+                                >
+                                  Pilih
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleQuickResetStudent(s)}
+                                  className="px-2 py-1 bg-slate-100 hover:bg-rose-50 text-slate-700 hover:text-rose-700 border border-slate-200 font-bold rounded-lg text-[11px] transition cursor-pointer"
+                                  title="Reset password siswa ini ke 123456"
+                                >
+                                  Reset ke 123456
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
                 </div>
               </div>
             </div>
           )}
         </div>
+      </div>
+    )}
 
+    {/* ========================================================================= */}
+    {/* TAB 6: DATABASE & SINKRONISASI MULTI-PERANGKAT                           */}
+    {/* ========================================================================= */}
+    {activeNavTab === 'database' && (
+      <div id="section-database" className="space-y-6 animate-fadeIn">
         {/* Cloud Database Synchronization & Direct Transfer Manager */}
         <div className="bg-gradient-to-br from-slate-900 to-sky-950 border border-sky-800/60 rounded-3xl p-6 shadow-md text-white space-y-4">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-sky-800/40 pb-4">
@@ -3170,15 +3523,28 @@ export const SchoolSettingsView: React.FC<SchoolSettingsViewProps> = ({
           </div>
         </div>
 
-        <div className="flex justify-end">
+        {/* Reset Data Default / Sampel Card */}
+        <div className="bg-white border border-slate-200/80 rounded-3xl p-6 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div className="space-y-1">
+            <h3 className="text-sm font-bold text-slate-800 flex items-center gap-2">
+              <RotateCcw className="w-4 h-4 text-amber-600" />
+              Reset ke Data Awal Sampel (425 Siswa)
+            </h3>
+            <p className="text-xs text-slate-500">
+              Jika Anda ingin mengembalikan seluruh profil sekolah, daftar guru, dan data siswa ke konfigurasi contoh bawaan sistem.
+            </p>
+          </div>
           <button
-            type="submit"
-            className="bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold px-6 py-3 rounded-2xl shadow-md flex items-center gap-2 text-xs transition-all cursor-pointer"
+            type="button"
+            onClick={() => setShowResetModal(true)}
+            className="bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 font-bold px-4 py-2.5 rounded-xl text-xs flex items-center gap-2 transition-all cursor-pointer shrink-0"
           >
-            <Save className="w-4 h-4" />
-            Simpan Seluruh Pengaturan
+            <RotateCcw className="w-4 h-4 text-amber-600" />
+            Reset Data Sampel
           </button>
         </div>
+      </div>
+    )}
 
       </form>
 

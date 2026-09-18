@@ -692,6 +692,9 @@ export function mergeSchoolProfile(local: SchoolProfile, cloud: SchoolProfile): 
       ...(cloud.dailyEndTimes || {})
     },
     autoAlpaTime: cloud.autoAlpaTime || local.autoAlpaTime || INITIAL_SCHOOL_PROFILE.autoAlpaTime,
+    autoAlpaEnabled: typeof cloud.autoAlpaEnabled === 'boolean'
+      ? cloud.autoAlpaEnabled
+      : (typeof local.autoAlpaEnabled === 'boolean' ? local.autoAlpaEnabled : (INITIAL_SCHOOL_PROFILE.autoAlpaEnabled !== false)),
     lateToleranceMinutes: typeof cloud.lateToleranceMinutes === 'number' ? cloud.lateToleranceMinutes : (typeof local.lateToleranceMinutes === 'number' ? local.lateToleranceMinutes : (INITIAL_SCHOOL_PROFILE.lateToleranceMinutes ?? 15)),
   };
 }
@@ -1261,6 +1264,9 @@ export function getSchoolProfile(): SchoolProfile {
             'Minggu': parsed.endTime || '15:00',
           }),
       autoAlpaTime: parsed.autoAlpaTime || INITIAL_SCHOOL_PROFILE.autoAlpaTime || '08:30',
+      autoAlpaEnabled: typeof parsed.autoAlpaEnabled === 'boolean'
+        ? parsed.autoAlpaEnabled
+        : (INITIAL_SCHOOL_PROFILE.autoAlpaEnabled !== false),
       lateToleranceMinutes: typeof parsed.lateToleranceMinutes === 'number' ? parsed.lateToleranceMinutes : (INITIAL_SCHOOL_PROFILE.lateToleranceMinutes ?? 15),
       activeDays: parsed.activeDays && Array.isArray(parsed.activeDays) && parsed.activeDays.length > 0 ? parsed.activeDays : (INITIAL_SCHOOL_PROFILE.activeDays || ['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu']),
       holidays: parsed.holidays && Array.isArray(parsed.holidays) ? parsed.holidays : (INITIAL_SCHOOL_PROFILE.holidays || []),

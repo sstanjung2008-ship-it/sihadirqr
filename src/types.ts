@@ -133,6 +133,7 @@ export interface SchoolProfile {
   dailyEndTimes?: Record<string, string>; // e.g. { 'Senin': '15:00', 'Selasa': '15:00', 'Rabu': '15:00', 'Kamis': '15:00', 'Jumat': '11:30', 'Sabtu': '13:00' }
   autoAlpaTime?: string; // e.g. "08:30" Waktu Batas Otomatis Alpa
   autoAlpaEnabled?: boolean; // Saklar aktif/non-aktif penentuan otomatis status ALPA
+  autoCharacterAssessmentEnabled?: boolean; // Saklar aktif/non-aktif Penilaian Karakter Otomatis
   lateToleranceMinutes: number; // e.g. 15 -> after 07:15 is TERLAMBAT
   educationLevel: string; // e.g. "SMP / MTs"
   gradeLevels: string[]; // e.g. ["Kelas 7", "Kelas 8", "Kelas 9"]

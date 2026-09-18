@@ -7,7 +7,8 @@ import {
   AttendanceRecord, 
   Teacher, 
   UserSession,
-  LearningJournal
+  LearningJournal,
+  SchoolProfile
 } from '../types';
 import { 
   Sparkles, 
@@ -25,7 +26,11 @@ import {
   ThumbsDown,
   Info,
   Layers,
-  GraduationCap
+  GraduationCap,
+  Power,
+  ShieldAlert,
+  AlertTriangle,
+  Lock
 } from 'lucide-react';
 
 export type AutoRuleType = 
@@ -70,6 +75,8 @@ interface AutoCharacterAssessmentModalProps {
   learningJournals?: LearningJournal[];
   teachers: Teacher[];
   userSession?: UserSession | null;
+  schoolProfile?: SchoolProfile;
+  onUpdateSchoolProfile?: (profile: SchoolProfile) => void;
   onApplyLogs: (newLogs: StudentCharacterLog[]) => void;
 }
 
@@ -84,8 +91,23 @@ export const AutoCharacterAssessmentModal: React.FC<AutoCharacterAssessmentModal
   learningJournals = [],
   teachers,
   userSession,
+  schoolProfile,
+  onUpdateSchoolProfile,
   onApplyLogs,
 }) => {
+  // Auto assessment status (Defaults to true if undefined)
+  const isAutoEnabled = schoolProfile?.autoCharacterAssessmentEnabled !== false;
+
+  const handleToggleAutoAssessment = (targetState?: boolean) => {
+    const nextState = targetState !== undefined ? targetState : !isAutoEnabled;
+    if (schoolProfile && onUpdateSchoolProfile) {
+      const updatedProfile: SchoolProfile = {
+        ...schoolProfile,
+        autoCharacterAssessmentEnabled: nextState,
+      };
+      onUpdateSchoolProfile(updatedProfile);
+    }
+  };
   // Configurable parameters with user-specified defaults
   const [latePoints, setLatePoints] = useState<number>(2);
   const [alpaPoints, setAlpaPoints] = useState<number>(5);
@@ -567,6 +589,11 @@ export const AutoCharacterAssessmentModal: React.FC<AutoCharacterAssessmentModal
 
   // Submit and save selected candidates to Character Logs
   const handleProcessSubmit = () => {
+    if (!isAutoEnabled) {
+      alert('Penilaian Karakter Otomatis saat ini sedang NON-AKTIF. Silakan aktifkan terlebih dahulu tombol di bagian atas.');
+      return;
+    }
+
     const toApply = allCandidates.filter(c => selectedCandidateIds.has(c.id) && !c.isAlreadyLogged);
 
     if (toApply.length === 0) {
@@ -636,7 +663,83 @@ export const AutoCharacterAssessmentModal: React.FC<AutoCharacterAssessmentModal
         {/* Modal Body */}
         <div className="p-4 sm:p-6 overflow-y-auto space-y-5 flex-1 bg-slate-50/50">
           
-          {/* Rules Configuration & Summary Cards Grid */}
+          {/* Top Control Bar: Saklar Aktif & Non-Aktif Penilaian Karakter Otomatis */}
+          <div className={`p-4 sm:p-5 rounded-2xl border-2 transition-all shadow-sm ${
+            isAutoEnabled 
+              ? 'bg-gradient-to-r from-emerald-50 via-teal-50/50 to-white border-emerald-300' 
+              : 'bg-gradient-to-r from-rose-50 via-orange-50/50 to-white border-rose-300'
+          }`}>
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div className="flex items-start sm:items-center gap-3.5">
+                <div className={`w-12 h-12 rounded-2xl flex items-center justify-center font-extrabold shadow-sm shrink-0 transition-all ${
+                  isAutoEnabled 
+                    ? 'bg-emerald-600 text-white shadow-emerald-600/30 ring-4 ring-emerald-100' 
+                    : 'bg-rose-600 text-white shadow-rose-600/30 ring-4 ring-rose-100'
+                }`}>
+                  <Power className="w-6 h-6" />
+                </div>
+                <div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <h3 className="font-black text-sm sm:text-base text-slate-900">
+                      Status Penilaian Karakter Otomatis
+                    </h3>
+                    <span className={`inline-flex items-center gap-1.5 text-xs font-black px-3 py-1 rounded-full border shadow-2xs ${
+                      isAutoEnabled
+                        ? 'bg-emerald-100 text-emerald-800 border-emerald-300'
+                        : 'bg-rose-100 text-rose-800 border-rose-300'
+                    }`}>
+                      <span className={`w-2.5 h-2.5 rounded-full ${isAutoEnabled ? 'bg-emerald-600 animate-ping' : 'bg-rose-600'}`}></span>
+                      {isAutoEnabled ? '🟢 SISTEM AKTIF' : '🔴 NON-AKTIF'}
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-600 mt-1 leading-relaxed max-w-2xl">
+                    {isAutoEnabled
+                      ? 'Sistem sedang AKTIF memproses sinkronisasi data presensi QR (Terlambat, Alpa, Datang Tepat Waktu) dan catatan Jurnal KBM menjadi nilai karakter siswa.'
+                      : 'Sistem TIDAK menjalankan penilaian karakter otomatis (NON-AKTIF). Tidak ada poin karakter yang diproses atau disinkronkan ke siswa.'}
+                  </p>
+                </div>
+              </div>
+
+              {/* Tombol Toggle Aktif / Non-Aktif */}
+              <div className="flex items-center gap-1.5 shrink-0 bg-white p-1.5 rounded-2xl border border-slate-200 shadow-xs">
+                <button
+                  type="button"
+                  onClick={() => handleToggleAutoAssessment(true)}
+                  className={`px-4 py-2 rounded-xl text-xs font-black transition-all flex items-center gap-1.5 cursor-pointer ${
+                    isAutoEnabled
+                      ? 'bg-emerald-600 text-white shadow-md shadow-emerald-600/30 ring-2 ring-emerald-400/60 scale-102'
+                      : 'bg-transparent text-slate-500 hover:text-emerald-700 hover:bg-emerald-50/80'
+                  }`}
+                >
+                  <CheckCircle2 className="w-4 h-4" />
+                  <span>Aktif</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleToggleAutoAssessment(false)}
+                  className={`px-4 py-2 rounded-xl text-xs font-black transition-all flex items-center gap-1.5 cursor-pointer ${
+                    !isAutoEnabled
+                      ? 'bg-rose-600 text-white shadow-md shadow-rose-600/30 ring-2 ring-rose-400/60 scale-102'
+                      : 'bg-transparent text-slate-500 hover:text-rose-700 hover:bg-rose-50/80'
+                  }`}
+                >
+                  <Power className="w-4 h-4" />
+                  <span>Non-Aktif</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Peringatan Banner saat Non-Aktif */}
+            {!isAutoEnabled && (
+              <div className="mt-3.5 pt-3.5 border-t border-rose-200 flex items-start sm:items-center gap-3 text-rose-900 text-xs font-semibold bg-white/90 p-3.5 rounded-xl border border-rose-300">
+                <ShieldAlert className="w-5 h-5 text-rose-600 shrink-0 mt-0.5 sm:mt-0" />
+                <div className="flex-1">
+                  <strong className="text-rose-950 block sm:inline font-black">Mode Non-Aktif Sedang Berjalan: </strong>
+                  Sistem menghentikan seluruh proses penilaian karakter otomatis. Untuk kembali memproses data, klik tombol <strong>"Aktif"</strong> di sebelah kanan.
+                </div>
+              </div>
+            )}
+          </div>
           <div>
             <div className="flex items-center justify-between mb-2.5">
               <div className="text-xs font-extrabold uppercase tracking-wider text-slate-600 flex items-center gap-1.5">
@@ -1248,7 +1351,14 @@ export const AutoCharacterAssessmentModal: React.FC<AutoCharacterAssessmentModal
         {/* Footer Actions */}
         <div className="p-4 sm:p-5 bg-white border-t border-slate-200 flex flex-col sm:flex-row items-center justify-between gap-3 shrink-0">
           <div className="text-xs text-slate-500 text-center sm:text-left">
-            Total <strong>{selectedCount}</strong> data nilai karakter ({groupFilter === 'ALL' ? 'Positif & Negatif' : groupFilter}) akan dimasukkan ke log siswa.
+            {isAutoEnabled ? (
+              <span>Total <strong>{selectedCount}</strong> data nilai karakter ({groupFilter === 'ALL' ? 'Positif & Negatif' : groupFilter}) akan dimasukkan ke log siswa.</span>
+            ) : (
+              <span className="text-rose-600 font-bold flex items-center gap-1.5 justify-center sm:justify-start">
+                <ShieldAlert className="w-4 h-4 text-rose-500" />
+                Sistem Penilaian Karakter Otomatis sedang Non-Aktif. Tidak ada data yang dapat disimpan.
+              </span>
+            )}
           </div>
           <div className="flex items-center gap-3 w-full sm:w-auto justify-end">
             <button
@@ -1261,11 +1371,24 @@ export const AutoCharacterAssessmentModal: React.FC<AutoCharacterAssessmentModal
             <button
               type="button"
               onClick={handleProcessSubmit}
-              disabled={selectedCount === 0}
-              className="inline-flex items-center justify-center gap-2 px-6 py-2.5 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 disabled:opacity-50 text-white font-extrabold text-xs rounded-xl shadow-lg shadow-indigo-600/30 transition-all transform active:scale-95 cursor-pointer w-full sm:w-auto"
+              disabled={!isAutoEnabled || selectedCount === 0}
+              className={`inline-flex items-center justify-center gap-2 px-6 py-2.5 font-extrabold text-xs rounded-xl shadow-lg transition-all transform active:scale-95 cursor-pointer w-full sm:w-auto ${
+                !isAutoEnabled
+                  ? 'bg-slate-300 text-slate-500 cursor-not-allowed shadow-none'
+                  : 'bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 disabled:opacity-50 text-white shadow-indigo-600/30'
+              }`}
             >
-              <Sparkles className="w-4 h-4 text-amber-300" />
-              <span>Simpan {selectedCount} Nilai Otomatis</span>
+              {!isAutoEnabled ? (
+                <>
+                  <Lock className="w-4 h-4 text-slate-400" />
+                  <span>Sistem Non-Aktif</span>
+                </>
+              ) : (
+                <>
+                  <Sparkles className="w-4 h-4 text-amber-300" />
+                  <span>Simpan {selectedCount} Nilai Otomatis</span>
+                </>
+              )}
             </button>
           </div>
         </div>

@@ -1642,7 +1642,7 @@ export const SchoolSettingsView: React.FC<SchoolSettingsViewProps> = ({
             </div>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs pt-1">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 text-xs pt-1">
             <div>
               <label className="block text-slate-700 font-semibold mb-1">Jam Masuk Sekolah (WITA)</label>
               <input
@@ -1711,11 +1711,53 @@ export const SchoolSettingsView: React.FC<SchoolSettingsViewProps> = ({
               />
               <p className="text-[10.5px] text-slate-500 leading-tight">
                 {formData.autoAlpaEnabled !== false ? (
-                  <span>Siswa yang belum melakukan presensi hingga jam ini pada hari aktif otomatis berstatus <strong className="text-rose-700">ALPA</strong>.</span>
+                  <span>Siswa yang belum presensi hingga jam ini otomatis berstatus <strong className="text-rose-700">ALPA</strong>.</span>
                 ) : (
-                  <span className="text-emerald-700 font-medium">✓ Fitur Alpa Otomatis dinonaktifkan. Mode Scan Masuk tetap terbuka tanpa pembatasan jam alpa.</span>
+                  <span className="text-emerald-700 font-medium">✓ Fitur Alpa Otomatis dinonaktifkan. Mode Scan Masuk tetap terbuka.</span>
                 )}
               </p>
+            </div>
+
+            {/* Saklar Penilaian Karakter Otomatis */}
+            <div className={`border rounded-2xl p-3 space-y-2 transition-all ${
+              formData.autoCharacterAssessmentEnabled !== false
+                ? 'bg-purple-50/60 border-purple-200/80'
+                : 'bg-slate-50 border-slate-200 opacity-90'
+            }`}>
+              <div className="flex items-center justify-between gap-2 flex-wrap">
+                <div className="flex items-center gap-1.5">
+                  <label className="block text-slate-900 font-extrabold flex items-center gap-1.5 text-xs">
+                    <Sparkles className={`w-3.5 h-3.5 ${formData.autoCharacterAssessmentEnabled !== false ? 'text-purple-600' : 'text-slate-400'}`} />
+                    Penilaian Karakter Otomatis
+                  </label>
+                </div>
+
+                {/* Saklar / Toggle Switch Penilaian Karakter Otomatis */}
+                <label className="relative inline-flex items-center cursor-pointer shrink-0">
+                  <input
+                    type="checkbox"
+                    checked={formData.autoCharacterAssessmentEnabled !== false}
+                    onChange={(e) => setFormData({ ...formData, autoCharacterAssessmentEnabled: e.target.checked })}
+                    className="sr-only peer"
+                  />
+                  <div className="w-9 h-5 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-purple-600"></div>
+                  <span className="ml-1.5 text-[11px] font-bold text-slate-800">
+                    {formData.autoCharacterAssessmentEnabled !== false ? 'Aktif' : 'Non-aktif'}
+                  </span>
+                </label>
+              </div>
+
+              <div className="p-2 rounded-xl bg-white/80 border border-purple-100 text-[11px] leading-snug text-slate-600">
+                {formData.autoCharacterAssessmentEnabled !== false ? (
+                  <span className="text-purple-900 font-semibold">
+                    ✓ <strong>Sistem Aktif:</strong> Mengizinkan sinkronisasi otomatis poin karakter dari presensi QR & Jurnal KBM.
+                  </span>
+                ) : (
+                  <span className="text-rose-700 font-semibold">
+                    ✕ <strong>Sistem Non-Aktif:</strong> Sistem tidak menjalankan penilaian karakter otomatis.
+                  </span>
+                )}
+              </div>
             </div>
           </div>
 

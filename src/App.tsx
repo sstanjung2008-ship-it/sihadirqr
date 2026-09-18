@@ -1669,6 +1669,8 @@ export default function App() {
               teachers={teachers}
               userSession={userSession}
               predicateSettings={predicateSettings}
+              schoolProfile={schoolProfile}
+              onUpdateSchoolProfile={handleSaveSchoolProfile}
               onAddTrait={handleAddTrait}
               onUpdateTrait={handleUpdateTrait}
               onDeleteTrait={handleDeleteTrait}
@@ -1692,6 +1694,7 @@ export default function App() {
               onDeleteLog={handleDeleteCharacterLog}
               currentUserRole={currentRole}
               schoolProfile={schoolProfile}
+              onUpdateSchoolProfile={handleSaveSchoolProfile}
               predicateSettings={predicateSettings}
               userSession={userSession}
             />

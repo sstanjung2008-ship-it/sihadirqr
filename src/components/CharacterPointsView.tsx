@@ -38,6 +38,7 @@ interface CharacterPointsViewProps {
   onDeleteLog: (logId: string) => void;
   currentUserRole?: string;
   schoolProfile?: SchoolProfile;
+  onUpdateSchoolProfile?: (profile: SchoolProfile) => void;
   predicateSettings?: CharacterPredicateSettings;
   userSession?: UserSession | null;
 }
@@ -56,9 +57,11 @@ export const CharacterPointsView: React.FC<CharacterPointsViewProps> = ({
   onDeleteLog,
   currentUserRole,
   schoolProfile,
+  onUpdateSchoolProfile,
   predicateSettings = { minA: 30, minB: 10, minC: 0, minD: -20, minE: -50 },
   userSession,
 }) => {
+  const isAutoAssessmentEnabled = schoolProfile?.autoCharacterAssessmentEnabled !== false;
   const [selectedClassId, setSelectedClassId] = useState<string>('ALL');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [isExporting, setIsExporting] = useState<boolean>(false);
@@ -551,10 +554,21 @@ export const CharacterPointsView: React.FC<CharacterPointsViewProps> = ({
         <div className="flex flex-wrap items-center gap-2.5 shrink-0">
           <button
             onClick={() => setShowAutoAssessmentModal(true)}
-            className="inline-flex items-center justify-center gap-2 px-5 py-3 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-slate-950 font-extrabold rounded-2xl shadow-lg shadow-amber-500/30 transition-all transform active:scale-95 cursor-pointer shrink-0"
+            className={`inline-flex items-center justify-center gap-2 px-5 py-3 font-extrabold rounded-2xl shadow-lg transition-all transform active:scale-95 cursor-pointer shrink-0 ${
+              isAutoAssessmentEnabled
+                ? 'bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-slate-950 shadow-amber-500/30 ring-2 ring-amber-300/40'
+                : 'bg-slate-700 hover:bg-slate-600 text-slate-200 border border-slate-600 shadow-slate-900/30'
+            }`}
           >
-            <Zap className="w-5 h-5 fill-slate-950 text-slate-950" />
-            <span>Nilai Otomatis</span>
+            <Zap className={`w-5 h-5 ${isAutoAssessmentEnabled ? 'fill-slate-950 text-slate-950' : 'text-rose-400'}`} />
+            <span>Penilaian Otomatis</span>
+            <span className={`text-[10px] font-black px-2 py-0.5 rounded-full ${
+              isAutoAssessmentEnabled
+                ? 'bg-slate-950 text-amber-300'
+                : 'bg-rose-500 text-white'
+            }`}>
+              {isAutoAssessmentEnabled ? 'Aktif' : 'Non-Aktif'}
+            </span>
           </button>
 
           <button
@@ -1563,6 +1577,8 @@ export const CharacterPointsView: React.FC<CharacterPointsViewProps> = ({
           learningJournals={learningJournals}
           teachers={teachers}
           userSession={userSession}
+          schoolProfile={schoolProfile}
+          onUpdateSchoolProfile={onUpdateSchoolProfile}
           onApplyLogs={(newLogs) => {
             if (onApplyMultipleLogs) {
               onApplyMultipleLogs(newLogs);

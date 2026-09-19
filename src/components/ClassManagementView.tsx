@@ -621,11 +621,11 @@ export const ClassManagementView: React.FC<ClassManagementViewProps> = ({
 
     const sStr = attendanceDateRange === 'CUSTOM' ? customStartDate :
                  attendanceDateRange === 'MONTH' ? `${selectedAttendanceYear}-${String(selectedAttendanceMonth).padStart(2, '0')}-01` :
-                 start.toISOString().split('T')[0];
+                 getLocalDateString(start);
 
     const eStr = attendanceDateRange === 'CUSTOM' ? customEndDate :
                  attendanceDateRange === 'MONTH' ? `${selectedAttendanceYear}-${String(selectedAttendanceMonth).padStart(2, '0')}-${String(new Date(selectedAttendanceYear, selectedAttendanceMonth, 0).getDate()).padStart(2, '0')}` :
-                 end.toISOString().split('T')[0];
+                 getLocalDateString(end);
 
     const records = attendanceRecords.filter(r => {
       if (attendanceDateRange === 'ALL') return true;

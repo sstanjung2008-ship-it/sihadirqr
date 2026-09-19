@@ -26,7 +26,7 @@ import {
   exportStudentGradesExcel,
   exportStudentCharacterDetailPdf
 } from '../lib/exportUtils';
-import { getStudentGradeAssessments, getTeachers } from '../lib/storage';
+import { getStudentGradeAssessments, getTeachers, getLocalDateString } from '../lib/storage';
 import { 
   FileText, 
   Download, 
@@ -285,13 +285,13 @@ export const RecapExportView: React.FC<RecapExportViewProps> = ({
     } else if (p === 'WEEKLY') {
       const start = new Date();
       start.setDate(now.getDate() - 7);
-      setStartDate(start.toISOString().split('T')[0]);
-      setEndDate(now.toISOString().split('T')[0]);
+      setStartDate(getLocalDateString(start));
+      setEndDate(getLocalDateString(now));
     } else if (p === 'YEARLY') {
       const start = new Date();
       start.setFullYear(now.getFullYear() - 1);
-      setStartDate(start.toISOString().split('T')[0]);
-      setEndDate(now.toISOString().split('T')[0]);
+      setStartDate(getLocalDateString(start));
+      setEndDate(getLocalDateString(now));
     }
   };
 

@@ -766,6 +766,22 @@ export function mergeSchoolProfile(local: SchoolProfile, cloud: SchoolProfile): 
     autoAlpaEnabled: typeof cloud.autoAlpaEnabled === 'boolean'
       ? cloud.autoAlpaEnabled
       : (typeof local.autoAlpaEnabled === 'boolean' ? local.autoAlpaEnabled : (INITIAL_SCHOOL_PROFILE.autoAlpaEnabled !== false)),
+    autoCharacterAssessmentEnabled: typeof cloud.autoCharacterAssessmentEnabled === 'boolean'
+      ? cloud.autoCharacterAssessmentEnabled
+      : (typeof local.autoCharacterAssessmentEnabled === 'boolean' ? local.autoCharacterAssessmentEnabled : (INITIAL_SCHOOL_PROFILE.autoCharacterAssessmentEnabled !== false)),
+    autoCharacterPoints: {
+      ...(INITIAL_SCHOOL_PROFILE.autoCharacterPoints || {
+        latePoints: 2,
+        alpaPoints: 5,
+        disruptivePoints: 1,
+        absentKbmPoints: 2,
+        veryActiveKbmPoints: 1,
+        onTimePoints: 1,
+        onTimeRequiredDays: 3,
+      }),
+      ...(local.autoCharacterPoints || {}),
+      ...(cloud.autoCharacterPoints || {}),
+    },
     lateToleranceMinutes: typeof cloud.lateToleranceMinutes === 'number' ? cloud.lateToleranceMinutes : (typeof local.lateToleranceMinutes === 'number' ? local.lateToleranceMinutes : (INITIAL_SCHOOL_PROFILE.lateToleranceMinutes ?? 15)),
   };
 }
@@ -1241,6 +1257,54 @@ export function initFirestoreRealtimeSync() {
               }
             }
 
+            // SPECIAL ATTENDANCE SYNC:
+            // Ensure real-time attendance scans from scanner devices merge smoothly onto all other devices
+            if (key === KEYS.ATTENDANCE) {
+              try {
+                const cloudAtt = typeof finalDataToSave === 'string' ? JSON.parse(finalDataToSave) : finalDataToSave;
+                if (Array.isArray(cloudAtt)) {
+                  const currentLocalAtt = getAttendanceRecords();
+                  const mergedAtt = localUpdatedAt <= 1 ? cloudAtt : mergeAttendanceLists(currentLocalAtt, cloudAtt);
+                  const mergedStr = JSON.stringify(mergedAtt);
+                  if (currentLocalStr !== mergedStr) {
+                    lastSavedStringCache[key] = mergedStr;
+                    localStorage.setItem(key, mergedStr);
+                    localStorage.setItem(key + '_updatedAt', String(Math.max(cloudUpdatedAt, localUpdatedAt, Date.now())));
+                    notifyStorageUpdated();
+                  }
+                  setCloudSyncStatus('connected');
+                  return;
+                }
+              } catch (e) {
+                console.warn('[Firestore Sync] Error updating attendance data:', e);
+              }
+            }
+
+            // SPECIAL SCHOOL PROFILE SYNC:
+            // Ensure school settings, jam masuk/pulang, hari libur, toleransi terlambat, mapel sync instantly across all devices
+            if (key === KEYS.PROFILE) {
+              try {
+                const cloudProfile = typeof finalDataToSave === 'string' ? JSON.parse(finalDataToSave) : finalDataToSave;
+                if (cloudProfile && typeof cloudProfile === 'object') {
+                  const currentLocalProfile = getSchoolProfile();
+                  const mergedProfile = (localUpdatedAt <= 1 || cloudUpdatedAt >= localUpdatedAt)
+                    ? { ...INITIAL_SCHOOL_PROFILE, ...currentLocalProfile, ...cloudProfile }
+                    : mergeSchoolProfile(currentLocalProfile, cloudProfile);
+                  const mergedStr = JSON.stringify(mergedProfile);
+                  if (currentLocalStr !== mergedStr) {
+                    lastSavedStringCache[key] = mergedStr;
+                    localStorage.setItem(key, mergedStr);
+                    localStorage.setItem(key + '_updatedAt', String(Math.max(cloudUpdatedAt, localUpdatedAt, Date.now())));
+                    notifyStorageUpdated();
+                  }
+                  setCloudSyncStatus('connected');
+                  return;
+                }
+              } catch (e) {
+                console.warn('[Firestore Sync] Error updating school profile data:', e);
+              }
+            }
+
             // CRITICAL TIMESTAMP CHECK:
             if (currentLocalStr !== null && localUpdatedAt > 0) {
               if (cloudUpdatedAt > 0 && cloudUpdatedAt < localUpdatedAt) {
@@ -1338,6 +1402,28 @@ export function getSchoolProfile(): SchoolProfile {
       autoAlpaEnabled: typeof parsed.autoAlpaEnabled === 'boolean'
         ? parsed.autoAlpaEnabled
         : (INITIAL_SCHOOL_PROFILE.autoAlpaEnabled !== false),
+      autoCharacterAssessmentEnabled: typeof parsed.autoCharacterAssessmentEnabled === 'boolean'
+        ? parsed.autoCharacterAssessmentEnabled
+        : (INITIAL_SCHOOL_PROFILE.autoCharacterAssessmentEnabled !== false),
+      autoCharacterPoints: parsed.autoCharacterPoints && typeof parsed.autoCharacterPoints === 'object'
+        ? {
+            latePoints: Number(parsed.autoCharacterPoints.latePoints) || 2,
+            alpaPoints: Number(parsed.autoCharacterPoints.alpaPoints) || 5,
+            disruptivePoints: Number(parsed.autoCharacterPoints.disruptivePoints) || 1,
+            absentKbmPoints: Number(parsed.autoCharacterPoints.absentKbmPoints) || 2,
+            veryActiveKbmPoints: Number(parsed.autoCharacterPoints.veryActiveKbmPoints) || 1,
+            onTimePoints: Number(parsed.autoCharacterPoints.onTimePoints) || 1,
+            onTimeRequiredDays: Number(parsed.autoCharacterPoints.onTimeRequiredDays) || 3,
+          }
+        : (INITIAL_SCHOOL_PROFILE.autoCharacterPoints || {
+            latePoints: 2,
+            alpaPoints: 5,
+            disruptivePoints: 1,
+            absentKbmPoints: 2,
+            veryActiveKbmPoints: 1,
+            onTimePoints: 1,
+            onTimeRequiredDays: 3,
+          }),
       lateToleranceMinutes: typeof parsed.lateToleranceMinutes === 'number' ? parsed.lateToleranceMinutes : (INITIAL_SCHOOL_PROFILE.lateToleranceMinutes ?? 15),
       activeDays: parsed.activeDays && Array.isArray(parsed.activeDays) && parsed.activeDays.length > 0 ? parsed.activeDays : (INITIAL_SCHOOL_PROFILE.activeDays || ['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu']),
       holidays: parsed.holidays && Array.isArray(parsed.holidays) ? parsed.holidays : (INITIAL_SCHOOL_PROFILE.holidays || []),

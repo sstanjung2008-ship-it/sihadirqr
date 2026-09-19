@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { 
   Student, 
   SchoolClass, 
@@ -8,7 +8,8 @@ import {
   Teacher, 
   UserSession,
   LearningJournal,
-  SchoolProfile
+  SchoolProfile,
+  AutoCharacterPointSettings
 } from '../types';
 import { 
   Sparkles, 
@@ -30,8 +31,12 @@ import {
   Power,
   ShieldAlert,
   AlertTriangle,
-  Lock
+  Lock,
+  Save,
+  RotateCcw,
+  Check
 } from 'lucide-react';
+import { saveSchoolProfile } from '../lib/storage';
 
 export type AutoRuleType = 
   | 'LATE' 
@@ -108,14 +113,125 @@ export const AutoCharacterAssessmentModal: React.FC<AutoCharacterAssessmentModal
       onUpdateSchoolProfile(updatedProfile);
     }
   };
-  // Configurable parameters with user-specified defaults
-  const [latePoints, setLatePoints] = useState<number>(2);
-  const [alpaPoints, setAlpaPoints] = useState<number>(5);
-  const [disruptivePoints, setDisruptivePoints] = useState<number>(1);
-  const [absentKbmPoints, setAbsentKbmPoints] = useState<number>(2); // Default 2 poin negatif
-  const [veryActiveKbmPoints, setVeryActiveKbmPoints] = useState<number>(1); // Default 1 poin positif
-  const [onTimePoints, setOnTimePoints] = useState<number>(1);
-  const [onTimeRequiredDays, setOnTimeRequiredDays] = useState<number>(3);
+  // Configurable parameters with user-specified defaults from schoolProfile
+  const [latePoints, setLatePoints] = useState<number>(() => schoolProfile?.autoCharacterPoints?.latePoints ?? 2);
+  const [alpaPoints, setAlpaPoints] = useState<number>(() => schoolProfile?.autoCharacterPoints?.alpaPoints ?? 5);
+  const [disruptivePoints, setDisruptivePoints] = useState<number>(() => schoolProfile?.autoCharacterPoints?.disruptivePoints ?? 1);
+  const [absentKbmPoints, setAbsentKbmPoints] = useState<number>(() => schoolProfile?.autoCharacterPoints?.absentKbmPoints ?? 2); // Default 2 poin negatif
+  const [veryActiveKbmPoints, setVeryActiveKbmPoints] = useState<number>(() => schoolProfile?.autoCharacterPoints?.veryActiveKbmPoints ?? 1); // Default 1 poin positif
+  const [onTimePoints, setOnTimePoints] = useState<number>(() => schoolProfile?.autoCharacterPoints?.onTimePoints ?? 1);
+  const [onTimeRequiredDays, setOnTimeRequiredDays] = useState<number>(() => schoolProfile?.autoCharacterPoints?.onTimeRequiredDays ?? 3);
+  const [pointsSavedNotice, setPointsSavedNotice] = useState<{ type: 'success' | 'info'; message: string } | null>(null);
+
+  // Sync state when schoolProfile updates from cloud
+  useEffect(() => {
+    if (schoolProfile?.autoCharacterPoints) {
+      const p = schoolProfile.autoCharacterPoints;
+      if (typeof p.latePoints === 'number') setLatePoints(p.latePoints);
+      if (typeof p.alpaPoints === 'number') setAlpaPoints(p.alpaPoints);
+      if (typeof p.disruptivePoints === 'number') setDisruptivePoints(p.disruptivePoints);
+      if (typeof p.absentKbmPoints === 'number') setAbsentKbmPoints(p.absentKbmPoints);
+      if (typeof p.veryActiveKbmPoints === 'number') setVeryActiveKbmPoints(p.veryActiveKbmPoints);
+      if (typeof p.onTimePoints === 'number') setOnTimePoints(p.onTimePoints);
+      if (typeof p.onTimeRequiredDays === 'number') setOnTimeRequiredDays(p.onTimeRequiredDays);
+    }
+  }, [schoolProfile?.autoCharacterPoints]);
+
+  const currentSavedConfig = useMemo(() => {
+    return {
+      latePoints: schoolProfile?.autoCharacterPoints?.latePoints ?? 2,
+      alpaPoints: schoolProfile?.autoCharacterPoints?.alpaPoints ?? 5,
+      disruptivePoints: schoolProfile?.autoCharacterPoints?.disruptivePoints ?? 1,
+      absentKbmPoints: schoolProfile?.autoCharacterPoints?.absentKbmPoints ?? 2,
+      veryActiveKbmPoints: schoolProfile?.autoCharacterPoints?.veryActiveKbmPoints ?? 1,
+      onTimePoints: schoolProfile?.autoCharacterPoints?.onTimePoints ?? 1,
+      onTimeRequiredDays: schoolProfile?.autoCharacterPoints?.onTimeRequiredDays ?? 3,
+    };
+  }, [schoolProfile?.autoCharacterPoints]);
+
+  const hasUnsavedPointChanges = useMemo(() => {
+    return (
+      latePoints !== currentSavedConfig.latePoints ||
+      alpaPoints !== currentSavedConfig.alpaPoints ||
+      disruptivePoints !== currentSavedConfig.disruptivePoints ||
+      absentKbmPoints !== currentSavedConfig.absentKbmPoints ||
+      veryActiveKbmPoints !== currentSavedConfig.veryActiveKbmPoints ||
+      onTimePoints !== currentSavedConfig.onTimePoints ||
+      onTimeRequiredDays !== currentSavedConfig.onTimeRequiredDays
+    );
+  }, [
+    latePoints,
+    alpaPoints,
+    disruptivePoints,
+    absentKbmPoints,
+    veryActiveKbmPoints,
+    onTimePoints,
+    onTimeRequiredDays,
+    currentSavedConfig
+  ]);
+
+  const handleSavePoints = () => {
+    const newPoints: AutoCharacterPointSettings = {
+      latePoints: Math.max(1, Math.abs(Number(latePoints)) || 2),
+      alpaPoints: Math.max(1, Math.abs(Number(alpaPoints)) || 5),
+      disruptivePoints: Math.max(1, Math.abs(Number(disruptivePoints)) || 1),
+      absentKbmPoints: Math.max(1, Math.abs(Number(absentKbmPoints)) || 2),
+      veryActiveKbmPoints: Math.max(1, Math.abs(Number(veryActiveKbmPoints)) || 1),
+      onTimePoints: Math.max(1, Math.abs(Number(onTimePoints)) || 1),
+      onTimeRequiredDays: Math.max(1, Math.abs(Number(onTimeRequiredDays)) || 3),
+    };
+
+    if (schoolProfile) {
+      const updatedProfile: SchoolProfile = {
+        ...schoolProfile,
+        autoCharacterPoints: newPoints,
+      };
+      saveSchoolProfile(updatedProfile);
+      if (onUpdateSchoolProfile) {
+        onUpdateSchoolProfile(updatedProfile);
+      }
+    }
+    setPointsSavedNotice({
+      type: 'success',
+      message: 'Besaran nilai poin aturan otomatis berhasil disimpan & disinkronkan ke seluruh perangkat!'
+    });
+    setTimeout(() => setPointsSavedNotice(null), 4000);
+  };
+
+  const handleResetDefaultPoints = () => {
+    const defaultPoints: AutoCharacterPointSettings = {
+      latePoints: 2,
+      alpaPoints: 5,
+      disruptivePoints: 1,
+      absentKbmPoints: 2,
+      veryActiveKbmPoints: 1,
+      onTimePoints: 1,
+      onTimeRequiredDays: 3,
+    };
+    setLatePoints(2);
+    setAlpaPoints(5);
+    setDisruptivePoints(1);
+    setAbsentKbmPoints(2);
+    setVeryActiveKbmPoints(1);
+    setOnTimePoints(1);
+    setOnTimeRequiredDays(3);
+
+    if (schoolProfile) {
+      const updatedProfile: SchoolProfile = {
+        ...schoolProfile,
+        autoCharacterPoints: defaultPoints,
+      };
+      saveSchoolProfile(updatedProfile);
+      if (onUpdateSchoolProfile) {
+        onUpdateSchoolProfile(updatedProfile);
+      }
+    }
+    setPointsSavedNotice({
+      type: 'info',
+      message: 'Nilai poin telah dikembalikan ke standar default (Baku) dan disimpan.'
+    });
+    setTimeout(() => setPointsSavedNotice(null), 4000);
+  };
 
   // Group Filter (POSITIF / NEGATIF / ALL)
   const [groupFilter, setGroupFilter] = useState<'ALL' | 'POSITIF' | 'NEGATIF'>('ALL');
@@ -740,20 +856,75 @@ export const AutoCharacterAssessmentModal: React.FC<AutoCharacterAssessmentModal
               </div>
             )}
           </div>
-          <div>
-            <div className="flex items-center justify-between mb-2.5">
-              <div className="text-xs font-extrabold uppercase tracking-wider text-slate-600 flex items-center gap-1.5">
-                <Layers className="w-4 h-4 text-indigo-600" />
-                <span>Pengaturan Poin Aturan Otomatis</span>
+          <div className="bg-slate-50/70 p-4 rounded-3xl border border-slate-200/90 space-y-3.5">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+              <div>
+                <div className="text-xs font-black uppercase tracking-wider text-slate-800 flex items-center gap-2">
+                  <Layers className="w-4 h-4 text-indigo-600" />
+                  <span>Pengaturan Poin Aturan Otomatis</span>
+                  {hasUnsavedPointChanges && (
+                    <span className="px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 border border-amber-300 text-[10px] font-extrabold animate-pulse">
+                      Ada Perubahan Belum Disimpan
+                    </span>
+                  )}
+                </div>
+                <p className="text-[11px] text-slate-500 mt-0.5">
+                  Ubah besaran poin yang diterapkan untuk tiap perilaku, lalu klik <strong>"Simpan Nilai Poin"</strong> untuk menyimpannya ke Cloud.
+                </p>
               </div>
-              <div className="text-[11px] text-slate-500">
-                Total terdeteksi: <strong>{allCandidates.length}</strong> kandidat ({totalPositiveCount} Positif, {totalNegativeCount} Negatif)
+
+              {/* Action Buttons: Simpan Nilai Poin & Reset Default */}
+              <div className="flex items-center gap-2 shrink-0">
+                <button
+                  type="button"
+                  onClick={handleResetDefaultPoints}
+                  title="Kembalikan semua nilai poin ke standar baku default"
+                  className="px-3 py-1.5 bg-white hover:bg-slate-100 text-slate-700 hover:text-slate-900 border border-slate-200 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer shadow-xs active:scale-95"
+                >
+                  <RotateCcw className="w-3.5 h-3.5 text-slate-500" />
+                  <span>Reset Default</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSavePoints}
+                  className={`px-4 py-1.5 rounded-xl text-xs font-black transition-all flex items-center gap-1.5 cursor-pointer shadow-md active:scale-95 ${
+                    hasUnsavedPointChanges
+                      ? 'bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white shadow-emerald-600/30 ring-2 ring-emerald-400/50'
+                      : 'bg-indigo-600 hover:bg-indigo-700 text-white shadow-indigo-600/20'
+                  }`}
+                >
+                  <Save className="w-3.5 h-3.5" />
+                  <span>Simpan Nilai Poin</span>
+                </button>
               </div>
             </div>
 
+            {/* Notification Banner when Points are Saved */}
+            {pointsSavedNotice && (
+              <div className={`p-3 rounded-2xl border text-xs font-bold flex items-center justify-between gap-2 animate-fadeIn ${
+                pointsSavedNotice.type === 'success'
+                  ? 'bg-emerald-50 text-emerald-900 border-emerald-300'
+                  : 'bg-indigo-50 text-indigo-900 border-indigo-200'
+              }`}>
+                <div className="flex items-center gap-2">
+                  <CheckCircle2 className={`w-4 h-4 shrink-0 ${
+                    pointsSavedNotice.type === 'success' ? 'text-emerald-600' : 'text-indigo-600'
+                  }`} />
+                  <span>{pointsSavedNotice.message}</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setPointsSavedNotice(null)}
+                  className="p-1 hover:bg-black/5 rounded-lg text-slate-500 cursor-pointer"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            )}
+
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
               {/* 1. Rule Positif Baru: Sangat Aktif KBM */}
-              <div className="bg-emerald-50/40 p-4 rounded-2xl border border-emerald-300/80 shadow-xs space-y-2 flex flex-col justify-between">
+              <div className="bg-emerald-50/50 p-4 rounded-2xl border border-emerald-300/80 shadow-xs space-y-2 flex flex-col justify-between">
                 <div>
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-1.5 text-emerald-800 font-black text-xs uppercase tracking-wider">
@@ -776,8 +947,8 @@ export const AutoCharacterAssessmentModal: React.FC<AutoCharacterAssessmentModal
                       min="1"
                       max="50"
                       value={veryActiveKbmPoints}
-                      onChange={(e) => setVeryActiveKbmPoints(Math.abs(Number(e.target.value)) || 1)}
-                      className="w-12 px-1.5 py-1 bg-white border border-emerald-300 rounded-lg text-xs font-black text-center text-emerald-800 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                      onChange={(e) => setVeryActiveKbmPoints(Math.max(1, Math.abs(Number(e.target.value)) || 1))}
+                      className="w-12 px-1.5 py-1 bg-white border border-emerald-300 rounded-lg text-xs font-black text-center text-emerald-800 focus:outline-none focus:ring-2 focus:ring-emerald-500"
                     />
                     <span className="text-xs font-bold text-emerald-700">+Poin</span>
                   </div>
@@ -811,8 +982,8 @@ export const AutoCharacterAssessmentModal: React.FC<AutoCharacterAssessmentModal
                       min="1"
                       max="50"
                       value={absentKbmPoints}
-                      onChange={(e) => setAbsentKbmPoints(Math.abs(Number(e.target.value)) || 2)}
-                      className="w-12 px-1.5 py-1 bg-white border border-rose-300 rounded-lg text-xs font-black text-center text-rose-800 focus:outline-none focus:ring-1 focus:ring-rose-500"
+                      onChange={(e) => setAbsentKbmPoints(Math.max(1, Math.abs(Number(e.target.value)) || 2))}
+                      className="w-12 px-1.5 py-1 bg-white border border-rose-300 rounded-lg text-xs font-black text-center text-rose-800 focus:outline-none focus:ring-2 focus:ring-rose-500"
                     />
                     <span className="text-xs font-bold text-rose-700">-Poin</span>
                   </div>
@@ -823,7 +994,7 @@ export const AutoCharacterAssessmentModal: React.FC<AutoCharacterAssessmentModal
               </div>
 
               {/* 3. Rule Negatif: Mengganggu KBM */}
-              <div className="bg-amber-50/40 p-4 rounded-2xl border border-amber-300 shadow-xs space-y-2 flex flex-col justify-between">
+              <div className="bg-amber-50/50 p-4 rounded-2xl border border-amber-300 shadow-xs space-y-2 flex flex-col justify-between">
                 <div>
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-1.5 text-amber-800 font-black text-xs uppercase tracking-wider">
@@ -846,8 +1017,8 @@ export const AutoCharacterAssessmentModal: React.FC<AutoCharacterAssessmentModal
                       min="1"
                       max="50"
                       value={disruptivePoints}
-                      onChange={(e) => setDisruptivePoints(Math.abs(Number(e.target.value)) || 1)}
-                      className="w-12 px-1.5 py-1 bg-white border border-amber-300 rounded-lg text-xs font-black text-center text-amber-800 focus:outline-none focus:ring-1 focus:ring-amber-500"
+                      onChange={(e) => setDisruptivePoints(Math.max(1, Math.abs(Number(e.target.value)) || 1))}
+                      className="w-12 px-1.5 py-1 bg-white border border-amber-300 rounded-lg text-xs font-black text-center text-amber-800 focus:outline-none focus:ring-2 focus:ring-amber-500"
                     />
                     <span className="text-xs font-bold text-amber-700">-Poin</span>
                   </div>
@@ -858,19 +1029,28 @@ export const AutoCharacterAssessmentModal: React.FC<AutoCharacterAssessmentModal
               </div>
 
               {/* 4. Rule Positif: Datang Tepat Waktu Presensi */}
-              <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs space-y-2 flex flex-col justify-between">
+              <div className="bg-white p-4 rounded-2xl border border-emerald-200/80 shadow-xs space-y-2 flex flex-col justify-between">
                 <div>
                   <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-1.5 text-emerald-700 font-bold text-xs uppercase tracking-wider">
-                      <CalendarCheck2 className="w-4 h-4" />
+                    <div className="flex items-center gap-1.5 text-emerald-800 font-black text-xs uppercase tracking-wider">
+                      <CalendarCheck2 className="w-4 h-4 text-emerald-600" />
                       <span>Tepat Waktu ({onTimeRequiredDays} Hari)</span>
                     </div>
-                    <span className="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 text-[10px] font-bold">
+                    <span className="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 text-[10px] font-black border border-emerald-200">
                       🟢 POSITIF
                     </span>
                   </div>
-                  <div className="text-[11px] text-slate-600 leading-relaxed mt-1">
-                    Hadir tepat waktu berturut-turut pada Presensi:
+                  <div className="text-[11px] text-slate-600 leading-relaxed mt-1 flex items-center gap-1 flex-wrap">
+                    <span>Hadir berturut-turut:</span>
+                    <input
+                      type="number"
+                      min="1"
+                      max="30"
+                      value={onTimeRequiredDays}
+                      onChange={(e) => setOnTimeRequiredDays(Math.max(1, Math.abs(Number(e.target.value)) || 3))}
+                      className="w-10 px-1 py-0.5 bg-slate-50 border border-slate-300 rounded text-[11px] font-black text-center text-slate-800 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                    />
+                    <span>hari presensi</span>
                   </div>
                 </div>
                 <div className="flex items-center justify-between pt-2 border-t border-slate-100">
@@ -881,8 +1061,8 @@ export const AutoCharacterAssessmentModal: React.FC<AutoCharacterAssessmentModal
                       min="1"
                       max="50"
                       value={onTimePoints}
-                      onChange={(e) => setOnTimePoints(Math.abs(Number(e.target.value)) || 1)}
-                      className="w-12 px-1.5 py-1 bg-emerald-50/70 border border-emerald-200 rounded-lg text-xs font-black text-center text-emerald-700 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                      onChange={(e) => setOnTimePoints(Math.max(1, Math.abs(Number(e.target.value)) || 1))}
+                      className="w-12 px-1.5 py-1 bg-emerald-50/70 border border-emerald-200 rounded-lg text-xs font-black text-center text-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-500"
                     />
                     <span className="text-xs font-bold text-emerald-600">+Poin</span>
                   </div>
@@ -893,14 +1073,14 @@ export const AutoCharacterAssessmentModal: React.FC<AutoCharacterAssessmentModal
               </div>
 
               {/* 5. Rule Negatif: Terlambat Masuk Sekolah */}
-              <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs space-y-2 flex flex-col justify-between">
+              <div className="bg-white p-4 rounded-2xl border border-red-200/80 shadow-xs space-y-2 flex flex-col justify-between">
                 <div>
                   <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-1.5 text-red-600 font-bold text-xs uppercase tracking-wider">
-                      <Clock className="w-4 h-4" />
+                    <div className="flex items-center gap-1.5 text-red-700 font-black text-xs uppercase tracking-wider">
+                      <Clock className="w-4 h-4 text-red-600" />
                       <span>Terlambat Sekolah</span>
                     </div>
-                    <span className="px-2 py-0.5 rounded-full bg-red-100 text-red-800 text-[10px] font-bold">
+                    <span className="px-2 py-0.5 rounded-full bg-red-100 text-red-800 text-[10px] font-black border border-red-200">
                       🔴 NEGATIF
                     </span>
                   </div>
@@ -916,8 +1096,8 @@ export const AutoCharacterAssessmentModal: React.FC<AutoCharacterAssessmentModal
                       min="1"
                       max="50"
                       value={latePoints}
-                      onChange={(e) => setLatePoints(Math.abs(Number(e.target.value)) || 2)}
-                      className="w-12 px-1.5 py-1 bg-red-50/70 border border-red-200 rounded-lg text-xs font-black text-center text-red-700 focus:outline-none focus:ring-1 focus:ring-red-500"
+                      onChange={(e) => setLatePoints(Math.max(1, Math.abs(Number(e.target.value)) || 2))}
+                      className="w-12 px-1.5 py-1 bg-red-50/70 border border-red-200 rounded-lg text-xs font-black text-center text-red-700 focus:outline-none focus:ring-2 focus:ring-red-500"
                     />
                     <span className="text-xs font-bold text-red-600">-Poin</span>
                   </div>
@@ -928,14 +1108,14 @@ export const AutoCharacterAssessmentModal: React.FC<AutoCharacterAssessmentModal
               </div>
 
               {/* 6. Rule Negatif: Siswa Alpa */}
-              <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs space-y-2 flex flex-col justify-between">
+              <div className="bg-white p-4 rounded-2xl border border-rose-200/80 shadow-xs space-y-2 flex flex-col justify-between">
                 <div>
                   <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-1.5 text-rose-600 font-bold text-xs uppercase tracking-wider">
-                      <UserX className="w-4 h-4" />
+                    <div className="flex items-center gap-1.5 text-rose-700 font-black text-xs uppercase tracking-wider">
+                      <UserX className="w-4 h-4 text-rose-600" />
                       <span>Siswa Alpa</span>
                     </div>
-                    <span className="px-2 py-0.5 rounded-full bg-rose-100 text-rose-800 text-[10px] font-bold">
+                    <span className="px-2 py-0.5 rounded-full bg-rose-100 text-rose-800 text-[10px] font-black border border-rose-200">
                       🔴 NEGATIF
                     </span>
                   </div>
@@ -951,8 +1131,8 @@ export const AutoCharacterAssessmentModal: React.FC<AutoCharacterAssessmentModal
                       min="1"
                       max="50"
                       value={alpaPoints}
-                      onChange={(e) => setAlpaPoints(Math.abs(Number(e.target.value)) || 5)}
-                      className="w-12 px-1.5 py-1 bg-rose-50/70 border border-rose-200 rounded-lg text-xs font-black text-center text-rose-700 focus:outline-none focus:ring-1 focus:ring-rose-500"
+                      onChange={(e) => setAlpaPoints(Math.max(1, Math.abs(Number(e.target.value)) || 5))}
+                      className="w-12 px-1.5 py-1 bg-rose-50/70 border border-rose-200 rounded-lg text-xs font-black text-center text-rose-700 focus:outline-none focus:ring-2 focus:ring-rose-500"
                     />
                     <span className="text-xs font-bold text-rose-600">-Poin</span>
                   </div>

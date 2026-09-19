@@ -112,6 +112,16 @@ export interface SchoolHoliday {
   type?: 'NASIONAL' | 'SEKOLAH' | 'CUTI_BERSAMA';
 }
 
+export interface AutoCharacterPointSettings {
+  latePoints: number; // default 2
+  alpaPoints: number; // default 5
+  disruptivePoints: number; // default 1
+  absentKbmPoints: number; // default 2
+  veryActiveKbmPoints: number; // default 1
+  onTimePoints: number; // default 1
+  onTimeRequiredDays: number; // default 3
+}
+
 export interface SchoolProfile {
   name: string;
   npsn: string;
@@ -134,6 +144,7 @@ export interface SchoolProfile {
   autoAlpaTime?: string; // e.g. "08:30" Waktu Batas Otomatis Alpa
   autoAlpaEnabled?: boolean; // Saklar aktif/non-aktif penentuan otomatis status ALPA
   autoCharacterAssessmentEnabled?: boolean; // Saklar aktif/non-aktif Penilaian Karakter Otomatis
+  autoCharacterPoints?: AutoCharacterPointSettings; // Konfigurasi besaran nilai poin untuk aturan karakter otomatis
   lateToleranceMinutes: number; // e.g. 15 -> after 07:15 is TERLAMBAT
   educationLevel: string; // e.g. "SMP / MTs"
   gradeLevels: string[]; // e.g. ["Kelas 7", "Kelas 8", "Kelas 9"]

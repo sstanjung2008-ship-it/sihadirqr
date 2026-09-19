@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { AttendanceRecord, Student, SchoolProfile, StudentCharacterLog, LearningJournal } from '../types';
+import { getLocalDateString } from '../lib/storage';
 import { 
   BarChart, 
   Bar, 
@@ -64,7 +65,7 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
     for (let i = 6; i >= 0; i--) {
       const d = new Date(today);
       d.setDate(d.getDate() - i);
-      const dateStr = d.toISOString().split('T')[0];
+      const dateStr = getLocalDateString(d);
       const dayName = d.toLocaleDateString('id-ID', { weekday: 'short' });
 
       days[dateStr] = {
@@ -281,7 +282,7 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
 
   // Calculate Students who haven't scanned return today (Belum Scan Pulang Hari Ini)
   const notReturnedList = React.useMemo(() => {
-    const todayStr = new Date().toISOString().split('T')[0];
+    const todayStr = getLocalDateString();
     const todayRecords = attendanceRecords.filter(r => r.date === todayStr);
 
     const list: { student: Student; arrivalTime: string; status: AttendanceRecord['status'] }[] = [];

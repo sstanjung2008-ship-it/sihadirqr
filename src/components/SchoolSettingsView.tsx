@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { SchoolProfile, Teacher, Student, SchoolHoliday } from '../types';
-import { Settings, Save, School, Clock, RotateCcw, CreditCard, CheckCircle2, Upload, Image as ImageIcon, Link, BookOpen, Plus, X, KeyRound, Key, Lock, Eye, EyeOff, User, GraduationCap, Search, Check, RefreshCw, Users, ShieldAlert, ShieldCheck, AlertCircle, Calendar, Trash2, Edit3, Tag, Flag, AlertTriangle, Sparkles, Filter, Cloud, CloudDownload, CloudUpload, FileJson, Download, Volume2, VolumeX, Mic, Headphones, BellRing, UserCheck, Smile, UserX, Play, Square, MessageSquare } from 'lucide-react';
-import { resetToDefaultData, forceUploadAllToCloud, forceDownloadAllFromCloud, getCloudSyncStatus, CloudSyncStatus, downloadDatabaseBackupFile } from '../lib/storage';
+import { Settings, Save, School, Clock, RotateCcw, CreditCard, CheckCircle2, Upload, Image as ImageIcon, Link, BookOpen, Plus, X, KeyRound, Key, Lock, Eye, EyeOff, User, GraduationCap, Search, Check, RefreshCw, Users, ShieldAlert, ShieldCheck, AlertCircle, Calendar, Trash2, Edit3, Tag, Flag, AlertTriangle, Sparkles, Filter, Cloud, CloudDownload, CloudUpload, FileJson, Download, Volume2, VolumeX, Mic, Headphones, BellRing, UserCheck, Smile, UserX, Play, Square, MessageSquare, Flame, CalendarCheck2, Layers } from 'lucide-react';
+import { resetToDefaultData, forceUploadAllToCloud, forceDownloadAllFromCloud, getCloudSyncStatus, CloudSyncStatus, downloadDatabaseBackupFile, getLocalDateString } from '../lib/storage';
 import { 
   DEFAULT_TEACHER_SPEECH_TEMPLATE,
   DEFAULT_PARENT_ARRIVAL_MESSAGE,
@@ -414,7 +414,7 @@ export const SchoolSettingsView: React.FC<SchoolSettingsViewProps> = ({
   // Holiday Management State & Handlers
   const currentHolidays = formData.holidays || [];
   const [holidayNameInput, setHolidayNameInput] = useState<string>('');
-  const [holidayDateInput, setHolidayDateInput] = useState<string>(() => new Date().toISOString().split('T')[0]);
+  const [holidayDateInput, setHolidayDateInput] = useState<string>(() => getLocalDateString());
   const [holidayEndDateInput, setHolidayEndDateInput] = useState<string>('');
   const [isMultiDayHoliday, setIsMultiDayHoliday] = useState<boolean>(false);
   const [holidayTypeInput, setHolidayTypeInput] = useState<'NASIONAL' | 'SEKOLAH' | 'CUTI_BERSAMA'>('NASIONAL');
@@ -429,7 +429,7 @@ export const SchoolSettingsView: React.FC<SchoolSettingsViewProps> = ({
   const handleAddOrUpdateHoliday = (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     const effectiveName = holidayNameInput.trim() || 'Hari Libur Sekolah';
-    const effectiveDate = holidayDateInput || new Date().toISOString().split('T')[0];
+    const effectiveDate = holidayDateInput || getLocalDateString();
 
     if (isMultiDayHoliday && holidayEndDateInput && holidayEndDateInput < effectiveDate) {
       setHolidayNotice({ type: 'error', msg: 'Tanggal selesai libur tidak boleh lebih awal dari tanggal mulai!' });
@@ -2107,6 +2107,320 @@ export const SchoolSettingsView: React.FC<SchoolSettingsViewProps> = ({
                 ))}
               </div>
             )}
+          </div>
+        </div>
+
+        {/* Card Penilaian Karakter Otomatis & Konfigurasi Poin */}
+        <div className="bg-white border border-slate-200/80 rounded-3xl p-6 shadow-sm space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-3">
+            <div className="flex items-center gap-2">
+              <div className="p-2 bg-indigo-50 text-indigo-600 rounded-xl">
+                <Sparkles className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="text-sm font-extrabold text-slate-800">
+                  Penilaian Karakter Otomatis & Besaran Nilai Poin
+                </h3>
+                <p className="text-xs text-slate-500">
+                  Konfigurasi besaran poin untuk sistem evaluasi otomatis dari presensi sekolah & jurnal harian KBM.
+                </p>
+              </div>
+            </div>
+
+            {/* Master Toggle */}
+            <label className="relative inline-flex items-center cursor-pointer select-none self-start sm:self-auto">
+              <input
+                type="checkbox"
+                checked={formData.autoCharacterAssessmentEnabled !== false}
+                onChange={(e) => setFormData({
+                  ...formData,
+                  autoCharacterAssessmentEnabled: e.target.checked
+                })}
+                className="sr-only peer"
+              />
+              <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-600"></div>
+              <span className="ml-2.5 text-xs font-bold text-slate-800">
+                {formData.autoCharacterAssessmentEnabled !== false ? '🟢 Sistem Aktif' : '🔴 Non-Aktif'}
+              </span>
+            </label>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 pt-1 text-xs">
+            {/* 1. Sangat Aktif KBM */}
+            <div className="p-3.5 bg-emerald-50/50 border border-emerald-200 rounded-2xl space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="font-extrabold text-emerald-900 flex items-center gap-1.5">
+                  <Flame className="w-4 h-4 text-emerald-600" />
+                  Sangat Aktif KBM
+                </span>
+                <span className="text-[10px] font-black bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full">
+                  +POSITIF
+                </span>
+              </div>
+              <div className="flex items-center justify-between pt-1">
+                <span className="text-[11px] text-slate-600 font-medium">Nilai Poin:</span>
+                <div className="flex items-center gap-1">
+                  <input
+                    type="number"
+                    min="1"
+                    max="50"
+                    value={formData.autoCharacterPoints?.veryActiveKbmPoints ?? 1}
+                    onChange={(e) => setFormData({
+                      ...formData,
+                      autoCharacterPoints: {
+                        ...(formData.autoCharacterPoints || {
+                          latePoints: 2,
+                          alpaPoints: 5,
+                          disruptivePoints: 1,
+                          absentKbmPoints: 2,
+                          veryActiveKbmPoints: 1,
+                          onTimePoints: 1,
+                          onTimeRequiredDays: 3,
+                        }),
+                        veryActiveKbmPoints: Math.max(1, Math.abs(Number(e.target.value)) || 1)
+                      }
+                    })}
+                    className="w-14 px-2 py-1 bg-white border border-emerald-300 rounded-lg text-xs font-black text-center text-emerald-800 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                  />
+                  <span className="text-[11px] font-bold text-emerald-700">+Poin</span>
+                </div>
+              </div>
+            </div>
+
+            {/* 2. Tidak Hadir di Kelas KBM */}
+            <div className="p-3.5 bg-rose-50/50 border border-rose-200 rounded-2xl space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="font-extrabold text-rose-900 flex items-center gap-1.5">
+                  <UserX className="w-4 h-4 text-rose-600" />
+                  Tidak Hadir di Kelas KBM
+                </span>
+                <span className="text-[10px] font-black bg-rose-100 text-rose-800 px-2 py-0.5 rounded-full">
+                  -NEGATIF
+                </span>
+              </div>
+              <div className="flex items-center justify-between pt-1">
+                <span className="text-[11px] text-slate-600 font-medium">Nilai Poin:</span>
+                <div className="flex items-center gap-1">
+                  <input
+                    type="number"
+                    min="1"
+                    max="50"
+                    value={formData.autoCharacterPoints?.absentKbmPoints ?? 2}
+                    onChange={(e) => setFormData({
+                      ...formData,
+                      autoCharacterPoints: {
+                        ...(formData.autoCharacterPoints || {
+                          latePoints: 2,
+                          alpaPoints: 5,
+                          disruptivePoints: 1,
+                          absentKbmPoints: 2,
+                          veryActiveKbmPoints: 1,
+                          onTimePoints: 1,
+                          onTimeRequiredDays: 3,
+                        }),
+                        absentKbmPoints: Math.max(1, Math.abs(Number(e.target.value)) || 2)
+                      }
+                    })}
+                    className="w-14 px-2 py-1 bg-white border border-rose-300 rounded-lg text-xs font-black text-center text-rose-800 focus:outline-none focus:ring-1 focus:ring-rose-500"
+                  />
+                  <span className="text-[11px] font-bold text-rose-700">-Poin</span>
+                </div>
+              </div>
+            </div>
+
+            {/* 3. Mengganggu KBM */}
+            <div className="p-3.5 bg-amber-50/50 border border-amber-200 rounded-2xl space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="font-extrabold text-amber-900 flex items-center gap-1.5">
+                  <VolumeX className="w-4 h-4 text-amber-600" />
+                  Mengganggu KBM
+                </span>
+                <span className="text-[10px] font-black bg-amber-100 text-amber-800 px-2 py-0.5 rounded-full">
+                  -NEGATIF
+                </span>
+              </div>
+              <div className="flex items-center justify-between pt-1">
+                <span className="text-[11px] text-slate-600 font-medium">Nilai Poin:</span>
+                <div className="flex items-center gap-1">
+                  <input
+                    type="number"
+                    min="1"
+                    max="50"
+                    value={formData.autoCharacterPoints?.disruptivePoints ?? 1}
+                    onChange={(e) => setFormData({
+                      ...formData,
+                      autoCharacterPoints: {
+                        ...(formData.autoCharacterPoints || {
+                          latePoints: 2,
+                          alpaPoints: 5,
+                          disruptivePoints: 1,
+                          absentKbmPoints: 2,
+                          veryActiveKbmPoints: 1,
+                          onTimePoints: 1,
+                          onTimeRequiredDays: 3,
+                        }),
+                        disruptivePoints: Math.max(1, Math.abs(Number(e.target.value)) || 1)
+                      }
+                    })}
+                    className="w-14 px-2 py-1 bg-white border border-amber-300 rounded-lg text-xs font-black text-center text-amber-800 focus:outline-none focus:ring-1 focus:ring-amber-500"
+                  />
+                  <span className="text-[11px] font-bold text-amber-700">-Poin</span>
+                </div>
+              </div>
+            </div>
+
+            {/* 4. Tepat Waktu Presensi */}
+            <div className="p-3.5 bg-emerald-50/30 border border-slate-200 rounded-2xl space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="font-extrabold text-emerald-800 flex items-center gap-1.5">
+                  <CalendarCheck2 className="w-4 h-4 text-emerald-600" />
+                  Tepat Waktu Presensi
+                </span>
+                <span className="text-[10px] font-black bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full">
+                  +POSITIF
+                </span>
+              </div>
+              <div className="space-y-1.5 pt-1">
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] text-slate-600 font-medium">Syarat Kehadiran:</span>
+                  <div className="flex items-center gap-1">
+                    <input
+                      type="number"
+                      min="1"
+                      max="30"
+                      value={formData.autoCharacterPoints?.onTimeRequiredDays ?? 3}
+                      onChange={(e) => setFormData({
+                        ...formData,
+                        autoCharacterPoints: {
+                          ...(formData.autoCharacterPoints || {
+                            latePoints: 2,
+                            alpaPoints: 5,
+                            disruptivePoints: 1,
+                            absentKbmPoints: 2,
+                            veryActiveKbmPoints: 1,
+                            onTimePoints: 1,
+                            onTimeRequiredDays: 3,
+                          }),
+                          onTimeRequiredDays: Math.max(1, Math.abs(Number(e.target.value)) || 3)
+                        }
+                      })}
+                      className="w-12 px-1.5 py-1 bg-white border border-slate-300 rounded-lg text-xs font-black text-center text-slate-800 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                    />
+                    <span className="text-[11px] text-slate-500 font-semibold">Hari</span>
+                  </div>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] text-slate-600 font-medium">Nilai Poin:</span>
+                  <div className="flex items-center gap-1">
+                    <input
+                      type="number"
+                      min="1"
+                      max="50"
+                      value={formData.autoCharacterPoints?.onTimePoints ?? 1}
+                      onChange={(e) => setFormData({
+                        ...formData,
+                        autoCharacterPoints: {
+                          ...(formData.autoCharacterPoints || {
+                            latePoints: 2,
+                            alpaPoints: 5,
+                            disruptivePoints: 1,
+                            absentKbmPoints: 2,
+                            veryActiveKbmPoints: 1,
+                            onTimePoints: 1,
+                            onTimeRequiredDays: 3,
+                          }),
+                          onTimePoints: Math.max(1, Math.abs(Number(e.target.value)) || 1)
+                        }
+                      })}
+                      className="w-14 px-2 py-1 bg-white border border-emerald-300 rounded-lg text-xs font-black text-center text-emerald-800 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                    />
+                    <span className="text-[11px] font-bold text-emerald-700">+Poin</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* 5. Terlambat Presensi */}
+            <div className="p-3.5 bg-red-50/30 border border-slate-200 rounded-2xl space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="font-extrabold text-red-800 flex items-center gap-1.5">
+                  <Clock className="w-4 h-4 text-red-600" />
+                  Terlambat Presensi
+                </span>
+                <span className="text-[10px] font-black bg-red-100 text-red-800 px-2 py-0.5 rounded-full">
+                  -NEGATIF
+                </span>
+              </div>
+              <div className="flex items-center justify-between pt-1">
+                <span className="text-[11px] text-slate-600 font-medium">Nilai Poin:</span>
+                <div className="flex items-center gap-1">
+                  <input
+                    type="number"
+                    min="1"
+                    max="50"
+                    value={formData.autoCharacterPoints?.latePoints ?? 2}
+                    onChange={(e) => setFormData({
+                      ...formData,
+                      autoCharacterPoints: {
+                        ...(formData.autoCharacterPoints || {
+                          latePoints: 2,
+                          alpaPoints: 5,
+                          disruptivePoints: 1,
+                          absentKbmPoints: 2,
+                          veryActiveKbmPoints: 1,
+                          onTimePoints: 1,
+                          onTimeRequiredDays: 3,
+                        }),
+                        latePoints: Math.max(1, Math.abs(Number(e.target.value)) || 2)
+                      }
+                    })}
+                    className="w-14 px-2 py-1 bg-white border border-red-300 rounded-lg text-xs font-black text-center text-red-800 focus:outline-none focus:ring-1 focus:ring-red-500"
+                  />
+                  <span className="text-[11px] font-bold text-red-700">-Poin</span>
+                </div>
+              </div>
+            </div>
+
+            {/* 6. Alpa Presensi */}
+            <div className="p-3.5 bg-rose-50/30 border border-slate-200 rounded-2xl space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="font-extrabold text-rose-800 flex items-center gap-1.5">
+                  <UserX className="w-4 h-4 text-rose-600" />
+                  Alpa Presensi
+                </span>
+                <span className="text-[10px] font-black bg-rose-100 text-rose-800 px-2 py-0.5 rounded-full">
+                  -NEGATIF
+                </span>
+              </div>
+              <div className="flex items-center justify-between pt-1">
+                <span className="text-[11px] text-slate-600 font-medium">Nilai Poin:</span>
+                <div className="flex items-center gap-1">
+                  <input
+                    type="number"
+                    min="1"
+                    max="50"
+                    value={formData.autoCharacterPoints?.alpaPoints ?? 5}
+                    onChange={(e) => setFormData({
+                      ...formData,
+                      autoCharacterPoints: {
+                        ...(formData.autoCharacterPoints || {
+                          latePoints: 2,
+                          alpaPoints: 5,
+                          disruptivePoints: 1,
+                          absentKbmPoints: 2,
+                          veryActiveKbmPoints: 1,
+                          onTimePoints: 1,
+                          onTimeRequiredDays: 3,
+                        }),
+                        alpaPoints: Math.max(1, Math.abs(Number(e.target.value)) || 5)
+                      }
+                    })}
+                    className="w-14 px-2 py-1 bg-white border border-rose-300 rounded-lg text-xs font-black text-center text-rose-800 focus:outline-none focus:ring-1 focus:ring-rose-500"
+                  />
+                  <span className="text-[11px] font-bold text-rose-700">-Poin</span>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
 

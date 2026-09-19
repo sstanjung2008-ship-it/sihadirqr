@@ -1552,6 +1552,7 @@ export default function App() {
               teachers={teachers}
               schoolProfile={schoolProfile}
               journals={journals}
+              attendanceRecords={attendanceRecords}
               onSaveJournal={handleSaveJournal}
               onDeleteJournal={handleDeleteJournal}
               userRole={currentRole}

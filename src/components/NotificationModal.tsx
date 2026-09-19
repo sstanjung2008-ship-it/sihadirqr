@@ -40,7 +40,8 @@ import {
   getLessonPeriods, 
   getStudents,
   getSchoolClasses,
-  getTeachers
+  getTeachers,
+  getLocalDateString
 } from '../lib/storage';
 import { playBkNotificationChime } from '../lib/kbmVoiceReminder';
 
@@ -171,7 +172,7 @@ export const NotificationModal: React.FC<NotificationModalProps> = ({
   // Calculate notifications
   const notifications = useMemo<AppNotification[]>(() => {
     const list: AppNotification[] = [];
-    const todayStr = new Date().toISOString().split('T')[0];
+    const todayStr = getLocalDateString();
     const dayNames = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
     const currentDayName = dayNames[new Date().getDay()];
 

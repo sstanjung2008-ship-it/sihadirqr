@@ -1,5 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { Student, SchoolClass, AttendanceRecord, UserSession } from '../types';
+import { getLocalDateString } from '../lib/storage';
 import { 
   UserX, 
   Trash2, 
@@ -13,10 +14,10 @@ import {
   CheckCircle2, 
   HeartPulse, 
   FileText, 
-  Sparkles,
-  Info,
-  ShieldCheck,
-  RotateCcw
+  Sparkles, 
+  Info, 
+  ShieldCheck, 
+  RotateCcw 
 } from 'lucide-react';
 
 export interface BulkAlpaItem {
@@ -63,7 +64,7 @@ export const BulkAlpaManagementModal: React.FC<BulkAlpaManagementModalProps> = (
   onDeleteRecords,
   onBulkUpdateStatus,
 }) => {
-  const todayStr = new Date().toISOString().split('T')[0];
+  const todayStr = getLocalDateString();
   const [selectedDate, setSelectedDate] = useState<string>(initialDate || todayStr);
   const [selectedClassId, setSelectedClassId] = useState<string>('ALL');
   const [searchQuery, setSearchQuery] = useState<string>('');

@@ -32,7 +32,7 @@ import {
   ChevronDown,
   Zap
 } from 'lucide-react';
-import { getStudentGradeAssessments, saveStudentGradeAssessments } from '../lib/storage';
+import { getStudentGradeAssessments, saveStudentGradeAssessments, getLocalDateString } from '../lib/storage';
 import { exportStudentGradesPdf, exportStudentGradesExcel } from '../lib/exportUtils';
 
 interface StudentGradesSectionProps {
@@ -56,7 +56,7 @@ export const StudentGradesSection: React.FC<StudentGradesSectionProps> = ({
   onShowSuccessToast,
   userSession
 }) => {
-  const todayStr = new Date().toISOString().split('T')[0];
+  const todayStr = getLocalDateString();
 
   const sortedClasses = useMemo(() => {
     return [...classes].sort((a, b) =>

@@ -254,12 +254,43 @@ export function exportAllDatabaseToJson(): string {
   return JSON.stringify(backupObject, null, 2);
 }
 
+/**
+ * Safely formats a Date or timestamp or date string into local YYYY-MM-DD (avoiding UTC offset bugs)
+ */
+export function getLocalDateString(dateInput: Date | number | string = new Date()): string {
+  let d: Date;
+  if (dateInput instanceof Date) {
+    d = dateInput;
+  } else if (typeof dateInput === 'number') {
+    d = new Date(dateInput);
+  } else if (typeof dateInput === 'string') {
+    if (dateInput.includes('T')) {
+      d = new Date(dateInput);
+    } else if (/^\d{4}-\d{2}-\d{2}$/.test(dateInput)) {
+      return dateInput;
+    } else {
+      d = new Date(dateInput);
+    }
+  } else {
+    d = new Date();
+  }
+
+  if (isNaN(d.getTime())) {
+    d = new Date();
+  }
+
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
 export function downloadDatabaseBackupFile(): void {
   const jsonStr = exportAllDatabaseToJson();
   const blob = new Blob([jsonStr], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
-  const dateStr = new Date().toISOString().split('T')[0];
+  const dateStr = getLocalDateString();
   const studentsCount = getStudents().length;
   a.href = url;
   a.download = `SiHadirQR_Backup_${studentsCount}_Siswa_${dateStr}.json`;
@@ -634,8 +665,48 @@ export function reconcileTeachersAndClasses(
 
 export function mergeAttendanceLists(local: AttendanceRecord[], cloud: AttendanceRecord[]): AttendanceRecord[] {
   const map = new Map<string, AttendanceRecord>();
+
+  const mergeSingleRecord = (existing: AttendanceRecord, incoming: AttendanceRecord): AttendanceRecord => {
+    // If incoming is QR_SCAN / TERLAMBAT / HADIR / SAKIT / IZIN and existing is auto-alpa, incoming wins
+    const isExistingReal = existing.status !== 'ALPA' || existing.method === 'QR_SCAN' || (existing.time && existing.time !== '-');
+    const isIncomingReal = incoming.status !== 'ALPA' || incoming.method === 'QR_SCAN' || (incoming.time && incoming.time !== '-');
+
+    let base: AttendanceRecord;
+    if (isIncomingReal && !isExistingReal) {
+      base = { ...incoming };
+    } else if (!isIncomingReal && isExistingReal) {
+      base = { ...existing };
+    } else {
+      // Both are real or both are alpa -> prefer incoming, but preserve important details
+      base = { ...existing, ...incoming };
+    }
+
+    // Always preserve returnTime if either has it
+    if (!base.returnTime && (existing.returnTime || incoming.returnTime)) {
+      base.returnTime = existing.returnTime || incoming.returnTime;
+      base.returnStatus = existing.returnStatus || incoming.returnStatus;
+      base.returnScannedBy = existing.returnScannedBy || incoming.returnScannedBy;
+    }
+    // Always preserve entry time if base has '-' or missing but one had it
+    if ((!base.time || base.time === '-') && (existing.time && existing.time !== '-')) {
+      base.time = existing.time;
+    } else if ((!base.time || base.time === '-') && (incoming.time && incoming.time !== '-')) {
+      base.time = incoming.time;
+    }
+
+    return base;
+  };
+
   cloud.forEach(a => map.set(`${a.studentId}_${a.date}`, a));
-  local.forEach(a => map.set(`${a.studentId}_${a.date}`, a));
+  local.forEach(a => {
+    const key = `${a.studentId}_${a.date}`;
+    if (map.has(key)) {
+      map.set(key, mergeSingleRecord(map.get(key)!, a));
+    } else {
+      map.set(key, a);
+    }
+  });
+
   return Array.from(map.values()).sort((a, b) => (b.date + (b.time || '')).localeCompare(a.date + (a.time || '')));
 }
 

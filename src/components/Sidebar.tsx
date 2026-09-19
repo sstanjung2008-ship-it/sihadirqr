@@ -30,7 +30,7 @@ import {
   CalendarDays,
   UserCircle
 } from 'lucide-react';
-import { getCloudSyncStatus, CloudSyncStatus, getStudents, getLeaveRequests, getDirectChats, getAttendanceRecords, getTeachers, getStudentCharacterLogs, getSchoolClasses } from '../lib/storage';
+import { getCloudSyncStatus, CloudSyncStatus, getStudents, getLeaveRequests, getDirectChats, getAttendanceRecords, getTeachers, getStudentCharacterLogs, getSchoolClasses, getLocalDateString } from '../lib/storage';
 import { MultiDeviceSyncModal } from './MultiDeviceSyncModal';
 import { PWAInstallButton } from './PWAInstallButton';
 import { NotificationModal } from './NotificationModal';
@@ -248,7 +248,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       }
       if (!student) return 0;
 
-      const todayStr = new Date().toISOString().split('T')[0];
+      const todayStr = getLocalDateString();
       let count = 0;
       
       const todayAtt = getAttendanceRecords().find(a => a.studentId === student!.id && a.date === todayStr);

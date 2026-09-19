@@ -9,6 +9,7 @@ import {
   StudentLearningAttendance,
   UserSession
 } from '../types';
+import { getLocalDateString } from '../lib/storage';
 import { 
   BookOpen, 
   Plus, 
@@ -127,7 +128,7 @@ export const LearningJournalView: React.FC<LearningJournalViewProps> = ({
   const [activeSubTab, setActiveSubTab] = useState<'create' | 'kbm' | 'grades'>('create');
   
   // Form States
-  const todayStr = new Date().toISOString().split('T')[0];
+  const todayStr = getLocalDateString();
 
   const sortedClasses = useMemo(() => {
     return [...classes].sort((a, b) =>

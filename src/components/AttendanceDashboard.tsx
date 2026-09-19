@@ -49,6 +49,7 @@ import {
 } from 'lucide-react';
 import { createWhatsAppUrl } from '../lib/exportUtils';
 import { BulkAlpaManagementModal } from './BulkAlpaManagementModal';
+import { getLocalDateString } from '../lib/storage';
 
 interface AttendanceDashboardProps {
   students: Student[];
@@ -103,7 +104,7 @@ export const AttendanceDashboard: React.FC<AttendanceDashboardProps> = ({
   schoolProfile,
   unreadLeavesCount = 0
 }) => {
-  const todayStr = new Date().toISOString().split('T')[0];
+  const todayStr = getLocalDateString();
 
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [selectedClassFilter, setSelectedClassFilter] = useState<string>('ALL');

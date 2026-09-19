@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { LeaveRequest, Student, UserRole, ChatMessage } from '../types';
+import { getLocalDateString } from '../lib/storage';
 import { 
   MessageSquare, 
   Paperclip, 
@@ -45,8 +46,8 @@ export const LeaveRequestView: React.FC<LeaveRequestViewProps> = ({
   // Submit Leave Form State
   const [formStudentId, setFormStudentId] = useState(selectedChildId || students[0]?.id || '');
   const [formType, setFormType] = useState<'SAKIT' | 'IZIN' | 'DESAK'>('SAKIT');
-  const [formStartDate, setFormStartDate] = useState(new Date().toISOString().split('T')[0]);
-  const [formEndDate, setFormEndDate] = useState(new Date().toISOString().split('T')[0]);
+  const [formStartDate, setFormStartDate] = useState(getLocalDateString());
+  const [formEndDate, setFormEndDate] = useState(getLocalDateString());
   const [formReason, setFormReason] = useState('');
   const [formPhotoUrl, setFormPhotoUrl] = useState('');
 

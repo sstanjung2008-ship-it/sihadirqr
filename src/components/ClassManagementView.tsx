@@ -17,6 +17,7 @@ import {
   exportMonthlyAttendanceMatrixPdf,
   exportMonthlyAttendanceMatrixExcel
 } from '../lib/exportUtils';
+import { getLocalDateString } from '../lib/storage';
 
 const INDONESIAN_MONTH_OPTIONS = [
   { value: 1, name: 'Januari' },
@@ -85,9 +86,9 @@ export const ClassManagementView: React.FC<ClassManagementViewProps> = ({
   const [customStartDate, setCustomStartDate] = useState(() => {
     const d = new Date();
     d.setDate(d.getDate() - 30);
-    return d.toISOString().split('T')[0];
+    return getLocalDateString(d);
   });
-  const [customEndDate, setCustomEndDate] = useState(() => new Date().toISOString().split('T')[0]);
+  const [customEndDate, setCustomEndDate] = useState(() => getLocalDateString());
 
   // Student Attendance Log Detail Modal state
   const [selectedStudentAttendanceModal, setSelectedStudentAttendanceModal] = useState<{

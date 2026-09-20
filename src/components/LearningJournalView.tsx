@@ -1255,23 +1255,19 @@ export const LearningJournalView: React.FC<LearningJournalViewProps> = ({
                   const rating = studentRatings[std.id] || { status: 'Cukup aktif', notes: '' };
                   const isLocked = isSaved && !isEditing;
 
-                  // Periksa apakah siswa sudah melakukan scan presensi pada tanggal jurnal (journalDate)
+                  // Status presensi siswa pada tanggal jurnal (journalDate) untuk informasi guru
                   const studentAttendance = attendanceRecords.find(
                     (rec) =>
                       (rec.studentId === std.id || rec.nisn === std.nisn) &&
                       rec.date === journalDate
                   );
                   const hasScanned = !!studentAttendance && !!studentAttendance.time && studentAttendance.time !== '-';
-                  const isDisabled = isLocked || !hasScanned;
+                  const isDisabled = isLocked;
 
                   return (
                     <div 
                       key={std.id}
-                      className={`p-4 rounded-2xl border transition-all space-y-3 ${
-                        !hasScanned 
-                          ? 'bg-slate-100/60 border-slate-200/60 opacity-80' 
-                          : 'bg-slate-50/80 hover:bg-slate-50 border-slate-200/80'
-                      }`}
+                      className="p-4 rounded-2xl border transition-all space-y-3 bg-slate-50/80 hover:bg-slate-50 border-slate-200/80"
                     >
                       <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
                         
@@ -1289,9 +1285,13 @@ export const LearningJournalView: React.FC<LearningJournalViewProps> = ({
                             <div className="flex items-center gap-2">
                               <h4 className="text-xs font-black text-slate-900">{std.name}</h4>
                               {!hasScanned && (
-                                <span className="inline-flex items-center gap-1 text-[10px] font-bold bg-amber-100 text-amber-800 px-2 py-0.5 rounded-md border border-amber-200">
-                                  <AlertCircle className="w-3 h-3 text-amber-600" />
+                                <span className="inline-flex items-center gap-1 text-[10px] font-bold bg-slate-100 text-slate-600 px-2 py-0.5 rounded-md border border-slate-200">
                                   Belum Scan
+                                </span>
+                              )}
+                              {hasScanned && (
+                                <span className="inline-flex items-center gap-1 text-[10px] font-bold bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-md border border-emerald-200">
+                                  Hadir ({studentAttendance?.time})
                                 </span>
                               )}
                             </div>
@@ -1311,7 +1311,6 @@ export const LearningJournalView: React.FC<LearningJournalViewProps> = ({
                                 type="button"
                                 disabled={isDisabled}
                                 onClick={() => handleStudentStatusChange(std.id, opt.value)}
-                                title={!hasScanned ? 'Siswa belum melakukan scan presensi kehadiran hari ini' : ''}
                                 className={`px-3 py-2 rounded-xl text-[11px] font-extrabold transition-all border flex items-center gap-1.5 ${
                                   isDisabled ? 'cursor-not-allowed opacity-50' : 'cursor-pointer'
                                 } ${
@@ -1336,11 +1335,7 @@ export const LearningJournalView: React.FC<LearningJournalViewProps> = ({
                           disabled={isDisabled}
                           value={rating.notes}
                           onChange={(e) => handleStudentNoteChange(std.id, e.target.value)}
-                          placeholder={
-                            !hasScanned 
-                              ? 'Siswa belum scan presensi kehadiran, penilaian KBM dinonaktifkan' 
-                              : 'Catatan keaktifan / perilaku siswa saat KBM (Opsional)...'
-                          }
+                          placeholder="Catatan keaktifan / perilaku siswa saat KBM (Opsional)..."
                           className="w-full bg-white border border-slate-200 text-slate-700 text-xs rounded-xl px-3 py-1.5 focus:ring-2 focus:ring-indigo-400 placeholder:text-slate-400 disabled:bg-slate-100/90 disabled:text-slate-500 disabled:cursor-not-allowed"
                         />
                       </div>

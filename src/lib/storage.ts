@@ -219,12 +219,12 @@ export function syncToCloud(key: string, data: any, instant: boolean = false, ex
     }
   };
 
-  // If instant or empty array (e.g. user cleared/deleted all students), push immediately
+  // If instant or empty array (e.g. user cleared/deleted all students or instant scan record), push immediately
   if (instant || dataStr === '[]') {
     doWrite();
   } else {
-    // Debounce by 1500ms to batch rapid interactions into 1 single Firestore write
-    debounceTimers[key] = setTimeout(doWrite, 1500);
+    // Ultra-fast debounce (400ms) to ensure near-instant real-time sync across all devices
+    debounceTimers[key] = setTimeout(doWrite, 400);
   }
 }
 
@@ -1547,13 +1547,13 @@ export function getAttendanceRecords(): AttendanceRecord[] {
   }
 }
 
-export function saveAttendanceRecords(records: AttendanceRecord[]): void {
+export function saveAttendanceRecords(records: AttendanceRecord[], instant: boolean = true): void {
   const now = Date.now();
   const dataStr = JSON.stringify(records);
   localStorage.setItem(KEYS.ATTENDANCE, dataStr);
   localStorage.setItem(KEYS.ATTENDANCE + '_updatedAt', String(now));
   notifyStorageUpdated();
-  syncToCloud(KEYS.ATTENDANCE, records, records.length === 0, now);
+  syncToCloud(KEYS.ATTENDANCE, records, instant, now);
 }
 
 export function getLeaveRequests(): LeaveRequest[] {

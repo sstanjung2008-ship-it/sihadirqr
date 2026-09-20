@@ -1727,6 +1727,8 @@ export default function App() {
               students={students}
               onUpdateTeacher={handleUpdateTeacher}
               onUpdateStudent={handleUpdateStudent}
+              onDeleteTeacher={handleDeleteTeacher}
+              onBatchDeleteStudents={handleBatchDeleteStudents}
               onBatchResetTeachersPassword={handleBatchResetTeachersPassword}
               onBatchResetStudentsPassword={handleBatchResetStudentsPassword}
             />

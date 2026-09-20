@@ -1717,48 +1717,6 @@ export const SchoolSettingsView: React.FC<SchoolSettingsViewProps> = ({
                 )}
               </p>
             </div>
-
-            {/* Saklar Penilaian Karakter Otomatis */}
-            <div className={`border rounded-2xl p-3 space-y-2 transition-all ${
-              formData.autoCharacterAssessmentEnabled !== false
-                ? 'bg-purple-50/60 border-purple-200/80'
-                : 'bg-slate-50 border-slate-200 opacity-90'
-            }`}>
-              <div className="flex items-center justify-between gap-2 flex-wrap">
-                <div className="flex items-center gap-1.5">
-                  <label className="block text-slate-900 font-extrabold flex items-center gap-1.5 text-xs">
-                    <Sparkles className={`w-3.5 h-3.5 ${formData.autoCharacterAssessmentEnabled !== false ? 'text-purple-600' : 'text-slate-400'}`} />
-                    Penilaian Karakter Otomatis
-                  </label>
-                </div>
-
-                {/* Saklar / Toggle Switch Penilaian Karakter Otomatis */}
-                <label className="relative inline-flex items-center cursor-pointer shrink-0">
-                  <input
-                    type="checkbox"
-                    checked={formData.autoCharacterAssessmentEnabled !== false}
-                    onChange={(e) => setFormData({ ...formData, autoCharacterAssessmentEnabled: e.target.checked })}
-                    className="sr-only peer"
-                  />
-                  <div className="w-9 h-5 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-purple-600"></div>
-                  <span className="ml-1.5 text-[11px] font-bold text-slate-800">
-                    {formData.autoCharacterAssessmentEnabled !== false ? 'Aktif' : 'Non-aktif'}
-                  </span>
-                </label>
-              </div>
-
-              <div className="p-2 rounded-xl bg-white/80 border border-purple-100 text-[11px] leading-snug text-slate-600">
-                {formData.autoCharacterAssessmentEnabled !== false ? (
-                  <span className="text-purple-900 font-semibold">
-                    ✓ <strong>Sistem Aktif:</strong> Mengizinkan sinkronisasi otomatis poin karakter dari presensi QR & Jurnal KBM.
-                  </span>
-                ) : (
-                  <span className="text-rose-700 font-semibold">
-                    ✕ <strong>Sistem Non-Aktif:</strong> Sistem tidak menjalankan penilaian karakter otomatis.
-                  </span>
-                )}
-              </div>
-            </div>
           </div>
 
           {/* Pengaturan Jam Pulang Berbeda Tiap Hari (Berdasarkan Hari Aktif Belajar Sekolah) */}

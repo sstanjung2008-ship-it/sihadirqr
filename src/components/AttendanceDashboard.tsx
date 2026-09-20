@@ -45,6 +45,7 @@ import {
   LayoutDashboard,
   BarChart3,
   UserX,
+  UserCheck,
   Trash2
 } from 'lucide-react';
 import { createWhatsAppUrl } from '../lib/exportUtils';
@@ -1145,18 +1146,18 @@ export const AttendanceDashboard: React.FC<AttendanceDashboardProps> = ({
                 </button>
               )}
 
-              {/* KHUSUS ADMIN: Tombol Kelola / Hapus Alpa Massal */}
+              {/* KHUSUS ADMIN: Tombol Ubah Status Masuk Massal */}
               {currentRole === 'ADMIN' && (
                 <button
                   type="button"
                   onClick={() => setShowBulkAlpaModal(true)}
-                  className="bg-gradient-to-r from-rose-600 to-red-600 hover:from-rose-700 hover:to-red-700 text-white font-extrabold px-3.5 py-1.5 rounded-xl text-xs flex items-center gap-1.5 transition-all cursor-pointer shadow-sm shadow-rose-600/25 active:scale-95 shrink-0"
-                  title="Kelola & Hapus Data Siswa Alpa secara Massal (Khusus Admin)"
+                  className="bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-700 hover:to-violet-700 text-white font-extrabold px-3.5 py-1.5 rounded-xl text-xs flex items-center gap-1.5 transition-all cursor-pointer shadow-sm shadow-indigo-600/25 active:scale-95 shrink-0"
+                  title="Ubah Status Masuk Siswa secara Massal (Khusus Admin)"
                 >
-                  <UserX className="w-3.5 h-3.5 text-rose-200 shrink-0" />
-                  <span>Kelola / Hapus Alpa Massal</span>
+                  <UserCheck className="w-3.5 h-3.5 text-indigo-200 shrink-0" />
+                  <span>Ubah Status Masuk Massal</span>
                   {countAlpa > 0 && (
-                    <span className="bg-white text-rose-700 text-[10px] font-black px-1.5 py-0.2 rounded-full shadow-2xs">
+                    <span className="bg-white text-indigo-700 text-[10px] font-black px-1.5 py-0.2 rounded-full shadow-2xs">
                       {countAlpa}
                     </span>
                   )}

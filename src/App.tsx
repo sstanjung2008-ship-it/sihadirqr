@@ -968,10 +968,15 @@ export default function App() {
     fullRecord?: AttendanceRecord
   ) => {
     let exists = false;
+    let targetStudentId = fullRecord?.studentId;
+    let targetDate = fullRecord?.date;
+
     const updated = attendanceRecords.map(r => {
       const isMatch = r.id === recordId || (fullRecord && r.studentId === fullRecord.studentId && r.date === fullRecord.date);
       if (isMatch) {
         exists = true;
+        targetStudentId = r.studentId;
+        targetDate = r.date;
         return { 
           ...r, 
           status: newStatus, 
@@ -984,6 +989,8 @@ export default function App() {
     });
 
     if (!exists && fullRecord) {
+      targetStudentId = fullRecord.studentId;
+      targetDate = fullRecord.date;
       const createdRecord: AttendanceRecord = {
         ...fullRecord,
         status: newStatus,
@@ -996,16 +1003,71 @@ export default function App() {
 
     setAttendanceRecordsState(updated);
     saveAttendanceRecords(updated);
+
+    // Auto-sync & cleanup character logs if attendance status changed away from ALPA / TERLAMBAT
+    if (targetStudentId && targetDate) {
+      setCharacterLogsState(prevLogs => {
+        let logsChanged = false;
+        const cleanedLogs = prevLogs.filter(l => {
+          if (l.studentId === targetStudentId && l.date === targetDate) {
+            // If status is not ALPA, remove auto-alpa penalty logs
+            if (newStatus !== 'ALPA' && (l.notes?.toLowerCase().includes('terekam alpa') || l.id.includes('auto-alpa') || (l.traitType === 'NEGATIF' && l.traitName.toLowerCase().includes('alpa') && l.notes?.includes('Otomatis')))) {
+              logsChanged = true;
+              return false;
+            }
+            // If status is not TERLAMBAT, remove auto-late penalty logs
+            if (newStatus !== 'TERLAMBAT' && (l.notes?.toLowerCase().includes('scan hadir terlambat') || l.id.includes('auto-late') || (l.traitType === 'NEGATIF' && l.traitName.toLowerCase().includes('terlambat') && l.notes?.includes('Otomatis')))) {
+              logsChanged = true;
+              return false;
+            }
+          }
+          return true;
+        });
+
+        if (logsChanged) {
+          saveStudentCharacterLogs(cleanedLogs);
+          return cleanedLogs;
+        }
+        return prevLogs;
+      });
+    }
   };
 
   // Delete multiple attendance records (e.g. Alpa massal)
   const handleDeleteAttendanceRecords = (recordIds: string[]) => {
     const idSet = new Set(recordIds);
+    const deletedRecords = attendanceRecords.filter(r => idSet.has(r.id));
+    
     setAttendanceRecordsState(prev => {
       const updated = prev.filter(r => !idSet.has(r.id));
       saveAttendanceRecords(updated);
       return updated;
     });
+
+    // Clean up corresponding auto character logs for deleted attendance records
+    if (deletedRecords.length > 0) {
+      setCharacterLogsState(prevLogs => {
+        let logsChanged = false;
+        const cleanedLogs = prevLogs.filter(l => {
+          const isFromDeleted = deletedRecords.some(d => 
+            d.studentId === l.studentId && 
+            d.date === l.date && 
+            (l.notes?.includes('Penilaian Otomatis Presensi') || l.id.startsWith('log-auto-'))
+          );
+          if (isFromDeleted) {
+            logsChanged = true;
+            return false;
+          }
+          return true;
+        });
+
+        if (logsChanged) {
+          saveStudentCharacterLogs(cleanedLogs);
+          return cleanedLogs;
+        }
+        return prevLogs;
+      });
+    }
   };
 
   // Bulk update attendance status (e.g. convert Alpa to Hadir/Izin/Sakit)
@@ -1061,6 +1123,33 @@ export default function App() {
       saveAttendanceRecords(updated);
       return updated;
     });
+
+    // Auto-sync & cleanup character logs for bulk updates
+    if (updates.length > 0) {
+      setCharacterLogsState(prevLogs => {
+        let logsChanged = false;
+        const cleanedLogs = prevLogs.filter(l => {
+          const matchUpdate = updates.find(u => u.studentId === l.studentId && u.date === l.date);
+          if (matchUpdate) {
+            if (matchUpdate.newStatus !== 'ALPA' && (l.notes?.toLowerCase().includes('terekam alpa') || l.id.includes('auto-alpa') || (l.traitType === 'NEGATIF' && l.traitName.toLowerCase().includes('alpa') && l.notes?.includes('Otomatis')))) {
+              logsChanged = true;
+              return false;
+            }
+            if (matchUpdate.newStatus !== 'TERLAMBAT' && (l.notes?.toLowerCase().includes('scan hadir terlambat') || l.id.includes('auto-late') || (l.traitType === 'NEGATIF' && l.traitName.toLowerCase().includes('terlambat') && l.notes?.includes('Otomatis')))) {
+              logsChanged = true;
+              return false;
+            }
+          }
+          return true;
+        });
+
+        if (logsChanged) {
+          saveStudentCharacterLogs(cleanedLogs);
+          return cleanedLogs;
+        }
+        return prevLogs;
+      });
+    }
   };
 
   // Student CRUD

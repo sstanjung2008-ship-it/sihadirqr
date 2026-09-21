@@ -666,44 +666,50 @@ export function reconcileTeachersAndClasses(
 export function mergeAttendanceLists(local: AttendanceRecord[], cloud: AttendanceRecord[]): AttendanceRecord[] {
   const map = new Map<string, AttendanceRecord>();
 
-  const mergeSingleRecord = (existing: AttendanceRecord, incoming: AttendanceRecord): AttendanceRecord => {
-    // If incoming is QR_SCAN / TERLAMBAT / HADIR / SAKIT / IZIN and existing is auto-alpa, incoming wins
-    const isExistingReal = existing.status !== 'ALPA' || existing.method === 'QR_SCAN' || (existing.time && existing.time !== '-');
-    const isIncomingReal = incoming.status !== 'ALPA' || incoming.method === 'QR_SCAN' || (incoming.time && incoming.time !== '-');
+  const mergeSingleRecord = (localRec: AttendanceRecord, cloudRec: AttendanceRecord): AttendanceRecord => {
+    // If cloud has a scan (QR_SCAN / HADIR / TERLAMBAT / SAKIT / IZIN / returnTime), cloud takes precedence
+    const isLocalReal = localRec.status !== 'ALPA' || localRec.method === 'QR_SCAN' || (localRec.time && localRec.time !== '-');
+    const isCloudReal = cloudRec.status !== 'ALPA' || cloudRec.method === 'QR_SCAN' || (cloudRec.time && cloudRec.time !== '-');
 
     let base: AttendanceRecord;
-    if (isIncomingReal && !isExistingReal) {
-      base = { ...incoming };
-    } else if (!isIncomingReal && isExistingReal) {
-      base = { ...existing };
+    if (isCloudReal && !isLocalReal) {
+      base = { ...localRec, ...cloudRec };
+    } else if (!isCloudReal && isLocalReal) {
+      base = { ...cloudRec, ...localRec };
     } else {
-      // Both are real or both are alpa -> prefer incoming, but preserve important details
-      base = { ...existing, ...incoming };
+      // Both are real or both are alpa -> Cloud record is the authoritative distributed truth
+      base = { ...localRec, ...cloudRec };
     }
 
     // Always preserve returnTime if either has it
-    if (!base.returnTime && (existing.returnTime || incoming.returnTime)) {
-      base.returnTime = existing.returnTime || incoming.returnTime;
-      base.returnStatus = existing.returnStatus || incoming.returnStatus;
-      base.returnScannedBy = existing.returnScannedBy || incoming.returnScannedBy;
+    if (!base.returnTime && (localRec.returnTime || cloudRec.returnTime)) {
+      base.returnTime = cloudRec.returnTime || localRec.returnTime;
+      base.returnStatus = cloudRec.returnStatus || localRec.returnStatus;
+      base.returnScannedBy = cloudRec.returnScannedBy || localRec.returnScannedBy;
     }
     // Always preserve entry time if base has '-' or missing but one had it
-    if ((!base.time || base.time === '-') && (existing.time && existing.time !== '-')) {
-      base.time = existing.time;
-    } else if ((!base.time || base.time === '-') && (incoming.time && incoming.time !== '-')) {
-      base.time = incoming.time;
+    if ((!base.time || base.time === '-') && (cloudRec.time && cloudRec.time !== '-')) {
+      base.time = cloudRec.time;
+    } else if ((!base.time || base.time === '-') && (localRec.time && localRec.time !== '-')) {
+      base.time = localRec.time;
     }
 
     return base;
   };
 
-  cloud.forEach(a => map.set(`${a.studentId}_${a.date}`, a));
+  // Start with local records
   local.forEach(a => {
     const key = `${a.studentId}_${a.date}`;
+    map.set(key, a);
+  });
+
+  // Apply cloud updates on top of local records so new scans from other devices are immediately visible!
+  cloud.forEach(cloudRec => {
+    const key = `${cloudRec.studentId}_${cloudRec.date}`;
     if (map.has(key)) {
-      map.set(key, mergeSingleRecord(map.get(key)!, a));
+      map.set(key, mergeSingleRecord(map.get(key)!, cloudRec));
     } else {
-      map.set(key, a);
+      map.set(key, cloudRec);
     }
   });
 
@@ -1100,6 +1106,26 @@ export async function forceDownloadAllFromCloud(): Promise<{ success: boolean; e
               const localStudents = getStudents();
               const mergedStudents = mergeStudentLists(localStudents, cloudStudents);
               const mergedStr = JSON.stringify(mergedStudents);
+              localStorage.setItem(key, mergedStr);
+              localStorage.setItem(key + '_updatedAt', String(cloudDoc.updatedAt || Date.now()));
+              lastSavedStringCache[key] = mergedStr;
+            } else {
+              localStorage.setItem(key, cloudDoc.data);
+              localStorage.setItem(key + '_updatedAt', String(cloudDoc.updatedAt || Date.now()));
+              lastSavedStringCache[key] = cloudDoc.data;
+            }
+          } catch {
+            localStorage.setItem(key, cloudDoc.data);
+            localStorage.setItem(key + '_updatedAt', String(cloudDoc.updatedAt || Date.now()));
+            lastSavedStringCache[key] = cloudDoc.data;
+          }
+        } else if (key === KEYS.ATTENDANCE) {
+          try {
+            const cloudAtt = JSON.parse(cloudDoc.data);
+            if (Array.isArray(cloudAtt)) {
+              const localAtt = getAttendanceRecords();
+              const mergedAtt = mergeAttendanceLists(localAtt, cloudAtt);
+              const mergedStr = JSON.stringify(mergedAtt);
               localStorage.setItem(key, mergedStr);
               localStorage.setItem(key + '_updatedAt', String(cloudDoc.updatedAt || Date.now()));
               lastSavedStringCache[key] = mergedStr;

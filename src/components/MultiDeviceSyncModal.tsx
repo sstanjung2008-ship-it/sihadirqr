@@ -58,7 +58,7 @@ export const MultiDeviceSyncModal: React.FC<MultiDeviceSyncModalProps> = ({
     setIsLoading(true);
     setFeedback({
       type: 'info',
-      message: 'Sedang menyamakan dan menyinkronkan seluruh 425 data siswa, kelas, guru, dan absensi dengan Cloud...',
+      message: `Sedang menyamakan dan menyinkronkan seluruh ${currentStudentCount} data siswa, kelas, guru, dan absensi dengan Cloud...`,
     });
     try {
       const res = await smartSyncAndMergeAllWithCloud();
@@ -236,7 +236,7 @@ export const MultiDeviceSyncModal: React.FC<MultiDeviceSyncModalProps> = ({
                 </span>
               </h2>
               <p className="text-xs text-sky-200/70">
-                Samakan 425 data siswa, guru, & absensi di semua HP & Laptop
+                Samakan {currentStudentCount} data siswa, guru, & absensi di semua HP & Laptop
               </p>
             </div>
           </div>
@@ -303,7 +303,7 @@ export const MultiDeviceSyncModal: React.FC<MultiDeviceSyncModalProps> = ({
                 <span>Pemberitahuan Kuota Harian Firebase (20.000 Write Limit)</span>
               </div>
               <p className="leading-relaxed text-[11px]">
-                Batas kuota tulis gratis harian Firestore di Google Cloud telah tercapai hari ini. <strong>Semua data di perangkat Anda tetap aman 100%</strong>. Anda dapat langsung menggunakan tab <strong>"Transfer Instan (Cadangan File)"</strong> di atas untuk menyamakan data 425 siswa ke HP/laptop lain tanpa kuota internet!
+                Batas kuota tulis gratis harian Firestore di Google Cloud telah tercapai hari ini. <strong>Semua data di perangkat Anda tetap aman 100%</strong>. Anda dapat langsung menggunakan tab <strong>"Transfer Instan (Cadangan File)"</strong> di atas untuk menyamakan seluruh data siswa ke HP/laptop lain tanpa kuota internet!
               </p>
             </div>
           )}
@@ -325,7 +325,7 @@ export const MultiDeviceSyncModal: React.FC<MultiDeviceSyncModalProps> = ({
                   <span>Sinkronisasi Otomatis Cloud</span>
                 </div>
                 <p className="leading-relaxed text-[11px]">
-                  Gunakan tombol di bawah pada perangkat yang memiliki data terlengkap (misal laptop dengan <strong>425 siswa</strong>) untuk menggabungkan dan memperbarui database Cloud.
+                  Gunakan tombol di bawah pada perangkat yang memiliki data terlengkap (misal HP dengan <strong>{currentStudentCount} siswa</strong>) untuk mengunggah dan memperbarui database Cloud.
                 </p>
               </div>
 
@@ -378,7 +378,7 @@ export const MultiDeviceSyncModal: React.FC<MultiDeviceSyncModalProps> = ({
                   <span>Transfer Data Instan (Tanpa Kuota Cloud)</span>
                 </div>
                 <p className="leading-relaxed text-[11px]">
-                  Fitur ini memungkinkan Anda memindahkan seluruh <strong>425 data siswa, kelas, guru, dan absensi</strong> dari laptop utama ke HP/laptop lain secara langsung dalam 1 detik.
+                  Fitur ini memungkinkan Anda memindahkan seluruh <strong>{currentStudentCount} data siswa, kelas, guru, dan absensi</strong> dari satu perangkat ke HP/laptop lain secara langsung dalam 1 detik.
                 </p>
               </div>
 

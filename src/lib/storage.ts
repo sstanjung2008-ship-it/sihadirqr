@@ -81,73 +81,184 @@ function withTimeout<T>(promise: Promise<T>, ms: number = 12000, fallbackVal: T)
   ]);
 }
 
-let quotaExceededCooldownUntil = 0;
+const QUOTA_COOLDOWN_KEY = 'sihadir_firestore_quota_cooldown_until';
 
 // Max chunk size per Firestore document: 450 KB (well below the 1MB Firestore threshold)
 const FIRESTORE_MAX_CHUNK_SIZE = 450 * 1024;
 
 export function isFirestoreQuotaExceeded(): boolean {
-  return Date.now() < quotaExceededCooldownUntil;
+  if (typeof window === 'undefined') return false;
+  try {
+    const stored = Number(localStorage.getItem(QUOTA_COOLDOWN_KEY) || '0');
+    return Date.now() < stored;
+  } catch {
+    return false;
+  }
 }
 
 export function resetFirestoreQuotaCooldown(): void {
-  quotaExceededCooldownUntil = 0;
+  if (typeof window !== 'undefined') {
+    try {
+      localStorage.removeItem(QUOTA_COOLDOWN_KEY);
+    } catch {}
+  }
+}
+
+export function handleFirestoreError(err: any): void {
+  if (!err) return;
+  const errMsg = String(err?.message || err?.code || err || '');
+  if (
+    errMsg.includes('resource-exhausted') || 
+    errMsg.includes('Quota limit exceeded') || 
+    errMsg.includes('quota metric') || 
+    errMsg.includes('Free daily write units') ||
+    err?.code === 'resource-exhausted'
+  ) {
+    console.warn('[Firestore Sync] Kuota harian Firestore gratis telah tercapai. Beralih aman ke penyimpanan lokal.');
+    if (activeUnsubscribes.length > 0) {
+      activeUnsubscribes.forEach(unsub => {
+        try { unsub(); } catch {}
+      });
+      activeUnsubscribes = [];
+      isFirestoreInitialized = false;
+    }
+    if (typeof window !== 'undefined') {
+      try {
+        localStorage.setItem(QUOTA_COOLDOWN_KEY, String(Date.now() + 6 * 60 * 60 * 1000));
+      } catch {}
+    }
+    setCloudSyncStatus('quota_exceeded');
+  }
+}
+
+/**
+ * Safe LocalStorage setter that gracefully catches QuotaExceededError,
+ * compacts attendance records, and removes stale temporary cache without crashing.
+ */
+export function safeSetLocalStorage(key: string, value: string): void {
+  if (typeof window === 'undefined') return;
+  try {
+    localStorage.setItem(key, value);
+  } catch (err: any) {
+    console.warn(`[Storage Quota Warning] LocalStorage penuh saat menyimpan ${key}. Mengoptimalkan data...`);
+    
+    // 1. If key is ATTENDANCE, compact & trim older history to avoid crash
+    if (key === KEYS.ATTENDANCE) {
+      try {
+        const records = JSON.parse(value);
+        if (Array.isArray(records)) {
+          // Compact fields
+          const compacted = records.map((r: any) => {
+            const item: any = {
+              id: r.id,
+              studentId: r.studentId,
+              studentName: r.studentName,
+              className: r.className,
+              date: r.date,
+              time: r.time,
+              status: r.status,
+              method: r.method,
+            };
+            if (r.nisn) item.nisn = r.nisn;
+            if (r.returnTime && r.returnTime !== '-') item.returnTime = r.returnTime;
+            if (r.returnStatus) item.returnStatus = r.returnStatus;
+            if (r.scannedBy && !r.scannedBy.includes('Sistem Otomatis')) item.scannedBy = r.scannedBy;
+            if (r.returnScannedBy) item.returnScannedBy = r.returnScannedBy;
+            if (r.notes) item.notes = r.notes;
+            return item;
+          });
+
+          let compStr = JSON.stringify(compacted);
+          try {
+            localStorage.setItem(key, compStr);
+            return;
+          } catch {
+            // Keep the most recent 1,200 records (covers ample school days of 431 active students)
+            compacted.sort((a: any, b: any) => (b.date || '').localeCompare(a.date || ''));
+            const recent = compacted.slice(0, 1200);
+            compStr = JSON.stringify(recent);
+            localStorage.setItem(key, compStr);
+            return;
+          }
+        }
+      } catch (e) {
+        console.error('[Storage Compact Error]:', e);
+      }
+    }
+
+    // 2. Clear non-critical caches if any
+    try {
+      const keysToClear = ['sihadir_temp_cache', 'sihadir_cached_export', 'sihadir_wa_queue'];
+      keysToClear.forEach(k => localStorage.removeItem(k));
+      localStorage.setItem(key, value);
+    } catch {
+      console.warn(`[Storage Quota Warning] Tidak dapat menulis ${key} ke LocalStorage (kuota penuh).`);
+    }
+  }
 }
 
 export async function writeCloudDocument(key: string, dataStr: string, timestamp: number): Promise<void> {
-  const totalLength = dataStr.length;
-  if (totalLength <= FIRESTORE_MAX_CHUNK_SIZE) {
-    // Normal single document
-    const docRef = doc(db, 'sihadir_app_data', key);
-    await withTimeout(
-      setDoc(docRef, {
-        data: dataStr,
-        updatedAt: timestamp,
-        isChunked: false,
-        totalChunks: 1,
-      }),
-      6000,
-      undefined
-    );
-  } else {
-    // Multi-chunk document sharding
-    const numChunks = Math.ceil(totalLength / FIRESTORE_MAX_CHUNK_SIZE);
-    const chunks: string[] = [];
-    for (let i = 0; i < numChunks; i++) {
-      chunks.push(dataStr.slice(i * FIRESTORE_MAX_CHUNK_SIZE, (i + 1) * FIRESTORE_MAX_CHUNK_SIZE));
-    }
+  if (isFirestoreQuotaExceeded()) {
+    return;
+  }
 
-    // Write chunks 1 to numChunks - 1 first in parallel with timeout
-    const chunkPromises = [];
-    for (let i = 1; i < numChunks; i++) {
-      const chunkDocRef = doc(db, 'sihadir_app_data', `${key}_chunk_${i}`);
-      chunkPromises.push(
-        withTimeout(
-          setDoc(chunkDocRef, {
-            data: chunks[i],
-            updatedAt: timestamp,
-            chunkIndex: i,
-            parentKey: key,
-          }),
-          6000,
-          undefined
-        )
+  try {
+    const totalLength = dataStr.length;
+    if (totalLength <= FIRESTORE_MAX_CHUNK_SIZE) {
+      // Normal single document
+      const docRef = doc(db, 'sihadir_app_data', key);
+      await withTimeout(
+        setDoc(docRef, {
+          data: dataStr,
+          updatedAt: timestamp,
+          isChunked: false,
+          totalChunks: 1,
+        }),
+        6000,
+        undefined
+      );
+    } else {
+      // Multi-chunk document sharding
+      const numChunks = Math.ceil(totalLength / FIRESTORE_MAX_CHUNK_SIZE);
+      const chunks: string[] = [];
+      for (let i = 0; i < numChunks; i++) {
+        chunks.push(dataStr.slice(i * FIRESTORE_MAX_CHUNK_SIZE, (i + 1) * FIRESTORE_MAX_CHUNK_SIZE));
+      }
+
+      // Write chunks 1 to numChunks - 1 first in parallel with timeout
+      const chunkPromises = [];
+      for (let i = 1; i < numChunks; i++) {
+        const chunkDocRef = doc(db, 'sihadir_app_data', `${key}_chunk_${i}`);
+        chunkPromises.push(
+          withTimeout(
+            setDoc(chunkDocRef, {
+              data: chunks[i],
+              updatedAt: timestamp,
+              chunkIndex: i,
+              parentKey: key,
+            }),
+            6000,
+            undefined
+          )
+        );
+      }
+      await Promise.all(chunkPromises);
+
+      // Finally write the root document (chunk 0) which acts as the commit pointer
+      const rootDocRef = doc(db, 'sihadir_app_data', key);
+      await withTimeout(
+        setDoc(rootDocRef, {
+          data: chunks[0],
+          updatedAt: timestamp,
+          isChunked: true,
+          totalChunks: numChunks,
+        }),
+        6000,
+        undefined
       );
     }
-    await Promise.all(chunkPromises);
-
-    // Finally write the root document (chunk 0) which acts as the commit pointer
-    const rootDocRef = doc(db, 'sihadir_app_data', key);
-    await withTimeout(
-      setDoc(rootDocRef, {
-        data: chunks[0],
-        updatedAt: timestamp,
-        isChunked: true,
-        totalChunks: numChunks,
-      }),
-      6000,
-      undefined
-    );
+  } catch (err) {
+    handleFirestoreError(err);
   }
 }
 
@@ -209,7 +320,7 @@ export function syncToCloud(key: string, data: any, instant: boolean = false, ex
   }
 
   // If daily free quota is exceeded on Google Cloud, pause remote network writes during cooldown
-  if (Date.now() < quotaExceededCooldownUntil) {
+  if (isFirestoreQuotaExceeded()) {
     setCloudSyncStatus('quota_exceeded');
     return;
   }
@@ -220,7 +331,7 @@ export function syncToCloud(key: string, data: any, instant: boolean = false, ex
   }
 
   const doWrite = async () => {
-    if (Date.now() < quotaExceededCooldownUntil) {
+    if (isFirestoreQuotaExceeded()) {
       setCloudSyncStatus('quota_exceeded');
       return;
     }
@@ -232,13 +343,9 @@ export function syncToCloud(key: string, data: any, instant: boolean = false, ex
       lastSavedStringCache[key] = dataStr;
       setCloudSyncStatus('connected');
     } catch (err: any) {
-      const errMsg = err?.message || String(err);
-      if (errMsg.includes('resource-exhausted') || errMsg.includes('Quota limit exceeded')) {
-        console.warn('[Firestore Sync] Kuota gratis Firestore harian tercapai. Beralih ke mode offline lokal.');
-        quotaExceededCooldownUntil = Date.now() + 180000; // 3 min cooldown
-        setCloudSyncStatus('quota_exceeded');
-      } else {
-        console.warn('[Firestore Sync] Error, menggunakan penyimpanan offline lokal:', errMsg);
+      handleFirestoreError(err);
+      if (!isFirestoreQuotaExceeded()) {
+        console.warn('[Firestore Sync] Error, menggunakan penyimpanan offline lokal:', err?.message || err);
         setCloudSyncStatus('offline');
       }
     }
@@ -919,8 +1026,8 @@ export async function smartSyncAndMergeAllWithCloud(): Promise<{ success: boolea
       }
     }
     const profileStr = JSON.stringify(mergedProfile);
-    localStorage.setItem(KEYS.PROFILE, profileStr);
-    localStorage.setItem(KEYS.PROFILE + '_updatedAt', String(now));
+    safeSetLocalStorage(KEYS.PROFILE, profileStr);
+    safeSetLocalStorage(KEYS.PROFILE + '_updatedAt', String(now));
 
     // Step B: Students & Photo Sanitization
     let cloudStudents: Student[] = [];
@@ -935,8 +1042,8 @@ export async function smartSyncAndMergeAllWithCloud(): Promise<{ success: boolea
     const mergedStudents = mergeStudentLists(currentLocalStudents, cloudStudents);
     const optimizedStudents = await sanitizeAndCompressStudentPhotos(mergedStudents);
     const studentsJsonStr = JSON.stringify(optimizedStudents);
-    localStorage.setItem(KEYS.STUDENTS, studentsJsonStr);
-    localStorage.setItem(KEYS.STUDENTS + '_updatedAt', String(now));
+    safeSetLocalStorage(KEYS.STUDENTS, studentsJsonStr);
+    safeSetLocalStorage(KEYS.STUDENTS + '_updatedAt', String(now));
 
     // Step C: Classes & Teachers
     let cloudClasses: SchoolClass[] = [];
@@ -963,10 +1070,10 @@ export async function smartSyncAndMergeAllWithCloud(): Promise<{ success: boolea
 
     const classesJsonStr = JSON.stringify(finalClasses);
     const teachersJsonStr = JSON.stringify(finalTeachers);
-    localStorage.setItem(KEYS.CLASSES, classesJsonStr);
-    localStorage.setItem(KEYS.CLASSES + '_updatedAt', String(now));
-    localStorage.setItem(KEYS.TEACHERS, teachersJsonStr);
-    localStorage.setItem(KEYS.TEACHERS + '_updatedAt', String(now));
+    safeSetLocalStorage(KEYS.CLASSES, classesJsonStr);
+    safeSetLocalStorage(KEYS.CLASSES + '_updatedAt', String(now));
+    safeSetLocalStorage(KEYS.TEACHERS, teachersJsonStr);
+    safeSetLocalStorage(KEYS.TEACHERS + '_updatedAt', String(now));
 
     // Step D: Attendance Records
     let cloudAtt: AttendanceRecord[] = [];
@@ -978,8 +1085,8 @@ export async function smartSyncAndMergeAllWithCloud(): Promise<{ success: boolea
     const currentLocalAtt = getAttendanceRecords();
     const mergedAtt = mergeAttendanceLists(currentLocalAtt, cloudAtt);
     const attJsonStr = JSON.stringify(mergedAtt);
-    localStorage.setItem(KEYS.ATTENDANCE, attJsonStr);
-    localStorage.setItem(KEYS.ATTENDANCE + '_updatedAt', String(now));
+    safeSetLocalStorage(KEYS.ATTENDANCE, attJsonStr);
+    safeSetLocalStorage(KEYS.ATTENDANCE + '_updatedAt', String(now));
 
     // Step E: Generic Entity Merging
     const mergeAndStoreGeneric = (key: string, cloudDoc: any, getLocal: () => any[]) => {
@@ -992,8 +1099,8 @@ export async function smartSyncAndMergeAllWithCloud(): Promise<{ success: boolea
       const localItems = getLocal();
       const merged = mergeGenericListsById(localItems, cloudItems);
       const jsonStr = JSON.stringify(merged);
-      localStorage.setItem(key, jsonStr);
-      localStorage.setItem(key + '_updatedAt', String(now));
+      safeSetLocalStorage(key, jsonStr);
+      safeSetLocalStorage(key + '_updatedAt', String(now));
       return jsonStr;
     };
 
@@ -1014,8 +1121,8 @@ export async function smartSyncAndMergeAllWithCloud(): Promise<{ success: boolea
     const localPredicates = getCharacterPredicateSettings();
     const mergedPredicates = { ...INITIAL_CHARACTER_PREDICATES, ...localPredicates, ...(cloudPredicates || {}) };
     const predicatesJsonStr = JSON.stringify(mergedPredicates);
-    localStorage.setItem(KEYS.CHARACTER_PREDICATES, predicatesJsonStr);
-    localStorage.setItem(KEYS.CHARACTER_PREDICATES + '_updatedAt', String(now));
+    safeSetLocalStorage(KEYS.CHARACTER_PREDICATES, predicatesJsonStr);
+    safeSetLocalStorage(KEYS.CHARACTER_PREDICATES + '_updatedAt', String(now));
 
     // Update local cache & notify UI instantly
     lastSavedStringCache[KEYS.PROFILE] = profileStr;
@@ -1034,24 +1141,30 @@ export async function smartSyncAndMergeAllWithCloud(): Promise<{ success: boolea
 
     notifyStorageUpdated();
 
-    // 3. Concurrently Push All Merged Data Back to Cloud
-    await Promise.allSettled([
-      writeCloudDocument(KEYS.PROFILE, profileStr, now),
-      writeCloudDocument(KEYS.STUDENTS, studentsJsonStr, now),
-      writeCloudDocument(KEYS.CLASSES, classesJsonStr, now),
-      writeCloudDocument(KEYS.TEACHERS, teachersJsonStr, now),
-      writeCloudDocument(KEYS.ATTENDANCE, attJsonStr, now),
-      writeCloudDocument(KEYS.LEAVES, leavesJsonStr, now),
-      writeCloudDocument(KEYS.LEARNING_JOURNALS, journalsJsonStr, now),
-      writeCloudDocument(KEYS.CHARACTER_TRAITS, traitsJsonStr, now),
-      writeCloudDocument(KEYS.CHARACTER_LOGS, logsJsonStr, now),
-      writeCloudDocument(KEYS.CHARACTER_PREDICATES, predicatesJsonStr, now),
-      writeCloudDocument(KEYS.GRADES, gradesJsonStr, now),
-      writeCloudDocument(KEYS.PERIODS, periodsJsonStr, now),
-      writeCloudDocument(KEYS.SCHEDULES, schedulesJsonStr, now),
-    ]);
+    // 3. Concurrently Push All Merged Data Back to Cloud (if quota is available)
+    if (!isFirestoreQuotaExceeded()) {
+      await Promise.allSettled([
+        writeCloudDocument(KEYS.PROFILE, profileStr, now),
+        writeCloudDocument(KEYS.STUDENTS, studentsJsonStr, now),
+        writeCloudDocument(KEYS.CLASSES, classesJsonStr, now),
+        writeCloudDocument(KEYS.TEACHERS, teachersJsonStr, now),
+        writeCloudDocument(KEYS.ATTENDANCE, attJsonStr, now),
+        writeCloudDocument(KEYS.LEAVES, leavesJsonStr, now),
+        writeCloudDocument(KEYS.LEARNING_JOURNALS, journalsJsonStr, now),
+        writeCloudDocument(KEYS.CHARACTER_TRAITS, traitsJsonStr, now),
+        writeCloudDocument(KEYS.CHARACTER_LOGS, logsJsonStr, now),
+        writeCloudDocument(KEYS.CHARACTER_PREDICATES, predicatesJsonStr, now),
+        writeCloudDocument(KEYS.GRADES, gradesJsonStr, now),
+        writeCloudDocument(KEYS.PERIODS, periodsJsonStr, now),
+        writeCloudDocument(KEYS.SCHEDULES, schedulesJsonStr, now),
+      ]);
+    }
 
-    setCloudSyncStatus('connected');
+    if (isFirestoreQuotaExceeded()) {
+      setCloudSyncStatus('quota_exceeded');
+    } else {
+      setCloudSyncStatus('connected');
+    }
 
     return {
       success: true,
@@ -1090,9 +1203,13 @@ export async function triggerAutoSyncOnOnline(silent: boolean = false): Promise<
     return false;
   }
 
+  if (isFirestoreQuotaExceeded()) {
+    setCloudSyncStatus('quota_exceeded');
+    return false;
+  }
+
   isAutoSyncRunning = true;
   lastAutoSyncTime = now;
-  resetFirestoreQuotaCooldown();
 
   try {
     if (!silent) {
@@ -1305,9 +1422,15 @@ export async function forceDownloadAllFromCloud(): Promise<{ success: boolean; e
   }
 }
 
+let activeUnsubscribes: (() => void)[] = [];
+
 // Initialize Realtime Sync from Firestore
 export function initFirestoreRealtimeSync() {
   if (isFirestoreInitialized || typeof window === 'undefined') return;
+  if (isFirestoreQuotaExceeded()) {
+    setCloudSyncStatus('quota_exceeded');
+    return;
+  }
   isFirestoreInitialized = true;
 
   const SYNC_KEYS: Array<{ 
@@ -1334,7 +1457,7 @@ export function initFirestoreRealtimeSync() {
   SYNC_KEYS.forEach(({ key }) => {
     try {
       const docRef = doc(db, 'sihadir_app_data', key);
-      onSnapshot(docRef, async (docSnap) => {
+      const unsub = onSnapshot(docRef, async (docSnap) => {
         if (docSnap.exists()) {
           const payload = docSnap.data();
           if (payload && payload.data !== undefined) {
@@ -1372,8 +1495,8 @@ export function initFirestoreRealtimeSync() {
                 const mergedProfile = mergeSchoolProfile(localProfile, cloudProfile);
                 finalDataToSave = JSON.stringify(mergedProfile);
                 lastSavedStringCache[key] = finalDataToSave;
-                localStorage.setItem(key, finalDataToSave);
-                localStorage.setItem(key + '_updatedAt', String(Math.max(cloudUpdatedAt, localUpdatedAt, Date.now())));
+                safeSetLocalStorage(key, finalDataToSave);
+                safeSetLocalStorage(key + '_updatedAt', String(Math.max(cloudUpdatedAt, localUpdatedAt, Date.now())));
                 notifyStorageUpdated();
                 setCloudSyncStatus('connected');
                 return;
@@ -1393,8 +1516,8 @@ export function initFirestoreRealtimeSync() {
                   const mergedStr = JSON.stringify(mergedTeachers);
                   if (currentLocalStr !== mergedStr) {
                     lastSavedStringCache[key] = mergedStr;
-                    localStorage.setItem(key, mergedStr);
-                    localStorage.setItem(key + '_updatedAt', String(Math.max(cloudUpdatedAt, localUpdatedAt, Date.now())));
+                    safeSetLocalStorage(key, mergedStr);
+                    safeSetLocalStorage(key + '_updatedAt', String(Math.max(cloudUpdatedAt, localUpdatedAt, Date.now())));
                     notifyStorageUpdated();
                   }
                   setCloudSyncStatus('connected');
@@ -1416,8 +1539,8 @@ export function initFirestoreRealtimeSync() {
                   const mergedStr = JSON.stringify(mergedStudents);
                   if (currentLocalStr !== mergedStr) {
                     lastSavedStringCache[key] = mergedStr;
-                    localStorage.setItem(key, mergedStr);
-                    localStorage.setItem(key + '_updatedAt', String(Math.max(cloudUpdatedAt, localUpdatedAt, Date.now())));
+                    safeSetLocalStorage(key, mergedStr);
+                    safeSetLocalStorage(key + '_updatedAt', String(Math.max(cloudUpdatedAt, localUpdatedAt, Date.now())));
                     notifyStorageUpdated();
                   }
                   setCloudSyncStatus('connected');
@@ -1439,8 +1562,8 @@ export function initFirestoreRealtimeSync() {
                   const mergedStr = JSON.stringify(mergedAtt);
                   if (currentLocalStr !== mergedStr) {
                     lastSavedStringCache[key] = mergedStr;
-                    localStorage.setItem(key, mergedStr);
-                    localStorage.setItem(key + '_updatedAt', String(Math.max(cloudUpdatedAt, localUpdatedAt, Date.now())));
+                    safeSetLocalStorage(key, mergedStr);
+                    safeSetLocalStorage(key + '_updatedAt', String(Math.max(cloudUpdatedAt, localUpdatedAt, Date.now())));
                     notifyStorageUpdated();
                   }
                   setCloudSyncStatus('connected');
@@ -1464,8 +1587,8 @@ export function initFirestoreRealtimeSync() {
                   const mergedStr = JSON.stringify(mergedProfile);
                   if (currentLocalStr !== mergedStr) {
                     lastSavedStringCache[key] = mergedStr;
-                    localStorage.setItem(key, mergedStr);
-                    localStorage.setItem(key + '_updatedAt', String(Math.max(cloudUpdatedAt, localUpdatedAt, Date.now())));
+                    safeSetLocalStorage(key, mergedStr);
+                    safeSetLocalStorage(key + '_updatedAt', String(Math.max(cloudUpdatedAt, localUpdatedAt, Date.now())));
                     notifyStorageUpdated();
                   }
                   setCloudSyncStatus('connected');
@@ -1491,21 +1614,17 @@ export function initFirestoreRealtimeSync() {
             lastSavedStringCache[key] = finalDataToSave;
 
             if (currentLocalStr !== finalDataToSave) {
-              localStorage.setItem(key, finalDataToSave);
-              localStorage.setItem(key + '_updatedAt', String(cloudUpdatedAt || Date.now()));
+              safeSetLocalStorage(key, finalDataToSave);
+              safeSetLocalStorage(key + '_updatedAt', String(cloudUpdatedAt || Date.now()));
               notifyStorageUpdated();
             }
           }
           setCloudSyncStatus('connected');
         }
       }, (err) => {
-        const errMsg = err?.message || String(err);
-        if (errMsg.includes('resource-exhausted') || errMsg.includes('Quota limit exceeded')) {
-          setCloudSyncStatus('quota_exceeded');
-        } else {
-          setCloudSyncStatus('offline');
-        }
+        handleFirestoreError(err);
       });
+      activeUnsubscribes.push(unsub);
     } catch (e) {
       setCloudSyncStatus('offline');
     }
@@ -1516,7 +1635,7 @@ export function initFirestoreRealtimeSync() {
   try {
     const existingStudents = getStudents();
     const hasOversized = existingStudents.some(s => s.photoUrl?.startsWith('data:') && s.photoUrl.length > 18000);
-    if (hasOversized) {
+    if (hasOversized && !isFirestoreQuotaExceeded()) {
       sanitizeAndCompressStudentPhotos(existingStudents).then(optimized => {
         if (optimized !== existingStudents) {
           saveStudents(optimized, true);
@@ -1529,8 +1648,10 @@ export function initFirestoreRealtimeSync() {
   if (typeof window !== 'undefined') {
     // 1. When device comes back online (WiFi/Cellular reconnected)
     window.addEventListener('online', () => {
-      console.log('[Network] Koneksi online terdeteksi! Menjalankan sinkronisasi database otomatis...');
-      triggerAutoSyncOnOnline(false);
+      if (!isFirestoreQuotaExceeded()) {
+        console.log('[Network] Koneksi online terdeteksi! Menjalankan sinkronisasi database otomatis...');
+        triggerAutoSyncOnOnline(false);
+      }
     });
 
     // 2. When device loses connection (Offline)
@@ -1548,7 +1669,7 @@ export function initFirestoreRealtimeSync() {
 
     // 3. When returning to the app/tab from background
     document.addEventListener('visibilitychange', () => {
-      if (document.visibilityState === 'visible' && typeof navigator !== 'undefined' && navigator.onLine) {
+      if (document.visibilityState === 'visible' && typeof navigator !== 'undefined' && navigator.onLine && !isFirestoreQuotaExceeded()) {
         const timeSince = Date.now() - lastAutoSyncTime;
         if (timeSince > 25000) {
           triggerAutoSyncOnOnline(true);
@@ -1557,9 +1678,11 @@ export function initFirestoreRealtimeSync() {
     });
 
     // 4. Initial background auto-sync on startup after brief initialization delay
-    if (typeof navigator !== 'undefined' && navigator.onLine) {
+    if (typeof navigator !== 'undefined' && navigator.onLine && !isFirestoreQuotaExceeded()) {
       setTimeout(() => {
-        triggerAutoSyncOnOnline(true);
+        if (!isFirestoreQuotaExceeded()) {
+          triggerAutoSyncOnOnline(true);
+        }
       }, 1500);
     }
 
@@ -1672,12 +1795,8 @@ export function getSchoolCheckoutTimeForDay(profile: SchoolProfile, dayName?: st
 export function saveSchoolProfile(profile: SchoolProfile): void {
   const now = Date.now();
   const dataStr = JSON.stringify(profile);
-  try {
-    localStorage.setItem(KEYS.PROFILE, dataStr);
-    localStorage.setItem(KEYS.PROFILE + '_updatedAt', String(now));
-  } catch (err) {
-    console.error('Error saving school profile to localStorage:', err);
-  }
+  safeSetLocalStorage(KEYS.PROFILE, dataStr);
+  safeSetLocalStorage(KEYS.PROFILE + '_updatedAt', String(now));
   notifyStorageUpdated();
   syncToCloud(KEYS.PROFILE, profile, true, now);
 }
@@ -1692,8 +1811,8 @@ export function getSchoolClasses(): SchoolClass[] {
       parsed = INITIAL_CLASSES;
     }
   } else {
-    localStorage.setItem(KEYS.CLASSES, JSON.stringify(INITIAL_CLASSES));
-    localStorage.setItem(KEYS.CLASSES + '_updatedAt', '1');
+    safeSetLocalStorage(KEYS.CLASSES, JSON.stringify(INITIAL_CLASSES));
+    safeSetLocalStorage(KEYS.CLASSES + '_updatedAt', '1');
   }
   return [...parsed].sort((a, b) => a.name.localeCompare(b.name, 'id', { numeric: true, sensitivity: 'base' }));
 }
@@ -1701,8 +1820,8 @@ export function getSchoolClasses(): SchoolClass[] {
 export function saveSchoolClasses(classes: SchoolClass[]): void {
   const now = Date.now();
   const dataStr = JSON.stringify(classes);
-  localStorage.setItem(KEYS.CLASSES, dataStr);
-  localStorage.setItem(KEYS.CLASSES + '_updatedAt', String(now));
+  safeSetLocalStorage(KEYS.CLASSES, dataStr);
+  safeSetLocalStorage(KEYS.CLASSES + '_updatedAt', String(now));
   notifyStorageUpdated();
   syncToCloud(KEYS.CLASSES, classes, false, now);
 }
@@ -1710,8 +1829,8 @@ export function saveSchoolClasses(classes: SchoolClass[]): void {
 export function getStudents(): Student[] {
   const data = localStorage.getItem(KEYS.STUDENTS);
   if (data === null) {
-    localStorage.setItem(KEYS.STUDENTS, JSON.stringify(INITIAL_STUDENTS));
-    localStorage.setItem(KEYS.STUDENTS + '_updatedAt', '1');
+    safeSetLocalStorage(KEYS.STUDENTS, JSON.stringify(INITIAL_STUDENTS));
+    safeSetLocalStorage(KEYS.STUDENTS + '_updatedAt', '1');
     return INITIAL_STUDENTS;
   }
   try {
@@ -1725,8 +1844,8 @@ export function getStudents(): Student[] {
 export function saveStudents(students: Student[], instant: boolean = false): void {
   const now = Date.now();
   const dataStr = JSON.stringify(students);
-  localStorage.setItem(KEYS.STUDENTS, dataStr);
-  localStorage.setItem(KEYS.STUDENTS + '_updatedAt', String(now));
+  safeSetLocalStorage(KEYS.STUDENTS, dataStr);
+  safeSetLocalStorage(KEYS.STUDENTS + '_updatedAt', String(now));
   notifyStorageUpdated();
   syncToCloud(KEYS.STUDENTS, students, instant || students.length === 0, now);
 
@@ -1738,8 +1857,8 @@ export function saveStudents(students: Student[], instant: boolean = false): voi
       if (optimizedStudents !== students) {
         const optNow = Date.now();
         const optStr = JSON.stringify(optimizedStudents);
-        localStorage.setItem(KEYS.STUDENTS, optStr);
-        localStorage.setItem(KEYS.STUDENTS + '_updatedAt', String(optNow));
+        safeSetLocalStorage(KEYS.STUDENTS, optStr);
+        safeSetLocalStorage(KEYS.STUDENTS + '_updatedAt', String(optNow));
         notifyStorageUpdated();
         syncToCloud(KEYS.STUDENTS, optimizedStudents, true, optNow);
       }
@@ -1755,8 +1874,8 @@ export function getAttendanceRecords(): AttendanceRecord[] {
   const data = localStorage.getItem(KEYS.ATTENDANCE);
   if (data === null) {
     const initial = generateInitialAttendanceHistory(INITIAL_STUDENTS);
-    localStorage.setItem(KEYS.ATTENDANCE, JSON.stringify(initial));
-    localStorage.setItem(KEYS.ATTENDANCE + '_updatedAt', '1');
+    safeSetLocalStorage(KEYS.ATTENDANCE, JSON.stringify(initial));
+    safeSetLocalStorage(KEYS.ATTENDANCE + '_updatedAt', '1');
     return initial;
   }
   try {
@@ -1770,8 +1889,8 @@ export function getAttendanceRecords(): AttendanceRecord[] {
 export function saveAttendanceRecords(records: AttendanceRecord[], instant: boolean = true): void {
   const now = Date.now();
   const dataStr = JSON.stringify(records);
-  localStorage.setItem(KEYS.ATTENDANCE, dataStr);
-  localStorage.setItem(KEYS.ATTENDANCE + '_updatedAt', String(now));
+  safeSetLocalStorage(KEYS.ATTENDANCE, dataStr);
+  safeSetLocalStorage(KEYS.ATTENDANCE + '_updatedAt', String(now));
   notifyStorageUpdated();
   syncToCloud(KEYS.ATTENDANCE, records, instant, now);
 }
@@ -1779,15 +1898,15 @@ export function saveAttendanceRecords(records: AttendanceRecord[], instant: bool
 // Local-only save for automatic ALPA calculation so local device NEVER overwrites real Cloud scans
 export function saveAttendanceRecordsLocally(records: AttendanceRecord[]): void {
   const dataStr = JSON.stringify(records);
-  localStorage.setItem(KEYS.ATTENDANCE, dataStr);
+  safeSetLocalStorage(KEYS.ATTENDANCE, dataStr);
   notifyStorageUpdated();
 }
 
 export function getLeaveRequests(): LeaveRequest[] {
   const data = localStorage.getItem(KEYS.LEAVES);
   if (data === null) {
-    localStorage.setItem(KEYS.LEAVES, JSON.stringify(INITIAL_LEAVE_REQUESTS));
-    localStorage.setItem(KEYS.LEAVES + '_updatedAt', '1');
+    safeSetLocalStorage(KEYS.LEAVES, JSON.stringify(INITIAL_LEAVE_REQUESTS));
+    safeSetLocalStorage(KEYS.LEAVES + '_updatedAt', '1');
     return INITIAL_LEAVE_REQUESTS;
   }
   try {
@@ -1801,8 +1920,8 @@ export function getLeaveRequests(): LeaveRequest[] {
 export function saveLeaveRequests(requests: LeaveRequest[]): void {
   const now = Date.now();
   const dataStr = JSON.stringify(requests);
-  localStorage.setItem(KEYS.LEAVES, dataStr);
-  localStorage.setItem(KEYS.LEAVES + '_updatedAt', String(now));
+  safeSetLocalStorage(KEYS.LEAVES, dataStr);
+  safeSetLocalStorage(KEYS.LEAVES + '_updatedAt', String(now));
   notifyStorageUpdated();
   syncToCloud(KEYS.LEAVES, requests, requests.length === 0, now);
 }
@@ -1810,8 +1929,8 @@ export function saveLeaveRequests(requests: LeaveRequest[]): void {
 export function getWaLogs(): WhatsAppLog[] {
   const data = localStorage.getItem(KEYS.WA_LOGS);
   if (data === null) {
-    localStorage.setItem(KEYS.WA_LOGS, JSON.stringify(INITIAL_WA_LOGS));
-    localStorage.setItem(KEYS.WA_LOGS + '_updatedAt', '1');
+    safeSetLocalStorage(KEYS.WA_LOGS, JSON.stringify(INITIAL_WA_LOGS));
+    safeSetLocalStorage(KEYS.WA_LOGS + '_updatedAt', '1');
     return INITIAL_WA_LOGS;
   }
   try {
@@ -1825,16 +1944,16 @@ export function getWaLogs(): WhatsAppLog[] {
 export function saveWaLogs(logs: WhatsAppLog[]): void {
   const now = Date.now();
   const dataStr = JSON.stringify(logs);
-  localStorage.setItem(KEYS.WA_LOGS, dataStr);
-  localStorage.setItem(KEYS.WA_LOGS + '_updatedAt', String(now));
+  safeSetLocalStorage(KEYS.WA_LOGS, dataStr);
+  safeSetLocalStorage(KEYS.WA_LOGS + '_updatedAt', String(now));
   notifyStorageUpdated();
 }
 
 export function getTeachers(): Teacher[] {
   const data = localStorage.getItem(KEYS.TEACHERS);
   if (data === null) {
-    localStorage.setItem(KEYS.TEACHERS, JSON.stringify(INITIAL_TEACHERS));
-    localStorage.setItem(KEYS.TEACHERS + '_updatedAt', '1');
+    safeSetLocalStorage(KEYS.TEACHERS, JSON.stringify(INITIAL_TEACHERS));
+    safeSetLocalStorage(KEYS.TEACHERS + '_updatedAt', '1');
     return INITIAL_TEACHERS;
   }
   try {
@@ -1848,8 +1967,8 @@ export function getTeachers(): Teacher[] {
 export function saveTeachers(teachers: Teacher[], instant: boolean = true): void {
   const now = Date.now();
   const dataStr = JSON.stringify(teachers);
-  localStorage.setItem(KEYS.TEACHERS, dataStr);
-  localStorage.setItem(KEYS.TEACHERS + '_updatedAt', String(now));
+  safeSetLocalStorage(KEYS.TEACHERS, dataStr);
+  safeSetLocalStorage(KEYS.TEACHERS + '_updatedAt', String(now));
   notifyStorageUpdated();
   syncToCloud(KEYS.TEACHERS, teachers, instant, now);
 }
@@ -1903,8 +2022,8 @@ export function resetAllStudentsPassword(): void {
 export function getLearningJournals(): LearningJournal[] {
   const data = localStorage.getItem(KEYS.LEARNING_JOURNALS);
   if (data === null) {
-    localStorage.setItem(KEYS.LEARNING_JOURNALS, JSON.stringify(INITIAL_LEARNING_JOURNALS));
-    localStorage.setItem(KEYS.LEARNING_JOURNALS + '_updatedAt', '1');
+    safeSetLocalStorage(KEYS.LEARNING_JOURNALS, JSON.stringify(INITIAL_LEARNING_JOURNALS));
+    safeSetLocalStorage(KEYS.LEARNING_JOURNALS + '_updatedAt', '1');
     return INITIAL_LEARNING_JOURNALS;
   }
   try {
@@ -1918,8 +2037,8 @@ export function getLearningJournals(): LearningJournal[] {
 export function saveLearningJournals(journals: LearningJournal[]): void {
   const now = Date.now();
   const dataStr = JSON.stringify(journals);
-  localStorage.setItem(KEYS.LEARNING_JOURNALS, dataStr);
-  localStorage.setItem(KEYS.LEARNING_JOURNALS + '_updatedAt', String(now));
+  safeSetLocalStorage(KEYS.LEARNING_JOURNALS, dataStr);
+  safeSetLocalStorage(KEYS.LEARNING_JOURNALS + '_updatedAt', String(now));
   notifyStorageUpdated();
   syncToCloud(KEYS.LEARNING_JOURNALS, journals, false, now);
 }
@@ -1927,8 +2046,8 @@ export function saveLearningJournals(journals: LearningJournal[]): void {
 export function getCharacterTraits(): CharacterTrait[] {
   const data = localStorage.getItem(KEYS.CHARACTER_TRAITS);
   if (data === null) {
-    localStorage.setItem(KEYS.CHARACTER_TRAITS, JSON.stringify(INITIAL_CHARACTER_TRAITS));
-    localStorage.setItem(KEYS.CHARACTER_TRAITS + '_updatedAt', '1');
+    safeSetLocalStorage(KEYS.CHARACTER_TRAITS, JSON.stringify(INITIAL_CHARACTER_TRAITS));
+    safeSetLocalStorage(KEYS.CHARACTER_TRAITS + '_updatedAt', '1');
     return INITIAL_CHARACTER_TRAITS;
   }
   try {
@@ -1942,8 +2061,8 @@ export function getCharacterTraits(): CharacterTrait[] {
 export function saveCharacterTraits(traits: CharacterTrait[]): void {
   const now = Date.now();
   const dataStr = JSON.stringify(traits);
-  localStorage.setItem(KEYS.CHARACTER_TRAITS, dataStr);
-  localStorage.setItem(KEYS.CHARACTER_TRAITS + '_updatedAt', String(now));
+  safeSetLocalStorage(KEYS.CHARACTER_TRAITS, dataStr);
+  safeSetLocalStorage(KEYS.CHARACTER_TRAITS + '_updatedAt', String(now));
   notifyStorageUpdated();
   syncToCloud(KEYS.CHARACTER_TRAITS, traits, false, now);
 }
@@ -1951,8 +2070,8 @@ export function saveCharacterTraits(traits: CharacterTrait[]): void {
 export function getStudentCharacterLogs(): StudentCharacterLog[] {
   const data = localStorage.getItem(KEYS.CHARACTER_LOGS);
   if (data === null) {
-    localStorage.setItem(KEYS.CHARACTER_LOGS, JSON.stringify(INITIAL_STUDENT_CHARACTER_LOGS));
-    localStorage.setItem(KEYS.CHARACTER_LOGS + '_updatedAt', '1');
+    safeSetLocalStorage(KEYS.CHARACTER_LOGS, JSON.stringify(INITIAL_STUDENT_CHARACTER_LOGS));
+    safeSetLocalStorage(KEYS.CHARACTER_LOGS + '_updatedAt', '1');
     return INITIAL_STUDENT_CHARACTER_LOGS;
   }
   try {
@@ -1966,8 +2085,8 @@ export function getStudentCharacterLogs(): StudentCharacterLog[] {
 export function saveStudentCharacterLogs(logs: StudentCharacterLog[]): void {
   const now = Date.now();
   const dataStr = JSON.stringify(logs);
-  localStorage.setItem(KEYS.CHARACTER_LOGS, dataStr);
-  localStorage.setItem(KEYS.CHARACTER_LOGS + '_updatedAt', String(now));
+  safeSetLocalStorage(KEYS.CHARACTER_LOGS, dataStr);
+  safeSetLocalStorage(KEYS.CHARACTER_LOGS + '_updatedAt', String(now));
   notifyStorageUpdated();
   syncToCloud(KEYS.CHARACTER_LOGS, logs, false, now);
 }
@@ -1975,8 +2094,8 @@ export function saveStudentCharacterLogs(logs: StudentCharacterLog[]): void {
 export function getCharacterPredicateSettings(): CharacterPredicateSettings {
   const data = localStorage.getItem(KEYS.CHARACTER_PREDICATES);
   if (data === null) {
-    localStorage.setItem(KEYS.CHARACTER_PREDICATES, JSON.stringify(INITIAL_CHARACTER_PREDICATES));
-    localStorage.setItem(KEYS.CHARACTER_PREDICATES + '_updatedAt', '1');
+    safeSetLocalStorage(KEYS.CHARACTER_PREDICATES, JSON.stringify(INITIAL_CHARACTER_PREDICATES));
+    safeSetLocalStorage(KEYS.CHARACTER_PREDICATES + '_updatedAt', '1');
     return INITIAL_CHARACTER_PREDICATES;
   }
   try {
@@ -1996,8 +2115,8 @@ export function getCharacterPredicateSettings(): CharacterPredicateSettings {
 export function saveCharacterPredicateSettings(settings: CharacterPredicateSettings): void {
   const now = Date.now();
   const dataStr = JSON.stringify(settings);
-  localStorage.setItem(KEYS.CHARACTER_PREDICATES, dataStr);
-  localStorage.setItem(KEYS.CHARACTER_PREDICATES + '_updatedAt', String(now));
+  safeSetLocalStorage(KEYS.CHARACTER_PREDICATES, dataStr);
+  safeSetLocalStorage(KEYS.CHARACTER_PREDICATES + '_updatedAt', String(now));
   notifyStorageUpdated();
   syncToCloud(KEYS.CHARACTER_PREDICATES, settings, false, now);
 }
@@ -2015,8 +2134,8 @@ export function getStudentGradeAssessments(): StudentGradeAssessment[] {
 export function saveStudentGradeAssessments(assessments: StudentGradeAssessment[]): void {
   const now = Date.now();
   const dataStr = JSON.stringify(assessments);
-  localStorage.setItem(KEYS.GRADES, dataStr);
-  localStorage.setItem(KEYS.GRADES + '_updatedAt', String(now));
+  safeSetLocalStorage(KEYS.GRADES, dataStr);
+  safeSetLocalStorage(KEYS.GRADES + '_updatedAt', String(now));
   notifyStorageUpdated();
   syncToCloud(KEYS.GRADES, assessments, false, now);
 }
@@ -2035,7 +2154,7 @@ export function saveUserSession(session: UserSession | null): void {
   if (!session) {
     localStorage.removeItem(KEYS.SESSION);
   } else {
-    localStorage.setItem(KEYS.SESSION, JSON.stringify(session));
+    safeSetLocalStorage(KEYS.SESSION, JSON.stringify(session));
   }
   notifyStorageUpdated();
 }
@@ -2044,8 +2163,8 @@ export function saveUserSession(session: UserSession | null): void {
 export function getLessonPeriods(): LessonPeriod[] {
   const data = localStorage.getItem(KEYS.PERIODS);
   if (data === null) {
-    localStorage.setItem(KEYS.PERIODS, JSON.stringify(INITIAL_LESSON_PERIODS));
-    localStorage.setItem(KEYS.PERIODS + '_updatedAt', '1');
+    safeSetLocalStorage(KEYS.PERIODS, JSON.stringify(INITIAL_LESSON_PERIODS));
+    safeSetLocalStorage(KEYS.PERIODS + '_updatedAt', '1');
     return INITIAL_LESSON_PERIODS;
   }
   try {
@@ -2059,8 +2178,8 @@ export function getLessonPeriods(): LessonPeriod[] {
 export function saveLessonPeriods(periods: LessonPeriod[]): void {
   const now = Date.now();
   const dataStr = JSON.stringify(periods);
-  localStorage.setItem(KEYS.PERIODS, dataStr);
-  localStorage.setItem(KEYS.PERIODS + '_updatedAt', String(now));
+  safeSetLocalStorage(KEYS.PERIODS, dataStr);
+  safeSetLocalStorage(KEYS.PERIODS + '_updatedAt', String(now));
   notifyStorageUpdated();
   syncToCloud(KEYS.PERIODS, periods, true, now);
 }
@@ -2069,8 +2188,8 @@ export function saveLessonPeriods(periods: LessonPeriod[]): void {
 export function getClassSchedules(): ClassScheduleSlot[] {
   const data = localStorage.getItem(KEYS.SCHEDULES);
   if (data === null) {
-    localStorage.setItem(KEYS.SCHEDULES, JSON.stringify(INITIAL_CLASS_SCHEDULES));
-    localStorage.setItem(KEYS.SCHEDULES + '_updatedAt', '1');
+    safeSetLocalStorage(KEYS.SCHEDULES, JSON.stringify(INITIAL_CLASS_SCHEDULES));
+    safeSetLocalStorage(KEYS.SCHEDULES + '_updatedAt', '1');
     return INITIAL_CLASS_SCHEDULES;
   }
   try {
@@ -2084,8 +2203,8 @@ export function getClassSchedules(): ClassScheduleSlot[] {
 export function saveClassSchedules(schedules: ClassScheduleSlot[]): void {
   const now = Date.now();
   const dataStr = JSON.stringify(schedules);
-  localStorage.setItem(KEYS.SCHEDULES, dataStr);
-  localStorage.setItem(KEYS.SCHEDULES + '_updatedAt', String(now));
+  safeSetLocalStorage(KEYS.SCHEDULES, dataStr);
+  safeSetLocalStorage(KEYS.SCHEDULES + '_updatedAt', String(now));
   notifyStorageUpdated();
   syncToCloud(KEYS.SCHEDULES, schedules, true, now);
 }
@@ -2170,8 +2289,8 @@ export function getDirectChats(): Record<string, DirectChatMessage[]> {
 export function saveDirectChats(chats: Record<string, DirectChatMessage[]>): void {
   const now = Date.now();
   const dataStr = JSON.stringify(chats);
-  localStorage.setItem(KEYS.DIRECT_CHATS, dataStr);
-  localStorage.setItem(KEYS.DIRECT_CHATS + '_updatedAt', String(now));
+  safeSetLocalStorage(KEYS.DIRECT_CHATS, dataStr);
+  safeSetLocalStorage(KEYS.DIRECT_CHATS + '_updatedAt', String(now));
   notifyStorageUpdated();
   syncToCloud(KEYS.DIRECT_CHATS, chats, true, now);
 }
@@ -2179,8 +2298,8 @@ export function saveDirectChats(chats: Record<string, DirectChatMessage[]>): voi
 export function resetToDefaultData(): void {
   localStorage.clear();
   const now = Date.now();
-  localStorage.setItem(KEYS.STUDENTS, JSON.stringify(INITIAL_STUDENTS));
-  localStorage.setItem(KEYS.STUDENTS + '_updatedAt', String(now));
+  safeSetLocalStorage(KEYS.STUDENTS, JSON.stringify(INITIAL_STUDENTS));
+  safeSetLocalStorage(KEYS.STUDENTS + '_updatedAt', String(now));
   getSchoolProfile();
   getSchoolClasses();
   getAttendanceRecords();

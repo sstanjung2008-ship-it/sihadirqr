@@ -9,9 +9,12 @@ import {
   KeyRound, 
   AlertCircle, 
   Sparkles, 
-  Clock 
+  Clock,
+  RefreshCw,
+  CheckCircle2
 } from 'lucide-react';
 import { PWAInstallBanner } from './PWAInstallBanner';
+import { smartSyncAndMergeAllWithCloud, getTeachers, getStudents, getSchoolProfile } from '../lib/storage';
 
 interface LoginViewProps {
   schoolProfile: SchoolProfile;
@@ -21,16 +24,33 @@ interface LoginViewProps {
 }
 
 export const LoginView: React.FC<LoginViewProps> = ({
-  schoolProfile,
-  teachers,
-  students,
+  schoolProfile: initialSchoolProfile,
+  teachers: initialTeachers,
+  students: initialStudents,
   onLoginSuccess,
 }) => {
+  const [schoolProfile, setSchoolProfile] = useState<SchoolProfile>(initialSchoolProfile);
+  const [teachers, setTeachers] = useState<Teacher[]>(initialTeachers);
+  const [students, setStudents] = useState<Student[]>(initialStudents);
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [timeStr, setTimeStr] = useState('');
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [syncSuccessMsg, setSyncSuccessMsg] = useState<string | null>(null);
+
+  useEffect(() => {
+    setSchoolProfile(initialSchoolProfile);
+  }, [initialSchoolProfile]);
+
+  useEffect(() => {
+    setTeachers(initialTeachers);
+  }, [initialTeachers]);
+
+  useEffect(() => {
+    setStudents(initialStudents);
+  }, [initialStudents]);
 
   // Update clock
   useEffect(() => {
@@ -52,46 +72,59 @@ export const LoginView: React.FC<LoginViewProps> = ({
     return digits;
   };
 
-  const handleLoginSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleManualSync = async () => {
+    setIsSyncing(true);
     setErrorMessage(null);
+    setSyncSuccessMsg(null);
+    try {
+      const res = await smartSyncAndMergeAllWithCloud();
+      const updatedTeachers = getTeachers();
+      const updatedStudents = getStudents();
+      const updatedProfile = getSchoolProfile();
+      setTeachers(updatedTeachers);
+      setStudents(updatedStudents);
+      setSchoolProfile(updatedProfile);
+      setSyncSuccessMsg(`Data berhasil diperbarui dari Cloud! (${updatedTeachers.length} Guru, ${updatedStudents.length} Siswa)`);
+      setTimeout(() => setSyncSuccessMsg(null), 4000);
+    } catch (err: any) {
+      setErrorMessage(`Gagal memperbarui data dari Cloud: ${err?.message || 'Pastikan koneksi internet aktif'}`);
+    } finally {
+      setIsSyncing(false);
+    }
+  };
 
+  const performLoginCheck = (
+    currentTeachers: Teacher[],
+    currentStudents: Student[],
+    currentProfile: SchoolProfile
+  ): boolean => {
     const cleanInputUser = username.trim();
     const cleanNoSpaceUser = cleanInputUser.replace(/\s+/g, '');
     const cleanDigitsUser = normalizePhone(cleanInputUser);
-
-    if (!cleanInputUser) {
-      setErrorMessage('Username / No. HP/WA / NIP / NISN wajib diisi!');
-      return;
-    }
-
-    if (!password.trim()) {
-      setErrorMessage('Kata sandi wajib diisi!');
-      return;
-    }
+    const pureDigitsInput = cleanInputUser.replace(/\D/g, '');
 
     // 1. ADMIN LOGIC
     if (cleanInputUser.toLowerCase() === 'admin') {
-      const expectedAdminPassword = schoolProfile.adminPassword || 'admin123';
+      const expectedAdminPassword = currentProfile.adminPassword || 'admin123';
       if (password === expectedAdminPassword) {
         const session: UserSession = {
           isLoggedIn: true,
           role: 'ADMIN',
           username: 'admin',
           displayName: 'Administrator Utama (Admin Sekolah)',
-          photoUrl: schoolProfile.schoolLogo || undefined
+          photoUrl: currentProfile.schoolLogo || undefined
         };
         onLoginSuccess(session);
-        return;
+        return true;
       } else {
         setErrorMessage('Password Admin salah! Silakan periksa kembali password yang telah diatur.');
-        return;
+        return true;
       }
     }
 
     // 2. SCANNER / SATPAM LOGIC
     if (cleanInputUser.toLowerCase() === 'satpam' || cleanInputUser.toLowerCase() === 'pos') {
-      const expectedScannerPassword = schoolProfile.scannerPassword || '123456';
+      const expectedScannerPassword = currentProfile.scannerPassword || '123456';
       if (password === expectedScannerPassword || password === 'satpam' || (expectedScannerPassword === '123456' && password === '123456')) {
         const session: UserSession = {
           isLoggedIn: true,
@@ -100,15 +133,15 @@ export const LoginView: React.FC<LoginViewProps> = ({
           displayName: 'Petugas Pos Scanner Satpam',
         };
         onLoginSuccess(session);
-        return;
+        return true;
       } else {
         setErrorMessage('Password Pos Scanner Satpam salah!');
-        return;
+        return true;
       }
     }
 
-    // 3. TEACHER (GURU) LOGIC - Match by No. Handphone / WhatsApp, NIP, or Nama Guru
-    const matchedTeacher = teachers.find(t => {
+    // 3. TEACHER (GURU) LOGIC - Match by No. Handphone / WhatsApp, NIP, Email, or Nama Guru
+    const matchedTeacher = currentTeachers.find(t => {
       const tPhoneDigits = normalizePhone(t.phone);
       // Check phone number match
       if (tPhoneDigits && cleanDigitsUser && tPhoneDigits === cleanDigitsUser) {
@@ -117,20 +150,24 @@ export const LoginView: React.FC<LoginViewProps> = ({
       if (t.phone && t.phone.replace(/\s+/g, '') === cleanNoSpaceUser) {
         return true;
       }
+      // Check Email match
+      if (t.email && t.email.trim().toLowerCase() === cleanInputUser.toLowerCase()) {
+        return true;
+      }
       // Check NIP or ID match
-      if (t.nip && (
-          t.nip.replace(/\s+/g, '') === cleanNoSpaceUser ||
-          t.nip.toLowerCase() === cleanInputUser.toLowerCase() ||
-          t.id.toLowerCase() === cleanInputUser.toLowerCase()
-      )) {
+      if (t.nip) {
+        const tNipPure = t.nip.replace(/\D/g, '');
+        if (pureDigitsInput && tNipPure && pureDigitsInput === tNipPure) return true;
+        if (t.nip.replace(/\s+/g, '') === cleanNoSpaceUser) return true;
+        if (t.nip.toLowerCase() === cleanInputUser.toLowerCase()) return true;
+      }
+      if (t.id && t.id.toLowerCase() === cleanInputUser.toLowerCase()) {
         return true;
       }
       // Check Teacher Name match (case-insensitive)
-      if (t.name && (
-          t.name.toLowerCase().trim() === cleanInputUser.toLowerCase() ||
-          t.name.toLowerCase().replace(/[^a-z0-9]/g, '') === cleanInputUser.toLowerCase().replace(/[^a-z0-9]/g, '')
-      )) {
-        return true;
+      if (t.name) {
+        if (t.name.toLowerCase().trim() === cleanInputUser.toLowerCase()) return true;
+        if (t.name.toLowerCase().replace(/[^a-z0-9]/g, '') === cleanInputUser.toLowerCase().replace(/[^a-z0-9]/g, '')) return true;
       }
       return false;
     });
@@ -141,26 +178,34 @@ export const LoginView: React.FC<LoginViewProps> = ({
         const session: UserSession = {
           isLoggedIn: true,
           role: 'TEACHER',
-          username: matchedTeacher.phone || matchedTeacher.nip,
+          username: matchedTeacher.phone || matchedTeacher.nip || matchedTeacher.id,
           displayName: matchedTeacher.name,
           nipOrNisn: matchedTeacher.nip,
           teacherId: matchedTeacher.id,
           photoUrl: matchedTeacher.photoUrl
         };
         onLoginSuccess(session);
-        return;
+        return true;
       } else {
         setErrorMessage('Password Guru salah! (Default password: 123456). Silakan periksa kembali atau hubungi Administrator.');
-        return;
+        return true;
       }
     }
 
     // 4. PARENT / STUDENT (WALI MURID) LOGIC
-    const matchedStudent = students.find(s => 
-      s.nisn.replace(/\s+/g, '') === cleanNoSpaceUser || 
-      s.nisn.toLowerCase() === cleanInputUser.toLowerCase() ||
-      s.nis.toLowerCase() === cleanInputUser.toLowerCase()
-    );
+    const matchedStudent = currentStudents.find(s => {
+      const sNisnPure = (s.nisn || '').replace(/\D/g, '');
+      const sNisPure = (s.nis || '').replace(/\D/g, '');
+      const sParentPhoneDigits = normalizePhone(s.parentPhone);
+
+      if (pureDigitsInput && sNisnPure && pureDigitsInput === sNisnPure) return true;
+      if (pureDigitsInput && sNisPure && pureDigitsInput === sNisPure) return true;
+      if (cleanDigitsUser && sParentPhoneDigits && cleanDigitsUser === sParentPhoneDigits) return true;
+      if (s.nisn && s.nisn.replace(/\s+/g, '') === cleanNoSpaceUser) return true;
+      if (s.nisn && s.nisn.toLowerCase() === cleanInputUser.toLowerCase()) return true;
+      if (s.nis && s.nis.toLowerCase() === cleanInputUser.toLowerCase()) return true;
+      return false;
+    });
 
     if (matchedStudent) {
       const expectedPassword = matchedStudent.password || '123456';
@@ -175,15 +220,56 @@ export const LoginView: React.FC<LoginViewProps> = ({
           photoUrl: matchedStudent.photoUrl
         };
         onLoginSuccess(session);
-        return;
+        return true;
       } else {
         setErrorMessage('Password Wali / Siswa salah! (Default password: 123456). Silakan periksa kembali atau hubungi Administrator.');
-        return;
+        return true;
       }
     }
 
-    // If no match found
-    setErrorMessage('No. HP/WA, NIP, NISN, atau Username tidak terdaftar! Periksa kembali data login Anda.');
+    return false;
+  };
+
+  const handleLoginSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setErrorMessage(null);
+    setSyncSuccessMsg(null);
+
+    const cleanInputUser = username.trim();
+    if (!cleanInputUser) {
+      setErrorMessage('Username / No. HP/WA / NIP / Email / NISN wajib diisi!');
+      return;
+    }
+
+    if (!password.trim()) {
+      setErrorMessage('Kata sandi wajib diisi!');
+      return;
+    }
+
+    // Attempt local match first
+    const localFound = performLoginCheck(teachers, students, schoolProfile);
+    if (localFound) return;
+
+    // If not found locally, attempt instant cloud sync in case this device just installed the app
+    setIsSyncing(true);
+    try {
+      await smartSyncAndMergeAllWithCloud();
+      const freshTeachers = getTeachers();
+      const freshStudents = getStudents();
+      const freshProfile = getSchoolProfile();
+      setTeachers(freshTeachers);
+      setStudents(freshStudents);
+      setSchoolProfile(freshProfile);
+
+      const cloudFound = performLoginCheck(freshTeachers, freshStudents, freshProfile);
+      if (!cloudFound) {
+        setErrorMessage('No. HP/WA, NIP, Email, atau Akun tidak ditemukan di Database Sekolah. Pastikan data guru sudah diinput oleh Admin di Master Data Guru.');
+      }
+    } catch {
+      setErrorMessage('No. HP/WA, NIP, NISN, atau Akun tidak terdaftar. Periksa kembali atau hubungi Admin Sekolah.');
+    } finally {
+      setIsSyncing(false);
+    }
   };
 
   return (
@@ -328,15 +414,42 @@ export const LoginView: React.FC<LoginViewProps> = ({
             {/* Submit Login Button */}
             <button
               type="submit"
-              className="w-full bg-gradient-to-r from-indigo-600 via-indigo-700 to-indigo-800 hover:from-indigo-700 hover:to-indigo-900 text-white font-extrabold py-3.5 px-4 rounded-2xl shadow-lg shadow-indigo-600/25 text-sm flex items-center justify-center gap-2 transition-all cursor-pointer transform active:scale-[0.98]"
+              disabled={isSyncing}
+              className="w-full bg-gradient-to-r from-indigo-600 via-indigo-700 to-indigo-800 hover:from-indigo-700 hover:to-indigo-900 text-white font-extrabold py-3.5 px-4 rounded-2xl shadow-lg shadow-indigo-600/25 text-sm flex items-center justify-center gap-2 transition-all cursor-pointer transform active:scale-[0.98] disabled:opacity-60 disabled:cursor-not-allowed"
             >
-              <KeyRound className="w-4 h-4 text-indigo-100" />
-              Masuk Ke Aplikasi
+              {isSyncing ? (
+                <>
+                  <RefreshCw className="w-4 h-4 text-indigo-200 animate-spin" />
+                  <span>Memeriksa & Menyinkronkan Data Cloud...</span>
+                </>
+              ) : (
+                <>
+                  <KeyRound className="w-4 h-4 text-indigo-100" />
+                  <span>Masuk Ke Aplikasi</span>
+                </>
+              )}
             </button>
           </form>
 
-          {/* Footer Helper */}
-          <div className="pt-2 border-t border-slate-100 text-center text-[11px]">
+          {/* Sync Success Message */}
+          {syncSuccessMsg && (
+            <div className="bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-2xl p-3 text-xs flex items-center gap-2 shadow-2xs animate-fade-in">
+              <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+              <span className="font-semibold">{syncSuccessMsg}</span>
+            </div>
+          )}
+
+          {/* Cloud Sync Manual Button & Helper */}
+          <div className="pt-3 border-t border-slate-100 flex flex-col gap-2 text-center text-[11px]">
+            <button
+              type="button"
+              onClick={handleManualSync}
+              disabled={isSyncing}
+              className="inline-flex items-center justify-center gap-1.5 text-xs text-indigo-600 hover:text-indigo-800 font-bold hover:underline cursor-pointer disabled:opacity-50"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin' : ''}`} />
+              <span>{isSyncing ? 'Sedang Sinkronisasi...' : 'Akun baru belum terdeteksi? Sinkronkan Data Cloud'}</span>
+            </button>
             <span className="text-slate-400 italic font-medium">Bantuan Lupa Password? Hubungi Administrator Sekolah</span>
           </div>
 

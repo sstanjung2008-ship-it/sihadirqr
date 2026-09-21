@@ -1,8 +1,7 @@
 import React, { useEffect, useRef, useState, useMemo, useCallback } from 'react';
 import { Html5Qrcode } from 'html5-qrcode';
-import { Student, SchoolProfile, AttendanceRecord, WhatsAppLog, SchoolClass } from '../types';
+import { Student, SchoolProfile, AttendanceRecord, SchoolClass } from '../types';
 import { playScanSound } from '../lib/audioBeep';
-import { createWhatsAppUrl, sendWhatsAppGatewayMessage } from '../lib/exportUtils';
 import { getSchoolCheckoutTimeForDay } from '../lib/storage';
 import { 
   ScanLine, 
@@ -11,7 +10,6 @@ import {
   Search, 
   Camera, 
   Volume2, 
-  Send, 
   User, 
   Clock, 
   RotateCw,
@@ -34,7 +32,7 @@ interface QRScannerViewProps {
   classes?: SchoolClass[];
   schoolProfile: SchoolProfile;
   attendanceRecords: AttendanceRecord[];
-  onAddAttendance: (record: AttendanceRecord, waLog?: WhatsAppLog) => void;
+  onAddAttendance: (record: AttendanceRecord) => void;
 }
 
 const DAY_NAMES = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
@@ -121,6 +119,24 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
     return Array.from(new Set(students.map(s => s.className))).sort();
   }, [classes, students]);
 
+  // High-performance O(1) index map for instantaneous student lookup during rapid scanning
+  const studentLookupMap = useMemo(() => {
+    const map = new Map<string, Student>();
+    students.forEach(s => {
+      if (!s) return;
+      if (s.qrCode) map.set(s.qrCode.trim().toLowerCase(), s);
+      if (s.nisn) map.set(s.nisn.trim().toLowerCase(), s);
+      if (s.nis) map.set(s.nis.trim().toLowerCase(), s);
+      if (s.id) map.set(s.id.trim().toLowerCase(), s);
+      
+      const cleanQr = (s.qrCode || '').trim().replace(/^(STUDENT|SISWA|STD|QR|ID)[-_:\s]*/i, '').toLowerCase();
+      if (cleanQr) map.set(cleanQr, s);
+      const cleanNisn = (s.nisn || '').trim().replace(/^(STUDENT|SISWA|STD|QR|ID)[-_:\s]*/i, '').toLowerCase();
+      if (cleanNisn) map.set(cleanNisn, s);
+    });
+    return map;
+  }, [students]);
+
   const filteredStudents = useMemo(() => {
     return students.filter(s => {
       const matchClass = simClassFilter === 'ALL' || s.className === simClassFilter;
@@ -149,8 +165,6 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
   const [lastScannedResult, setLastScannedResult] = useState<{
     student: Student;
     record: AttendanceRecord;
-    waMsg: string;
-    waUrl: string;
     mode: 'MASUK' | 'PULANG';
     isRejected?: boolean;
     rejectionReason?: string;
@@ -293,8 +307,12 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
       }
 
       const qrConfig = {
-        fps: 10,
-        qrbox: { width: 250, height: 250 },
+        fps: 20, // High-frequency frame rate (20 FPS) for lightning-fast scan detection
+        qrbox: (viewfinderWidth: number, viewfinderHeight: number) => {
+          const minEdge = Math.min(viewfinderWidth, viewfinderHeight);
+          const boxSize = Math.max(220, Math.floor(minEdge * 0.75));
+          return { width: boxSize, height: boxSize };
+        },
         aspectRatio: 1.0,
       };
 
@@ -410,39 +428,26 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
     const strippedCode = cleanDecoded.replace(/^(STUDENT|SISWA|STD|QR|ID)[-_:\s]*/i, '').trim();
     const normalizedStripped = strippedCode.toLowerCase();
 
-    // Smart student lookup
-    const matched = students.find(s => {
-      if (!s) return false;
-      const sQr = (s.qrCode || '').trim();
-      const sQrLower = sQr.toLowerCase();
-      const sNisn = (s.nisn || '').trim();
-      const sNisnLower = sNisn.toLowerCase();
-      const sNis = (s.nis || '').trim();
-      const sNisLower = sNis.toLowerCase();
-      const sId = (s.id || '').trim();
-      const sIdLower = sId.toLowerCase();
+    // Smart instant student lookup via pre-indexed Map (O(1) - <0.1ms)
+    let matched = studentLookupMap.get(normalizedDecoded) ||
+      (normalizedStripped ? studentLookupMap.get(normalizedStripped) : undefined) ||
+      studentLookupMap.get(`student-${normalizedDecoded}`) ||
+      studentLookupMap.get(`std-${normalizedDecoded}`);
 
-      // 1. Direct exact or lowercase match
-      if (sQr === cleanDecoded || sQrLower === normalizedDecoded) return true;
-      if (sNisn === cleanDecoded || sNisnLower === normalizedDecoded) return true;
-      if (sNis === cleanDecoded || sNisLower === normalizedDecoded) return true;
-      if (sId === cleanDecoded || sIdLower === normalizedDecoded) return true;
+    // Fallback search if not matched in direct map
+    if (!matched) {
+      matched = students.find(s => {
+        if (!s) return false;
+        const sQrLower = (s.qrCode || '').trim().toLowerCase();
+        const sNisnLower = (s.nisn || '').trim().toLowerCase();
+        const sNisLower = (s.nis || '').trim().toLowerCase();
+        const sIdLower = (s.id || '').trim().toLowerCase();
 
-      // 2. Match with stripped prefix (e.g. STUDENT-0084748523 -> 0084748523)
-      if (strippedCode) {
-        if (sNisn === strippedCode || sNisnLower === normalizedStripped) return true;
-        if (sNis === strippedCode || sNisLower === normalizedStripped) return true;
-        if (sId === strippedCode || sIdLower === normalizedStripped) return true;
-        const sQrStripped = sQr.replace(/^(STUDENT|SISWA|STD|QR|ID)[-_:\s]*/i, '').trim();
-        if (sQrStripped === strippedCode || sQrStripped.toLowerCase() === normalizedStripped) return true;
-      }
-
-      // 3. Match reverse (student qrCode has prefix, decoded is raw NISN)
-      if (sQrLower === `student-${normalizedDecoded}` || sQrLower === `std-${normalizedDecoded}`) return true;
-      if (normalizedDecoded === `student-${sNisnLower}` || normalizedDecoded === `std-${sNisnLower}`) return true;
-
-      return false;
-    });
+        if (sQrLower === normalizedDecoded || sNisnLower === normalizedDecoded || sNisLower === normalizedDecoded || sIdLower === normalizedDecoded) return true;
+        if (normalizedStripped && (sNisnLower === normalizedStripped || sNisLower === normalizedStripped || sIdLower === normalizedStripped)) return true;
+        return false;
+      });
+    }
 
     if (matched) {
       processAttendanceForStudent(matched);
@@ -532,62 +537,19 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
         status: existingRecord ? existingRecord.status : 'HADIR',
         method: existingRecord ? existingRecord.method : 'QR_SCAN',
         scannedBy: existingRecord ? existingRecord.scannedBy : 'Pos Scanner Utama',
-        parentNotified: isParentWaEnabled,
-        waLogId: existingRecord?.waLogId,
+        parentNotified: false,
         returnTime: timeStr,
         returnStatus,
         returnScannedBy: isBeforeEndTime 
           ? `Pos Scanner Utama (Pulang Cepat sebelum ${dayEndTimeStr})` 
           : 'Pos Scanner Utama (Pulang)',
-        returnWaLogId: isParentWaEnabled ? returnWaLogId : undefined
       };
 
-      const departureTemplate = schoolProfile.waTemplateDeparture || 
-        "PEMBERITAHUAN PULANG: Yth. Bpk/Ibu [ParentName], memberitahukan bahwa siswa [StudentName] ([ClassName]) telah Pulang dari Sekolah pada pukul [Time] WITA. Terima kasih.";
-
-      const waMsg = departureTemplate
-        .replace('[ParentName]', student.parentName)
-        .replace('[StudentName]', student.name)
-        .replace('[ClassName]', student.className)
-        .replace('[Time]', timeStr);
-
-      const waUrl = createWhatsAppUrl(student.parentPhone, waMsg);
-
-      // Kirim via WhatsApp API Gateway secara otomatis jika diaktifkan dan API Key terisi
-      if (isParentWaEnabled && schoolProfile.waApiKey && schoolProfile.waApiKey.trim() && schoolProfile.waGatewayEnabled !== false) {
-        sendWhatsAppGatewayMessage(
-          student.parentPhone, 
-          waMsg, 
-          schoolProfile.waApiKey, 
-          schoolProfile.waGatewayProvider || 'Fonnte'
-        ).then(res => {
-          if (res.success) {
-            console.log(`Pesan WA Pulang untuk ${student.name} berhasil terkirim via Gateway.`);
-          } else {
-            console.warn(`Gagal terkirim via Gateway WA: ${res.error}`);
-          }
-        });
-      }
-
-      const waLog: WhatsAppLog | undefined = isParentWaEnabled ? {
-        id: returnWaLogId,
-        studentId: student.id,
-        studentName: student.name,
-        className: student.className,
-        phone: student.parentPhone,
-        message: waMsg,
-        status: (schoolProfile.waApiKey && schoolProfile.waApiKey.trim()) ? 'TERKIRIM' : 'TERKIRIM',
-        timestamp: now.toISOString(),
-        type: 'PULANG'
-      } : undefined;
-
-      onAddAttendance(record, waLog);
+      onAddAttendance(record);
 
       setLastScannedResult({
         student,
         record,
-        waMsg,
-        waUrl,
         mode: 'PULANG',
         isRejected: false
       });
@@ -695,9 +657,6 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
 
       playScanSound(isLate ? 'LATE' : 'SUCCESS');
 
-      const isParentWaEnabled = schoolProfile.waParentNotificationEnabled !== false;
-      const waLogId = isParentWaEnabled ? `wa-${Date.now()}` : undefined;
-
       const record: AttendanceRecord = {
         id: existingRecord ? existingRecord.id : `att-${Date.now()}-${student.id}`,
         studentId: student.id,
@@ -709,58 +668,17 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
         status,
         method: 'QR_SCAN',
         scannedBy: 'Pos Scanner Utama',
-        parentNotified: isParentWaEnabled,
-        waLogId: waLogId || existingRecord?.waLogId,
+        parentNotified: false,
         returnTime: existingRecord?.returnTime,
         returnStatus: existingRecord?.returnStatus,
         returnScannedBy: existingRecord?.returnScannedBy,
-        returnWaLogId: existingRecord?.returnWaLogId
       };
 
-      const template = isLate ? schoolProfile.waTemplateLate : schoolProfile.waTemplateArrival;
-      const waMsg = template
-        .replace('[ParentName]', student.parentName)
-        .replace('[StudentName]', student.name)
-        .replace('[ClassName]', student.className)
-        .replace('[Time]', timeStr);
-
-      const waUrl = createWhatsAppUrl(student.parentPhone, waMsg);
-
-      // Kirim via WhatsApp API Gateway secara otomatis jika diaktifkan dan API Key terisi
-      if (isParentWaEnabled && schoolProfile.waApiKey && schoolProfile.waApiKey.trim() && schoolProfile.waGatewayEnabled !== false) {
-        sendWhatsAppGatewayMessage(
-          student.parentPhone, 
-          waMsg, 
-          schoolProfile.waApiKey, 
-          schoolProfile.waGatewayProvider || 'Fonnte'
-        ).then(res => {
-          if (res.success) {
-            console.log(`Pesan WA Masuk (${status}) untuk ${student.name} berhasil terkirim via Gateway.`);
-          } else {
-            console.warn(`Gagal terkirim via Gateway WA: ${res.error}`);
-          }
-        });
-      }
-
-      const waLog: WhatsAppLog | undefined = isParentWaEnabled && waLogId ? {
-        id: waLogId,
-        studentId: student.id,
-        studentName: student.name,
-        className: student.className,
-        phone: student.parentPhone,
-        message: waMsg,
-        status: (schoolProfile.waApiKey && schoolProfile.waApiKey.trim()) ? 'TERKIRIM' : 'TERKIRIM',
-        timestamp: now.toISOString(),
-        type: status
-      } : undefined;
-
-      onAddAttendance(record, waLog);
+      onAddAttendance(record);
 
       setLastScannedResult({
         student,
         record,
-        waMsg,
-        waUrl,
         mode: 'MASUK',
         isRejected: false
       });
@@ -1327,7 +1245,7 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
                 </div>
               </div>
 
-              {/* WhatsApp Notification Trigger Box / Rejection Box */}
+              {/* Attendance Verification Confirmation Card / Rejection Box */}
               {lastScannedResult.isRejected ? (
                 <div className="bg-rose-50 p-4 rounded-2xl border border-rose-200 space-y-2 text-xs">
                   <div className="flex items-center justify-between text-rose-900 font-bold">
@@ -1347,31 +1265,36 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
                   </p>
                 </div>
               ) : (
-                <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200 space-y-3">
+                <div className="bg-emerald-50/60 p-4 rounded-2xl border border-emerald-200/80 space-y-3">
                   <div className="flex items-center justify-between text-xs">
                     <span className="font-bold text-emerald-800 flex items-center gap-1.5">
-                      <Send className="w-3.5 h-3.5 text-emerald-600" />
-                      Pesan Otomatis WhatsApp Orang Tua
+                      <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                      Presensi Berhasil Dicatat
                     </span>
-                    <span className="text-[10px] bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full font-bold border border-emerald-200">
-                      Auto Generated
+                    <span className="text-[10px] bg-emerald-100 text-emerald-800 px-2.5 py-0.5 rounded-full font-bold border border-emerald-200">
+                      Tersimpan
                     </span>
                   </div>
 
-                  <p className="text-xs text-slate-700 bg-white p-3 rounded-xl border border-slate-200/80 leading-relaxed font-sans shadow-2xs">
-                    "{lastScannedResult.waMsg}"
-                  </p>
-
-                  <div className="pt-1 flex flex-col sm:flex-row gap-2">
-                    <a
-                      href={lastScannedResult.waUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2.5 px-3 rounded-xl text-xs flex items-center justify-center gap-2 shadow-md transition-all cursor-pointer"
-                    >
-                      <Send className="w-4 h-4" />
-                      Kirim Pesan WA Sekarang
-                    </a>
+                  <div className="bg-white p-3.5 rounded-xl border border-emerald-100 space-y-2 shadow-2xs text-xs">
+                    <div className="flex justify-between items-center text-slate-700">
+                      <span className="text-slate-500 font-medium">Sesi Presensi:</span>
+                      <span className="font-bold text-slate-900">
+                        {lastScannedResult.mode === 'MASUK' ? 'Sesi Masuk Sekolah' : 'Sesi Pulang Sekolah'}
+                      </span>
+                    </div>
+                    <div className="flex justify-between items-center text-slate-700">
+                      <span className="text-slate-500 font-medium">Waktu Tercatat:</span>
+                      <span className="font-mono font-bold text-slate-900">
+                        {lastScannedResult.mode === 'MASUK' ? lastScannedResult.record.time : lastScannedResult.record.returnTime} WITA
+                      </span>
+                    </div>
+                    <div className="flex justify-between items-center text-slate-700">
+                      <span className="text-slate-500 font-medium">Status Kehadiran:</span>
+                      <span className="font-bold text-emerald-700">
+                        {lastScannedResult.mode === 'MASUK' ? lastScannedResult.record.status : lastScannedResult.record.returnStatus}
+                      </span>
+                    </div>
                   </div>
                 </div>
               )}
@@ -1384,7 +1307,7 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
               </div>
               <h3 className="text-slate-800 font-bold text-sm">Belum Ada Siswa Ditingkat Scan</h3>
               <p className="text-slate-500 text-xs max-w-xs leading-relaxed">
-                Hasil pindaian QR Code terbaru akan otomatis muncul di panel ini lengkap dengan foto profil, waktu presensi, dan notifikasi WhatsApp.
+                Hasil pindaian QR Code terbaru akan otomatis muncul di panel ini lengkap dengan foto profil, waktu presensi, dan status kehadiran.
               </p>
             </div>
           )}

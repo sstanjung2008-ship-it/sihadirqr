@@ -6,7 +6,6 @@ import {
   SchoolClass, 
   AttendanceRecord, 
   LeaveRequest, 
-  WhatsAppLog,
   ChatMessage,
   Teacher,
   LearningJournal,
@@ -28,8 +27,6 @@ import {
   saveAttendanceRecords,
   getLeaveRequests, 
   saveLeaveRequests,
-  getWaLogs, 
-  saveWaLogs,
   getTeachers,
   saveTeachers,
   getLearningJournals,
@@ -50,7 +47,6 @@ import {
   reconcileTeachersAndClasses,
   KEYS
 } from './lib/storage';
-import { sendWhatsAppGatewayMessage } from './lib/exportUtils';
 import { ShieldCheck, CheckCircle2 } from 'lucide-react';
 
 import { Sidebar } from './components/Sidebar';
@@ -61,7 +57,6 @@ import { StudentDirectoryView } from './components/StudentDirectoryView';
 import { ClassManagementView } from './components/ClassManagementView';
 import { LeaveRequestView } from './components/LeaveRequestView';
 import { SchoolSettingsView } from './components/SchoolSettingsView';
-import { WhatsAppLogView } from './components/WhatsAppLogView';
 import { RecapExportView } from './components/RecapExportView';
 import { TeacherDirectoryView } from './components/TeacherDirectoryView';
 import { LearningJournalView } from './components/LearningJournalView';
@@ -195,7 +190,6 @@ export default function App() {
   const [classes, setClassesState] = useState<SchoolClass[]>(getSchoolClasses());
   const [attendanceRecords, setAttendanceRecordsState] = useState<AttendanceRecord[]>(getAttendanceRecords());
   const [leaveRequests, setLeaveRequestsState] = useState<LeaveRequest[]>(getLeaveRequests());
-  const [waLogs, setWaLogsState] = useState<WhatsAppLog[]>(getWaLogs());
   const [teachers, setTeachersState] = useState<Teacher[]>(getTeachers());
   const [journals, setJournalsState] = useState<LearningJournal[]>(getLearningJournals());
   const [traits, setTraitsState] = useState<CharacterTrait[]>(getCharacterTraits());
@@ -339,7 +333,6 @@ export default function App() {
     setTeachersState(updatedTeachers);
     setAttendanceRecordsState(getAttendanceRecords());
     setLeaveRequestsState(getLeaveRequests());
-    setWaLogsState(getWaLogs());
     setJournalsState(getLearningJournals());
     setTraitsState(getCharacterTraits());
     setCharacterLogsState(getStudentCharacterLogs());
@@ -420,7 +413,6 @@ export default function App() {
 
       let hasChanges = false;
       const updatedAttendance = [...attendanceRecords];
-      const updatedWaLogs = [...waLogs];
 
       students.forEach(student => {
         // Check if student already has attendance today
@@ -437,9 +429,6 @@ export default function App() {
         if (hasApprovedLeave) return;
 
         // Auto assign ALPA
-        const waLogId = `wa-autoalpa-${Date.now()}-${student.id}`;
-        const isParentWaEnabled = schoolProfile.waParentNotificationEnabled !== false;
-
         const record: AttendanceRecord = {
           id: `att-autoalpa-${dateStr}-${student.id}`,
           studentId: student.id,
@@ -452,54 +441,16 @@ export default function App() {
           method: 'MANUAL',
           scannedBy: 'Sistem Otomatis (Batas Alpa)',
           notes: `Otomatis Alpa (Melewati batas jam ${autoAlpaTime} WITA)`,
-          parentNotified: isParentWaEnabled,
-          waLogId: isParentWaEnabled ? waLogId : undefined
+          parentNotified: false,
         };
 
         updatedAttendance.push(record);
         hasChanges = true;
-
-        const absentTemplate = schoolProfile.parentTemplateAbsent || schoolProfile.waTemplateAbsent;
-        if (isParentWaEnabled && absentTemplate) {
-          const waMsg = absentTemplate
-            .replace(/\[ParentName\]/g, student.parentName || 'Orang Tua / Wali Murid')
-            .replace(/\[StudentName\]/g, student.name)
-            .replace(/\[ClassName\]/g, student.className)
-            .replace(/\[Time\]/g, autoAlpaTime)
-            .replace(/\[SchoolName\]/g, schoolProfile.name || 'Sekolah');
-
-          // Automatic dispatch via WhatsApp Gateway API if configured
-          if (schoolProfile.waApiKey && schoolProfile.waApiKey.trim() && schoolProfile.waGatewayEnabled !== false) {
-            sendWhatsAppGatewayMessage(
-              student.parentPhone,
-              waMsg,
-              schoolProfile.waApiKey,
-              schoolProfile.waGatewayProvider || 'Fonnte'
-            );
-          }
-
-          const waLog: WhatsAppLog = {
-            id: waLogId,
-            studentId: student.id,
-            studentName: student.name,
-            className: student.className,
-            phone: student.parentPhone,
-            message: waMsg,
-            status: 'TERKIRIM',
-            timestamp: now.toISOString(),
-            type: 'ALPA'
-          };
-          updatedWaLogs.push(waLog);
-        }
       });
 
       if (hasChanges) {
         setAttendanceRecordsState(updatedAttendance);
         saveAttendanceRecords(updatedAttendance);
-        if (updatedWaLogs.length > waLogs.length) {
-          setWaLogsState(updatedWaLogs);
-          saveWaLogs(updatedWaLogs);
-        }
       }
     };
 
@@ -511,211 +462,9 @@ export default function App() {
     schoolProfile.autoAlpaTime, 
     schoolProfile.activeDays, 
     schoolProfile.holidays, 
-    schoolProfile.waParentNotificationEnabled,
-    schoolProfile.waTemplateAbsent,
-    schoolProfile.waApiKey,
-    schoolProfile.waGatewayProvider,
-    schoolProfile.waGatewayEnabled,
     students, 
     attendanceRecords, 
-    leaveRequests, 
-    waLogs
-  ]);
-
-  // Teacher WhatsApp Reminder Queue for 30s staggered delivery (to prevent spam/blocking)
-  const teacherReminderQueueRef = useRef<{
-    id: string;
-    phone: string;
-    message: string;
-    apiKey: string;
-    provider: string;
-  }[]>([]);
-  const isProcessingTeacherQueueRef = useRef<boolean>(false);
-  const queuedReminderIdsRef = useRef<Set<string>>(new Set());
-
-  const processTeacherReminderQueue = async () => {
-    if (isProcessingTeacherQueueRef.current) return;
-    isProcessingTeacherQueueRef.current = true;
-
-    while (teacherReminderQueueRef.current.length > 0) {
-      const item = teacherReminderQueueRef.current.shift();
-      if (item) {
-        try {
-          if (item.apiKey && item.apiKey.trim()) {
-            await sendWhatsAppGatewayMessage(
-              item.phone,
-              item.message,
-              item.apiKey,
-              item.provider || 'Fonnte'
-            );
-          }
-        } catch (err) {
-          console.error('[Staggered WA Sender] Error sending teacher reminder to', item.phone, err);
-        }
-
-        // If more items remain in the queue, wait exactly 30 seconds before sending the next reminder
-        if (teacherReminderQueueRef.current.length > 0) {
-          await new Promise(resolve => setTimeout(resolve, 30000));
-        }
-      }
-    }
-
-    isProcessingTeacherQueueRef.current = false;
-  };
-
-  // Automatic WhatsApp Reminder for Teachers based on KBM Schedule
-  useEffect(() => {
-    // Check if feature is enabled in settings
-    if (schoolProfile.waTeacherReminderEnabled === false) return;
-
-    const checkAndSendTeacherScheduleReminders = () => {
-      const now = new Date();
-      const dayNames = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
-      const currentDayName = dayNames[now.getDay()];
-
-      // 1. Check if today is an active learning day
-      const activeDays = schoolProfile.activeDays || ['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
-      if (!activeDays.includes(currentDayName)) return;
-
-      // 2. Check if today is a registered holiday
-      const year = now.getFullYear();
-      const month = String(now.getMonth() + 1).padStart(2, '0');
-      const day = String(now.getDate()).padStart(2, '0');
-      const dateStr = `${year}-${month}-${day}`;
-
-      const holidays = schoolProfile.holidays || [];
-      const isTodayHoliday = holidays.some(h => {
-        if (h.endDate) {
-          return dateStr >= h.date && dateStr <= h.endDate;
-        }
-        return h.date === dateStr;
-      });
-      if (isTodayHoliday) return;
-
-      // 3. Get periods for today
-      const daySpecificPeriods = periods.filter(p => p.day === currentDayName || p.daySpecific === currentDayName);
-      const todayPeriods = (daySpecificPeriods.length > 0 
-        ? daySpecificPeriods 
-        : periods.filter(p => !p.day || p.day === 'SEMUA')
-      ).filter(p => p.type === 'KBM');
-
-      if (todayPeriods.length === 0) return;
-
-      const currentMinutes = now.getHours() * 60 + now.getMinutes();
-      const minutesBefore = schoolProfile.waTeacherReminderMinutesBefore ?? 0;
-
-      // Schedules for today
-      const todaySchedules = schedules.filter(s => s.day === currentDayName);
-      if (todaySchedules.length === 0) return;
-
-      const currentWaLogs = getWaLogs();
-      const newWaLogs: WhatsAppLog[] = [];
-
-      todayPeriods.forEach(period => {
-        if (!period.startTime) return;
-        const [pH, pM] = period.startTime.split(':').map(Number);
-        if (isNaN(pH) || isNaN(pM)) return;
-
-        const periodStartMinutes = pH * 60 + pM;
-        const triggerMinutes = periodStartMinutes - minutesBefore;
-
-        // Trigger window: within 20 minutes from target trigger time
-        if (currentMinutes >= triggerMinutes && currentMinutes <= triggerMinutes + 20) {
-          const matchingSlots = todaySchedules.filter(s => s.periodNumber === period.periodNumber);
-
-          matchingSlots.forEach(slot => {
-            if (!slot.teacherId && !slot.teacherName) return;
-
-            // Unique log ID for today's reminder per slot
-            const reminderLogId = `wa-teacher-kbm-${dateStr}-${slot.id || `${slot.classId}-${slot.periodNumber}-${slot.teacherId}`}`;
-
-            // Check if reminder was already sent today or already in queue
-            const alreadySent = 
-              currentWaLogs.some(l => l.id === reminderLogId) || 
-              newWaLogs.some(l => l.id === reminderLogId) ||
-              queuedReminderIdsRef.current.has(reminderLogId);
-            if (alreadySent) return;
-
-            // Mark as queued immediately to avoid duplicate dispatch on 25s check interval
-            queuedReminderIdsRef.current.add(reminderLogId);
-
-            // Find teacher
-            const teacher = teachers.find(t => t.id === slot.teacherId || t.name.toLowerCase() === (slot.teacherName || '').toLowerCase());
-            if (!teacher || !teacher.phone || !teacher.phone.trim()) return;
-
-            // Build reminder message
-            const template = schoolProfile.waTemplateTeacherReminder || 
-              "PENGINGAT MENGAJAR: Yth. Bpk/Ibu [TeacherName], mengingatkan bahwa jadwal mengajar mata pelajaran [Subject] di Kelas [ClassName] ([Room]) akan dimulai pada pukul [Time] WITA ([PeriodLabel]). Selamat menjalankan KBM!";
-
-            const periodLabel = period.label || `JP ${slot.periodNumber}`;
-            const roomLabel = slot.room ? `Ruang ${slot.room}` : `Kelas ${slot.className}`;
-
-            const waMsg = template
-              .replace(/\[TeacherName\]/g, teacher.name)
-              .replace(/\[Subject\]/g, slot.subject)
-              .replace(/\[ClassName\]/g, slot.className)
-              .replace(/\[Room\]/g, roomLabel)
-              .replace(/\[Time\]/g, period.startTime)
-              .replace(/\[PeriodLabel\]/g, periodLabel)
-              .replace(/\[Period\]/g, String(slot.periodNumber))
-              .replace(/\[SchoolName\]/g, schoolProfile.name);
-
-            // Queue for staggered sending (every 30 seconds) via WhatsApp Gateway if configured & enabled
-            if (schoolProfile.waApiKey && schoolProfile.waApiKey.trim() && schoolProfile.waGatewayEnabled !== false) {
-              teacherReminderQueueRef.current.push({
-                id: reminderLogId,
-                phone: teacher.phone,
-                message: waMsg,
-                apiKey: schoolProfile.waApiKey,
-                provider: schoolProfile.waGatewayProvider || 'Fonnte'
-              });
-              processTeacherReminderQueue();
-            }
-
-            const waLog: WhatsAppLog = {
-              id: reminderLogId,
-              studentId: '',
-              studentName: teacher.name,
-              className: slot.className,
-              phone: teacher.phone,
-              message: waMsg,
-              status: 'TERKIRIM',
-              timestamp: now.toISOString(),
-              type: 'JADWAL_GURU',
-              recipientRole: 'TEACHER',
-              teacherId: teacher.id,
-              teacherName: teacher.name,
-              slotId: slot.id,
-              periodNumber: slot.periodNumber
-            };
-
-            newWaLogs.push(waLog);
-          });
-        }
-      });
-
-      if (newWaLogs.length > 0) {
-        const updated = [...newWaLogs, ...currentWaLogs];
-        setWaLogsState(updated);
-        saveWaLogs(updated);
-      }
-    };
-
-    checkAndSendTeacherScheduleReminders();
-    const interval = setInterval(checkAndSendTeacherScheduleReminders, 25000);
-    return () => clearInterval(interval);
-  }, [
-    schoolProfile.waTeacherReminderEnabled,
-    schoolProfile.waTeacherReminderMinutesBefore,
-    schoolProfile.waTemplateTeacherReminder,
-    schoolProfile.activeDays,
-    schoolProfile.holidays,
-    schoolProfile.waApiKey,
-    schoolProfile.waGatewayProvider,
-    schoolProfile.waGatewayEnabled,
-    periods,
-    schedules,
-    teachers
+    leaveRequests
   ]);
 
   // -------------------------------------------------------------
@@ -942,20 +691,12 @@ export default function App() {
   };
 
   // Add Attendance Record (from scanner or manual)
-  const handleAddAttendance = (record: AttendanceRecord, waLog?: WhatsAppLog) => {
+  const handleAddAttendance = (record: AttendanceRecord) => {
     setAttendanceRecordsState(prev => {
       const updated = [record, ...prev.filter(r => !(r.studentId === record.studentId && r.date === record.date))];
       saveAttendanceRecords(updated);
       return updated;
     });
-
-    if (waLog) {
-      setWaLogsState(prevWa => {
-        const updatedWa = [waLog, ...prevWa.filter(l => l.id !== waLog.id)];
-        saveWaLogs(updatedWa);
-        return updatedWa;
-      });
-    }
   };
 
   // Update Attendance Status manually
@@ -1802,10 +1543,6 @@ export default function App() {
               characterLogs={characterLogs}
               predicateSettings={predicateSettings}
             />
-          )}
-
-          {activeTab === 'walogs' && (
-            <WhatsAppLogView waLogs={waLogs} />
           )}
 
           {activeTab === 'settings' && (

@@ -107,7 +107,7 @@ export const LoginView: React.FC<LoginViewProps> = ({
       }
     }
 
-    // 3. TEACHER (GURU) LOGIC - Match by No. Handphone / WhatsApp or NIP
+    // 3. TEACHER (GURU) LOGIC - Match by No. Handphone / WhatsApp, NIP, or Nama Guru
     const matchedTeacher = teachers.find(t => {
       const tPhoneDigits = normalizePhone(t.phone);
       // Check phone number match
@@ -118,9 +118,18 @@ export const LoginView: React.FC<LoginViewProps> = ({
         return true;
       }
       // Check NIP or ID match
-      if (t.nip.replace(/\s+/g, '') === cleanNoSpaceUser ||
+      if (t.nip && (
+          t.nip.replace(/\s+/g, '') === cleanNoSpaceUser ||
           t.nip.toLowerCase() === cleanInputUser.toLowerCase() ||
-          t.id.toLowerCase() === cleanInputUser.toLowerCase()) {
+          t.id.toLowerCase() === cleanInputUser.toLowerCase()
+      )) {
+        return true;
+      }
+      // Check Teacher Name match (case-insensitive)
+      if (t.name && (
+          t.name.toLowerCase().trim() === cleanInputUser.toLowerCase() ||
+          t.name.toLowerCase().replace(/[^a-z0-9]/g, '') === cleanInputUser.toLowerCase().replace(/[^a-z0-9]/g, '')
+      )) {
         return true;
       }
       return false;

@@ -89,7 +89,6 @@ export const Header: React.FC<HeaderProps> = ({
         { id: 'scanner', label: 'Scan QR', icon: ScanLine },
         { id: 'leaves', label: 'Persetujuan Izin', icon: MessageSquare, badge: unreadLeavesCount },
         { id: 'recap', label: 'Rekap Laporan', icon: FileText },
-        { id: 'walogs', label: 'Log Pesan', icon: Bell },
         { id: 'teacher_assistant', label: 'Asisten Guru (AI)', icon: Sparkles },
         { id: 'account', label: 'Akun Guru', icon: UserCircle },
       ];
@@ -104,7 +103,6 @@ export const Header: React.FC<HeaderProps> = ({
       { id: 'classes', label: 'Data Kelas', icon: Building2 },
       { id: 'leaves', label: 'Permohonan Izin', icon: MessageSquare, badge: unreadLeavesCount },
       { id: 'recap', label: 'Rekap & Ekspor', icon: FileText },
-      { id: 'walogs', label: 'Log Pesan', icon: Bell },
       { id: 'teacher_assistant', label: 'Asisten Guru (AI)', icon: Sparkles },
       { id: 'settings', label: 'Pengaturan Sekolah', icon: Settings },
     ];

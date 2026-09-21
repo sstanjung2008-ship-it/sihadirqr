@@ -321,7 +321,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
         { id: 'leaves', label: 'Persetujuan Izin', icon: MessageSquare, desc: 'Persetujuan wali murid', badge: unreadLeavesCount },
         { id: 'recap', label: 'Rekap Laporan', icon: FileText, desc: 'Ekspor laporan bulanan' },
         { id: 'chat', label: 'Fitur Chat Wali Murid', icon: MessageSquare, desc: 'Obrolan Wali Kelas, Humas & BK' },
-        { id: 'walogs', label: 'Log Pesan', icon: Bell, desc: 'Notifikasi Guru & Orang Tua' },
         { id: 'teacher_assistant', label: 'Asisten Guru (AI)', icon: Sparkles, desc: 'Buat Soal AI & Modul Ajar Word' },
         { id: 'account', label: 'Akun Guru', icon: UserCircle, desc: 'Identitas guru & ubah password' },
       ];
@@ -342,7 +341,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
       { id: 'classes', label: 'Kelola Data Kelas', icon: Building2, desc: 'Daftar & wali kelas' },
       { id: 'leaves', label: 'Permohonan Izin', icon: MessageSquare, desc: 'Verifikasi surat izin/sakit', badge: unreadLeavesCount },
       { id: 'recap', label: 'Rekap & Ekspor', icon: FileText, desc: 'Cetak laporan PDF/Excel' },
-      { id: 'walogs', label: 'Log Pesan', icon: Bell, desc: 'Notifikasi Guru & Orang Tua' },
       { id: 'teacher_assistant', label: 'Asisten Guru (AI)', icon: Sparkles, desc: 'Generator Soal & Modul Ajar Word' },
       { id: 'settings', label: 'Pengaturan Sekolah', icon: Settings, desc: 'Profil & jam operasional' },
     ];

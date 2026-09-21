@@ -78,8 +78,18 @@ function withTimeout<T>(promise: Promise<T>, ms: number = 6000, fallbackVal: T):
   ]);
 }
 
+let quotaExceededCooldownUntil = 0;
+
 // Max chunk size per Firestore document: 450 KB (well below the 1MB Firestore threshold)
 const FIRESTORE_MAX_CHUNK_SIZE = 450 * 1024;
+
+export function isFirestoreQuotaExceeded(): boolean {
+  return Date.now() < quotaExceededCooldownUntil;
+}
+
+export function resetFirestoreQuotaCooldown(): void {
+  quotaExceededCooldownUntil = 0;
+}
 
 export async function writeCloudDocument(key: string, dataStr: string, timestamp: number): Promise<void> {
   const totalLength = dataStr.length;
@@ -195,12 +205,23 @@ export function syncToCloud(key: string, data: any, instant: boolean = false, ex
     return;
   }
 
+  // If daily free quota is exceeded on Google Cloud, pause remote network writes during cooldown
+  if (Date.now() < quotaExceededCooldownUntil) {
+    setCloudSyncStatus('quota_exceeded');
+    return;
+  }
+
   // Clear previous debounce for this key
   if (debounceTimers[key]) {
     clearTimeout(debounceTimers[key]);
   }
 
   const doWrite = async () => {
+    if (Date.now() < quotaExceededCooldownUntil) {
+      setCloudSyncStatus('quota_exceeded');
+      return;
+    }
+
     try {
       setCloudSyncStatus('syncing');
       const timestamp = explicitTimestamp || Number(localStorage.getItem(key + '_updatedAt')) || Date.now();
@@ -210,7 +231,8 @@ export function syncToCloud(key: string, data: any, instant: boolean = false, ex
     } catch (err: any) {
       const errMsg = err?.message || String(err);
       if (errMsg.includes('resource-exhausted') || errMsg.includes('Quota limit exceeded')) {
-        console.warn('[Firestore Sync] Kuota gratis Firestore harian tercapai. Beralih ke penyimpanan lokal & fitur backup instan.');
+        console.warn('[Firestore Sync] Kuota gratis Firestore harian tercapai. Beralih ke mode offline lokal.');
+        quotaExceededCooldownUntil = Date.now() + 180000; // 3 min cooldown
         setCloudSyncStatus('quota_exceeded');
       } else {
         console.warn('[Firestore Sync] Error, menggunakan penyimpanan offline lokal:', errMsg);
@@ -805,7 +827,6 @@ export async function smartSyncAndMergeAllWithCloud(): Promise<{ success: boolea
       teacherCloud,
       attCloud,
       leavesCloud,
-      waLogsCloud,
       journalsCloud,
       traitsCloud,
       logsCloud,
@@ -820,7 +841,6 @@ export async function smartSyncAndMergeAllWithCloud(): Promise<{ success: boolea
       readCloudDocument(KEYS.TEACHERS),
       readCloudDocument(KEYS.ATTENDANCE),
       readCloudDocument(KEYS.LEAVES),
-      readCloudDocument(KEYS.WA_LOGS),
       readCloudDocument(KEYS.LEARNING_JOURNALS),
       readCloudDocument(KEYS.CHARACTER_TRAITS),
       readCloudDocument(KEYS.CHARACTER_LOGS),
@@ -923,7 +943,6 @@ export async function smartSyncAndMergeAllWithCloud(): Promise<{ success: boolea
     };
 
     const leavesJsonStr = mergeAndStoreGeneric(KEYS.LEAVES, leavesCloud, getLeaveRequests);
-    const waLogsJsonStr = mergeAndStoreGeneric(KEYS.WA_LOGS, waLogsCloud, getWaLogs);
     const journalsJsonStr = mergeAndStoreGeneric(KEYS.LEARNING_JOURNALS, journalsCloud, getLearningJournals);
     const traitsJsonStr = mergeAndStoreGeneric(KEYS.CHARACTER_TRAITS, traitsCloud, getCharacterTraits);
     const logsJsonStr = mergeAndStoreGeneric(KEYS.CHARACTER_LOGS, logsCloud, getStudentCharacterLogs);
@@ -950,7 +969,6 @@ export async function smartSyncAndMergeAllWithCloud(): Promise<{ success: boolea
     lastSavedStringCache[KEYS.TEACHERS] = teachersJsonStr;
     lastSavedStringCache[KEYS.ATTENDANCE] = attJsonStr;
     lastSavedStringCache[KEYS.LEAVES] = leavesJsonStr;
-    lastSavedStringCache[KEYS.WA_LOGS] = waLogsJsonStr;
     lastSavedStringCache[KEYS.LEARNING_JOURNALS] = journalsJsonStr;
     lastSavedStringCache[KEYS.CHARACTER_TRAITS] = traitsJsonStr;
     lastSavedStringCache[KEYS.CHARACTER_LOGS] = logsJsonStr;
@@ -969,7 +987,6 @@ export async function smartSyncAndMergeAllWithCloud(): Promise<{ success: boolea
       writeCloudDocument(KEYS.TEACHERS, teachersJsonStr, now),
       writeCloudDocument(KEYS.ATTENDANCE, attJsonStr, now),
       writeCloudDocument(KEYS.LEAVES, leavesJsonStr, now),
-      writeCloudDocument(KEYS.WA_LOGS, waLogsJsonStr, now),
       writeCloudDocument(KEYS.LEARNING_JOURNALS, journalsJsonStr, now),
       writeCloudDocument(KEYS.CHARACTER_TRAITS, traitsJsonStr, now),
       writeCloudDocument(KEYS.CHARACTER_LOGS, logsJsonStr, now),
@@ -1007,7 +1024,6 @@ export async function forceUploadAllToCloud(): Promise<{ success: boolean; error
       KEYS.STUDENTS,
       KEYS.ATTENDANCE,
       KEYS.LEAVES,
-      KEYS.WA_LOGS,
       KEYS.TEACHERS,
       KEYS.LEARNING_JOURNALS,
       KEYS.CHARACTER_TRAITS,
@@ -1627,7 +1643,6 @@ export function saveWaLogs(logs: WhatsAppLog[]): void {
   localStorage.setItem(KEYS.WA_LOGS, dataStr);
   localStorage.setItem(KEYS.WA_LOGS + '_updatedAt', String(now));
   notifyStorageUpdated();
-  syncToCloud(KEYS.WA_LOGS, logs, false, now);
 }
 
 export function getTeachers(): Teacher[] {

@@ -60,10 +60,13 @@ const notifyStorageUpdated = () => {
 };
 
 // Helper to prevent any promise from hanging indefinitely
-function withTimeout<T>(promise: Promise<T>, ms: number = 6000, fallbackVal: T): Promise<T> {
+function withTimeout<T>(promise: Promise<T>, ms: number = 12000, fallbackVal: T): Promise<T> {
   let timeoutHandle: any;
   const timeoutPromise = new Promise<T>((resolve) => {
-    timeoutHandle = setTimeout(() => resolve(fallbackVal), ms);
+    timeoutHandle = setTimeout(() => {
+      console.warn(`[Cloud Storage] Operasi melebihi batas waktu ${ms}ms.`);
+      resolve(fallbackVal);
+    }, ms);
   });
   return Promise.race([
     promise.then((res) => {
@@ -71,7 +74,7 @@ function withTimeout<T>(promise: Promise<T>, ms: number = 6000, fallbackVal: T):
       return res;
     }).catch((err) => {
       clearTimeout(timeoutHandle);
-      console.warn('[Cloud Storage Timeout/Error]:', err);
+      console.warn('[Cloud Storage Error]:', err);
       return fallbackVal;
     }),
     timeoutPromise
@@ -685,21 +688,55 @@ export function reconcileTeachersAndClasses(
   };
 }
 
-export function mergeAttendanceLists(local: AttendanceRecord[], cloud: AttendanceRecord[]): AttendanceRecord[] {
-  const map = new Map<string, AttendanceRecord>();
+export function isRealAttendance(rec?: AttendanceRecord | null): boolean {
+  if (!rec) return false;
+  // If return scan happened, it's definitely real
+  if (rec.returnTime && rec.returnTime !== '-') return true;
+  // If QR code was scanned, it's definitely real
+  if (rec.method === 'QR_SCAN') return true;
+  // If status is not ALPA, it's a real status (HADIR, TERLAMBAT, SAKIT, IZIN, DISPENSASI, etc.)
+  if (rec.status && rec.status !== 'ALPA') return true;
+  // If it is explicitly marked as auto-alpa, it's NOT a real scan
+  if (
+    rec.id?.startsWith('att-autoalpa-') ||
+    rec.scannedBy?.includes('Sistem Otomatis') ||
+    rec.scannedBy?.includes('Batas Alpa') ||
+    rec.notes?.includes('Otomatis Alpa')
+  ) {
+    return false;
+  }
+  // Otherwise, only real if non-alpa or time is present
+  return rec.status !== 'ALPA' || (!!rec.time && rec.time !== '-');
+}
 
+export function mergeAttendanceLists(local: AttendanceRecord[], cloud: AttendanceRecord[]): AttendanceRecord[] {
   const mergeSingleRecord = (localRec: AttendanceRecord, cloudRec: AttendanceRecord): AttendanceRecord => {
-    // If cloud has a scan (QR_SCAN / HADIR / TERLAMBAT / SAKIT / IZIN / returnTime), cloud takes precedence
-    const isLocalReal = localRec.status !== 'ALPA' || localRec.method === 'QR_SCAN' || (localRec.time && localRec.time !== '-');
-    const isCloudReal = cloudRec.status !== 'ALPA' || cloudRec.method === 'QR_SCAN' || (cloudRec.time && cloudRec.time !== '-');
+    const isLocalReal = isRealAttendance(localRec);
+    const isCloudReal = isRealAttendance(cloudRec);
 
     let base: AttendanceRecord;
     if (isCloudReal && !isLocalReal) {
-      base = { ...localRec, ...cloudRec };
+      // Cloud has real scan, local was just auto-alpa or placeholder -> Cloud wins 100%!
+      base = { ...cloudRec };
     } else if (!isCloudReal && isLocalReal) {
-      base = { ...cloudRec, ...localRec };
+      // Local has real scan, cloud was just auto-alpa -> Local wins 100%!
+      base = { ...localRec };
+    } else if (isCloudReal && isLocalReal) {
+      // Both are real (e.g. one has morning scan, other has return scan, or teacher status edit)
+      base = {
+        ...localRec,
+        ...cloudRec,
+        status: (cloudRec.status && cloudRec.status !== 'ALPA') ? cloudRec.status : localRec.status,
+        method: (cloudRec.method === 'QR_SCAN' || localRec.method === 'QR_SCAN') ? 'QR_SCAN' : (cloudRec.method || localRec.method),
+        scannedBy: (cloudRec.scannedBy && !cloudRec.scannedBy.includes('Sistem Otomatis')) ? cloudRec.scannedBy : localRec.scannedBy,
+        time: (cloudRec.time && cloudRec.time !== '-') ? cloudRec.time : (localRec.time || '-'),
+        notes: cloudRec.notes || localRec.notes || undefined,
+        returnTime: cloudRec.returnTime || localRec.returnTime || undefined,
+        returnStatus: cloudRec.returnStatus || localRec.returnStatus || undefined,
+        returnScannedBy: cloudRec.returnScannedBy || localRec.returnScannedBy || undefined,
+      };
     } else {
-      // Both are real or both are alpa -> Cloud record is the authoritative distributed truth
+      // Both are auto-alpa -> Cloud takes precedence
       base = { ...localRec, ...cloudRec };
     }
 
@@ -719,23 +756,41 @@ export function mergeAttendanceLists(local: AttendanceRecord[], cloud: Attendanc
     return base;
   };
 
-  // Start with local records
-  local.forEach(a => {
-    const key = `${a.studentId}_${a.date}`;
-    map.set(key, a);
-  });
+  const recordsList: AttendanceRecord[] = [];
 
-  // Apply cloud updates on top of local records so new scans from other devices are immediately visible!
-  cloud.forEach(cloudRec => {
-    const key = `${cloudRec.studentId}_${cloudRec.date}`;
-    if (map.has(key)) {
-      map.set(key, mergeSingleRecord(map.get(key)!, cloudRec));
+  const findIndexForRecord = (rec: AttendanceRecord): number => {
+    return recordsList.findIndex(existing => {
+      if (existing.date !== rec.date) return false;
+      if (rec.studentId && existing.studentId === rec.studentId) return true;
+      if (rec.nisn && existing.nisn && existing.nisn === rec.nisn) return true;
+      if (rec.id && existing.id === rec.id) return true;
+      return false;
+    });
+  };
+
+  // 1. Add all local records
+  local.forEach(a => {
+    if (!a) return;
+    const idx = findIndexForRecord(a);
+    if (idx >= 0) {
+      recordsList[idx] = mergeSingleRecord(recordsList[idx], a);
     } else {
-      map.set(key, cloudRec);
+      recordsList.push({ ...a });
     }
   });
 
-  return Array.from(map.values()).sort((a, b) => (b.date + (b.time || '')).localeCompare(a.date + (a.time || '')));
+  // 2. Merge cloud records
+  cloud.forEach(cloudRec => {
+    if (!cloudRec) return;
+    const idx = findIndexForRecord(cloudRec);
+    if (idx >= 0) {
+      recordsList[idx] = mergeSingleRecord(recordsList[idx], cloudRec);
+    } else {
+      recordsList.push({ ...cloudRec });
+    }
+  });
+
+  return recordsList.sort((a, b) => (b.date + (b.time || '')).localeCompare(a.date + (a.time || '')));
 }
 
 export function mergeGenericListsById<T extends { id: string }>(local: T[], cloud: T[]): T[] {
@@ -1014,9 +1069,72 @@ export async function smartSyncAndMergeAllWithCloud(): Promise<{ success: boolea
   }
 }
 
-// Upload all local data to Cloud database (Parallelized)
-export async function forceUploadAllToCloud(): Promise<{ success: boolean; error?: string }> {
+let isAutoSyncRunning = false;
+let lastAutoSyncTime = 0;
+
+/**
+ * Otomatis menyinkronkan seluruh database dua arah (lokal & cloud) saat perangkat terhubung online
+ */
+export async function triggerAutoSyncOnOnline(silent: boolean = false): Promise<boolean> {
+  if (typeof window === 'undefined') return false;
+
+  // Jika koneksi fisik terdeteksi offline, abaikan
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+    setCloudSyncStatus('offline');
+    return false;
+  }
+
+  const now = Date.now();
+  // Cegah eksekusi ganda / spamming dalam interval < 3 detik
+  if (isAutoSyncRunning || (now - lastAutoSyncTime < 3000)) {
+    return false;
+  }
+
+  isAutoSyncRunning = true;
+  lastAutoSyncTime = now;
+  resetFirestoreQuotaCooldown();
+
   try {
+    if (!silent) {
+      window.dispatchEvent(new CustomEvent('sihadir_network_toast', {
+        detail: {
+          type: 'info',
+          title: '🔄 Terhubung Kembali',
+          message: 'Perangkat online. Memulai sinkronisasi otomatis dengan Cloud...'
+        }
+      }));
+    }
+
+    const res = await smartSyncAndMergeAllWithCloud();
+    if (res.success) {
+      setCloudSyncStatus('connected');
+      if (!silent) {
+        window.dispatchEvent(new CustomEvent('sihadir_network_toast', {
+          detail: {
+            type: 'success',
+            title: '✅ Sinkronisasi Otomatis Selesai',
+            message: 'Seluruh data presensi dan sekolah telah sinkron dengan Cloud dan perangkat lain.'
+          }
+        }));
+      }
+      notifyStorageUpdated();
+      return true;
+    } else {
+      console.warn('[Auto-Sync] Gagal menjalankan sinkronisasi otomatis:', res.message);
+      return false;
+    }
+  } catch (err) {
+    console.error('[Auto-Sync Error]:', err);
+    return false;
+  } finally {
+    isAutoSyncRunning = false;
+  }
+}
+
+// Upload all local data to Cloud database (Parallelized)
+export async function forceUploadAllToCloud(): Promise<{ success: boolean; error?: string; studentCount?: number; attendanceCount?: number }> {
+  try {
+    resetFirestoreQuotaCooldown();
     setCloudSyncStatus('syncing');
     const ALL_KEYS = [
       KEYS.PROFILE,
@@ -1035,18 +1153,19 @@ export async function forceUploadAllToCloud(): Promise<{ success: boolean; error
     ];
 
     const now = Date.now();
-    const writePromises = ALL_KEYS.map((key) => {
+    const writePromises = ALL_KEYS.map(async (key) => {
       const raw = localStorage.getItem(key);
       if (raw) {
         lastSavedStringCache[key] = raw;
-        return writeCloudDocument(key, raw, now);
+        await writeCloudDocument(key, raw, now);
       }
-      return Promise.resolve();
     });
 
-    await Promise.allSettled(writePromises);
+    await Promise.all(writePromises);
     setCloudSyncStatus('connected');
-    return { success: true };
+    const stdCount = getStudents().length;
+    const attCount = getAttendanceRecords().length;
+    return { success: true, studentCount: stdCount, attendanceCount: attCount };
   } catch (err: any) {
     console.error('[Force Upload Cloud Error]', err);
     setCloudSyncStatus('offline');
@@ -1055,8 +1174,9 @@ export async function forceUploadAllToCloud(): Promise<{ success: boolean; error
 }
 
 // Download latest data from Cloud database (Parallelized)
-export async function forceDownloadAllFromCloud(): Promise<{ success: boolean; error?: string }> {
+export async function forceDownloadAllFromCloud(): Promise<{ success: boolean; error?: string; studentCount?: number; attendanceCount?: number; downloadedCount?: number }> {
   try {
+    resetFirestoreQuotaCooldown();
     setCloudSyncStatus('syncing');
     const ALL_KEYS = [
       KEYS.PROFILE,
@@ -1164,11 +1284,20 @@ export async function forceDownloadAllFromCloud(): Promise<{ success: boolean; e
       }
     });
 
-    if (updatedCount > 0) {
-      notifyStorageUpdated();
+    if (updatedCount === 0) {
+      setCloudSyncStatus('offline');
+      return { 
+        success: false, 
+        error: 'Tidak ditemukan data di Cloud (Database Cloud masih kosong atau belum diunggah dari perangkat scan). Pastikan HP scanner sudah menekan "Upload Data Perangkat Ini" terlebih dahulu.',
+        downloadedCount: 0 
+      };
     }
+
+    notifyStorageUpdated();
     setCloudSyncStatus('connected');
-    return { success: true };
+    const stdCount = getStudents().length;
+    const attCount = getAttendanceRecords().length;
+    return { success: true, studentCount: stdCount, attendanceCount: attCount, downloadedCount: updatedCount };
   } catch (err: any) {
     console.error('[Force Download Cloud Error]', err);
     setCloudSyncStatus('offline');
@@ -1395,6 +1524,55 @@ export function initFirestoreRealtimeSync() {
       }).catch(() => {});
     }
   } catch {}
+
+  // Register Automatic Network Status and Online Auto-Sync Listeners
+  if (typeof window !== 'undefined') {
+    // 1. When device comes back online (WiFi/Cellular reconnected)
+    window.addEventListener('online', () => {
+      console.log('[Network] Koneksi online terdeteksi! Menjalankan sinkronisasi database otomatis...');
+      triggerAutoSyncOnOnline(false);
+    });
+
+    // 2. When device loses connection (Offline)
+    window.addEventListener('offline', () => {
+      console.log('[Network] Koneksi internet terputus (Offline).');
+      setCloudSyncStatus('offline');
+      window.dispatchEvent(new CustomEvent('sihadir_network_toast', {
+        detail: {
+          type: 'warning',
+          title: '⚠️ Mode Offline Aktif',
+          message: 'Perangkat offline. Scan & data tetap dicatat di perangkat ini dan akan otomatis diunggah saat koneksi online.'
+        }
+      }));
+    });
+
+    // 3. When returning to the app/tab from background
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible' && typeof navigator !== 'undefined' && navigator.onLine) {
+        const timeSince = Date.now() - lastAutoSyncTime;
+        if (timeSince > 25000) {
+          triggerAutoSyncOnOnline(true);
+        }
+      }
+    });
+
+    // 4. Initial background auto-sync on startup after brief initialization delay
+    if (typeof navigator !== 'undefined' && navigator.onLine) {
+      setTimeout(() => {
+        triggerAutoSyncOnOnline(true);
+      }, 1500);
+    }
+
+    // 5. Periodic lightweight background sync (every 60 seconds when online)
+    setInterval(() => {
+      if (typeof navigator !== 'undefined' && navigator.onLine && !isFirestoreQuotaExceeded()) {
+        const timeSince = Date.now() - lastAutoSyncTime;
+        if (timeSince > 60000) {
+          triggerAutoSyncOnOnline(true);
+        }
+      }
+    }, 60000);
+  }
 }
 
 export const INITIAL_CHARACTER_PREDICATES: CharacterPredicateSettings = {
@@ -1596,6 +1774,13 @@ export function saveAttendanceRecords(records: AttendanceRecord[], instant: bool
   localStorage.setItem(KEYS.ATTENDANCE + '_updatedAt', String(now));
   notifyStorageUpdated();
   syncToCloud(KEYS.ATTENDANCE, records, instant, now);
+}
+
+// Local-only save for automatic ALPA calculation so local device NEVER overwrites real Cloud scans
+export function saveAttendanceRecordsLocally(records: AttendanceRecord[]): void {
+  const dataStr = JSON.stringify(records);
+  localStorage.setItem(KEYS.ATTENDANCE, dataStr);
+  notifyStorageUpdated();
 }
 
 export function getLeaveRequests(): LeaveRequest[] {

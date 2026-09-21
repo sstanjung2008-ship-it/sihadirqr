@@ -1,0 +1,34 @@
+{
+  "entities": {
+    "AppData": {
+      "title": "AppData",
+      "description": "JSON serialized school data for multi-device synchronization",
+      "type": "object",
+      "properties": {
+        "data": {
+          "type": "string",
+          "description": "Serialized data JSON string"
+        },
+        "updatedAt": {
+          "type": "number",
+          "description": "Timestamp of last modification in ms"
+        },
+        "isChunked": {
+          "type": "boolean",
+          "description": "Whether document is chunked"
+        },
+        "totalChunks": {
+          "type": "number",
+          "description": "Number of chunks"
+        }
+      },
+      "required": ["data", "updatedAt"]
+    }
+  },
+  "firestore": {
+    "/sihadir_app_data/{docId}": {
+      "schema": "AppData",
+      "description": "Collection storing synchronized school datasets"
+    }
+  }
+}

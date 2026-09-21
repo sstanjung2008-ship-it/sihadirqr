@@ -410,7 +410,35 @@ export const Sidebar: React.FC<SidebarProps> = ({
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1.5">
+          {/* Cloud Sync Quick Button for Mobile Header (Teachers, Admins, Scanner Pos) */}
+          <button
+            type="button"
+            onClick={() => setShowSyncModal(true)}
+            className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer shadow-xs active:scale-95 ${
+              syncStatus === 'connected'
+                ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-400/40 hover:bg-emerald-500/30'
+                : syncStatus === 'syncing'
+                ? 'bg-amber-500/20 text-amber-300 border border-amber-400/40 animate-pulse'
+                : 'bg-sky-500/20 text-sky-300 border border-sky-400/40 hover:bg-sky-500/30'
+            }`}
+            title="Sinkronisasi Cloud & Multi-Perangkat (Upload/Tarik Data)"
+          >
+            {syncStatus === 'syncing' ? (
+              <RefreshCw className="w-3.5 h-3.5 animate-spin text-amber-300" />
+            ) : syncStatus === 'connected' ? (
+              <span className="relative flex h-2 w-2">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-400"></span>
+              </span>
+            ) : (
+              <Cloud className="w-3.5 h-3.5 text-sky-300" />
+            )}
+            <span className="text-[11px] font-extrabold">
+              {syncStatus === 'connected' ? 'Cloud Live' : syncStatus === 'syncing' ? 'Sync...' : 'Sinkron'}
+            </span>
+          </button>
+
           {/* Bell Notification Icon for Teacher and Parent in Mobile Mode */}
           {(currentRole === 'TEACHER' || currentRole === 'PARENT') && (
             <button
@@ -681,62 +709,36 @@ export const Sidebar: React.FC<SidebarProps> = ({
             </span>
           </div>
 
-          {/* Cloud Database Sync Indicator (Interactive for Admin to sync data across devices) */}
-          {currentRole === 'ADMIN' || userSession?.role === 'ADMIN' ? (
-            <button
-              type="button"
-              onClick={() => setShowSyncModal(true)}
-              className="w-full flex items-center justify-between text-[11px] bg-sky-950/60 hover:bg-sky-900/70 border border-sky-700/60 p-2 rounded-xl text-sky-200 transition-all cursor-pointer text-left shadow-xs group"
-              title="Klik untuk menyamakan dan menyinkronkan data antar-perangkat (Khusus Admin)"
-            >
-              <div className="flex items-center space-x-2 truncate mr-1.5">
-                {syncStatus === 'syncing' ? (
-                  <RefreshCw className="w-3.5 h-3.5 text-amber-400 animate-spin shrink-0" />
-                ) : syncStatus === 'connected' ? (
-                  <span className="relative flex h-2 w-2 shrink-0">
-                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                    <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-400"></span>
-                  </span>
-                ) : syncStatus === 'quota_exceeded' ? (
-                  <span className="relative flex h-2 w-2 shrink-0">
-                    <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-400"></span>
-                  </span>
-                ) : (
-                  <Cloud className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                )}
-                <span className="font-bold text-[11px] text-sky-100 group-hover:text-white transition-colors truncate">
-                  {syncStatus === 'connected' ? 'Database: Live' : syncStatus === 'quota_exceeded' ? 'Cloud: Kuota Habis' : syncStatus === 'syncing' ? 'Menyinkronkan...' : 'Database: Offline'}
+          {/* Cloud Database Sync Indicator (Interactive for all roles to sync data across devices) */}
+          <button
+            type="button"
+            onClick={() => setShowSyncModal(true)}
+            className="w-full flex items-center justify-between text-[11px] bg-sky-950/60 hover:bg-sky-900/70 border border-sky-700/60 p-2 rounded-xl text-sky-200 transition-all cursor-pointer text-left shadow-xs group"
+            title="Klik untuk menyamakan dan menyinkronkan data antar-perangkat (Upload / Tarik Data Cloud)"
+          >
+            <div className="flex items-center space-x-2 truncate mr-1.5">
+              {syncStatus === 'syncing' ? (
+                <RefreshCw className="w-3.5 h-3.5 text-amber-400 animate-spin shrink-0" />
+              ) : syncStatus === 'connected' ? (
+                <span className="relative flex h-2 w-2 shrink-0">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-400"></span>
                 </span>
-              </div>
-              <span className={`text-[10px] font-extrabold px-1.5 py-0.5 rounded-md border transition-colors shrink-0 ${syncStatus === 'quota_exceeded' ? 'text-amber-300 bg-amber-950/80 border-amber-700 group-hover:bg-amber-600 group-hover:text-white' : 'text-sky-300 bg-sky-900/80 border-sky-600 group-hover:bg-sky-600 group-hover:text-white'}`}>
-                {syncStatus === 'quota_exceeded' ? 'File ↗' : 'Sinkron ↗'}
-              </span>
-            </button>
-          ) : (
-            <button
-              type="button"
-              onClick={() => setShowSyncModal(true)}
-              className="w-full flex items-center justify-between text-[11px] bg-slate-900/40 hover:bg-slate-800/60 border border-slate-800/60 p-2 rounded-xl text-slate-400 hover:text-slate-200 text-left transition-colors cursor-pointer"
-              title="Status koneksi database (Klik untuk info sinkronisasi)"
-            >
-              <div className="flex items-center space-x-2">
-                {syncStatus === 'connected' ? (
-                  <span className="relative flex h-2 w-2">
-                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                    <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-400"></span>
-                  </span>
-                ) : (
-                  <Cloud className="w-3.5 h-3.5 text-slate-500" />
-                )}
-                <span className="font-bold text-[11px] text-slate-300 truncate">
-                  {syncStatus === 'connected' ? 'Database: Live' : syncStatus === 'quota_exceeded' ? 'Mode Offline' : syncStatus === 'syncing' ? 'Memuat...' : 'Database: Siap'}
+              ) : syncStatus === 'quota_exceeded' ? (
+                <span className="relative flex h-2 w-2 shrink-0">
+                  <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-400"></span>
                 </span>
-              </div>
-              <span className="text-[10px] font-medium text-emerald-400/80 bg-emerald-950/30 px-1.5 py-0.5 rounded border border-emerald-800/30">
-                Otomatis
+              ) : (
+                <Cloud className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+              )}
+              <span className="font-bold text-[11px] text-sky-100 group-hover:text-white transition-colors truncate">
+                {syncStatus === 'connected' ? 'Database: Live' : syncStatus === 'quota_exceeded' ? 'Cloud: Kuota Habis' : syncStatus === 'syncing' ? 'Menyinkronkan...' : 'Database: Offline'}
               </span>
-            </button>
-          )}
+            </div>
+            <span className={`text-[10px] font-extrabold px-1.5 py-0.5 rounded-md border transition-colors shrink-0 ${syncStatus === 'quota_exceeded' ? 'text-amber-300 bg-amber-950/80 border-amber-700 group-hover:bg-amber-600 group-hover:text-white' : 'text-sky-300 bg-sky-900/80 border-sky-600 group-hover:bg-sky-600 group-hover:text-white'}`}>
+              {syncStatus === 'quota_exceeded' ? 'File ↗' : 'Sinkron ↗'}
+            </span>
+          </button>
         </div>
 
       </aside>

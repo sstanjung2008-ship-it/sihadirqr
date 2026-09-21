@@ -26,7 +26,9 @@ import {
   CloudSyncStatus,
   downloadDatabaseBackupFile,
   importAllDatabaseFromJson,
-  exportAllDatabaseToJson
+  exportAllDatabaseToJson,
+  getAttendanceRecords,
+  getStudents
 } from '../lib/storage';
 
 interface MultiDeviceSyncModalProps {
@@ -89,7 +91,7 @@ export const MultiDeviceSyncModal: React.FC<MultiDeviceSyncModalProps> = ({
       if (res.success) {
         setFeedback({
           type: 'success',
-          message: `Berhasil mengunggah seluruh data (${currentStudentCount} siswa) ke Cloud Firestore! Perangkat lain sekarang dapat menarik data ini.`,
+          message: `Berhasil mengunggah seluruh data (${res.studentCount ?? getStudents().length} siswa, ${res.attendanceCount ?? getAttendanceRecords().length} riwayat presensi) ke Cloud Firestore! Buka perangkat lain (laptop) lalu klik "Tarik Data Terbanyak Cloud".`,
         });
       } else {
         setFeedback({
@@ -115,7 +117,7 @@ export const MultiDeviceSyncModal: React.FC<MultiDeviceSyncModalProps> = ({
       if (res.success) {
         setFeedback({
           type: 'success',
-          message: 'Berhasil mengunduh dan menyinkronkan data terbaru dari Cloud Firestore ke perangkat ini!',
+          message: `Berhasil mengunduh dan menyinkronkan data terbaru (${res.studentCount ?? getStudents().length} siswa, ${res.attendanceCount ?? getAttendanceRecords().length} riwayat presensi) dari Cloud Firestore ke perangkat ini!`,
         });
       } else {
         setFeedback({

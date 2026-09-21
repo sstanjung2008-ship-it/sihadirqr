@@ -25,6 +25,7 @@ import {
   saveSchoolClasses,
   getAttendanceRecords, 
   saveAttendanceRecords,
+  saveAttendanceRecordsLocally,
   getLeaveRequests, 
   saveLeaveRequests,
   getTeachers,
@@ -47,7 +48,7 @@ import {
   reconcileTeachersAndClasses,
   KEYS
 } from './lib/storage';
-import { ShieldCheck, CheckCircle2 } from 'lucide-react';
+import { ShieldCheck, CheckCircle2, WifiOff, RefreshCw, Wifi } from 'lucide-react';
 
 import { Sidebar } from './components/Sidebar';
 import { QRScannerView } from './components/QRScannerView';
@@ -311,6 +312,13 @@ export default function App() {
   const [activeVoiceReminder, setActiveVoiceReminder] = useState<KbmReminderInfo | null>(null);
   const triggeredVoiceReminderKeysRef = useRef<Set<string>>(new Set());
 
+  // Automatic Network / Auto-Sync Toast notification state
+  const [networkToast, setNetworkToast] = useState<{
+    type: 'info' | 'success' | 'warning' | 'error';
+    title: string;
+    message: string;
+  } | null>(null);
+
   // Sync state on local storage events
   const refreshDataFromStorage = () => {
     const rawProfile = getSchoolProfile();
@@ -359,9 +367,20 @@ export default function App() {
       setClassesState(updatedClasses);
     }
 
+    const handleNetworkToast = (e: any) => {
+      if (e?.detail) {
+        setNetworkToast(e.detail);
+        setTimeout(() => {
+          setNetworkToast((prev) => (prev === e.detail ? null : prev));
+        }, 4500);
+      }
+    };
+
     window.addEventListener('sihadir_storage_updated', refreshDataFromStorage);
+    window.addEventListener('sihadir_network_toast', handleNetworkToast);
     return () => {
       window.removeEventListener('sihadir_storage_updated', refreshDataFromStorage);
+      window.removeEventListener('sihadir_network_toast', handleNetworkToast);
     };
   }, []);
 
@@ -450,7 +469,7 @@ export default function App() {
 
       if (hasChanges) {
         setAttendanceRecordsState(updatedAttendance);
-        saveAttendanceRecords(updatedAttendance);
+        saveAttendanceRecordsLocally(updatedAttendance);
       }
     };
 
@@ -693,8 +712,24 @@ export default function App() {
   // Add Attendance Record (from scanner or manual)
   const handleAddAttendance = (record: AttendanceRecord) => {
     setAttendanceRecordsState(prev => {
-      const updated = [record, ...prev.filter(r => !(r.studentId === record.studentId && r.date === record.date))];
-      saveAttendanceRecords(updated);
+      const existingIndex = prev.findIndex(r => (r.studentId === record.studentId || (r.nisn && record.nisn && r.nisn === record.nisn)) && r.date === record.date);
+      let newRecord = { ...record };
+      if (existingIndex >= 0) {
+        const existing = prev[existingIndex];
+        newRecord = {
+          ...existing,
+          ...record,
+          time: (record.time && record.time !== '-') ? record.time : (existing.time || '-'),
+          status: (record.status && record.status !== 'ALPA') ? record.status : existing.status,
+          method: (record.method === 'QR_SCAN' || existing.method === 'QR_SCAN') ? 'QR_SCAN' : (record.method || existing.method),
+          scannedBy: (record.scannedBy && !record.scannedBy.includes('Sistem Otomatis')) ? record.scannedBy : existing.scannedBy,
+          returnTime: record.returnTime || existing.returnTime,
+          returnStatus: record.returnStatus || existing.returnStatus,
+          returnScannedBy: record.returnScannedBy || existing.returnScannedBy,
+        };
+      }
+      const updated = [newRecord, ...prev.filter(r => !((r.studentId === record.studentId || (r.nisn && record.nisn && r.nisn === record.nisn)) && r.date === record.date))];
+      saveAttendanceRecords(updated, true);
       return updated;
     });
   };
@@ -1590,6 +1625,51 @@ export default function App() {
           teacherName={currentTeacher?.name}
           homeroomClassName={currentTeacher?.homeroomClassName}
         />
+      )}
+
+      {/* Floating Auto-Sync & Network Toast Notification */}
+      {networkToast && (
+        <div
+          className={`fixed bottom-20 md:bottom-6 right-4 md:right-6 z-50 max-w-sm p-3.5 rounded-2xl shadow-2xl border flex items-start space-x-3 transition-all animate-in fade-in slide-in-from-bottom-5 backdrop-blur-md ${
+            networkToast.type === 'success'
+              ? 'bg-slate-900/95 text-emerald-100 border-emerald-500/50 shadow-emerald-950/40'
+              : networkToast.type === 'warning'
+              ? 'bg-slate-900/95 text-amber-100 border-amber-500/50 shadow-amber-950/40'
+              : 'bg-slate-900/95 text-sky-100 border-sky-500/50 shadow-sky-950/40'
+          }`}
+        >
+          <div className="shrink-0 mt-0.5">
+            {networkToast.type === 'success' ? (
+              <span className="flex h-6 w-6 rounded-full bg-emerald-500/20 items-center justify-center border border-emerald-500/40">
+                <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+              </span>
+            ) : networkToast.type === 'warning' ? (
+              <span className="flex h-6 w-6 rounded-full bg-amber-500/20 items-center justify-center border border-amber-500/40">
+                <WifiOff className="w-4 h-4 text-amber-400" />
+              </span>
+            ) : (
+              <span className="flex h-6 w-6 rounded-full bg-sky-500/20 items-center justify-center border border-sky-500/40">
+                <RefreshCw className="w-4 h-4 text-sky-400 animate-spin" />
+              </span>
+            )}
+          </div>
+          <div className="flex-1 min-w-0 pr-1">
+            <h4 className="font-bold text-xs uppercase tracking-wider text-white">
+              {networkToast.title}
+            </h4>
+            <p className="text-[11.5px] opacity-85 mt-0.5 leading-snug">
+              {networkToast.message}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => setNetworkToast(null)}
+            className="text-slate-400 hover:text-white text-xs p-1 cursor-pointer transition-colors"
+            title="Tutup Notifikasi"
+          >
+            ✕
+          </button>
+        </div>
       )}
 
     </div>

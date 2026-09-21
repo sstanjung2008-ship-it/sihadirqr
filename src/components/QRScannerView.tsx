@@ -512,7 +512,7 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
         return;
       }
 
-      playScanSound('SUCCESS');
+      playScanSound('PULANG');
 
       const dayNowName = DAY_NAMES[now.getDay()];
       const dayEndTimeStr = getSchoolCheckoutTimeForDay(schoolProfile, dayNowName);
@@ -1039,6 +1039,41 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
                   </div>
                 </div>
               )}
+            </div>
+
+            {/* Sound Notification Status & Quick Test Bar */}
+            <div className="w-full mt-3 pt-3 border-t border-slate-100 flex flex-wrap items-center justify-between gap-2 text-xs">
+              <div className="flex items-center gap-1.5 text-slate-600 font-semibold">
+                <Volume2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                <span>Nada Dering Scan: <strong className="text-emerald-700">Aktif</strong></span>
+              </div>
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <span className="text-[11px] text-slate-400 font-medium mr-1 hidden sm:inline">Uji Suara:</span>
+                <button
+                  type="button"
+                  onClick={() => playScanSound('SUCCESS')}
+                  className="px-2.5 py-1 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 text-[11px] font-bold flex items-center gap-1 transition-colors cursor-pointer"
+                  title="Putar Nada Dering Masuk Tepat Waktu"
+                >
+                  🔔 Tepat Waktu
+                </button>
+                <button
+                  type="button"
+                  onClick={() => playScanSound('LATE')}
+                  className="px-2.5 py-1 rounded-lg bg-amber-50 hover:bg-amber-100 text-amber-700 border border-amber-200 text-[11px] font-bold flex items-center gap-1 transition-colors cursor-pointer"
+                  title="Putar Nada Dering Masuk Terlambat"
+                >
+                  ⚠️ Terlambat
+                </button>
+                <button
+                  type="button"
+                  onClick={() => playScanSound('PULANG')}
+                  className="px-2.5 py-1 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 text-[11px] font-bold flex items-center gap-1 transition-colors cursor-pointer"
+                  title="Putar Nada Dering Pulang"
+                >
+                  🏠 Pulang
+                </button>
+              </div>
             </div>
           </div>
 

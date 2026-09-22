@@ -107,12 +107,22 @@ export function resetFirestoreQuotaCooldown(): void {
 export function handleFirestoreError(err: any): void {
   if (!err) return;
   const errMsg = String(err?.message || err?.code || err || '');
+
+  // If write stream exhausted (client-side buffer limit) or transient connection issue, do NOT lock out
   if (
-    errMsg.includes('resource-exhausted') || 
+    errMsg.includes('Write stream exhausted') || 
+    errMsg.includes('maximum backoff delay') ||
+    errMsg.includes('unavailable') ||
+    errMsg.includes('Connection failed')
+  ) {
+    console.warn('[Firestore Sync] Buffer jaringan/koneksi Firestore sedang sibuk, sinkronisasi dilanjutkan otomatis.');
+    return;
+  }
+
+  if (
     errMsg.includes('Quota limit exceeded') || 
     errMsg.includes('quota metric') || 
-    errMsg.includes('Free daily write units') ||
-    err?.code === 'resource-exhausted'
+    errMsg.includes('Free daily write units')
   ) {
     console.warn('[Firestore Sync] Kuota harian Firestore gratis telah tercapai. Beralih aman ke penyimpanan lokal.');
     if (activeUnsubscribes.length > 0) {
@@ -308,7 +318,48 @@ export async function readCloudDocument(key: string): Promise<{ data: string; up
   }
 }
 
-// Debounced and deduped push to Firestore with Auto-Chunking support
+// Serialized in-flight write tracker to prevent concurrent setDoc spam and write stream buffer exhaustion
+const inFlightWrites: Record<string, boolean> = {};
+const pendingWrites: Record<string, { dataStr: string; timestamp: number } | null> = {};
+
+async function executeSerializedWrite(key: string, dataStr: string, timestamp: number): Promise<void> {
+  if (inFlightWrites[key]) {
+    // If a write is currently in-flight for this document, buffer the newest data
+    pendingWrites[key] = { dataStr, timestamp };
+    return;
+  }
+
+  if (isFirestoreQuotaExceeded()) {
+    setCloudSyncStatus('quota_exceeded');
+    return;
+  }
+
+  inFlightWrites[key] = true;
+
+  try {
+    setCloudSyncStatus('syncing');
+    await writeCloudDocument(key, dataStr, timestamp);
+    lastSavedStringCache[key] = dataStr;
+    setCloudSyncStatus('connected');
+  } catch (err: any) {
+    handleFirestoreError(err);
+    if (!isFirestoreQuotaExceeded()) {
+      setCloudSyncStatus('offline');
+    }
+  } finally {
+    inFlightWrites[key] = false;
+    // If a new update arrived while this write was executing, process it immediately
+    if (pendingWrites[key]) {
+      const nextPayload = pendingWrites[key]!;
+      pendingWrites[key] = null;
+      setTimeout(() => {
+        executeSerializedWrite(key, nextPayload.dataStr, nextPayload.timestamp);
+      }, 50);
+    }
+  }
+}
+
+// Debounced and deduped push to Firestore with Auto-Chunking & Queue Serializer
 export function syncToCloud(key: string, data: any, instant: boolean = false, explicitTimestamp?: number) {
   if (typeof window === 'undefined') return;
 
@@ -325,38 +376,21 @@ export function syncToCloud(key: string, data: any, instant: boolean = false, ex
     return;
   }
 
+  const timestamp = explicitTimestamp || Number(localStorage.getItem(key + '_updatedAt')) || Date.now();
+
   // Clear previous debounce for this key
   if (debounceTimers[key]) {
     clearTimeout(debounceTimers[key]);
+    delete debounceTimers[key];
   }
 
-  const doWrite = async () => {
-    if (isFirestoreQuotaExceeded()) {
-      setCloudSyncStatus('quota_exceeded');
-      return;
-    }
-
-    try {
-      setCloudSyncStatus('syncing');
-      const timestamp = explicitTimestamp || Number(localStorage.getItem(key + '_updatedAt')) || Date.now();
-      await writeCloudDocument(key, dataStr, timestamp);
-      lastSavedStringCache[key] = dataStr;
-      setCloudSyncStatus('connected');
-    } catch (err: any) {
-      handleFirestoreError(err);
-      if (!isFirestoreQuotaExceeded()) {
-        console.warn('[Firestore Sync] Error, menggunakan penyimpanan offline lokal:', err?.message || err);
-        setCloudSyncStatus('offline');
-      }
-    }
-  };
-
-  // If instant or empty array (e.g. user cleared/deleted all students or instant scan record), push immediately
   if (instant || dataStr === '[]') {
-    doWrite();
+    executeSerializedWrite(key, dataStr, timestamp);
   } else {
-    // Ultra-fast debounce (400ms) to ensure near-instant real-time sync across all devices
-    debounceTimers[key] = setTimeout(doWrite, 400);
+    // Smooth debounce (600ms) to coalesce rapid scan changes cleanly
+    debounceTimers[key] = setTimeout(() => {
+      executeSerializedWrite(key, dataStr, timestamp);
+    }, 600);
   }
 }
 
@@ -628,6 +662,8 @@ export function mergeStudentLists(local: Student[], cloud: Student[]): Student[]
         qrCode: cloudItem.qrCode || localItem.qrCode || `STUDENT-${localItem.nisn}`,
         photoUrl: bestPhoto,
         password: bestPassword,
+        statusPerbaikan: cloudItem.statusPerbaikan !== undefined ? cloudItem.statusPerbaikan : localItem.statusPerbaikan,
+        perbaikanReason: cloudItem.perbaikanReason !== undefined ? cloudItem.perbaikanReason : localItem.perbaikanReason,
       };
 
       map.set(key, merged);
@@ -665,10 +701,10 @@ export function mergeTeacherLists(local: Teacher[], cloud: Teacher[]): Teacher[]
 
       // Preserve custom password:
       // If either cloud or local has a custom password, prioritize it so it never reverts to default on device sync
-      const isCloudCustomPass = !!cloudItem.password && cloudItem.password !== '123456';
-      const isLocalCustomPass = !!localItem.password && localItem.password !== '123456';
+      const isCloudCustomPass = !!cloudItem.password && cloudItem.password !== '123123' && cloudItem.password !== '123456';
+      const isLocalCustomPass = !!localItem.password && localItem.password !== '123123' && localItem.password !== '123456';
 
-      let bestPassword = cloudItem.password || localItem.password;
+      let bestPassword = cloudItem.password || localItem.password || '123123';
       if (isCloudCustomPass) {
         bestPassword = cloudItem.password;
       } else if (isLocalCustomPass) {
@@ -973,6 +1009,10 @@ export function mergeSchoolProfile(local: SchoolProfile, cloud: SchoolProfile): 
       ...(cloud.autoCharacterPoints || {}),
     },
     lateToleranceMinutes: typeof cloud.lateToleranceMinutes === 'number' ? cloud.lateToleranceMinutes : (typeof local.lateToleranceMinutes === 'number' ? local.lateToleranceMinutes : (INITIAL_SCHOOL_PROFILE.lateToleranceMinutes ?? 15)),
+    parentPortalMaintenance: typeof cloud.parentPortalMaintenance === 'boolean'
+      ? cloud.parentPortalMaintenance
+      : (typeof local.parentPortalMaintenance === 'boolean' ? local.parentPortalMaintenance : false),
+    parentMaintenanceMessage: cloud.parentMaintenanceMessage || local.parentMaintenanceMessage || INITIAL_SCHOOL_PROFILE.parentMaintenanceMessage || 'Mohon maaf, Portal Orang Tua sedang dalam status perbaikan / pemeliharaan sistem. Silakan coba beberapa saat lagi.',
   };
 }
 
@@ -2015,7 +2055,7 @@ export function resetAllTeachersPassword(): void {
 
 export function resetAllStudentsPassword(): void {
   const students = getStudents();
-  const updated = students.map(s => ({ ...s, password: '123456' }));
+  const updated = students.map(s => ({ ...s, password: '123123' }));
   saveStudents(updated, true);
 }
 

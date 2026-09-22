@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { SchoolProfile, Teacher, Student, SchoolHoliday } from '../types';
-import { Settings, Save, School, Clock, RotateCcw, CreditCard, CheckCircle2, Upload, Image as ImageIcon, Link, BookOpen, Plus, X, KeyRound, Key, Lock, Eye, EyeOff, User, GraduationCap, Search, Check, RefreshCw, Users, ShieldAlert, ShieldCheck, AlertCircle, Calendar, Trash2, Edit3, Tag, Flag, AlertTriangle, Sparkles, Filter, Cloud, CloudDownload, CloudUpload, FileJson, Download, Volume2, VolumeX, Mic, Headphones, BellRing, UserCheck, Smile, UserX, Play, Square, MessageSquare, Flame, CalendarCheck2, Layers } from 'lucide-react';
+import { Settings, Save, School, Clock, RotateCcw, CreditCard, CheckCircle2, Upload, Image as ImageIcon, Link, BookOpen, Plus, X, KeyRound, Key, Lock, Eye, EyeOff, User, GraduationCap, Search, Check, RefreshCw, Users, ShieldAlert, ShieldCheck, AlertCircle, Calendar, Trash2, Edit3, Tag, Flag, AlertTriangle, Sparkles, Filter, Cloud, CloudDownload, CloudUpload, FileJson, Download, Volume2, VolumeX, Mic, Headphones, BellRing, UserCheck, Smile, UserX, Play, Square, MessageSquare, Flame, CalendarCheck2, Layers, Wrench } from 'lucide-react';
 import { resetToDefaultData, forceUploadAllToCloud, forceDownloadAllFromCloud, getCloudSyncStatus, CloudSyncStatus, downloadDatabaseBackupFile, getLocalDateString } from '../lib/storage';
 import { 
   DEFAULT_TEACHER_SPEECH_TEMPLATE,
@@ -634,7 +634,7 @@ export const SchoolSettingsView: React.FC<SchoolSettingsViewProps> = ({
     setSelectedStudentId(id);
     const s = students.find(item => item.id === id);
     if (s) {
-      setNewPasswordInput(s.password || '123456');
+      setNewPasswordInput(s.password || '123123');
     }
   };
 
@@ -719,14 +719,14 @@ export const SchoolSettingsView: React.FC<SchoolSettingsViewProps> = ({
     if (onBatchResetStudentsPassword) {
       onBatchResetStudentsPassword();
     } else if (onUpdateStudent && students) {
-      students.forEach(s => onUpdateStudent({ ...s, password: '123456' }));
+      students.forEach(s => onUpdateStudent({ ...s, password: '123123' }));
     }
     setConfirmBatchStudentModal(false);
     setPasswordResetNotice({
       type: 'success',
-      msg: `Berhasil mereset password SELURUH AKUN SISWA (${students.length} orang) menjadi default "123456".`
+      msg: `Berhasil mereset password SELURUH AKUN SISWA (${students.length} orang) menjadi default "123123".`
     });
-    setNewPasswordInput('123456');
+    setNewPasswordInput('123123');
     setTimeout(() => setPasswordResetNotice(null), 6000);
   };
 
@@ -745,15 +745,40 @@ export const SchoolSettingsView: React.FC<SchoolSettingsViewProps> = ({
 
   const handleQuickResetStudent = (s: Student) => {
     if (!onUpdateStudent) return;
-    onUpdateStudent({ ...s, password: '123456' });
+    onUpdateStudent({ ...s, password: '123123' });
     setPasswordResetNotice({
       type: 'success',
-      msg: `Password akun Siswa ${s.name} (${s.className} - NISN: ${s.nisn}) berhasil direset kembali ke default: "123456".`
+      msg: `Password akun Siswa ${s.name} (${s.className} - NISN: ${s.nisn}) berhasil direset kembali ke default: "123123".`
     });
     if (selectedStudentId === s.id) {
-      setNewPasswordInput('123456');
+      setNewPasswordInput('123123');
     }
     setTimeout(() => setPasswordResetNotice(null), 5000);
+  };
+
+  const handleToggleStudentPerbaikan = (s: Student) => {
+    if (!onUpdateStudent) return;
+    const newStatus = !s.statusPerbaikan;
+    onUpdateStudent({ ...s, statusPerbaikan: newStatus });
+    setPasswordResetNotice({
+      type: 'success',
+      msg: `Status akun Orang Tua siswa ${s.name} (NISN: ${s.nisn}) berhasil diubah: ${newStatus ? '🛠️ MODE PERBAIKAN AKTIF (Login Ditolak)' : '🟢 AKTIF NORMAL (Login Diizinkan)'}.`
+    });
+    setTimeout(() => setPasswordResetNotice(null), 5000);
+  };
+
+  const handleBatchSetStudentsPerbaikan = (status: boolean) => {
+    if (!onUpdateStudent || !students || students.length === 0) return;
+    students.forEach(s => {
+      onUpdateStudent({ ...s, statusPerbaikan: status });
+    });
+    setPasswordResetNotice({
+      type: 'success',
+      msg: status
+        ? `Status seluruh akun orang tua siswa (${students.length} orang) berhasil diset ke mode "🛠️ PERBAIKAN (Login Ditolak)".`
+        : `Status seluruh akun orang tua siswa (${students.length} orang) berhasil dinormalkan (🟢 AKTIF NORMAL).`
+    });
+    setTimeout(() => setPasswordResetNotice(null), 6000);
   };
 
   const filteredTeachersForPassword = useMemo(() => {
@@ -1147,6 +1172,85 @@ export const SchoolSettingsView: React.FC<SchoolSettingsViewProps> = ({
                 className="w-full bg-slate-50 border border-slate-200 text-slate-800 rounded-xl p-2.5 font-mono font-bold focus:ring-2 focus:ring-indigo-500"
               />
             </div>
+          </div>
+        </div>
+
+        {/* STATUS PERBAIKAN & PEMELIHARAAN PORTAL ORANG TUA */}
+        <div id="section-perbaikan-orangtua" className="bg-white border border-amber-200/90 rounded-3xl p-6 shadow-sm space-y-4">
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-amber-100 pb-3">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-2xl bg-amber-100 border border-amber-300 flex items-center justify-center text-amber-700 shrink-0">
+                <Wrench className="w-5 h-5" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <h2 className="text-sm font-bold text-slate-900">
+                    Status & Mode Perbaikan Portal Orang Tua
+                  </h2>
+                  {formData.parentPortalMaintenance ? (
+                    <span className="bg-rose-100 text-rose-800 text-[10px] font-extrabold px-2.5 py-0.5 rounded-full border border-rose-300 flex items-center gap-1">
+                      <ShieldAlert className="w-3 h-3 text-rose-600" />
+                      PERBAIKAN AKTIF (LOGIN DITOLAK)
+                    </span>
+                  ) : (
+                    <span className="bg-emerald-100 text-emerald-800 text-[10px] font-extrabold px-2.5 py-0.5 rounded-full border border-emerald-300 flex items-center gap-1">
+                      <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+                      PORTAL AKTIF NORMAL
+                    </span>
+                  )}
+                </div>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Kontrol izin akses login seluruh akun Orang Tua / Siswa saat sistem database dalam pemeliharaan.
+                </p>
+              </div>
+            </div>
+
+            {/* Toggle Switch */}
+            <div className="flex items-center gap-2.5 bg-amber-50/80 border border-amber-200 px-3.5 py-2 rounded-2xl">
+              <span className="text-xs font-bold text-slate-700">
+                Mode Perbaikan:
+              </span>
+              <label className="relative inline-flex items-center cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={!!formData.parentPortalMaintenance}
+                  onChange={(e) => setFormData({ ...formData, parentPortalMaintenance: e.target.checked })}
+                  className="sr-only peer"
+                />
+                <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-amber-600"></div>
+              </label>
+              <span className={`text-xs font-extrabold ${formData.parentPortalMaintenance ? 'text-rose-600' : 'text-emerald-700'}`}>
+                {formData.parentPortalMaintenance ? 'Aktif' : 'Non-Aktif'}
+              </span>
+            </div>
+          </div>
+
+          {/* Info Banner when Active */}
+          {formData.parentPortalMaintenance && (
+            <div className="bg-rose-50 border border-rose-200 rounded-2xl p-4 text-xs space-y-1.5 text-rose-950">
+              <div className="flex items-center gap-2 font-extrabold text-rose-800">
+                <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
+                Akses Login Orang Tua Sedang Dinonaktifkan
+              </div>
+              <p className="leading-relaxed text-slate-700">
+                Ketika status perbaikan ini aktif, seluruh orang tua/wali murid yang mencoba masuk ke aplikasi akan langsung ditolak sebelum otentikasi, dan sistem akan menampilkan pesan perbaikan di bawah.
+              </p>
+            </div>
+          )}
+
+          {/* Custom Announcement Message Input */}
+          <div className="space-y-1.5">
+            <label className="block text-slate-700 font-bold text-xs flex items-center justify-between">
+              <span>Informasi / Pesan Perbaikan untuk Orang Tua</span>
+              <span className="text-[11px] text-slate-400 font-normal">Tampil otomatis saat orang tua mencoba login</span>
+            </label>
+            <textarea
+              rows={2}
+              value={formData.parentMaintenanceMessage || ''}
+              onChange={(e) => setFormData({ ...formData, parentMaintenanceMessage: e.target.value })}
+              placeholder="Contoh: Mohon maaf, Portal Orang Tua saat ini sedang dalam status perbaikan dan sinkronisasi data. Silakan hubungi pihak sekolah."
+              className="w-full bg-slate-50 border border-slate-200 text-slate-800 rounded-xl p-3 text-xs focus:ring-2 focus:ring-amber-500 font-medium leading-relaxed"
+            />
           </div>
         </div>
 
@@ -3549,7 +3653,7 @@ export const SchoolSettingsView: React.FC<SchoolSettingsViewProps> = ({
                         .filter(s => studentClassFilter === 'ALL' || s.className === studentClassFilter)
                         .map(s => (
                           <option key={s.id} value={s.id}>
-                            {s.name} ({s.className}) - NISN: {s.nisn} {s.password ? '🔑 [Custom Password]' : '🔒 [Default: 123456]'}
+                            {s.name} ({s.className}) - NISN: {s.nisn} {s.password ? '🔑 [Custom Password]' : '🔒 [Default: 123123]'}
                           </option>
                         ))}
                     </select>
@@ -3575,29 +3679,51 @@ export const SchoolSettingsView: React.FC<SchoolSettingsViewProps> = ({
                         {showPasswordText ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                       </button>
                     </div>
-                    <p className="text-[11px] text-slate-400">Default password awal: <code className="font-mono bg-slate-100 px-1 py-0.5 rounded text-indigo-600 font-bold">123456</code></p>
+                    <p className="text-[11px] text-slate-400">Default password awal: <code className="font-mono bg-slate-100 px-1 py-0.5 rounded text-indigo-600 font-bold">123123</code></p>
                   </div>
                 </div>
 
                 {/* Action Buttons */}
                 <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-200/60">
-                  <button
-                    type="button"
-                    onClick={handleBatchResetStudents}
-                    className="bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 font-bold px-3.5 py-2 rounded-xl text-xs flex items-center gap-1.5 transition-all cursor-pointer"
-                    title="Kembalikan password semua siswa ke 123456"
-                  >
-                    <RefreshCw className="w-3.5 h-3.5 text-rose-600" />
-                    Reset Massal Semua Password Siswa ke 123456
-                  </button>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <button
+                      type="button"
+                      onClick={handleBatchResetStudents}
+                      className="bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 font-bold px-3.5 py-2 rounded-xl text-xs flex items-center gap-1.5 transition-all cursor-pointer"
+                      title="Kembalikan password semua siswa ke 123123"
+                    >
+                      <RefreshCw className="w-3.5 h-3.5 text-rose-600" />
+                      Reset Massal Password ke 123123
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => handleBatchSetStudentsPerbaikan(true)}
+                      className="bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-300 font-bold px-3 py-2 rounded-xl text-xs flex items-center gap-1.5 transition-all cursor-pointer"
+                      title="Set semua akun orang tua siswa ke mode Perbaikan (Tolak Login)"
+                    >
+                      <Wrench className="w-3.5 h-3.5 text-amber-600" />
+                      Set Semua ke "Perbaikan"
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => handleBatchSetStudentsPerbaikan(false)}
+                      className="bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-300 font-bold px-3 py-2 rounded-xl text-xs flex items-center gap-1.5 transition-all cursor-pointer"
+                      title="Normalkan semua akun orang tua siswa (Izinkan Login)"
+                    >
+                      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                      Normalkan Semua Akun
+                    </button>
+                  </div>
 
                   <div className="flex items-center gap-2">
                     <button
                       type="button"
-                      onClick={() => setNewPasswordInput('123456')}
-                      className="bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 font-bold px-3.5 py-2 rounded-xl text-xs flex items-center gap-1.5 transition-all cursor-pointer"
+                      onClick={() => setNewPasswordInput('123123')}
+                      className="bg-slate-100 hover:bg-slate-200 text-slate-800 border border-slate-300 font-bold px-3.5 py-2 rounded-xl text-xs flex items-center gap-1.5 transition-all cursor-pointer"
                     >
-                      Set Default (123456)
+                      Set Input 123123
                     </button>
                     <button
                       type="button"
@@ -3655,13 +3781,14 @@ export const SchoolSettingsView: React.FC<SchoolSettingsViewProps> = ({
                         <th className="py-2.5 px-3">Kelas</th>
                         <th className="py-2.5 px-3">Username (NISN)</th>
                         <th className="py-2.5 px-3">Status Password</th>
+                        <th className="py-2.5 px-3">Status Perbaikan</th>
                         <th className="py-2.5 px-3 text-right">Aksi</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100 text-xs">
                       {filteredStudentsForPassword.length === 0 ? (
                         <tr>
-                          <td colSpan={5} className="py-6 text-center text-slate-400 italic">
+                          <td colSpan={6} className="py-6 text-center text-slate-400 italic">
                             Tidak ada data siswa yang cocok dengan filter / pencarian.
                           </td>
                         </tr>
@@ -3688,12 +3815,48 @@ export const SchoolSettingsView: React.FC<SchoolSettingsViewProps> = ({
                               ) : (
                                 <span className="inline-flex items-center gap-1 bg-emerald-50 text-emerald-800 border border-emerald-200 px-2 py-0.5 rounded-md font-semibold text-[10px]">
                                   <Lock className="w-2.5 h-2.5 text-emerald-600" />
-                                  Default: 123456
+                                  Default: 123123
                                 </span>
+                              )}
+                            </td>
+                            <td className="py-2.5 px-3">
+                              {s.statusPerbaikan ? (
+                                <button
+                                  type="button"
+                                  onClick={() => handleToggleStudentPerbaikan(s)}
+                                  className="inline-flex items-center gap-1 bg-rose-100 hover:bg-rose-200 text-rose-800 border border-rose-300 px-2 py-0.5 rounded-md font-bold text-[10px] cursor-pointer transition shadow-2xs"
+                                  title="Klik untuk mengubah status menjadi Normal"
+                                >
+                                  <Wrench className="w-2.5 h-2.5 text-rose-600" />
+                                  Perbaikan Aktif
+                                </button>
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={() => handleToggleStudentPerbaikan(s)}
+                                  className="inline-flex items-center gap-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 px-2 py-0.5 rounded-md font-medium text-[10px] cursor-pointer transition"
+                                  title="Klik untuk mengaktifkan status Perbaikan pada akun siswa ini"
+                                >
+                                  <CheckCircle2 className="w-2.5 h-2.5 text-emerald-600" />
+                                  Normal
+                                </button>
                               )}
                             </td>
                             <td className="py-2.5 px-3 text-right">
                               <div className="inline-flex items-center gap-1.5 justify-end">
+                                <button
+                                  type="button"
+                                  onClick={() => handleToggleStudentPerbaikan(s)}
+                                  className={`px-2 py-1 border font-bold rounded-lg text-[11px] transition cursor-pointer flex items-center gap-1 ${
+                                    s.statusPerbaikan
+                                      ? 'bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border-emerald-300'
+                                      : 'bg-amber-50 hover:bg-amber-100 text-amber-900 border-amber-300'
+                                  }`}
+                                  title="Toggle Status Perbaikan Akun"
+                                >
+                                  <Wrench className="w-3 h-3" />
+                                  {s.statusPerbaikan ? 'Normalkan' : 'Perbaikan'}
+                                </button>
                                 <button
                                   type="button"
                                   onClick={() => handleSelectStudentForReset(s.id)}
@@ -3705,9 +3868,9 @@ export const SchoolSettingsView: React.FC<SchoolSettingsViewProps> = ({
                                   type="button"
                                   onClick={() => handleQuickResetStudent(s)}
                                   className="px-2 py-1 bg-slate-100 hover:bg-rose-50 text-slate-700 hover:text-rose-700 border border-slate-200 font-bold rounded-lg text-[11px] transition cursor-pointer"
-                                  title="Reset password siswa ini ke 123456"
+                                  title="Reset password siswa ini ke 123123"
                                 >
-                                  Reset ke 123456
+                                  Reset 123123
                                 </button>
                               </div>
                             </td>
@@ -3957,7 +4120,7 @@ export const SchoolSettingsView: React.FC<SchoolSettingsViewProps> = ({
             </div>
 
             <p className="text-xs text-slate-600 leading-relaxed bg-indigo-50/50 p-3.5 rounded-2xl border border-indigo-100">
-              Apakah Anda yakin ingin mereset kata sandi login <strong>SELURUH SISWA ({students.length} orang)</strong> menjadi kata sandi bawaan <code className="font-mono bg-white px-1.5 py-0.5 rounded text-indigo-600 font-bold border border-indigo-200">123456</code>?
+              Apakah Anda yakin ingin mereset kata sandi login <strong>SELURUH SISWA ({students.length} orang)</strong> menjadi kata sandi bawaan <code className="font-mono bg-white px-1.5 py-0.5 rounded text-indigo-600 font-bold border border-indigo-200">123123</code>?
             </p>
 
             <div className="flex items-center justify-end gap-2 pt-2">

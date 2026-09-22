@@ -52,6 +52,8 @@ export const INITIAL_SCHOOL_PROFILE: SchoolProfile = {
   waGatewayEnabled: true,
   adminPassword: "admin123",
   scannerPassword: "123456",
+  parentPortalMaintenance: false,
+  parentMaintenanceMessage: "Mohon maaf, Portal Orang Tua saat ini sedang dalam status perbaikan / pemeliharaan sistem. Silakan coba kembali beberapa saat lagi atau hubungi pihak sekolah.",
   activeDays: ["Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu"],
   holidays: [
     {

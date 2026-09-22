@@ -367,6 +367,17 @@ export default function App() {
       setClassesState(updatedClasses);
     }
 
+    // Reset all student/parent account passwords to 123123
+    const PARENT_PW_RESET_FLAG = 'sihadir_parent_pw_reset_123123_v1';
+    if (!localStorage.getItem(PARENT_PW_RESET_FLAG)) {
+      setStudentsState(prev => {
+        const resetStudents = prev.map(s => ({ ...s, password: '123123' }));
+        saveStudents(resetStudents, true);
+        localStorage.setItem(PARENT_PW_RESET_FLAG, 'true');
+        return resetStudents;
+      });
+    }
+
     const handleNetworkToast = (e: any) => {
       if (e?.detail) {
         setNetworkToast(e.detail);
@@ -1179,7 +1190,7 @@ export default function App() {
 
   const handleBatchResetStudentsPassword = () => {
     setStudentsState(prev => {
-      const updated = prev.map(s => ({ ...s, password: '123456' }));
+      const updated = prev.map(s => ({ ...s, password: '123123' }));
       saveStudents(updated, true);
       return updated;
     });

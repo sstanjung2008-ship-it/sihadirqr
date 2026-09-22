@@ -226,21 +226,21 @@ export const LoginView: React.FC<LoginViewProps> = ({
       if (isGlobalMaintenance || isStudentMaintenance) {
         const infoDetail = matchedStudent.perbaikanReason || 
           currentProfile?.parentMaintenanceMessage || 
-          'Mohon maaf, Portal Orang Tua saat ini sedang dalam status perbaikan / pemeliharaan sistem. Silakan coba beberapa saat lagi atau hubungi pihak sekolah.';
+          'Maaf ada perbaikan Sistem. Akses login akun orang tua sementara ditutup.';
         
         setMaintenanceNotice({
-          title: 'Sistem Dalam Perbaikan',
+          title: 'Maaf ada perbaikan Sistem',
           message: infoDetail,
           studentName: matchedStudent.name,
           parentName: matchedStudent.parentName || 'Orang Tua / Wali Siswa',
           nisn: matchedStudent.nisn
         });
 
-        setErrorMessage(`⚠️ SISTEM DALAM PERBAIKAN: Akses Akun Orang Tua sedang ditutup untuk pemeliharaan sistem. Silakan hubungi pihak sekolah.`);
+        setErrorMessage('Maaf ada perbaikan Sistem');
         return true;
       }
 
-      const expectedPassword = matchedStudent.password || '123123';
+      const expectedPassword = matchedStudent.password || '123456';
       if (password === expectedPassword) {
         const session: UserSession = {
           isLoggedIn: true,
@@ -254,7 +254,7 @@ export const LoginView: React.FC<LoginViewProps> = ({
         onLoginSuccess(session);
         return true;
       } else {
-        setErrorMessage('Password Wali / Siswa salah! (Default password: 123123). Silakan periksa kembali atau hubungi Administrator.');
+        setErrorMessage('Password Wali / Siswa salah! (Default password: 123456). Silakan periksa kembali atau hubungi Administrator.');
         return true;
       }
     }
@@ -515,7 +515,7 @@ export const LoginView: React.FC<LoginViewProps> = ({
                     Akses Login Ditolak
                   </div>
                   <h3 className="text-lg font-black text-slate-900 tracking-tight">
-                    Sistem Dalam Perbaikan
+                    {maintenanceNotice.title || 'Maaf ada perbaikan Sistem'}
                   </h3>
                 </div>
               </div>

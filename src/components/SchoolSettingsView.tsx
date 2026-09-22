@@ -634,7 +634,7 @@ export const SchoolSettingsView: React.FC<SchoolSettingsViewProps> = ({
     setSelectedStudentId(id);
     const s = students.find(item => item.id === id);
     if (s) {
-      setNewPasswordInput(s.password || '123123');
+      setNewPasswordInput(s.password || '123456');
     }
   };
 
@@ -719,14 +719,14 @@ export const SchoolSettingsView: React.FC<SchoolSettingsViewProps> = ({
     if (onBatchResetStudentsPassword) {
       onBatchResetStudentsPassword();
     } else if (onUpdateStudent && students) {
-      students.forEach(s => onUpdateStudent({ ...s, password: '123123' }));
+      students.forEach(s => onUpdateStudent({ ...s, password: '123456' }));
     }
     setConfirmBatchStudentModal(false);
     setPasswordResetNotice({
       type: 'success',
-      msg: `Berhasil mereset password SELURUH AKUN SISWA (${students.length} orang) menjadi default "123123".`
+      msg: `Berhasil mereset password SELURUH AKUN SISWA (${students.length} orang) menjadi default "123456".`
     });
-    setNewPasswordInput('123123');
+    setNewPasswordInput('123456');
     setTimeout(() => setPasswordResetNotice(null), 6000);
   };
 
@@ -745,13 +745,13 @@ export const SchoolSettingsView: React.FC<SchoolSettingsViewProps> = ({
 
   const handleQuickResetStudent = (s: Student) => {
     if (!onUpdateStudent) return;
-    onUpdateStudent({ ...s, password: '123123' });
+    onUpdateStudent({ ...s, password: '123456' });
     setPasswordResetNotice({
       type: 'success',
-      msg: `Password akun Siswa ${s.name} (${s.className} - NISN: ${s.nisn}) berhasil direset kembali ke default: "123123".`
+      msg: `Password akun Siswa ${s.name} (${s.className} - NISN: ${s.nisn}) berhasil direset kembali ke default: "123456".`
     });
     if (selectedStudentId === s.id) {
-      setNewPasswordInput('123123');
+      setNewPasswordInput('123456');
     }
     setTimeout(() => setPasswordResetNotice(null), 5000);
   };
@@ -777,6 +777,25 @@ export const SchoolSettingsView: React.FC<SchoolSettingsViewProps> = ({
       msg: status
         ? `Status seluruh akun orang tua siswa (${students.length} orang) berhasil diset ke mode "🛠️ PERBAIKAN (Login Ditolak)".`
         : `Status seluruh akun orang tua siswa (${students.length} orang) berhasil dinormalkan (🟢 AKTIF NORMAL).`
+    });
+    setTimeout(() => setPasswordResetNotice(null), 6000);
+  };
+
+  const handleToggleGlobalPerbaikan = (newStatus?: boolean) => {
+    const updatedStatus = newStatus !== undefined ? newStatus : !formData.parentPortalMaintenance;
+    const defaultMsg = formData.parentMaintenanceMessage?.trim() || 'Maaf ada perbaikan Sistem';
+    const updatedProfile: SchoolProfile = {
+      ...formData,
+      parentPortalMaintenance: updatedStatus,
+      parentMaintenanceMessage: defaultMsg
+    };
+    setFormData(updatedProfile);
+    onSaveProfile(updatedProfile);
+    setPasswordResetNotice({
+      type: updatedStatus ? 'error' : 'success',
+      msg: updatedStatus
+        ? '🛠️ Mode "Info Perbaikan Sistem" AKTIF: Seluruh akses login role Orang Tua/Siswa kini DITOLAK dengan pesan "Maaf ada perbaikan Sistem".'
+        : '🟢 Mode Perbaikan DINONAKTIFKAN: Seluruh akun Orang Tua/Siswa kini dapat login normal kembali.'
     });
     setTimeout(() => setPasswordResetNotice(null), 6000);
   };
@@ -3615,6 +3634,90 @@ export const SchoolSettingsView: React.FC<SchoolSettingsViewProps> = ({
           {/* ======================================= */}
           {passwordRoleTab === 'STUDENT' && (
             <div className="space-y-6 text-xs">
+              
+              {/* TOMBOL & KONTROL INFO PERBAIKAN SISTEM (PORTAL ORANG TUA) */}
+              <div className={`border rounded-2xl p-4 sm:p-5 transition-all shadow-xs space-y-3.5 ${
+                formData.parentPortalMaintenance 
+                  ? 'bg-rose-50/90 border-rose-300 ring-1 ring-rose-200' 
+                  : 'bg-amber-50/80 border-amber-200'
+              }`}>
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div className="flex items-center gap-3">
+                    <div className={`w-10 h-10 rounded-2xl flex items-center justify-center shrink-0 shadow-inner ${
+                      formData.parentPortalMaintenance
+                        ? 'bg-rose-200 text-rose-800 border border-rose-300'
+                        : 'bg-amber-100 text-amber-700 border border-amber-300'
+                    }`}>
+                      <Wrench className={`w-5 h-5 ${formData.parentPortalMaintenance ? 'animate-bounce' : ''}`} />
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <h3 className="text-sm font-bold text-slate-900">
+                          Info & Status Perbaikan Sistem (Portal Orang Tua)
+                        </h3>
+                        {formData.parentPortalMaintenance ? (
+                          <span className="bg-rose-600 text-white text-[10px] font-extrabold px-2.5 py-0.5 rounded-full flex items-center gap-1 shadow-2xs">
+                            <ShieldAlert className="w-3 h-3" />
+                            PERBAIKAN AKTIF (LOGIN ORANG TUA DITOLAK)
+                          </span>
+                        ) : (
+                          <span className="bg-emerald-100 text-emerald-800 text-[10px] font-bold px-2.5 py-0.5 rounded-full border border-emerald-300 flex items-center gap-1">
+                            <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+                            NORMAL (LOGIN DIIZINKAN)
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-[11px] text-slate-600 mt-0.5">
+                        Jika status perbaikan aktif, maka <strong className="text-rose-700">seluruh role Orang Tua/Siswa tidak bisa login (ditolak)</strong> meski user & password benar, dan akan muncul tulisan <strong className="text-rose-800">"Maaf ada perbaikan Sistem"</strong>.
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Tombol Info Perbaikan Sistem & Toggle */}
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => handleToggleGlobalPerbaikan()}
+                      className={`font-extrabold px-4 py-2.5 rounded-xl text-xs flex items-center gap-2 shadow-sm transition-all cursor-pointer ${
+                        formData.parentPortalMaintenance
+                          ? 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-emerald-600/20'
+                          : 'bg-rose-600 hover:bg-rose-700 text-white shadow-rose-600/20'
+                      }`}
+                    >
+                      <Wrench className="w-4 h-4" />
+                      {formData.parentPortalMaintenance
+                        ? 'Nonaktifkan Perbaikan (Buka Login)'
+                        : 'Tombol Info Perbaikan Sistem (Tolak Login)'}
+                    </button>
+                  </div>
+                </div>
+
+                {/* Pesan Info Perbaikan Preview & Edit */}
+                <div className="bg-white/90 border border-slate-200 rounded-xl p-3 space-y-1.5">
+                  <div className="flex items-center justify-between text-[11px] font-bold text-slate-700">
+                    <span className="flex items-center gap-1">
+                      <AlertTriangle className="w-3.5 h-3.5 text-amber-600" />
+                      Teks Tampilan Saat Login Ditolak:
+                    </span>
+                    <span className="text-slate-400 font-mono text-[10px]">Tersimpan Otomatis</span>
+                  </div>
+                  <input
+                    type="text"
+                    value={formData.parentMaintenanceMessage || 'Maaf ada perbaikan Sistem'}
+                    onChange={(e) => {
+                      const updated = { ...formData, parentMaintenanceMessage: e.target.value };
+                      setFormData(updated);
+                      onSaveProfile(updated);
+                    }}
+                    placeholder="Maaf ada perbaikan Sistem"
+                    className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2 text-xs font-semibold text-slate-800 focus:ring-2 focus:ring-amber-500"
+                  />
+                  <p className="text-[10px] text-slate-500 italic">
+                    Teks di atas akan ditampilkan kepada pengguna orang tua ketika mencoba login saat mode perbaikan aktif.
+                  </p>
+                </div>
+              </div>
+
               {/* Form Input Card */}
               <div className="bg-slate-50 border border-slate-200/80 rounded-2xl p-4 space-y-4">
                 <h3 className="font-bold text-slate-800 flex items-center gap-1.5 text-xs">
@@ -3653,7 +3756,7 @@ export const SchoolSettingsView: React.FC<SchoolSettingsViewProps> = ({
                         .filter(s => studentClassFilter === 'ALL' || s.className === studentClassFilter)
                         .map(s => (
                           <option key={s.id} value={s.id}>
-                            {s.name} ({s.className}) - NISN: {s.nisn} {s.password ? '🔑 [Custom Password]' : '🔒 [Default: 123123]'}
+                            {s.name} ({s.className}) - NISN: {s.nisn} {s.password ? '🔑 [Custom Password]' : '🔒 [Default: 123456]'}
                           </option>
                         ))}
                     </select>
@@ -3679,206 +3782,39 @@ export const SchoolSettingsView: React.FC<SchoolSettingsViewProps> = ({
                         {showPasswordText ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                       </button>
                     </div>
-                    <p className="text-[11px] text-slate-400">Default password awal: <code className="font-mono bg-slate-100 px-1 py-0.5 rounded text-indigo-600 font-bold">123123</code></p>
+                    <p className="text-[11px] text-slate-400">Default password awal: <code className="font-mono bg-slate-100 px-1 py-0.5 rounded text-indigo-600 font-bold">123456</code></p>
                   </div>
                 </div>
 
                 {/* Action Buttons */}
                 <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-200/60">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <button
-                      type="button"
-                      onClick={handleBatchResetStudents}
-                      className="bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 font-bold px-3.5 py-2 rounded-xl text-xs flex items-center gap-1.5 transition-all cursor-pointer"
-                      title="Kembalikan password semua siswa ke 123123"
-                    >
-                      <RefreshCw className="w-3.5 h-3.5 text-rose-600" />
-                      Reset Massal Password ke 123123
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => handleBatchSetStudentsPerbaikan(true)}
-                      className="bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-300 font-bold px-3 py-2 rounded-xl text-xs flex items-center gap-1.5 transition-all cursor-pointer"
-                      title="Set semua akun orang tua siswa ke mode Perbaikan (Tolak Login)"
-                    >
-                      <Wrench className="w-3.5 h-3.5 text-amber-600" />
-                      Set Semua ke "Perbaikan"
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => handleBatchSetStudentsPerbaikan(false)}
-                      className="bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-300 font-bold px-3 py-2 rounded-xl text-xs flex items-center gap-1.5 transition-all cursor-pointer"
-                      title="Normalkan semua akun orang tua siswa (Izinkan Login)"
-                    >
-                      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-                      Normalkan Semua Akun
-                    </button>
-                  </div>
+                  <button
+                    type="button"
+                    onClick={handleBatchResetStudents}
+                    className="bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 font-bold px-3.5 py-2 rounded-xl text-xs flex items-center gap-1.5 transition-all cursor-pointer"
+                    title="Kembalikan password semua siswa ke 123456"
+                  >
+                    <RefreshCw className="w-3.5 h-3.5 text-rose-600" />
+                    Reset Massal Password ke 123456
+                  </button>
 
                   <div className="flex items-center gap-2">
                     <button
                       type="button"
-                      onClick={() => setNewPasswordInput('123123')}
+                      onClick={() => setNewPasswordInput('123456')}
                       className="bg-slate-100 hover:bg-slate-200 text-slate-800 border border-slate-300 font-bold px-3.5 py-2 rounded-xl text-xs flex items-center gap-1.5 transition-all cursor-pointer"
                     >
-                      Set Input 123123
+                      Set Input 123456
                     </button>
                     <button
                       type="button"
                       onClick={handleSaveStudentPassword}
-                      className="bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold px-4 py-2 rounded-xl text-xs flex items-center gap-1.5 shadow-sm transition-all cursor-pointer"
+                      className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold px-4 py-2 rounded-xl text-xs flex items-center gap-1.5 shadow-sm transition-all cursor-pointer"
                     >
                       <Save className="w-3.5 h-3.5" />
                       Simpan Password Siswa
                     </button>
                   </div>
-                </div>
-              </div>
-
-              {/* Student Account Management Table */}
-              <div className="bg-white border border-slate-200/90 rounded-2xl p-4 space-y-3">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-2 border-b border-slate-100">
-                  <div className="flex items-center gap-2">
-                    <GraduationCap className="w-4 h-4 text-indigo-600" />
-                    <h4 className="font-bold text-slate-800">Daftar Akun Siswa & Reset Cepat</h4>
-                    <span className="bg-indigo-50 text-indigo-700 text-[10px] font-bold px-2 py-0.5 rounded-full">
-                      {filteredStudentsForPassword.length} Siswa
-                    </span>
-                  </div>
-
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <select
-                      value={studentClassFilter}
-                      onChange={(e) => setStudentClassFilter(e.target.value)}
-                      className="text-xs bg-slate-50 border border-slate-200 text-slate-700 font-bold rounded-xl px-2.5 py-1.5 focus:ring-1 focus:ring-indigo-500 cursor-pointer"
-                    >
-                      <option value="ALL">Semua Kelas</option>
-                      {Array.from(new Set(students.map(s => s.className))).sort().map(cls => (
-                        <option key={cls} value={cls}>Kelas {cls}</option>
-                      ))}
-                    </select>
-
-                    <div className="relative w-full sm:w-56">
-                      <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-                      <input
-                        type="text"
-                        placeholder="Cari nama / NISN..."
-                        value={studentSearchTerm}
-                        onChange={(e) => setStudentSearchTerm(e.target.value)}
-                        className="w-full bg-slate-50 border border-slate-200 text-slate-800 pl-8 pr-3 py-1.5 rounded-xl text-xs focus:ring-2 focus:ring-indigo-500 font-medium"
-                      />
-                    </div>
-                  </div>
-                </div>
-
-                <div className="overflow-x-auto max-h-80 overflow-y-auto">
-                  <table className="w-full text-left border-collapse">
-                    <thead className="sticky top-0 bg-slate-100 text-[11px] font-bold text-slate-600 uppercase border-b border-slate-200 z-10">
-                      <tr>
-                        <th className="py-2.5 px-3">Nama Siswa</th>
-                        <th className="py-2.5 px-3">Kelas</th>
-                        <th className="py-2.5 px-3">Username (NISN)</th>
-                        <th className="py-2.5 px-3">Status Password</th>
-                        <th className="py-2.5 px-3">Status Perbaikan</th>
-                        <th className="py-2.5 px-3 text-right">Aksi</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100 text-xs">
-                      {filteredStudentsForPassword.length === 0 ? (
-                        <tr>
-                          <td colSpan={6} className="py-6 text-center text-slate-400 italic">
-                            Tidak ada data siswa yang cocok dengan filter / pencarian.
-                          </td>
-                        </tr>
-                      ) : (
-                        filteredStudentsForPassword.map((s) => (
-                          <tr key={s.id} className="hover:bg-slate-50/80 transition-colors">
-                            <td className="py-2.5 px-3 font-bold text-slate-800">
-                              {s.name}
-                            </td>
-                            <td className="py-2.5 px-3">
-                              <span className="bg-slate-100 text-slate-700 px-2 py-0.5 rounded-md font-semibold text-[11px]">
-                                {s.className}
-                              </span>
-                            </td>
-                            <td className="py-2.5 px-3 font-mono text-slate-700">
-                              {s.nisn}
-                            </td>
-                            <td className="py-2.5 px-3">
-                              {s.password ? (
-                                <span className="inline-flex items-center gap-1 bg-amber-50 text-amber-800 border border-amber-200 px-2 py-0.5 rounded-md font-semibold text-[10px]">
-                                  <Key className="w-2.5 h-2.5 text-amber-600" />
-                                  Password Kustom
-                                </span>
-                              ) : (
-                                <span className="inline-flex items-center gap-1 bg-emerald-50 text-emerald-800 border border-emerald-200 px-2 py-0.5 rounded-md font-semibold text-[10px]">
-                                  <Lock className="w-2.5 h-2.5 text-emerald-600" />
-                                  Default: 123123
-                                </span>
-                              )}
-                            </td>
-                            <td className="py-2.5 px-3">
-                              {s.statusPerbaikan ? (
-                                <button
-                                  type="button"
-                                  onClick={() => handleToggleStudentPerbaikan(s)}
-                                  className="inline-flex items-center gap-1 bg-rose-100 hover:bg-rose-200 text-rose-800 border border-rose-300 px-2 py-0.5 rounded-md font-bold text-[10px] cursor-pointer transition shadow-2xs"
-                                  title="Klik untuk mengubah status menjadi Normal"
-                                >
-                                  <Wrench className="w-2.5 h-2.5 text-rose-600" />
-                                  Perbaikan Aktif
-                                </button>
-                              ) : (
-                                <button
-                                  type="button"
-                                  onClick={() => handleToggleStudentPerbaikan(s)}
-                                  className="inline-flex items-center gap-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 px-2 py-0.5 rounded-md font-medium text-[10px] cursor-pointer transition"
-                                  title="Klik untuk mengaktifkan status Perbaikan pada akun siswa ini"
-                                >
-                                  <CheckCircle2 className="w-2.5 h-2.5 text-emerald-600" />
-                                  Normal
-                                </button>
-                              )}
-                            </td>
-                            <td className="py-2.5 px-3 text-right">
-                              <div className="inline-flex items-center gap-1.5 justify-end">
-                                <button
-                                  type="button"
-                                  onClick={() => handleToggleStudentPerbaikan(s)}
-                                  className={`px-2 py-1 border font-bold rounded-lg text-[11px] transition cursor-pointer flex items-center gap-1 ${
-                                    s.statusPerbaikan
-                                      ? 'bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border-emerald-300'
-                                      : 'bg-amber-50 hover:bg-amber-100 text-amber-900 border-amber-300'
-                                  }`}
-                                  title="Toggle Status Perbaikan Akun"
-                                >
-                                  <Wrench className="w-3 h-3" />
-                                  {s.statusPerbaikan ? 'Normalkan' : 'Perbaikan'}
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => handleSelectStudentForReset(s.id)}
-                                  className="px-2 py-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-bold rounded-lg text-[11px] transition cursor-pointer"
-                                >
-                                  Pilih
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => handleQuickResetStudent(s)}
-                                  className="px-2 py-1 bg-slate-100 hover:bg-rose-50 text-slate-700 hover:text-rose-700 border border-slate-200 font-bold rounded-lg text-[11px] transition cursor-pointer"
-                                  title="Reset password siswa ini ke 123123"
-                                >
-                                  Reset 123123
-                                </button>
-                              </div>
-                            </td>
-                          </tr>
-                        ))
-                      )}
-                    </tbody>
-                  </table>
                 </div>
               </div>
             </div>

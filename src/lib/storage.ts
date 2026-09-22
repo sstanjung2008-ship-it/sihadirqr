@@ -20,7 +20,6 @@ export const KEYS = {
   CLASSES: 'sihadir_school_classes_v2',
   STUDENTS: 'sihadir_school_students_v2',
   ATTENDANCE: 'sihadir_attendance_records_v2',
-  ATTENDANCE_BATCH_QUEUE: 'sihadir_attendance_batch_queue_v2',
   LEAVES: 'sihadir_leave_requests_v2',
   WA_LOGS: 'sihadir_wa_logs_v2',
   TEACHERS: 'sihadir_teachers_v2',
@@ -35,17 +34,9 @@ export const KEYS = {
   DIRECT_CHATS: 'sihadir_parent_direct_chats_v2',
 };
 
-// Konfigurasi Batching Sinkronisasi Presensi Siswa
-export const ATTENDANCE_BATCH_SIZE = 25; // Maksimal 25 siswa per batching upload
-export const ATTENDANCE_WORKER_INTERVAL_MS = 20000; // Interval Worker setiap 20 detik (20.000 ms)
-
 export type CloudSyncStatus = 'connected' | 'syncing' | 'offline' | 'quota_exceeded';
 let currentSyncStatus: CloudSyncStatus = 'syncing';
 let isFirestoreInitialized = false;
-let isAttendanceBatchSyncing = false;
-let isAttendanceWorkerStarted = false;
-let lastAttendanceBatchSyncTime: number | null = null;
-let lastSyncedBatchCount = 0;
 const debounceTimers: Record<string, any> = {};
 const lastSavedStringCache: Record<string, string> = {};
 
@@ -116,22 +107,12 @@ export function resetFirestoreQuotaCooldown(): void {
 export function handleFirestoreError(err: any): void {
   if (!err) return;
   const errMsg = String(err?.message || err?.code || err || '');
-
-  // If write stream exhausted (client-side buffer limit) or transient connection issue, do NOT lock out
   if (
-    errMsg.includes('Write stream exhausted') || 
-    errMsg.includes('maximum backoff delay') ||
-    errMsg.includes('unavailable') ||
-    errMsg.includes('Connection failed')
-  ) {
-    console.warn('[Firestore Sync] Buffer jaringan/koneksi Firestore sedang sibuk, sinkronisasi dilanjutkan otomatis.');
-    return;
-  }
-
-  if (
+    errMsg.includes('resource-exhausted') || 
     errMsg.includes('Quota limit exceeded') || 
     errMsg.includes('quota metric') || 
-    errMsg.includes('Free daily write units')
+    errMsg.includes('Free daily write units') ||
+    err?.code === 'resource-exhausted'
   ) {
     console.warn('[Firestore Sync] Kuota harian Firestore gratis telah tercapai. Beralih aman ke penyimpanan lokal.');
     if (activeUnsubscribes.length > 0) {
@@ -327,48 +308,7 @@ export async function readCloudDocument(key: string): Promise<{ data: string; up
   }
 }
 
-// Serialized in-flight write tracker to prevent concurrent setDoc spam and write stream buffer exhaustion
-const inFlightWrites: Record<string, boolean> = {};
-const pendingWrites: Record<string, { dataStr: string; timestamp: number } | null> = {};
-
-async function executeSerializedWrite(key: string, dataStr: string, timestamp: number): Promise<void> {
-  if (inFlightWrites[key]) {
-    // If a write is currently in-flight for this document, buffer the newest data
-    pendingWrites[key] = { dataStr, timestamp };
-    return;
-  }
-
-  if (isFirestoreQuotaExceeded()) {
-    setCloudSyncStatus('quota_exceeded');
-    return;
-  }
-
-  inFlightWrites[key] = true;
-
-  try {
-    setCloudSyncStatus('syncing');
-    await writeCloudDocument(key, dataStr, timestamp);
-    lastSavedStringCache[key] = dataStr;
-    setCloudSyncStatus('connected');
-  } catch (err: any) {
-    handleFirestoreError(err);
-    if (!isFirestoreQuotaExceeded()) {
-      setCloudSyncStatus('offline');
-    }
-  } finally {
-    inFlightWrites[key] = false;
-    // If a new update arrived while this write was executing, process it immediately
-    if (pendingWrites[key]) {
-      const nextPayload = pendingWrites[key]!;
-      pendingWrites[key] = null;
-      setTimeout(() => {
-        executeSerializedWrite(key, nextPayload.dataStr, nextPayload.timestamp);
-      }, 50);
-    }
-  }
-}
-
-// Debounced and deduped push to Firestore with Auto-Chunking & Queue Serializer
+// Debounced and deduped push to Firestore with Auto-Chunking support
 export function syncToCloud(key: string, data: any, instant: boolean = false, explicitTimestamp?: number) {
   if (typeof window === 'undefined') return;
 
@@ -385,21 +325,38 @@ export function syncToCloud(key: string, data: any, instant: boolean = false, ex
     return;
   }
 
-  const timestamp = explicitTimestamp || Number(localStorage.getItem(key + '_updatedAt')) || Date.now();
-
   // Clear previous debounce for this key
   if (debounceTimers[key]) {
     clearTimeout(debounceTimers[key]);
-    delete debounceTimers[key];
   }
 
+  const doWrite = async () => {
+    if (isFirestoreQuotaExceeded()) {
+      setCloudSyncStatus('quota_exceeded');
+      return;
+    }
+
+    try {
+      setCloudSyncStatus('syncing');
+      const timestamp = explicitTimestamp || Number(localStorage.getItem(key + '_updatedAt')) || Date.now();
+      await writeCloudDocument(key, dataStr, timestamp);
+      lastSavedStringCache[key] = dataStr;
+      setCloudSyncStatus('connected');
+    } catch (err: any) {
+      handleFirestoreError(err);
+      if (!isFirestoreQuotaExceeded()) {
+        console.warn('[Firestore Sync] Error, menggunakan penyimpanan offline lokal:', err?.message || err);
+        setCloudSyncStatus('offline');
+      }
+    }
+  };
+
+  // If instant or empty array (e.g. user cleared/deleted all students or instant scan record), push immediately
   if (instant || dataStr === '[]') {
-    executeSerializedWrite(key, dataStr, timestamp);
+    doWrite();
   } else {
-    // Smooth debounce (600ms) to coalesce rapid scan changes cleanly
-    debounceTimers[key] = setTimeout(() => {
-      executeSerializedWrite(key, dataStr, timestamp);
-    }, 600);
+    // Ultra-fast debounce (400ms) to ensure near-instant real-time sync across all devices
+    debounceTimers[key] = setTimeout(doWrite, 400);
   }
 }
 
@@ -671,8 +628,6 @@ export function mergeStudentLists(local: Student[], cloud: Student[]): Student[]
         qrCode: cloudItem.qrCode || localItem.qrCode || `STUDENT-${localItem.nisn}`,
         photoUrl: bestPhoto,
         password: bestPassword,
-        statusPerbaikan: cloudItem.statusPerbaikan !== undefined ? cloudItem.statusPerbaikan : localItem.statusPerbaikan,
-        perbaikanReason: cloudItem.perbaikanReason !== undefined ? cloudItem.perbaikanReason : localItem.perbaikanReason,
       };
 
       map.set(key, merged);
@@ -710,10 +665,10 @@ export function mergeTeacherLists(local: Teacher[], cloud: Teacher[]): Teacher[]
 
       // Preserve custom password:
       // If either cloud or local has a custom password, prioritize it so it never reverts to default on device sync
-      const isCloudCustomPass = !!cloudItem.password && cloudItem.password !== '123123' && cloudItem.password !== '123456';
-      const isLocalCustomPass = !!localItem.password && localItem.password !== '123123' && localItem.password !== '123456';
+      const isCloudCustomPass = !!cloudItem.password && cloudItem.password !== '123456';
+      const isLocalCustomPass = !!localItem.password && localItem.password !== '123456';
 
-      let bestPassword = cloudItem.password || localItem.password || '123123';
+      let bestPassword = cloudItem.password || localItem.password;
       if (isCloudCustomPass) {
         bestPassword = cloudItem.password;
       } else if (isLocalCustomPass) {
@@ -953,7 +908,7 @@ export function mergeGenericListsById<T extends { id: string }>(local: T[], clou
 }
 
 // Merge SchoolProfile ensuring all subjects from both devices are preserved (union)
-export function mergeSchoolProfile(local: SchoolProfile, cloud: SchoolProfile, localIsNewer: boolean = false): SchoolProfile {
+export function mergeSchoolProfile(local: SchoolProfile, cloud: SchoolProfile): SchoolProfile {
   const subjectsSet = new Set<string>();
 
   // Collect subjects from cloud
@@ -981,36 +936,29 @@ export function mergeSchoolProfile(local: SchoolProfile, cloud: SchoolProfile, l
 
   const mergedSubjects = Array.from(subjectsSet);
 
-  const primary = localIsNewer ? local : cloud;
-  const secondary = localIsNewer ? cloud : local;
-
   return {
     ...INITIAL_SCHOOL_PROFILE,
-    ...secondary,
-    ...primary,
-    adminPassword: primary.adminPassword || secondary.adminPassword || INITIAL_SCHOOL_PROFILE.adminPassword || 'admin123',
-    scannerPassword: primary.scannerPassword || secondary.scannerPassword || INITIAL_SCHOOL_PROFILE.scannerPassword || '123456',
+    ...local,
+    ...cloud,
+    adminPassword: cloud.adminPassword || local.adminPassword || INITIAL_SCHOOL_PROFILE.adminPassword || 'admin123',
+    scannerPassword: cloud.scannerPassword || local.scannerPassword || INITIAL_SCHOOL_PROFILE.scannerPassword || '123456',
     subjects: mergedSubjects,
-    holidays: (primary.holidays && Array.isArray(primary.holidays) && primary.holidays.length > 0)
-      ? primary.holidays
-      : ((secondary.holidays && Array.isArray(secondary.holidays) && secondary.holidays.length > 0) ? secondary.holidays : []),
-    activeDays: (primary.activeDays && Array.isArray(primary.activeDays) && primary.activeDays.length > 0)
-      ? primary.activeDays
-      : ((secondary.activeDays && Array.isArray(secondary.activeDays) && secondary.activeDays.length > 0) ? secondary.activeDays : ['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu']),
-    startTime: primary.startTime || secondary.startTime || INITIAL_SCHOOL_PROFILE.startTime,
-    endTime: primary.endTime || secondary.endTime || INITIAL_SCHOOL_PROFILE.endTime,
+    holidays: (cloud.holidays && Array.isArray(cloud.holidays) && cloud.holidays.length > 0) ? cloud.holidays : (local.holidays || []),
+    activeDays: (cloud.activeDays && Array.isArray(cloud.activeDays) && cloud.activeDays.length > 0) ? cloud.activeDays : (local.activeDays || ['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu']),
+    startTime: cloud.startTime || local.startTime || INITIAL_SCHOOL_PROFILE.startTime,
+    endTime: cloud.endTime || local.endTime || INITIAL_SCHOOL_PROFILE.endTime,
     dailyEndTimes: {
       ...(INITIAL_SCHOOL_PROFILE.dailyEndTimes || {}),
-      ...(secondary.dailyEndTimes || {}),
-      ...(primary.dailyEndTimes || {})
+      ...(local.dailyEndTimes || {}),
+      ...(cloud.dailyEndTimes || {})
     },
-    autoAlpaTime: primary.autoAlpaTime || secondary.autoAlpaTime || INITIAL_SCHOOL_PROFILE.autoAlpaTime,
-    autoAlpaEnabled: typeof primary.autoAlpaEnabled === 'boolean'
-      ? primary.autoAlpaEnabled
-      : (typeof secondary.autoAlpaEnabled === 'boolean' ? secondary.autoAlpaEnabled : (INITIAL_SCHOOL_PROFILE.autoAlpaEnabled !== false)),
-    autoCharacterAssessmentEnabled: typeof primary.autoCharacterAssessmentEnabled === 'boolean'
-      ? primary.autoCharacterAssessmentEnabled
-      : (typeof secondary.autoCharacterAssessmentEnabled === 'boolean' ? secondary.autoCharacterAssessmentEnabled : (INITIAL_SCHOOL_PROFILE.autoCharacterAssessmentEnabled !== false)),
+    autoAlpaTime: cloud.autoAlpaTime || local.autoAlpaTime || INITIAL_SCHOOL_PROFILE.autoAlpaTime,
+    autoAlpaEnabled: typeof cloud.autoAlpaEnabled === 'boolean'
+      ? cloud.autoAlpaEnabled
+      : (typeof local.autoAlpaEnabled === 'boolean' ? local.autoAlpaEnabled : (INITIAL_SCHOOL_PROFILE.autoAlpaEnabled !== false)),
+    autoCharacterAssessmentEnabled: typeof cloud.autoCharacterAssessmentEnabled === 'boolean'
+      ? cloud.autoCharacterAssessmentEnabled
+      : (typeof local.autoCharacterAssessmentEnabled === 'boolean' ? local.autoCharacterAssessmentEnabled : (INITIAL_SCHOOL_PROFILE.autoCharacterAssessmentEnabled !== false)),
     autoCharacterPoints: {
       ...(INITIAL_SCHOOL_PROFILE.autoCharacterPoints || {
         latePoints: 2,
@@ -1021,16 +969,10 @@ export function mergeSchoolProfile(local: SchoolProfile, cloud: SchoolProfile, l
         onTimePoints: 1,
         onTimeRequiredDays: 3,
       }),
-      ...(secondary.autoCharacterPoints || {}),
-      ...(primary.autoCharacterPoints || {}),
+      ...(local.autoCharacterPoints || {}),
+      ...(cloud.autoCharacterPoints || {}),
     },
-    lateToleranceMinutes: typeof primary.lateToleranceMinutes === 'number'
-      ? primary.lateToleranceMinutes
-      : (typeof secondary.lateToleranceMinutes === 'number' ? secondary.lateToleranceMinutes : (INITIAL_SCHOOL_PROFILE.lateToleranceMinutes ?? 15)),
-    parentPortalMaintenance: typeof primary.parentPortalMaintenance === 'boolean'
-      ? primary.parentPortalMaintenance
-      : (typeof secondary.parentPortalMaintenance === 'boolean' ? secondary.parentPortalMaintenance : false),
-    parentMaintenanceMessage: primary.parentMaintenanceMessage || secondary.parentMaintenanceMessage || INITIAL_SCHOOL_PROFILE.parentMaintenanceMessage || 'Maaf ada perbaikan Sistem',
+    lateToleranceMinutes: typeof cloud.lateToleranceMinutes === 'number' ? cloud.lateToleranceMinutes : (typeof local.lateToleranceMinutes === 'number' ? local.lateToleranceMinutes : (INITIAL_SCHOOL_PROFILE.lateToleranceMinutes ?? 15)),
   };
 }
 
@@ -1078,10 +1020,7 @@ export async function smartSyncAndMergeAllWithCloud(): Promise<{ success: boolea
     if (profileCloud && profileCloud.data) {
       try {
         const cloudProfileData = typeof profileCloud.data === 'string' ? JSON.parse(profileCloud.data) : profileCloud.data;
-        const localUpdatedAt = Number(localStorage.getItem(KEYS.PROFILE + '_updatedAt') || '0');
-        const cloudUpdatedAt = Number(profileCloud.updatedAt) || 0;
-        const localIsNewer = localUpdatedAt > cloudUpdatedAt;
-        mergedProfile = mergeSchoolProfile(currentLocalProfile, cloudProfileData, localIsNewer);
+        mergedProfile = mergeSchoolProfile(currentLocalProfile, cloudProfileData);
       } catch (e) {
         console.warn('[Sync] Profile parse error:', e);
       }
@@ -1220,6 +1159,11 @@ export async function smartSyncAndMergeAllWithCloud(): Promise<{ success: boolea
         writeCloudDocument(KEYS.SCHEDULES, schedulesJsonStr, now),
       ]);
     }
+
+    // Reset scan queue since all attendance is completely synchronized
+    scanQueuePendingCount = 0;
+    scanQueueCountdownSeconds = 0;
+    notifyScanQueueChanged();
 
     if (isFirestoreQuotaExceeded()) {
       setCloudSyncStatus('quota_exceeded');
@@ -1383,10 +1327,7 @@ export async function forceDownloadAllFromCloud(): Promise<{ success: boolean; e
           try {
             const cloudP = JSON.parse(cloudDoc.data);
             const localP = getSchoolProfile();
-            const localUpdatedAt = Number(localStorage.getItem(key + '_updatedAt') || '0');
-            const cloudUpdatedAt = Number(cloudDoc.updatedAt || 0);
-            const localIsNewer = localUpdatedAt > cloudUpdatedAt;
-            const mergedP = mergeSchoolProfile(localP, cloudP, localIsNewer);
+            const mergedP = mergeSchoolProfile(localP, cloudP);
             const mergedStr = JSON.stringify(mergedP);
             localStorage.setItem(key, mergedStr);
             localStorage.setItem(key + '_updatedAt', String(cloudDoc.updatedAt || Date.now()));
@@ -1466,6 +1407,14 @@ export async function forceDownloadAllFromCloud(): Promise<{ success: boolean; e
     });
 
     if (updatedCount === 0) {
+      if (isFirestoreQuotaExceeded()) {
+        setCloudSyncStatus('quota_exceeded');
+        return { 
+          success: false, 
+          error: 'Kuota baca harian gratis Cloud Firestore (Free daily read quota) pada project ini telah tercapai untuk hari ini. Kuota akan otomatis di-reset oleh Google besok. Anda tetap dapat mentransfer seluruh data antar-perangkat secara instan lewat menu "Ekspor Cadangan Lengkap (.json)".',
+          downloadedCount: 0 
+        };
+      }
       setCloudSyncStatus('offline');
       return { 
         success: false, 
@@ -1556,8 +1505,7 @@ export function initFirestoreRealtimeSync() {
               try {
                 const cloudProfile = typeof finalDataToSave === 'string' ? JSON.parse(finalDataToSave) : finalDataToSave;
                 const localProfile = getSchoolProfile();
-                const localIsNewer = localUpdatedAt > cloudUpdatedAt;
-                const mergedProfile = mergeSchoolProfile(localProfile, cloudProfile, localIsNewer);
+                const mergedProfile = mergeSchoolProfile(localProfile, cloudProfile);
                 finalDataToSave = JSON.stringify(mergedProfile);
                 lastSavedStringCache[key] = finalDataToSave;
                 safeSetLocalStorage(key, finalDataToSave);
@@ -1760,9 +1708,6 @@ export function initFirestoreRealtimeSync() {
         }
       }
     }, 60000);
-
-    // 6. Inisialisasi Worker Batching Presensi Siswa (Maks 25 Siswa / Interval 20 Detik)
-    initAttendanceBatchWorker();
   }
 }
 
@@ -1954,19 +1899,166 @@ export function getAttendanceRecords(): AttendanceRecord[] {
   }
 }
 
-export function saveAttendanceRecords(records: AttendanceRecord[], instant: boolean = false): void {
+// =========================================================================
+// SCAN BATCHING QUEUE WORKER (25 SISWA / INTERVAL 20 DETIK)
+// =========================================================================
+export const SCAN_BATCH_THRESHOLD = 25; // Flush ke cloud jika antrean mencapai 25 siswa
+export const SCAN_IDLE_TIMEOUT_MS = 20000; // Flush ke cloud jika sudah 20 detik tanpa scan baru (idle)
+
+export interface ScanQueueStatus {
+  pendingCount: number;
+  maxBatch: number;
+  idleTimeoutSeconds: number;
+  lastFlushTime: number;
+  isFlushing: boolean;
+  secondsRemaining: number;
+}
+
+let scanQueuePendingCount = 0;
+let scanQueueIdleTimer: any = null;
+let scanQueueLastFlushTime = Date.now();
+let isScanQueueFlushing = false;
+let scanQueueCountdownTimer: any = null;
+let scanQueueCountdownSeconds = 20;
+
+export function getScanQueueStatus(): ScanQueueStatus {
+  return {
+    pendingCount: scanQueuePendingCount,
+    maxBatch: SCAN_BATCH_THRESHOLD,
+    idleTimeoutSeconds: Math.round(SCAN_IDLE_TIMEOUT_MS / 1000),
+    lastFlushTime: scanQueueLastFlushTime,
+    isFlushing: isScanQueueFlushing,
+    secondsRemaining: scanQueuePendingCount > 0 ? scanQueueCountdownSeconds : 0,
+  };
+}
+
+export function notifyScanQueueChanged(): void {
+  if (typeof window !== 'undefined') {
+    const status = getScanQueueStatus();
+    window.dispatchEvent(new CustomEvent('sihadir_scan_queue_changed', { detail: status }));
+  }
+}
+
+/**
+ * Paksa kirim (flush) seluruh antrean scan ke Cloud Firestore
+ */
+export async function flushAttendanceScanQueue(force: boolean = false): Promise<void> {
+  if (scanQueuePendingCount === 0 && !force) return;
+
+  if (scanQueueIdleTimer) {
+    clearTimeout(scanQueueIdleTimer);
+    scanQueueIdleTimer = null;
+  }
+  if (scanQueueCountdownTimer) {
+    clearInterval(scanQueueCountdownTimer);
+    scanQueueCountdownTimer = null;
+  }
+
+  isScanQueueFlushing = true;
+  scanQueueCountdownSeconds = 0;
+  notifyScanQueueChanged();
+
+  try {
+    const records = getAttendanceRecords();
+    const now = Date.now();
+    // Flush to cloud Firestore
+    syncToCloud(KEYS.ATTENDANCE, records, true, now);
+    scanQueueLastFlushTime = now;
+  } catch (err) {
+    console.error('[ScanQueueWorker] Gagal flush antrean scan ke Cloud:', err);
+  } finally {
+    scanQueuePendingCount = 0;
+    isScanQueueFlushing = false;
+    notifyScanQueueChanged();
+  }
+}
+
+/**
+ * Menyimpan hasil scan QR dengan sistem Worker Batching:
+ * 1. Simpan segera ke localStorage lokal (zero-delay bagi layar kamera & audio beep)
+ * 2. Tambah antrean pending
+ * 3. Jika antrean mencapai 25 siswa -> langsung kirim ke Cloud Firestore
+ * 4. Jika antrean belum mencapai 25 siswa -> antrean di-buffer dengan timer 20 detik (idle timer)
+ */
+export function queueAttendanceScanRecord(records: AttendanceRecord[]): void {
+  const now = Date.now();
+  const dataStr = JSON.stringify(records);
+  
+  // 1. Simpan segera ke penyimpanan lokal (Zero-delay untuk UI & feedback audio)
+  safeSetLocalStorage(KEYS.ATTENDANCE, dataStr);
+  safeSetLocalStorage(KEYS.ATTENDANCE + '_updatedAt', String(now));
+  notifyStorageUpdated();
+
+  // 2. Tambah jumlah antrean scan pending
+  scanQueuePendingCount += 1;
+
+  // 3. Evaluasi kondisi Batching Worker
+  if (scanQueuePendingCount >= SCAN_BATCH_THRESHOLD) {
+    // KONDISI A: Kuota batch 25 siswa terpenuhi -> langsung flush ke Cloud
+    flushAttendanceScanQueue(true);
+  } else {
+    // KONDISI B: Masih di bawah 25 siswa -> reset timer idle 20 detik
+    if (scanQueueIdleTimer) {
+      clearTimeout(scanQueueIdleTimer);
+      scanQueueIdleTimer = null;
+    }
+    if (scanQueueCountdownTimer) {
+      clearInterval(scanQueueCountdownTimer);
+      scanQueueCountdownTimer = null;
+    }
+
+    scanQueueCountdownSeconds = Math.round(SCAN_IDLE_TIMEOUT_MS / 1000);
+    notifyScanQueueChanged();
+
+    // Countdown per detik untuk tampilan UI
+    scanQueueCountdownTimer = setInterval(() => {
+      if (scanQueueCountdownSeconds > 1) {
+        scanQueueCountdownSeconds -= 1;
+        notifyScanQueueChanged();
+      } else {
+        if (scanQueueCountdownTimer) {
+          clearInterval(scanQueueCountdownTimer);
+          scanQueueCountdownTimer = null;
+        }
+      }
+    }, 1000);
+
+    // Timer idle 20 detik untuk auto-flush
+    scanQueueIdleTimer = setTimeout(() => {
+      if (scanQueuePendingCount > 0) {
+        flushAttendanceScanQueue(true);
+      }
+    }, SCAN_IDLE_TIMEOUT_MS);
+  }
+}
+
+if (typeof window !== 'undefined') {
+  window.addEventListener('beforeunload', () => {
+    if (scanQueuePendingCount > 0) {
+      flushAttendanceScanQueue(true);
+    }
+  });
+}
+
+export function saveAttendanceRecords(records: AttendanceRecord[], instant: boolean = true): void {
+  if (scanQueueIdleTimer) {
+    clearTimeout(scanQueueIdleTimer);
+    scanQueueIdleTimer = null;
+  }
+  if (scanQueueCountdownTimer) {
+    clearInterval(scanQueueCountdownTimer);
+    scanQueueCountdownTimer = null;
+  }
+  scanQueuePendingCount = 0;
+  scanQueueCountdownSeconds = 0;
+  notifyScanQueueChanged();
+
   const now = Date.now();
   const dataStr = JSON.stringify(records);
   safeSetLocalStorage(KEYS.ATTENDANCE, dataStr);
   safeSetLocalStorage(KEYS.ATTENDANCE + '_updatedAt', String(now));
   notifyStorageUpdated();
-
-  if (instant || records.length === 0) {
-    syncToCloud(KEYS.ATTENDANCE, records, true, now);
-  } else {
-    // Non-instant attendance saves are routed via the batch worker (max 25 students / 20s)
-    enqueueAttendanceBatchItems(records.slice(0, ATTENDANCE_BATCH_SIZE));
-  }
+  syncToCloud(KEYS.ATTENDANCE, records, instant, now);
 }
 
 // Local-only save for automatic ALPA calculation so local device NEVER overwrites real Cloud scans
@@ -1974,271 +2066,6 @@ export function saveAttendanceRecordsLocally(records: AttendanceRecord[]): void 
   const dataStr = JSON.stringify(records);
   safeSetLocalStorage(KEYS.ATTENDANCE, dataStr);
   notifyStorageUpdated();
-}
-
-// =========================================================================
-// SISTEM BATCHING SINKRONISASI PRESENSI SISWA (MAKSIMAL 25 SISWA / 20 DETIK)
-// =========================================================================
-
-/**
- * Membaca antrean pending sinkronisasi presensi dari LocalStorage
- */
-export function getPendingAttendanceBatchQueue(): AttendanceRecord[] {
-  if (typeof window === 'undefined') return [];
-  const raw = localStorage.getItem(KEYS.ATTENDANCE_BATCH_QUEUE);
-  if (!raw) return [];
-  try {
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
-  }
-}
-
-/**
- * Menyimpan antrean pending sinkronisasi presensi ke LocalStorage
- */
-export function savePendingAttendanceBatchQueue(queue: AttendanceRecord[]): void {
-  if (typeof window === 'undefined') return;
-  safeSetLocalStorage(KEYS.ATTENDANCE_BATCH_QUEUE, JSON.stringify(queue));
-  window.dispatchEvent(new CustomEvent('sihadir_attendance_batch_queue_updated', {
-    detail: { count: queue.length }
-  }));
-}
-
-/**
- * Mengosongkan antrean pending batch presensi
- */
-export function clearAttendanceBatchQueue(): void {
-  savePendingAttendanceBatchQueue([]);
-}
-
-/**
- * Memasukkan 1 record presensi ke antrean batch (deduplikasi berdasarkan studentId/nisn + date)
- */
-export function enqueueAttendanceBatchItem(record: AttendanceRecord): void {
-  const currentQueue = getPendingAttendanceBatchQueue();
-  const existingIdx = currentQueue.findIndex(item => 
-    (item.id === record.id) || 
-    (item.studentId && record.studentId && item.studentId === record.studentId && item.date === record.date) ||
-    (item.nisn && record.nisn && item.nisn === record.nisn && item.date === record.date)
-  );
-
-  let updatedQueue: AttendanceRecord[];
-  if (existingIdx >= 0) {
-    updatedQueue = [...currentQueue];
-    updatedQueue[existingIdx] = {
-      ...updatedQueue[existingIdx],
-      ...record
-    };
-  } else {
-    updatedQueue = [...currentQueue, record];
-  }
-
-  savePendingAttendanceBatchQueue(updatedQueue);
-}
-
-/**
- * Memasukkan kumpulan record presensi ke antrean batch
- */
-export function enqueueAttendanceBatchItems(records: AttendanceRecord[]): void {
-  const queue = getPendingAttendanceBatchQueue();
-  records.forEach(record => {
-    const existingIdx = queue.findIndex(item => 
-      (item.id === record.id) || 
-      (item.studentId && record.studentId && item.studentId === record.studentId && item.date === record.date) ||
-      (item.nisn && record.nisn && item.nisn === record.nisn && item.date === record.date)
-    );
-    if (existingIdx >= 0) {
-      queue[existingIdx] = { ...queue[existingIdx], ...record };
-    } else {
-      queue.push(record);
-    }
-  });
-  savePendingAttendanceBatchQueue(queue);
-}
-
-/**
- * Status Worker Batching untuk monitoring UI
- */
-export function getAttendanceBatchWorkerStatus() {
-  const queue = getPendingAttendanceBatchQueue();
-  return {
-    queueLength: queue.length,
-    isSyncing: isAttendanceBatchSyncing,
-    lastBatchSyncTime: lastAttendanceBatchSyncTime,
-    lastSyncedCount: lastSyncedBatchCount,
-    batchLimit: ATTENDANCE_BATCH_SIZE,
-    intervalSeconds: ATTENDANCE_WORKER_INTERVAL_MS / 1000,
-  };
-}
-
-/**
- * -------------------------------------------------------------
- * KOMPONEN 1: FUNGSI INPUT (Saat Scan QR / Input Presensi Siswa)
- * -------------------------------------------------------------
- * Menyimpan data lengkap presensi siswa secara instan ke LocalStorage (0 ms delay),
- * dan mendaftarkan record ke antrean batching untuk dikirim oleh Worker ke Cloud Firestore.
- */
-export function recordAttendanceWithBatchQueue(newRecord: AttendanceRecord, allUpdatedRecords: AttendanceRecord[]): void {
-  const now = Date.now();
-  const dataStr = JSON.stringify(allUpdatedRecords);
-  
-  // 1. Simpan ground-truth presensi lengkap ke LocalStorage
-  safeSetLocalStorage(KEYS.ATTENDANCE, dataStr);
-  safeSetLocalStorage(KEYS.ATTENDANCE + '_updatedAt', String(now));
-  
-  // 2. Daftarkan record yang diinput ke antrean batching
-  enqueueAttendanceBatchItem(newRecord);
-  
-  // 3. Notifikasi perubahan data ke semua komponen secara instan
-  notifyStorageUpdated();
-}
-
-/**
- * -------------------------------------------------------------
- * KOMPONEN 2: FUNGSI WORKER (Latar Belakang - Background Worker)
- * -------------------------------------------------------------
- * Memproses antrean sinkronisasi presensi secara bertahap (batching).
- * Mengambil maksimal 25 siswa per siklus dengan interval setiap 20 detik.
- */
-export async function processAttendanceBatchWorker(isForced = false): Promise<{ syncedCount: number; remainingCount: number }> {
-  // Hindari eksekusi paralel ganda
-  if (isAttendanceBatchSyncing) {
-    const queue = getPendingAttendanceBatchQueue();
-    return { syncedCount: 0, remainingCount: queue.length };
-  }
-
-  // Jika sedang offline, tahan pengiriman hingga online
-  if (typeof navigator !== 'undefined' && !navigator.onLine) {
-    const queue = getPendingAttendanceBatchQueue();
-    return { syncedCount: 0, remainingCount: queue.length };
-  }
-
-  // Jika kuota harian Firestore habis, tahan pengiriman
-  if (isFirestoreQuotaExceeded()) {
-    const queue = getPendingAttendanceBatchQueue();
-    return { syncedCount: 0, remainingCount: queue.length };
-  }
-
-  const queue = getPendingAttendanceBatchQueue();
-  // Jika antrean kosong, Worker tidur tanpa menghabiskan kuota write (Write Cost = 0)
-  if (queue.length === 0) {
-    return { syncedCount: 0, remainingCount: 0 };
-  }
-
-  isAttendanceBatchSyncing = true;
-  // Ambil maksimal 25 siswa untuk batch saat ini
-  const batchToSync = queue.slice(0, ATTENDANCE_BATCH_SIZE);
-  const now = Date.now();
-
-  try {
-    setCloudSyncStatus('syncing');
-
-    // 1. Ambil data presensi lokal lengkap
-    const localRecords = getAttendanceRecords();
-    const dataStr = JSON.stringify(localRecords);
-
-    // 2. Unggah data presensi ke Firestore Cloud
-    await writeCloudDocument(KEYS.ATTENDANCE, dataStr, now);
-    lastSavedStringCache[KEYS.ATTENDANCE] = dataStr;
-    safeSetLocalStorage(KEYS.ATTENDANCE + '_updatedAt', String(now));
-
-    // 3. Keluarkan batch yang berhasil terunggah dari antrean
-    const remainingQueue = queue.slice(batchToSync.length);
-    savePendingAttendanceBatchQueue(remainingQueue);
-
-    lastAttendanceBatchSyncTime = now;
-    lastSyncedBatchCount = batchToSync.length;
-    setCloudSyncStatus('connected');
-
-    console.log(`[Batch Worker Presensi] Berhasil sinkronisasi batch ${batchToSync.length} data presensi siswa ke Firestore. Sisa antrean: ${remainingQueue.length}`);
-
-    // Broadcast progres batch ke sistem
-    if (typeof window !== 'undefined') {
-      window.dispatchEvent(new CustomEvent('sihadir_batch_sync_progress', {
-        detail: {
-          syncedCount: batchToSync.length,
-          remainingCount: remainingQueue.length,
-          total: queue.length,
-          timestamp: now
-        }
-      }));
-
-      // Tampilkan toast informatif jika batch diproses
-      if (batchToSync.length > 0) {
-        window.dispatchEvent(new CustomEvent('sihadir_network_toast', {
-          detail: {
-            type: 'success',
-            title: '☁️ Batch Presensi Tersinkron',
-            message: `Batch ${batchToSync.length} data presensi berhasil diunggah ke Cloud. ${remainingQueue.length > 0 ? `Sisa antrean: ${remainingQueue.length} siswa (akan diproses 20 detik lagi).` : 'Semua data presensi telah tersimpan di Cloud.'}`
-          }
-        }));
-      }
-    }
-
-    return { syncedCount: batchToSync.length, remainingCount: remainingQueue.length };
-  } catch (err: any) {
-    console.error('[Batch Worker Presensi] Gagal mengunggah batch presensi ke Cloud:', err);
-    handleFirestoreError(err);
-    return { syncedCount: 0, remainingCount: queue.length };
-  } finally {
-    isAttendanceBatchSyncing = false;
-  }
-}
-
-/**
- * Inisialisasi Worker Latar Belakang Presensi (Interval setiap 20 detik)
- */
-export function initAttendanceBatchWorker(): void {
-  if (typeof window === 'undefined' || isAttendanceWorkerStarted) return;
-  isAttendanceWorkerStarted = true;
-
-  console.log(`[Batch Worker Presensi] Worker aktif: interval ${ATTENDANCE_WORKER_INTERVAL_MS / 1000}s, maksimal ${ATTENDANCE_BATCH_SIZE} siswa/batch.`);
-
-  // 1. Eksekusi berkala setiap 20 detik
-  setInterval(() => {
-    processAttendanceBatchWorker(false).catch(() => {});
-  }, ATTENDANCE_WORKER_INTERVAL_MS);
-
-  // 2. Eksekusi saat koneksi kembali online
-  window.addEventListener('online', () => {
-    setTimeout(() => {
-      processAttendanceBatchWorker(true).catch(() => {});
-    }, 1000);
-  });
-
-  // 3. Eksekusi saat tab browser dibuka kembali
-  document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible') {
-      processAttendanceBatchWorker(false).catch(() => {});
-    }
-  });
-
-  // 4. Periksa antrean awal 3 detik setelah aplikasi dimuat
-  setTimeout(() => {
-    const q = getPendingAttendanceBatchQueue();
-    if (q.length > 0) {
-      processAttendanceBatchWorker(false).catch(() => {});
-    }
-  }, 3000);
-}
-
-/**
- * Flush paksa seluruh sisa antrean presensi (misal saat logout atau sinkronisasi manual)
- */
-export async function flushAttendanceBatchWorker(): Promise<{ totalSynced: number; remainingCount: number }> {
-  let totalSynced = 0;
-  let remaining = getPendingAttendanceBatchQueue().length;
-
-  while (remaining > 0) {
-    const res = await processAttendanceBatchWorker(true);
-    if (res.syncedCount === 0) break;
-    totalSynced += res.syncedCount;
-    remaining = res.remainingCount;
-  }
-
-  return { totalSynced, remainingCount: remaining };
 }
 
 export function getLeaveRequests(): LeaveRequest[] {
@@ -2354,7 +2181,7 @@ export function resetAllTeachersPassword(): void {
 
 export function resetAllStudentsPassword(): void {
   const students = getStudents();
-  const updated = students.map(s => ({ ...s, password: '123123' }));
+  const updated = students.map(s => ({ ...s, password: '123456' }));
   saveStudents(updated, true);
 }
 

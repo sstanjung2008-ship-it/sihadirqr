@@ -26,7 +26,7 @@ import {
   getAttendanceRecords, 
   saveAttendanceRecords,
   saveAttendanceRecordsLocally,
-  recordAttendanceWithBatchQueue,
+  queueAttendanceScanRecord,
   getLeaveRequests, 
   saveLeaveRequests,
   getTeachers,
@@ -49,7 +49,7 @@ import {
   reconcileTeachersAndClasses,
   KEYS
 } from './lib/storage';
-import { ShieldCheck, CheckCircle2, WifiOff, RefreshCw, Wifi, Wrench, AlertTriangle, LogOut, ShieldAlert } from 'lucide-react';
+import { ShieldCheck, CheckCircle2, WifiOff, RefreshCw, Wifi } from 'lucide-react';
 
 import { Sidebar } from './components/Sidebar';
 import { QRScannerView } from './components/QRScannerView';
@@ -366,17 +366,6 @@ export default function App() {
     if (classesChanged) {
       localStorage.setItem(KEYS.CLASSES, JSON.stringify(updatedClasses));
       setClassesState(updatedClasses);
-    }
-
-    // Reset all student/parent account passwords to 123456
-    const PARENT_PW_RESET_FLAG = 'sihadir_parent_pw_reset_123456_v2';
-    if (!localStorage.getItem(PARENT_PW_RESET_FLAG)) {
-      setStudentsState(prev => {
-        const resetStudents = prev.map(s => ({ ...s, password: '123456' }));
-        saveStudents(resetStudents, true);
-        localStorage.setItem(PARENT_PW_RESET_FLAG, 'true');
-        return resetStudents;
-      });
     }
 
     const handleNetworkToast = (e: any) => {
@@ -741,8 +730,12 @@ export default function App() {
         };
       }
       const updated = [newRecord, ...prev.filter(r => !((r.studentId === record.studentId || (r.nisn && record.nisn && r.nisn === record.nisn)) && r.date === record.date))];
-      // Simpan ke LocalStorage dan daftarkan ke antrean batching (maks 25 siswa / interval 20 detik)
-      recordAttendanceWithBatchQueue(newRecord, updated);
+      // Jika scan presensi via QR Code, gunakan Batching Worker (25 siswa / interval 20 detik) untuk menghemat write Cloud
+      if (newRecord.method === 'QR_SCAN') {
+        queueAttendanceScanRecord(updated);
+      } else {
+        saveAttendanceRecords(updated, true);
+      }
       return updated;
     });
   };
@@ -1361,64 +1354,15 @@ export default function App() {
 
         {/* Main View Router */}
         <main className={`flex-1 p-4 sm:p-6 lg:p-8 max-w-7xl w-full mx-auto ${(currentRole === 'PARENT' || currentRole === 'TEACHER') ? 'pb-28 lg:pb-8' : ''}`}>
-          {currentRole === 'PARENT' && (schoolProfile.parentPortalMaintenance || parentStudent?.statusPerbaikan) ? (
-            <div className="bg-white border border-rose-200 rounded-3xl p-6 sm:p-8 max-w-xl mx-auto shadow-sm text-center space-y-6 my-8 animate-fadeIn">
-              <div className="w-16 h-16 bg-rose-100 border border-rose-300 text-rose-700 rounded-3xl flex items-center justify-center mx-auto shadow-inner">
-                <Wrench className="w-8 h-8 animate-bounce" />
-              </div>
-
-              <div className="space-y-2">
-                <div className="inline-flex items-center gap-1.5 bg-rose-100 text-rose-800 border border-rose-300 px-3 py-1 rounded-full text-xs font-black uppercase tracking-wider">
-                  <ShieldAlert className="w-3.5 h-3.5 text-rose-600" />
-                  Perbaikan Sistem Aktif
-                </div>
-                <h2 className="text-2xl font-black text-slate-900 tracking-tight">
-                  Maaf ada perbaikan Sistem
-                </h2>
-                <p className="text-sm text-slate-600 leading-relaxed font-medium">
-                  {parentStudent?.perbaikanReason || schoolProfile.parentMaintenanceMessage || 'Maaf ada perbaikan Sistem. Akses login akun orang tua sementara ditutup untuk pemeliharaan data.'}
-                </p>
-              </div>
-
-              {parentStudent && (
-                <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 text-xs space-y-1.5 text-left">
-                  <div className="flex justify-between text-slate-600">
-                    <span>Siswa:</span>
-                    <strong className="text-slate-800 font-bold">{parentStudent.name} ({parentStudent.className})</strong>
-                  </div>
-                  <div className="flex justify-between text-slate-600">
-                    <span>NISN:</span>
-                    <strong className="font-mono text-slate-800">{parentStudent.nisn}</strong>
-                  </div>
-                  <div className="flex justify-between text-slate-600">
-                    <span>Wali Murid:</span>
-                    <strong className="text-slate-800">{parentStudent.parentName || 'Orang Tua Siswa'}</strong>
-                  </div>
-                </div>
-              )}
-
-              <div className="pt-2">
-                <button
-                  type="button"
-                  onClick={handleLogout}
-                  className="w-full bg-slate-900 hover:bg-slate-800 text-white font-bold py-3 px-4 rounded-xl text-xs flex items-center justify-center gap-2 shadow-sm transition-all cursor-pointer"
-                >
-                  <LogOut className="w-4 h-4" />
-                  Keluar dari Akun (Logout)
-                </button>
-              </div>
-            </div>
-          ) : (
-            <>
-              {activeTab === 'scanner' && (
-                <QRScannerView
-                  students={students}
-                  classes={classes}
-                  schoolProfile={schoolProfile}
-                  attendanceRecords={attendanceRecords}
-                  onAddAttendance={handleAddAttendance}
-                />
-              )}
+          {activeTab === 'scanner' && (
+            <QRScannerView
+              students={students}
+              classes={classes}
+              schoolProfile={schoolProfile}
+              attendanceRecords={attendanceRecords}
+              onAddAttendance={handleAddAttendance}
+            />
+          )}
 
           {activeTab === 'dashboard' && (
             <AttendanceDashboard
@@ -1656,8 +1600,6 @@ export default function App() {
               onBatchResetStudentsPassword={handleBatchResetStudentsPassword}
             />
           )}
-          </>
-          )}
         </main>
       </div>
 
@@ -1672,7 +1614,7 @@ export default function App() {
       />
 
       {/* Mobile Glass Bottom Navigation Bar for Parent Role */}
-      {currentRole === 'PARENT' && !schoolProfile.parentPortalMaintenance && !parentStudent?.statusPerbaikan && (
+      {currentRole === 'PARENT' && (
         <ParentBottomNav
           activeTab={activeTab}
           onTabChange={handleTabChange}

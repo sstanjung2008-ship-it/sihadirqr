@@ -29,8 +29,6 @@ export interface Student {
   birthPlaceDate: string; // e.g., "Jakarta, 12 Mei 2010"
   address: string;
   password?: string;
-  statusPerbaikan?: boolean; // Status Perbaikan Akun Orang Tua Siswa Ini
-  perbaikanReason?: string; // Catatan Alasan Perbaikan Khusus Akun Ini
 }
 
 export interface SchoolClass {
@@ -183,8 +181,6 @@ export interface SchoolProfile {
   subjects?: string[];
   adminPassword?: string; // Kata sandi login Administrator Sekolah (Default: admin123)
   scannerPassword?: string; // Kata sandi login Pos Scanner Satpam (Default: 123456)
-  parentPortalMaintenance?: boolean; // Status Mode Perbaikan Global Portal Orang Tua
-  parentMaintenanceMessage?: string; // Informasi Pesan Status Perbaikan untuk Orang Tua
 }
 
 export interface Teacher {

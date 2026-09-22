@@ -11,11 +11,7 @@ import {
   Sparkles, 
   Clock,
   RefreshCw,
-  CheckCircle2,
-  Wrench,
-  ShieldAlert,
-  AlertTriangle,
-  X
+  CheckCircle2
 } from 'lucide-react';
 import { PWAInstallBanner } from './PWAInstallBanner';
 import { smartSyncAndMergeAllWithCloud, getTeachers, getStudents, getSchoolProfile } from '../lib/storage';
@@ -43,13 +39,6 @@ export const LoginView: React.FC<LoginViewProps> = ({
   const [timeStr, setTimeStr] = useState('');
   const [isSyncing, setIsSyncing] = useState(false);
   const [syncSuccessMsg, setSyncSuccessMsg] = useState<string | null>(null);
-  const [maintenanceNotice, setMaintenanceNotice] = useState<{
-    title: string;
-    message: string;
-    studentName: string;
-    parentName: string;
-    nisn: string;
-  } | null>(null);
 
   useEffect(() => {
     setSchoolProfile(initialSchoolProfile);
@@ -62,17 +51,6 @@ export const LoginView: React.FC<LoginViewProps> = ({
   useEffect(() => {
     setStudents(initialStudents);
   }, [initialStudents]);
-
-  // Keep state synchronized with storage events in real-time
-  useEffect(() => {
-    const handleStorageUpdate = () => {
-      setSchoolProfile(getSchoolProfile());
-      setTeachers(getTeachers());
-      setStudents(getStudents());
-    };
-    window.addEventListener('sihadir_storage_updated', handleStorageUpdate);
-    return () => window.removeEventListener('sihadir_storage_updated', handleStorageUpdate);
-  }, []);
 
   // Update clock
   useEffect(() => {
@@ -230,27 +208,6 @@ export const LoginView: React.FC<LoginViewProps> = ({
     });
 
     if (matchedStudent) {
-      // PERIKSA STATUS PERBAIKAN SEBELUM AUTHENTIKASI BERHASIL
-      const isGlobalMaintenance = Boolean(currentProfile?.parentPortalMaintenance);
-      const isStudentMaintenance = Boolean(matchedStudent.statusPerbaikan);
-
-      if (isGlobalMaintenance || isStudentMaintenance) {
-        const infoDetail = matchedStudent.perbaikanReason || 
-          currentProfile?.parentMaintenanceMessage || 
-          'Maaf ada perbaikan Sistem. Akses login akun orang tua sementara ditutup.';
-        
-        setMaintenanceNotice({
-          title: 'Maaf ada perbaikan Sistem',
-          message: infoDetail,
-          studentName: matchedStudent.name,
-          parentName: matchedStudent.parentName || 'Orang Tua / Wali Siswa',
-          nisn: matchedStudent.nisn
-        });
-
-        setErrorMessage('Maaf ada perbaikan Sistem');
-        return true;
-      }
-
       const expectedPassword = matchedStudent.password || '123456';
       if (password === expectedPassword) {
         const session: UserSession = {
@@ -289,16 +246,8 @@ export const LoginView: React.FC<LoginViewProps> = ({
       return;
     }
 
-    // Fetch most current ground truth from storage first
-    const freshProfile = getSchoolProfile();
-    const freshTeachers = getTeachers();
-    const freshStudents = getStudents();
-    setSchoolProfile(freshProfile);
-    setTeachers(freshTeachers);
-    setStudents(freshStudents);
-
-    // Attempt local match first with fresh state
-    const localFound = performLoginCheck(freshTeachers, freshStudents, freshProfile);
+    // Attempt local match first
+    const localFound = performLoginCheck(teachers, students, schoolProfile);
     if (localFound) return;
 
     // If not found locally, attempt instant cloud sync in case this device just installed the app
@@ -401,19 +350,6 @@ export const LoginView: React.FC<LoginViewProps> = ({
               </p>
             </div>
           </div>
-
-          {/* Global Parent Maintenance Notice Banner */}
-          {Boolean(schoolProfile.parentPortalMaintenance) && (
-            <div className="bg-amber-50 border border-amber-300 text-amber-900 rounded-2xl p-3.5 text-xs flex items-start gap-2.5 shadow-xs animate-fadeIn">
-              <Wrench className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
-              <div>
-                <span className="font-extrabold block text-amber-950">Info Perbaikan Sistem Aktif</span>
-                <span className="text-[11px] text-amber-800 leading-snug font-medium block mt-0.5">
-                  {schoolProfile.parentMaintenanceMessage || 'Maaf ada perbaikan Sistem. Akses login akun orang tua sementara ditutup.'}
-                </span>
-              </div>
-            </div>
-          )}
 
           {/* Error Message Alert */}
           {errorMessage && (
@@ -527,84 +463,6 @@ export const LoginView: React.FC<LoginViewProps> = ({
           © {new Date().getFullYear()} {schoolProfile.name}. Hak Cipta Dilindungi. Sistem Presensi QR & Manajemen Sekolah.
         </p>
       </div>
-
-      {/* SISTEM DALAM PERBAIKAN - POPUP NOTIFIKASI INFORMASI */}
-      {maintenanceNotice && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-md animate-fadeIn">
-          <div className="bg-white border border-amber-200 rounded-3xl max-w-lg w-full p-6 sm:p-7 shadow-2xl space-y-5 animate-scaleUp relative overflow-hidden">
-            
-            {/* Top Amber Accent Stripe */}
-            <div className="absolute top-0 left-0 right-0 h-2 bg-gradient-to-r from-amber-500 via-orange-500 to-amber-600"></div>
-
-            <div className="flex items-start justify-between gap-3 pt-1">
-              <div className="flex items-center gap-3">
-                <div className="w-12 h-12 rounded-2xl bg-amber-100 border border-amber-300/80 flex items-center justify-center shrink-0 shadow-inner text-amber-700">
-                  <Wrench className="w-6 h-6 animate-pulse" />
-                </div>
-                <div>
-                  <div className="inline-flex items-center gap-1 bg-amber-100 text-amber-900 border border-amber-300/60 px-2.5 py-0.5 rounded-full text-[10px] font-extrabold uppercase tracking-wider mb-1">
-                    <AlertTriangle className="w-3 h-3 text-amber-600" />
-                    Akses Login Ditolak
-                  </div>
-                  <h3 className="text-lg font-black text-slate-900 tracking-tight">
-                    {maintenanceNotice.title || 'Maaf ada perbaikan Sistem'}
-                  </h3>
-                </div>
-              </div>
-
-              <button
-                type="button"
-                onClick={() => setMaintenanceNotice(null)}
-                className="w-8 h-8 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-500 hover:text-slate-700 flex items-center justify-center transition cursor-pointer"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-
-            {/* Target Account Info */}
-            <div className="bg-slate-50 border border-slate-200 rounded-2xl p-3.5 text-xs space-y-1">
-              <div className="flex justify-between text-slate-600">
-                <span>Nama Siswa:</span>
-                <span className="font-bold text-slate-800">{maintenanceNotice.studentName}</span>
-              </div>
-              <div className="flex justify-between text-slate-600">
-                <span>NISN:</span>
-                <span className="font-mono font-bold text-slate-800">{maintenanceNotice.nisn}</span>
-              </div>
-              <div className="flex justify-between text-slate-600">
-                <span>Akun Wali:</span>
-                <span className="font-semibold text-slate-700">{maintenanceNotice.parentName}</span>
-              </div>
-            </div>
-
-            {/* Message Announcement Body */}
-            <div className="bg-amber-50/80 border border-amber-200 rounded-2xl p-4 text-xs space-y-2 text-amber-950">
-              <div className="flex items-center gap-1.5 font-bold text-amber-900">
-                <ShieldAlert className="w-4 h-4 text-amber-700 shrink-0" />
-                Informasi Pemeliharaan & Perbaikan Sistem:
-              </div>
-              <p className="leading-relaxed font-medium text-slate-700">
-                {maintenanceNotice.message}
-              </p>
-            </div>
-
-            <p className="text-[11px] text-slate-500 leading-relaxed text-center">
-              Selama status perbaikan aktif, otentikasi login untuk akun orang tua dinonaktifkan sementara demi keamanan dan sinkronisasi data sekolah.
-            </p>
-
-            <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
-              <button
-                type="button"
-                onClick={() => setMaintenanceNotice(null)}
-                className="w-full bg-gradient-to-r from-amber-600 to-amber-700 hover:from-amber-700 hover:to-amber-800 text-white font-extrabold py-2.5 px-4 rounded-xl shadow-md text-xs transition cursor-pointer flex items-center justify-center gap-1.5"
-              >
-                Mengerti & Tutup
-              </button>
-            </div>
-
-          </div>
-        </div>
-      )}
 
     </div>
   );

@@ -63,6 +63,17 @@ export const LoginView: React.FC<LoginViewProps> = ({
     setStudents(initialStudents);
   }, [initialStudents]);
 
+  // Keep state synchronized with storage events in real-time
+  useEffect(() => {
+    const handleStorageUpdate = () => {
+      setSchoolProfile(getSchoolProfile());
+      setTeachers(getTeachers());
+      setStudents(getStudents());
+    };
+    window.addEventListener('sihadir_storage_updated', handleStorageUpdate);
+    return () => window.removeEventListener('sihadir_storage_updated', handleStorageUpdate);
+  }, []);
+
   // Update clock
   useEffect(() => {
     const updateClock = () => {
@@ -278,8 +289,16 @@ export const LoginView: React.FC<LoginViewProps> = ({
       return;
     }
 
-    // Attempt local match first
-    const localFound = performLoginCheck(teachers, students, schoolProfile);
+    // Fetch most current ground truth from storage first
+    const freshProfile = getSchoolProfile();
+    const freshTeachers = getTeachers();
+    const freshStudents = getStudents();
+    setSchoolProfile(freshProfile);
+    setTeachers(freshTeachers);
+    setStudents(freshStudents);
+
+    // Attempt local match first with fresh state
+    const localFound = performLoginCheck(freshTeachers, freshStudents, freshProfile);
     if (localFound) return;
 
     // If not found locally, attempt instant cloud sync in case this device just installed the app
@@ -382,6 +401,19 @@ export const LoginView: React.FC<LoginViewProps> = ({
               </p>
             </div>
           </div>
+
+          {/* Global Parent Maintenance Notice Banner */}
+          {Boolean(schoolProfile.parentPortalMaintenance) && (
+            <div className="bg-amber-50 border border-amber-300 text-amber-900 rounded-2xl p-3.5 text-xs flex items-start gap-2.5 shadow-xs animate-fadeIn">
+              <Wrench className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+              <div>
+                <span className="font-extrabold block text-amber-950">Info Perbaikan Sistem Aktif</span>
+                <span className="text-[11px] text-amber-800 leading-snug font-medium block mt-0.5">
+                  {schoolProfile.parentMaintenanceMessage || 'Maaf ada perbaikan Sistem. Akses login akun orang tua sementara ditutup.'}
+                </span>
+              </div>
+            </div>
+          )}
 
           {/* Error Message Alert */}
           {errorMessage && (

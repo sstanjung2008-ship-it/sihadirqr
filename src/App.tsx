@@ -367,11 +367,11 @@ export default function App() {
       setClassesState(updatedClasses);
     }
 
-    // Reset all student/parent account passwords to 123123
-    const PARENT_PW_RESET_FLAG = 'sihadir_parent_pw_reset_123123_v1';
+    // Reset all student/parent account passwords to 123456
+    const PARENT_PW_RESET_FLAG = 'sihadir_parent_pw_reset_123456_v2';
     if (!localStorage.getItem(PARENT_PW_RESET_FLAG)) {
       setStudentsState(prev => {
-        const resetStudents = prev.map(s => ({ ...s, password: '123123' }));
+        const resetStudents = prev.map(s => ({ ...s, password: '123456' }));
         saveStudents(resetStudents, true);
         localStorage.setItem(PARENT_PW_RESET_FLAG, 'true');
         return resetStudents;
@@ -1670,7 +1670,7 @@ export default function App() {
       />
 
       {/* Mobile Glass Bottom Navigation Bar for Parent Role */}
-      {currentRole === 'PARENT' && (
+      {currentRole === 'PARENT' && !schoolProfile.parentPortalMaintenance && !parentStudent?.statusPerbaikan && (
         <ParentBottomNav
           activeTab={activeTab}
           onTabChange={handleTabChange}

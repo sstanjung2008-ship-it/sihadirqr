@@ -944,7 +944,7 @@ export function mergeGenericListsById<T extends { id: string }>(local: T[], clou
 }
 
 // Merge SchoolProfile ensuring all subjects from both devices are preserved (union)
-export function mergeSchoolProfile(local: SchoolProfile, cloud: SchoolProfile): SchoolProfile {
+export function mergeSchoolProfile(local: SchoolProfile, cloud: SchoolProfile, localIsNewer: boolean = false): SchoolProfile {
   const subjectsSet = new Set<string>();
 
   // Collect subjects from cloud
@@ -972,29 +972,36 @@ export function mergeSchoolProfile(local: SchoolProfile, cloud: SchoolProfile): 
 
   const mergedSubjects = Array.from(subjectsSet);
 
+  const primary = localIsNewer ? local : cloud;
+  const secondary = localIsNewer ? cloud : local;
+
   return {
     ...INITIAL_SCHOOL_PROFILE,
-    ...local,
-    ...cloud,
-    adminPassword: cloud.adminPassword || local.adminPassword || INITIAL_SCHOOL_PROFILE.adminPassword || 'admin123',
-    scannerPassword: cloud.scannerPassword || local.scannerPassword || INITIAL_SCHOOL_PROFILE.scannerPassword || '123456',
+    ...secondary,
+    ...primary,
+    adminPassword: primary.adminPassword || secondary.adminPassword || INITIAL_SCHOOL_PROFILE.adminPassword || 'admin123',
+    scannerPassword: primary.scannerPassword || secondary.scannerPassword || INITIAL_SCHOOL_PROFILE.scannerPassword || '123456',
     subjects: mergedSubjects,
-    holidays: (cloud.holidays && Array.isArray(cloud.holidays) && cloud.holidays.length > 0) ? cloud.holidays : (local.holidays || []),
-    activeDays: (cloud.activeDays && Array.isArray(cloud.activeDays) && cloud.activeDays.length > 0) ? cloud.activeDays : (local.activeDays || ['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu']),
-    startTime: cloud.startTime || local.startTime || INITIAL_SCHOOL_PROFILE.startTime,
-    endTime: cloud.endTime || local.endTime || INITIAL_SCHOOL_PROFILE.endTime,
+    holidays: (primary.holidays && Array.isArray(primary.holidays) && primary.holidays.length > 0)
+      ? primary.holidays
+      : ((secondary.holidays && Array.isArray(secondary.holidays) && secondary.holidays.length > 0) ? secondary.holidays : []),
+    activeDays: (primary.activeDays && Array.isArray(primary.activeDays) && primary.activeDays.length > 0)
+      ? primary.activeDays
+      : ((secondary.activeDays && Array.isArray(secondary.activeDays) && secondary.activeDays.length > 0) ? secondary.activeDays : ['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu']),
+    startTime: primary.startTime || secondary.startTime || INITIAL_SCHOOL_PROFILE.startTime,
+    endTime: primary.endTime || secondary.endTime || INITIAL_SCHOOL_PROFILE.endTime,
     dailyEndTimes: {
       ...(INITIAL_SCHOOL_PROFILE.dailyEndTimes || {}),
-      ...(local.dailyEndTimes || {}),
-      ...(cloud.dailyEndTimes || {})
+      ...(secondary.dailyEndTimes || {}),
+      ...(primary.dailyEndTimes || {})
     },
-    autoAlpaTime: cloud.autoAlpaTime || local.autoAlpaTime || INITIAL_SCHOOL_PROFILE.autoAlpaTime,
-    autoAlpaEnabled: typeof cloud.autoAlpaEnabled === 'boolean'
-      ? cloud.autoAlpaEnabled
-      : (typeof local.autoAlpaEnabled === 'boolean' ? local.autoAlpaEnabled : (INITIAL_SCHOOL_PROFILE.autoAlpaEnabled !== false)),
-    autoCharacterAssessmentEnabled: typeof cloud.autoCharacterAssessmentEnabled === 'boolean'
-      ? cloud.autoCharacterAssessmentEnabled
-      : (typeof local.autoCharacterAssessmentEnabled === 'boolean' ? local.autoCharacterAssessmentEnabled : (INITIAL_SCHOOL_PROFILE.autoCharacterAssessmentEnabled !== false)),
+    autoAlpaTime: primary.autoAlpaTime || secondary.autoAlpaTime || INITIAL_SCHOOL_PROFILE.autoAlpaTime,
+    autoAlpaEnabled: typeof primary.autoAlpaEnabled === 'boolean'
+      ? primary.autoAlpaEnabled
+      : (typeof secondary.autoAlpaEnabled === 'boolean' ? secondary.autoAlpaEnabled : (INITIAL_SCHOOL_PROFILE.autoAlpaEnabled !== false)),
+    autoCharacterAssessmentEnabled: typeof primary.autoCharacterAssessmentEnabled === 'boolean'
+      ? primary.autoCharacterAssessmentEnabled
+      : (typeof secondary.autoCharacterAssessmentEnabled === 'boolean' ? secondary.autoCharacterAssessmentEnabled : (INITIAL_SCHOOL_PROFILE.autoCharacterAssessmentEnabled !== false)),
     autoCharacterPoints: {
       ...(INITIAL_SCHOOL_PROFILE.autoCharacterPoints || {
         latePoints: 2,
@@ -1005,14 +1012,16 @@ export function mergeSchoolProfile(local: SchoolProfile, cloud: SchoolProfile): 
         onTimePoints: 1,
         onTimeRequiredDays: 3,
       }),
-      ...(local.autoCharacterPoints || {}),
-      ...(cloud.autoCharacterPoints || {}),
+      ...(secondary.autoCharacterPoints || {}),
+      ...(primary.autoCharacterPoints || {}),
     },
-    lateToleranceMinutes: typeof cloud.lateToleranceMinutes === 'number' ? cloud.lateToleranceMinutes : (typeof local.lateToleranceMinutes === 'number' ? local.lateToleranceMinutes : (INITIAL_SCHOOL_PROFILE.lateToleranceMinutes ?? 15)),
-    parentPortalMaintenance: typeof cloud.parentPortalMaintenance === 'boolean'
-      ? cloud.parentPortalMaintenance
-      : (typeof local.parentPortalMaintenance === 'boolean' ? local.parentPortalMaintenance : false),
-    parentMaintenanceMessage: cloud.parentMaintenanceMessage || local.parentMaintenanceMessage || INITIAL_SCHOOL_PROFILE.parentMaintenanceMessage || 'Mohon maaf, Portal Orang Tua sedang dalam status perbaikan / pemeliharaan sistem. Silakan coba beberapa saat lagi.',
+    lateToleranceMinutes: typeof primary.lateToleranceMinutes === 'number'
+      ? primary.lateToleranceMinutes
+      : (typeof secondary.lateToleranceMinutes === 'number' ? secondary.lateToleranceMinutes : (INITIAL_SCHOOL_PROFILE.lateToleranceMinutes ?? 15)),
+    parentPortalMaintenance: typeof primary.parentPortalMaintenance === 'boolean'
+      ? primary.parentPortalMaintenance
+      : (typeof secondary.parentPortalMaintenance === 'boolean' ? secondary.parentPortalMaintenance : false),
+    parentMaintenanceMessage: primary.parentMaintenanceMessage || secondary.parentMaintenanceMessage || INITIAL_SCHOOL_PROFILE.parentMaintenanceMessage || 'Maaf ada perbaikan Sistem',
   };
 }
 
@@ -1060,7 +1069,10 @@ export async function smartSyncAndMergeAllWithCloud(): Promise<{ success: boolea
     if (profileCloud && profileCloud.data) {
       try {
         const cloudProfileData = typeof profileCloud.data === 'string' ? JSON.parse(profileCloud.data) : profileCloud.data;
-        mergedProfile = mergeSchoolProfile(currentLocalProfile, cloudProfileData);
+        const localUpdatedAt = Number(localStorage.getItem(KEYS.PROFILE + '_updatedAt') || '0');
+        const cloudUpdatedAt = Number(profileCloud.updatedAt) || 0;
+        const localIsNewer = localUpdatedAt > cloudUpdatedAt;
+        mergedProfile = mergeSchoolProfile(currentLocalProfile, cloudProfileData, localIsNewer);
       } catch (e) {
         console.warn('[Sync] Profile parse error:', e);
       }
@@ -1362,7 +1374,10 @@ export async function forceDownloadAllFromCloud(): Promise<{ success: boolean; e
           try {
             const cloudP = JSON.parse(cloudDoc.data);
             const localP = getSchoolProfile();
-            const mergedP = mergeSchoolProfile(localP, cloudP);
+            const localUpdatedAt = Number(localStorage.getItem(key + '_updatedAt') || '0');
+            const cloudUpdatedAt = Number(cloudDoc.updatedAt || 0);
+            const localIsNewer = localUpdatedAt > cloudUpdatedAt;
+            const mergedP = mergeSchoolProfile(localP, cloudP, localIsNewer);
             const mergedStr = JSON.stringify(mergedP);
             localStorage.setItem(key, mergedStr);
             localStorage.setItem(key + '_updatedAt', String(cloudDoc.updatedAt || Date.now()));
@@ -1532,7 +1547,8 @@ export function initFirestoreRealtimeSync() {
               try {
                 const cloudProfile = typeof finalDataToSave === 'string' ? JSON.parse(finalDataToSave) : finalDataToSave;
                 const localProfile = getSchoolProfile();
-                const mergedProfile = mergeSchoolProfile(localProfile, cloudProfile);
+                const localIsNewer = localUpdatedAt > cloudUpdatedAt;
+                const mergedProfile = mergeSchoolProfile(localProfile, cloudProfile, localIsNewer);
                 finalDataToSave = JSON.stringify(mergedProfile);
                 lastSavedStringCache[key] = finalDataToSave;
                 safeSetLocalStorage(key, finalDataToSave);

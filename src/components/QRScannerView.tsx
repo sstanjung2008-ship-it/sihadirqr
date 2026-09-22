@@ -2,7 +2,13 @@ import React, { useEffect, useRef, useState, useMemo, useCallback } from 'react'
 import { Html5Qrcode } from 'html5-qrcode';
 import { Student, SchoolProfile, AttendanceRecord, SchoolClass } from '../types';
 import { playScanSound } from '../lib/audioBeep';
-import { getSchoolCheckoutTimeForDay } from '../lib/storage';
+import { 
+  getSchoolCheckoutTimeForDay, 
+  getAttendanceBatchWorkerStatus, 
+  flushAttendanceBatchWorker, 
+  getPendingAttendanceBatchQueue,
+  getCloudSyncStatus 
+} from '../lib/storage';
 import { 
   ScanLine, 
   CheckCircle2, 
@@ -24,7 +30,9 @@ import {
   Filter,
   XCircle,
   FlipHorizontal,
-  Zap
+  Zap,
+  Cloud,
+  RefreshCw
 } from 'lucide-react';
 
 interface QRScannerViewProps {
@@ -90,6 +98,38 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
   const [isScanning, setIsScanning] = useState<boolean>(false);
   const [simClassFilter, setSimClassFilter] = useState<string>('ALL');
   const [simSearchQuery, setSimSearchQuery] = useState<string>('');
+  const [batchStatus, setBatchStatus] = useState(() => getAttendanceBatchWorkerStatus());
+  const [isManualFlushing, setIsManualFlushing] = useState<boolean>(false);
+
+  // Live listener untuk status antrean batch sinkronisasi
+  useEffect(() => {
+    const updateBatchStatus = () => {
+      setBatchStatus(getAttendanceBatchWorkerStatus());
+    };
+
+    window.addEventListener('sihadir_attendance_batch_queue_updated', updateBatchStatus);
+    window.addEventListener('sihadir_batch_sync_progress', updateBatchStatus);
+    window.addEventListener('sihadir_cloud_status_changed', updateBatchStatus);
+    
+    const interval = setInterval(updateBatchStatus, 4000);
+    return () => {
+      window.removeEventListener('sihadir_attendance_batch_queue_updated', updateBatchStatus);
+      window.removeEventListener('sihadir_batch_sync_progress', updateBatchStatus);
+      window.removeEventListener('sihadir_cloud_status_changed', updateBatchStatus);
+      clearInterval(interval);
+    };
+  }, []);
+
+  const handleManualFlushBatch = async () => {
+    if (isManualFlushing || batchStatus.queueLength === 0) return;
+    setIsManualFlushing(true);
+    try {
+      await flushAttendanceBatchWorker();
+      setBatchStatus(getAttendanceBatchWorkerStatus());
+    } finally {
+      setIsManualFlushing(false);
+    }
+  };
 
   // Auto switch timer yang memantau waktu secara realtime dan beralih otomatis
   useEffect(() => {
@@ -711,6 +751,49 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
               Scanner Presensi Real-Time
             </div>
             <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight">Pos Scan QR Code Siswa</h1>
+          </div>
+
+          {/* Batch Sync Live Status Badge */}
+          <div className="flex flex-wrap items-center gap-3 bg-indigo-900/70 backdrop-blur-md p-3 rounded-2xl border border-indigo-400/30 text-xs">
+            <div className="flex items-center gap-2.5">
+              <div className="relative flex items-center justify-center p-2 rounded-xl bg-indigo-800/80">
+                <Cloud className={`w-4 h-4 ${batchStatus.queueLength > 0 ? 'text-amber-300' : 'text-emerald-300'}`} />
+                {batchStatus.queueLength > 0 && (
+                  <span className="absolute -top-1 -right-1 flex h-2.5 w-2.5">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-amber-500"></span>
+                  </span>
+                )}
+              </div>
+              <div>
+                <div className="font-bold text-white flex items-center gap-1.5">
+                  <span>Batch Sync:</span>
+                  <span className={`px-2 py-0.5 rounded-md font-mono text-[11px] font-extrabold ${
+                    batchStatus.queueLength > 0 
+                      ? 'bg-amber-400/20 text-amber-200 border border-amber-400/40' 
+                      : 'bg-emerald-400/20 text-emerald-200 border border-emerald-400/40'
+                  }`}>
+                    {batchStatus.queueLength} antrean
+                  </span>
+                </div>
+                <div className="text-[10.5px] text-indigo-200 font-medium mt-0.5">
+                  Maks. 25 siswa • Interval 20 detik (Hemat Kuota)
+                </div>
+              </div>
+            </div>
+
+            {batchStatus.queueLength > 0 && (
+              <button
+                type="button"
+                onClick={handleManualFlushBatch}
+                disabled={isManualFlushing}
+                className="ml-auto inline-flex items-center gap-1.5 bg-amber-400 hover:bg-amber-300 text-indigo-950 px-3 py-1.5 rounded-xl font-extrabold text-xs transition cursor-pointer shadow-xs disabled:opacity-50"
+                title="Kirim semua antrean presensi ke Cloud sekarang"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${isManualFlushing ? 'animate-spin' : ''}`} />
+                <span>{isManualFlushing ? 'Mengunggah...' : 'Unggah Sekarang'}</span>
+              </button>
+            )}
           </div>
         </div>
       </div>

@@ -20,6 +20,7 @@ export const KEYS = {
   CLASSES: 'sihadir_school_classes_v2',
   STUDENTS: 'sihadir_school_students_v2',
   ATTENDANCE: 'sihadir_attendance_records_v2',
+  ATTENDANCE_BATCH_QUEUE: 'sihadir_attendance_batch_queue_v2',
   LEAVES: 'sihadir_leave_requests_v2',
   WA_LOGS: 'sihadir_wa_logs_v2',
   TEACHERS: 'sihadir_teachers_v2',
@@ -34,9 +35,17 @@ export const KEYS = {
   DIRECT_CHATS: 'sihadir_parent_direct_chats_v2',
 };
 
+// Konfigurasi Batching Sinkronisasi Presensi Siswa
+export const ATTENDANCE_BATCH_SIZE = 25; // Maksimal 25 siswa per batching upload
+export const ATTENDANCE_WORKER_INTERVAL_MS = 20000; // Interval Worker setiap 20 detik (20.000 ms)
+
 export type CloudSyncStatus = 'connected' | 'syncing' | 'offline' | 'quota_exceeded';
 let currentSyncStatus: CloudSyncStatus = 'syncing';
 let isFirestoreInitialized = false;
+let isAttendanceBatchSyncing = false;
+let isAttendanceWorkerStarted = false;
+let lastAttendanceBatchSyncTime: number | null = null;
+let lastSyncedBatchCount = 0;
 const debounceTimers: Record<string, any> = {};
 const lastSavedStringCache: Record<string, string> = {};
 
@@ -1751,6 +1760,9 @@ export function initFirestoreRealtimeSync() {
         }
       }
     }, 60000);
+
+    // 6. Inisialisasi Worker Batching Presensi Siswa (Maks 25 Siswa / Interval 20 Detik)
+    initAttendanceBatchWorker();
   }
 }
 
@@ -1942,13 +1954,19 @@ export function getAttendanceRecords(): AttendanceRecord[] {
   }
 }
 
-export function saveAttendanceRecords(records: AttendanceRecord[], instant: boolean = true): void {
+export function saveAttendanceRecords(records: AttendanceRecord[], instant: boolean = false): void {
   const now = Date.now();
   const dataStr = JSON.stringify(records);
   safeSetLocalStorage(KEYS.ATTENDANCE, dataStr);
   safeSetLocalStorage(KEYS.ATTENDANCE + '_updatedAt', String(now));
   notifyStorageUpdated();
-  syncToCloud(KEYS.ATTENDANCE, records, instant, now);
+
+  if (instant || records.length === 0) {
+    syncToCloud(KEYS.ATTENDANCE, records, true, now);
+  } else {
+    // Non-instant attendance saves are routed via the batch worker (max 25 students / 20s)
+    enqueueAttendanceBatchItems(records.slice(0, ATTENDANCE_BATCH_SIZE));
+  }
 }
 
 // Local-only save for automatic ALPA calculation so local device NEVER overwrites real Cloud scans
@@ -1956,6 +1974,271 @@ export function saveAttendanceRecordsLocally(records: AttendanceRecord[]): void 
   const dataStr = JSON.stringify(records);
   safeSetLocalStorage(KEYS.ATTENDANCE, dataStr);
   notifyStorageUpdated();
+}
+
+// =========================================================================
+// SISTEM BATCHING SINKRONISASI PRESENSI SISWA (MAKSIMAL 25 SISWA / 20 DETIK)
+// =========================================================================
+
+/**
+ * Membaca antrean pending sinkronisasi presensi dari LocalStorage
+ */
+export function getPendingAttendanceBatchQueue(): AttendanceRecord[] {
+  if (typeof window === 'undefined') return [];
+  const raw = localStorage.getItem(KEYS.ATTENDANCE_BATCH_QUEUE);
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Menyimpan antrean pending sinkronisasi presensi ke LocalStorage
+ */
+export function savePendingAttendanceBatchQueue(queue: AttendanceRecord[]): void {
+  if (typeof window === 'undefined') return;
+  safeSetLocalStorage(KEYS.ATTENDANCE_BATCH_QUEUE, JSON.stringify(queue));
+  window.dispatchEvent(new CustomEvent('sihadir_attendance_batch_queue_updated', {
+    detail: { count: queue.length }
+  }));
+}
+
+/**
+ * Mengosongkan antrean pending batch presensi
+ */
+export function clearAttendanceBatchQueue(): void {
+  savePendingAttendanceBatchQueue([]);
+}
+
+/**
+ * Memasukkan 1 record presensi ke antrean batch (deduplikasi berdasarkan studentId/nisn + date)
+ */
+export function enqueueAttendanceBatchItem(record: AttendanceRecord): void {
+  const currentQueue = getPendingAttendanceBatchQueue();
+  const existingIdx = currentQueue.findIndex(item => 
+    (item.id === record.id) || 
+    (item.studentId && record.studentId && item.studentId === record.studentId && item.date === record.date) ||
+    (item.nisn && record.nisn && item.nisn === record.nisn && item.date === record.date)
+  );
+
+  let updatedQueue: AttendanceRecord[];
+  if (existingIdx >= 0) {
+    updatedQueue = [...currentQueue];
+    updatedQueue[existingIdx] = {
+      ...updatedQueue[existingIdx],
+      ...record
+    };
+  } else {
+    updatedQueue = [...currentQueue, record];
+  }
+
+  savePendingAttendanceBatchQueue(updatedQueue);
+}
+
+/**
+ * Memasukkan kumpulan record presensi ke antrean batch
+ */
+export function enqueueAttendanceBatchItems(records: AttendanceRecord[]): void {
+  const queue = getPendingAttendanceBatchQueue();
+  records.forEach(record => {
+    const existingIdx = queue.findIndex(item => 
+      (item.id === record.id) || 
+      (item.studentId && record.studentId && item.studentId === record.studentId && item.date === record.date) ||
+      (item.nisn && record.nisn && item.nisn === record.nisn && item.date === record.date)
+    );
+    if (existingIdx >= 0) {
+      queue[existingIdx] = { ...queue[existingIdx], ...record };
+    } else {
+      queue.push(record);
+    }
+  });
+  savePendingAttendanceBatchQueue(queue);
+}
+
+/**
+ * Status Worker Batching untuk monitoring UI
+ */
+export function getAttendanceBatchWorkerStatus() {
+  const queue = getPendingAttendanceBatchQueue();
+  return {
+    queueLength: queue.length,
+    isSyncing: isAttendanceBatchSyncing,
+    lastBatchSyncTime: lastAttendanceBatchSyncTime,
+    lastSyncedCount: lastSyncedBatchCount,
+    batchLimit: ATTENDANCE_BATCH_SIZE,
+    intervalSeconds: ATTENDANCE_WORKER_INTERVAL_MS / 1000,
+  };
+}
+
+/**
+ * -------------------------------------------------------------
+ * KOMPONEN 1: FUNGSI INPUT (Saat Scan QR / Input Presensi Siswa)
+ * -------------------------------------------------------------
+ * Menyimpan data lengkap presensi siswa secara instan ke LocalStorage (0 ms delay),
+ * dan mendaftarkan record ke antrean batching untuk dikirim oleh Worker ke Cloud Firestore.
+ */
+export function recordAttendanceWithBatchQueue(newRecord: AttendanceRecord, allUpdatedRecords: AttendanceRecord[]): void {
+  const now = Date.now();
+  const dataStr = JSON.stringify(allUpdatedRecords);
+  
+  // 1. Simpan ground-truth presensi lengkap ke LocalStorage
+  safeSetLocalStorage(KEYS.ATTENDANCE, dataStr);
+  safeSetLocalStorage(KEYS.ATTENDANCE + '_updatedAt', String(now));
+  
+  // 2. Daftarkan record yang diinput ke antrean batching
+  enqueueAttendanceBatchItem(newRecord);
+  
+  // 3. Notifikasi perubahan data ke semua komponen secara instan
+  notifyStorageUpdated();
+}
+
+/**
+ * -------------------------------------------------------------
+ * KOMPONEN 2: FUNGSI WORKER (Latar Belakang - Background Worker)
+ * -------------------------------------------------------------
+ * Memproses antrean sinkronisasi presensi secara bertahap (batching).
+ * Mengambil maksimal 25 siswa per siklus dengan interval setiap 20 detik.
+ */
+export async function processAttendanceBatchWorker(isForced = false): Promise<{ syncedCount: number; remainingCount: number }> {
+  // Hindari eksekusi paralel ganda
+  if (isAttendanceBatchSyncing) {
+    const queue = getPendingAttendanceBatchQueue();
+    return { syncedCount: 0, remainingCount: queue.length };
+  }
+
+  // Jika sedang offline, tahan pengiriman hingga online
+  if (typeof navigator !== 'undefined' && !navigator.onLine) {
+    const queue = getPendingAttendanceBatchQueue();
+    return { syncedCount: 0, remainingCount: queue.length };
+  }
+
+  // Jika kuota harian Firestore habis, tahan pengiriman
+  if (isFirestoreQuotaExceeded()) {
+    const queue = getPendingAttendanceBatchQueue();
+    return { syncedCount: 0, remainingCount: queue.length };
+  }
+
+  const queue = getPendingAttendanceBatchQueue();
+  // Jika antrean kosong, Worker tidur tanpa menghabiskan kuota write (Write Cost = 0)
+  if (queue.length === 0) {
+    return { syncedCount: 0, remainingCount: 0 };
+  }
+
+  isAttendanceBatchSyncing = true;
+  // Ambil maksimal 25 siswa untuk batch saat ini
+  const batchToSync = queue.slice(0, ATTENDANCE_BATCH_SIZE);
+  const now = Date.now();
+
+  try {
+    setCloudSyncStatus('syncing');
+
+    // 1. Ambil data presensi lokal lengkap
+    const localRecords = getAttendanceRecords();
+    const dataStr = JSON.stringify(localRecords);
+
+    // 2. Unggah data presensi ke Firestore Cloud
+    await writeCloudDocument(KEYS.ATTENDANCE, dataStr, now);
+    lastSavedStringCache[KEYS.ATTENDANCE] = dataStr;
+    safeSetLocalStorage(KEYS.ATTENDANCE + '_updatedAt', String(now));
+
+    // 3. Keluarkan batch yang berhasil terunggah dari antrean
+    const remainingQueue = queue.slice(batchToSync.length);
+    savePendingAttendanceBatchQueue(remainingQueue);
+
+    lastAttendanceBatchSyncTime = now;
+    lastSyncedBatchCount = batchToSync.length;
+    setCloudSyncStatus('connected');
+
+    console.log(`[Batch Worker Presensi] Berhasil sinkronisasi batch ${batchToSync.length} data presensi siswa ke Firestore. Sisa antrean: ${remainingQueue.length}`);
+
+    // Broadcast progres batch ke sistem
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('sihadir_batch_sync_progress', {
+        detail: {
+          syncedCount: batchToSync.length,
+          remainingCount: remainingQueue.length,
+          total: queue.length,
+          timestamp: now
+        }
+      }));
+
+      // Tampilkan toast informatif jika batch diproses
+      if (batchToSync.length > 0) {
+        window.dispatchEvent(new CustomEvent('sihadir_network_toast', {
+          detail: {
+            type: 'success',
+            title: '☁️ Batch Presensi Tersinkron',
+            message: `Batch ${batchToSync.length} data presensi berhasil diunggah ke Cloud. ${remainingQueue.length > 0 ? `Sisa antrean: ${remainingQueue.length} siswa (akan diproses 20 detik lagi).` : 'Semua data presensi telah tersimpan di Cloud.'}`
+          }
+        }));
+      }
+    }
+
+    return { syncedCount: batchToSync.length, remainingCount: remainingQueue.length };
+  } catch (err: any) {
+    console.error('[Batch Worker Presensi] Gagal mengunggah batch presensi ke Cloud:', err);
+    handleFirestoreError(err);
+    return { syncedCount: 0, remainingCount: queue.length };
+  } finally {
+    isAttendanceBatchSyncing = false;
+  }
+}
+
+/**
+ * Inisialisasi Worker Latar Belakang Presensi (Interval setiap 20 detik)
+ */
+export function initAttendanceBatchWorker(): void {
+  if (typeof window === 'undefined' || isAttendanceWorkerStarted) return;
+  isAttendanceWorkerStarted = true;
+
+  console.log(`[Batch Worker Presensi] Worker aktif: interval ${ATTENDANCE_WORKER_INTERVAL_MS / 1000}s, maksimal ${ATTENDANCE_BATCH_SIZE} siswa/batch.`);
+
+  // 1. Eksekusi berkala setiap 20 detik
+  setInterval(() => {
+    processAttendanceBatchWorker(false).catch(() => {});
+  }, ATTENDANCE_WORKER_INTERVAL_MS);
+
+  // 2. Eksekusi saat koneksi kembali online
+  window.addEventListener('online', () => {
+    setTimeout(() => {
+      processAttendanceBatchWorker(true).catch(() => {});
+    }, 1000);
+  });
+
+  // 3. Eksekusi saat tab browser dibuka kembali
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') {
+      processAttendanceBatchWorker(false).catch(() => {});
+    }
+  });
+
+  // 4. Periksa antrean awal 3 detik setelah aplikasi dimuat
+  setTimeout(() => {
+    const q = getPendingAttendanceBatchQueue();
+    if (q.length > 0) {
+      processAttendanceBatchWorker(false).catch(() => {});
+    }
+  }, 3000);
+}
+
+/**
+ * Flush paksa seluruh sisa antrean presensi (misal saat logout atau sinkronisasi manual)
+ */
+export async function flushAttendanceBatchWorker(): Promise<{ totalSynced: number; remainingCount: number }> {
+  let totalSynced = 0;
+  let remaining = getPendingAttendanceBatchQueue().length;
+
+  while (remaining > 0) {
+    const res = await processAttendanceBatchWorker(true);
+    if (res.syncedCount === 0) break;
+    totalSynced += res.syncedCount;
+    remaining = res.remainingCount;
+  }
+
+  return { totalSynced, remainingCount: remaining };
 }
 
 export function getLeaveRequests(): LeaveRequest[] {

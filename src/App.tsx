@@ -26,6 +26,7 @@ import {
   getAttendanceRecords, 
   saveAttendanceRecords,
   saveAttendanceRecordsLocally,
+  recordAttendanceWithBatchQueue,
   getLeaveRequests, 
   saveLeaveRequests,
   getTeachers,
@@ -740,7 +741,8 @@ export default function App() {
         };
       }
       const updated = [newRecord, ...prev.filter(r => !((r.studentId === record.studentId || (r.nisn && record.nisn && r.nisn === record.nisn)) && r.date === record.date))];
-      saveAttendanceRecords(updated, true);
+      // Simpan ke LocalStorage dan daftarkan ke antrean batching (maks 25 siswa / interval 20 detik)
+      recordAttendanceWithBatchQueue(newRecord, updated);
       return updated;
     });
   };

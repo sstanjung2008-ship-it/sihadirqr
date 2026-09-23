@@ -5,7 +5,6 @@ import {
   CheckCircle2, 
   Clock, 
   Calendar, 
-  MessageSquare, 
   AlertCircle, 
   BookOpen, 
   Award, 
@@ -33,7 +32,6 @@ import {
 import { 
   getAttendanceRecords, 
   getLeaveRequests, 
-  getDirectChats, 
   getStudentCharacterLogs, 
   getLearningJournals, 
   getClassSchedules, 
@@ -47,7 +45,7 @@ import { playBkNotificationChime } from '../lib/kbmVoiceReminder';
 
 export interface AppNotification {
   id: string;
-  category: 'attendance' | 'leave' | 'chat' | 'journal' | 'character' | 'schedule' | 'bk' | 'wali_kelas';
+  category: 'attendance' | 'leave' | 'journal' | 'character' | 'schedule' | 'bk' | 'wali_kelas';
   title: string;
   description: string;
   timestamp: string; // ISO or readable
@@ -55,7 +53,7 @@ export interface AppNotification {
   isUnread: boolean;
   targetTab: string;
   badgeColor: string;
-  icon: 'attendance' | 'leave' | 'chat' | 'journal' | 'character' | 'schedule' | 'bk' | 'wali_kelas';
+  icon: 'attendance' | 'leave' | 'journal' | 'character' | 'schedule' | 'bk' | 'wali_kelas';
   studentId?: string;
   studentName?: string;
   characterLogId?: string;
@@ -179,7 +177,6 @@ export const NotificationModal: React.FC<NotificationModalProps> = ({
     const students = getStudents();
     const attendanceRecords = getAttendanceRecords();
     const leaveRequests = getLeaveRequests();
-    const directChats = getDirectChats();
     const journals = getLearningJournals();
     const characterLogs = getStudentCharacterLogs();
     const schedules = getClassSchedules();
@@ -239,29 +236,7 @@ export const NotificationModal: React.FC<NotificationModalProps> = ({
           });
         });
 
-        // C. Direct Chats from Teachers/Staff
-        Object.entries(directChats).forEach(([threadKey, messages]) => {
-          if (threadKey.includes(student!.id) || threadKey.includes(student!.nisn) || threadKey.includes('parent')) {
-            const staffMsgs = messages.filter(m => m.senderRole === 'STAFF');
-            if (staffMsgs.length > 0) {
-              const latest = staffMsgs[staffMsgs.length - 1];
-              list.push({
-                id: `chat-${latest.id}`,
-                category: 'chat',
-                title: `Pesan dari ${latest.senderName || 'Wali Kelas'}`,
-                description: latest.message,
-                timestamp: latest.timestamp,
-                timeLabel: latest.timestamp ? latest.timestamp.split('T')[0] : 'Baru saja',
-                isUnread: false,
-                targetTab: 'parent-chat',
-                badgeColor: 'bg-indigo-100 text-indigo-800 border-indigo-300',
-                icon: 'chat'
-              });
-            }
-          }
-        });
-
-        // D. Character Logs for Student
+        // C. Character Logs for Student
         const studentCharLogs = characterLogs
           .filter(c => c.studentId === student!.id || c.nisn === student!.nisn)
           .sort((a, b) => new Date(b.date || b.timestamp).getTime() - new Date(a.date || a.timestamp).getTime());
@@ -396,27 +371,7 @@ export const NotificationModal: React.FC<NotificationModalProps> = ({
         });
       });
 
-      // D. Incoming Parent Consultation Messages
-      Object.entries(directChats).forEach(([threadKey, messages]) => {
-        const parentMsgs = messages.filter(m => m.senderRole === 'PARENT');
-        if (parentMsgs.length > 0) {
-          const latest = parentMsgs[parentMsgs.length - 1];
-          list.push({
-            id: `chat-${latest.id}`,
-            category: 'chat',
-            title: `Konsultasi dari ${latest.senderName || 'Wali Murid'}`,
-            description: latest.message,
-            timestamp: latest.timestamp,
-            timeLabel: latest.timestamp ? latest.timestamp.split('T')[0] : 'Baru saja',
-            isUnread: false,
-            targetTab: 'parent-chat',
-            badgeColor: 'bg-indigo-100 text-indigo-800 border-indigo-300',
-            icon: 'chat'
-          });
-        }
-      });
-
-      // E. Today's Teaching Schedule Reminders (Teacher only)
+      // D. Today's Teaching Schedule Reminders (Teacher only)
       if (currentRole === 'TEACHER') {
         const mySchedulesToday = schedules.filter(s => {
           const matchDay = (s.day?.toLowerCase() === currentDayName.toLowerCase()) || (s.day?.toUpperCase() === 'SEMUA');
@@ -550,8 +505,6 @@ export const NotificationModal: React.FC<NotificationModalProps> = ({
         return <UserCheck className="w-5 h-5 text-emerald-600" />;
       case 'leave':
         return <AlertCircle className="w-5 h-5 text-amber-600" />;
-      case 'chat':
-        return <MessageSquare className="w-5 h-5 text-indigo-600" />;
       case 'journal':
         return <BookOpen className="w-5 h-5 text-sky-600" />;
       case 'character':
@@ -728,18 +681,6 @@ export const NotificationModal: React.FC<NotificationModalProps> = ({
               }`}
             >
               Izin
-            </button>
-
-            <button
-              type="button"
-              onClick={() => setActiveFilter('CHAT')}
-              className={`px-3 py-1 rounded-xl font-bold transition-all whitespace-nowrap cursor-pointer ${
-                activeFilter === 'CHAT'
-                  ? 'bg-indigo-600 text-white shadow-xs'
-                  : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-100'
-              }`}
-            >
-              Pesan
             </button>
           </div>
 

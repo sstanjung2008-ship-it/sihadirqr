@@ -35,7 +35,6 @@ import {
   X,
   GraduationCap,
   CalendarDays,
-  MessageSquare,
   UserCircle,
   ShieldCheck,
   QrCode,
@@ -154,7 +153,8 @@ export const AttendanceDashboard: React.FC<AttendanceDashboardProps> = ({
 
   const studentDateStatusMap = new Map<string, AttendanceRecord>();
   dateRecords.forEach(r => {
-    studentDateStatusMap.set(r.studentId, r);
+    if (r.studentId) studentDateStatusMap.set(r.studentId, r);
+    if (r.nisn) studentDateStatusMap.set(r.nisn, r);
   });
 
   // Base student list based on role/class filter
@@ -177,7 +177,7 @@ export const AttendanceDashboard: React.FC<AttendanceDashboardProps> = ({
   // Filter by Entry Status (Status Masuk)
   if (selectedEntryStatusFilter !== 'ALL') {
     filteredStudents = filteredStudents.filter(std => {
-      const rec = studentDateStatusMap.get(std.id);
+      const rec = studentDateStatusMap.get(std.id) || (std.nisn ? studentDateStatusMap.get(std.nisn) : undefined);
       if (selectedEntryStatusFilter === 'BELUM_ABSEN') {
         return !rec;
       }
@@ -191,7 +191,7 @@ export const AttendanceDashboard: React.FC<AttendanceDashboardProps> = ({
   // Filter by Return Status (Status Pulang)
   if (selectedReturnStatusFilter !== 'ALL') {
     filteredStudents = filteredStudents.filter(std => {
-      const rec = studentDateStatusMap.get(std.id);
+      const rec = studentDateStatusMap.get(std.id) || (std.nisn ? studentDateStatusMap.get(std.nisn) : undefined);
       const isPulang = !!(rec && (rec.returnTime || rec.returnStatus === 'PULANG' || rec.returnStatus === 'PULANG_TEPAT' || rec.returnStatus === 'PULANG_CEPAT'));
       if (selectedReturnStatusFilter === 'PULANG') {
         return isPulang;
@@ -523,33 +523,11 @@ export const AttendanceDashboard: React.FC<AttendanceDashboardProps> = ({
                   </div>
                 </button>
 
-                {/* ITEM 4: CHAT SEKOLAH */}
-                <button
-                  type="button"
-                  onClick={() => onNavigateTab?.('chat')}
-                  className="group relative overflow-hidden rounded-3xl p-4 text-left backdrop-blur-xl bg-white/75 hover:bg-white/95 border border-sky-200/80 hover:border-sky-400 shadow-sm hover:shadow-md transition-all duration-200 cursor-pointer flex flex-col justify-between min-h-[120px]"
-                >
-                  <div className="flex items-center justify-between">
-                    <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-sky-500 to-cyan-600 text-white flex items-center justify-center shadow-md shadow-sky-500/20 group-hover:scale-105 transition-transform">
-                      <MessageSquare className="w-5 h-5" />
-                    </div>
-                    <ArrowRight className="w-4 h-4 text-slate-300 group-hover:text-sky-600 group-hover:translate-x-0.5 transition-all" />
-                  </div>
-                  <div className="mt-3">
-                    <p className="text-xs font-black text-slate-900 group-hover:text-sky-700 transition-colors">
-                      Chat
-                    </p>
-                    <p className="text-[10px] text-slate-500 font-medium line-clamp-1 mt-0.5">
-                      Wali Kelas, BK & Humas
-                    </p>
-                  </div>
-                </button>
-
-                {/* ITEM 5: AKUN & KARTU KTS */}
+                {/* ITEM 4: AKUN & KARTU KTS */}
                 <button
                   type="button"
                   onClick={() => onNavigateTab?.('account')}
-                  className="group relative overflow-hidden rounded-3xl p-4 text-left backdrop-blur-xl bg-white/75 hover:bg-white/95 border border-purple-200/80 hover:border-purple-400 shadow-sm hover:shadow-md transition-all duration-200 cursor-pointer flex flex-col justify-between min-h-[120px] col-span-2 sm:col-span-1"
+                  className="group relative overflow-hidden rounded-3xl p-4 text-left backdrop-blur-xl bg-white/75 hover:bg-white/95 border border-purple-200/80 hover:border-purple-400 shadow-sm hover:shadow-md transition-all duration-200 cursor-pointer flex flex-col justify-between min-h-[120px]"
                 >
                   <div className="flex items-center justify-between">
                     <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-purple-500 to-pink-600 text-white flex items-center justify-center shadow-md shadow-purple-500/20 group-hover:scale-105 transition-transform">
@@ -1280,7 +1258,7 @@ export const AttendanceDashboard: React.FC<AttendanceDashboardProps> = ({
                   </tr>
                 ) : (
                   filteredStudents.map((student) => {
-                    const rec = studentDateStatusMap.get(student.id);
+                    const rec = studentDateStatusMap.get(student.id) || (student.nisn ? studentDateStatusMap.get(student.nisn) : undefined);
                     const status = rec ? rec.status : 'BELUM_ABSEN';
 
                     return (

@@ -66,10 +66,8 @@ import { DisciplineRulesView } from './components/DisciplineRulesView';
 import { CharacterInputView } from './components/CharacterInputView';
 import { CharacterPointsView } from './components/CharacterPointsView';
 import { ScheduleManagementView } from './components/ScheduleManagementView';
-import { ParentChatView } from './components/ParentChatView';
 import { ParentAccountView } from './components/ParentAccountView';
 import { TeacherAccountView } from './components/TeacherAccountView';
-import { TeacherAssistantView } from './components/TeacherAssistantView';
 import { ParentBottomNav } from './components/ParentBottomNav';
 import { TeacherBottomNav } from './components/TeacherBottomNav';
 import { LoginView } from './components/LoginView';
@@ -393,126 +391,17 @@ export default function App() {
   const leaveRequestsRef = useRef(leaveRequests);
   leaveRequestsRef.current = leaveRequests;
 
-  const lastAutoAlpaDateRef = useRef<string>('');
-
-  // Automatic ALPA status assignment when autoAlpaTime is reached
+  // Automatic ALPA feature completely removed as requested (sistem tidak lagi merubah belum scan menjadi alpa otomatis)
   useEffect(() => {
-    // Check if auto ALPA is disabled by admin in settings
-    if (schoolProfile.autoAlpaEnabled === false) return;
-
-    const autoAlpaTime = schoolProfile.autoAlpaTime || '08:30';
-    const [targetH, targetM] = autoAlpaTime.split(':').map(Number);
-    if (isNaN(targetH) || isNaN(targetM)) return;
-
-    const checkAndApplyAutoAlpa = () => {
-      const now = new Date();
-
-      // Check if today is an active learning day
-      const activeDays = schoolProfile.activeDays || ['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
-      const dayNames = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
-      const currentDayName = dayNames[now.getDay()];
-
-      if (!activeDays.includes(currentDayName)) {
-        // Hari ini adalah hari libur / non-aktif belajar. Abaikan penetapan Alpa otomatis.
-        return;
-      }
-
-      const currentMinutes = now.getHours() * 60 + now.getMinutes();
-      const targetMinutes = targetH * 60 + targetM;
-
-      if (currentMinutes < targetMinutes) return;
-
-      const year = now.getFullYear();
-      const month = String(now.getMonth() + 1).padStart(2, '0');
-      const day = String(now.getDate()).padStart(2, '0');
-      const dateStr = `${year}-${month}-${day}`;
-
-      // Check if today is a registered holiday
-      const holidays = schoolProfile.holidays || [];
-      const isTodayHoliday = holidays.some(h => {
-        if (h.endDate) {
-          return dateStr >= h.date && dateStr <= h.endDate;
-        }
-        return h.date === dateStr;
-      });
-
-      if (isTodayHoliday) {
-        // Hari ini adalah hari libur khusus / libur nasional. Abaikan penetapan Alpa otomatis.
-        return;
-      }
-
-      const curAttendance = attendanceRecordsRef.current;
-      const curStudents = studentsRef.current;
-      const curLeaves = leaveRequestsRef.current;
-
-      // High-performance O(1) Sets to eliminate O(N * M) nested looping on the main thread
-      const todayAttendedStudentIds = new Set<string>();
-      for (let i = 0; i < curAttendance.length; i++) {
-        const r = curAttendance[i];
-        if (r.date === dateStr) {
-          if (r.studentId) todayAttendedStudentIds.add(r.studentId);
-          if (r.nisn) todayAttendedStudentIds.add(r.nisn);
-        }
-      }
-
-      const todayApprovedLeaveStudentIds = new Set<string>();
-      for (let i = 0; i < curLeaves.length; i++) {
-        const l = curLeaves[i];
-        if (l.status === 'APPROVED' && l.startDate <= dateStr && l.endDate >= dateStr) {
-          if (l.studentId) todayApprovedLeaveStudentIds.add(l.studentId);
-        }
-      }
-
-      let hasChanges = false;
-      const newAlpaRecords: AttendanceRecord[] = [];
-
-      for (let i = 0; i < curStudents.length; i++) {
-        const student = curStudents[i];
-        if (!student) continue;
-
-        if (todayAttendedStudentIds.has(student.id) || (student.nisn && todayAttendedStudentIds.has(student.nisn))) {
-          continue;
-        }
-        if (todayApprovedLeaveStudentIds.has(student.id)) {
-          continue;
-        }
-
-        const record: AttendanceRecord = {
-          id: `att-autoalpa-${dateStr}-${student.id}`,
-          studentId: student.id,
-          studentName: student.name,
-          nisn: student.nisn,
-          className: student.className,
-          date: dateStr,
-          time: autoAlpaTime,
-          status: 'ALPA',
-          method: 'MANUAL',
-          scannedBy: 'Sistem Otomatis (Batas Alpa)',
-          notes: `Otomatis Alpa (Melewati batas jam ${autoAlpaTime} WITA)`,
-          parentNotified: false,
-        };
-
-        newAlpaRecords.push(record);
-        hasChanges = true;
-      }
-
-      if (hasChanges && newAlpaRecords.length > 0) {
-        const updatedAttendance = [...newAlpaRecords, ...curAttendance];
-        setAttendanceRecordsState(updatedAttendance);
-        saveAttendanceRecordsLocally(updatedAttendance);
-      }
-      lastAutoAlpaDateRef.current = dateStr;
-    };
-
-    checkAndApplyAutoAlpa();
-    const interval = setInterval(checkAndApplyAutoAlpa, 60000);
-    return () => clearInterval(interval);
-  }, [
-    schoolProfile.autoAlpaEnabled,
-    schoolProfile.autoAlpaTime, 
-    schoolProfile.activeDays, 
-    schoolProfile.holidays
-  ]);
+    // Clean up any remaining auto-alpa records if present
+    setAttendanceRecordsState(prev => {
+      const hasAutoAlpa = prev.some(r => r.id?.startsWith('att-autoalpa-') || r.scannedBy?.includes('Sistem Otomatis (Batas Alpa)'));
+      if (!hasAutoAlpa) return prev;
+      const cleaned = prev.filter(r => !r.id?.startsWith('att-autoalpa-') && !r.scannedBy?.includes('Sistem Otomatis (Batas Alpa)'));
+      saveAttendanceRecordsLocally(cleaned);
+      return cleaned;
+    });
+  }, []);
 
   // -------------------------------------------------------------
   // Real-Time AI Voice Reminder for Teachers with Active KBM Slots
@@ -740,24 +629,40 @@ export default function App() {
   // Add Attendance Record (from scanner or manual)
   const handleAddAttendance = (record: AttendanceRecord) => {
     setAttendanceRecordsState(prev => {
-      const existingIndex = prev.findIndex(r => (r.studentId === record.studentId || (r.nisn && record.nisn && r.nisn === record.nisn)) && r.date === record.date);
+      const existingIndex = prev.findIndex(r => (
+        (record.id && r.id === record.id) ||
+        (r.studentId && record.studentId && r.studentId === record.studentId) ||
+        (r.nisn && record.nisn && r.nisn === record.nisn)
+      ) && r.date === record.date);
+
       let newRecord = { ...record };
       if (existingIndex >= 0) {
         const existing = prev[existingIndex];
+        const mergedTime = (record.time && record.time !== '-')
+          ? record.time
+          : (existing.time && existing.time !== '-' ? existing.time : '-');
+        const mergedReturnTime = (record.returnTime && record.returnTime !== '-')
+          ? record.returnTime
+          : (existing.returnTime && existing.returnTime !== '-' ? existing.returnTime : undefined);
+        const isCompletedReturn = (s?: string) => s === 'PULANG' || s === 'PULANG_CEPAT' || s === 'PULANG_TEPAT';
+        const mergedReturnStatus = isCompletedReturn(record.returnStatus)
+          ? record.returnStatus
+          : (isCompletedReturn(existing.returnStatus) ? existing.returnStatus : (record.returnStatus || existing.returnStatus));
+
         newRecord = {
           ...existing,
           ...record,
-          time: (record.time && record.time !== '-') ? record.time : (existing.time || '-'),
+          time: mergedTime,
           status: (record.status && record.status !== 'ALPA') ? record.status : existing.status,
           method: (record.method === 'QR_SCAN' || existing.method === 'QR_SCAN') ? 'QR_SCAN' : (record.method || existing.method),
           scannedBy: (record.scannedBy && !record.scannedBy.includes('Sistem Otomatis')) ? record.scannedBy : existing.scannedBy,
-          returnTime: record.returnTime || existing.returnTime,
-          returnStatus: record.returnStatus || existing.returnStatus,
+          returnTime: mergedReturnTime,
+          returnStatus: mergedReturnStatus,
           returnScannedBy: record.returnScannedBy || existing.returnScannedBy,
         };
       }
-      const updated = [newRecord, ...prev.filter(r => !((r.studentId === record.studentId || (r.nisn && record.nisn && r.nisn === record.nisn)) && r.date === record.date))];
-      // Jika scan presensi via QR Code, gunakan Batching Worker (25 siswa / interval 20 detik) untuk menghemat write Cloud
+      const updated = [newRecord, ...prev.filter((_, idx) => idx !== existingIndex)];
+      // Simpan segera ke antrean/cloud dengan auto-flush cepat (1.5 detik)
       if (newRecord.method === 'QR_SCAN') {
         queueAttendanceScanRecord(updated);
       } else {
@@ -1414,13 +1319,6 @@ export default function App() {
             />
           )}
 
-          {activeTab === 'teacher_assistant' && (
-            <TeacherAssistantView
-              schoolProfile={schoolProfile}
-              userSession={userSession}
-            />
-          )}
-
           {activeTab === 'schedule' && (
             <ScheduleManagementView
               schoolProfile={schoolProfile}
@@ -1500,18 +1398,6 @@ export default function App() {
               onAddClass={handleAddClass}
               onUpdateClass={handleUpdateClass}
               onDeleteClass={handleDeleteClass}
-            />
-          )}
-
-          {activeTab === 'chat' && (
-            <ParentChatView
-              students={students}
-              teachers={teachers}
-              classes={classes}
-              selectedChildId={effectiveChildId}
-              schoolProfile={schoolProfile}
-              userRole={currentRole}
-              userSession={userSession}
             />
           )}
 

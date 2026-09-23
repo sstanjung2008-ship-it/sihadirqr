@@ -1170,10 +1170,10 @@ export const SchoolSettingsView: React.FC<SchoolSettingsViewProps> = ({
           <div className="border-b border-slate-100 pb-3">
             <h2 className="text-sm font-bold text-slate-800 flex items-center gap-2">
               <Clock className="w-4 h-4 text-amber-500" />
-              Aturan Jam Masuk, Jam Pulang & Waktu Batas Otomatis Alpa
+              Aturan Jam Masuk, Jam Pulang & Hari Libur
             </h2>
             <p className="text-xs text-slate-500 mt-0.5">
-              Atur jam operasional presensi dan tentukan pada hari apa saja aturan presensi & penentuan status Alpa otomatis berlaku.
+              Atur jam operasional presensi, jam masuk, jam pulang, serta kalender hari aktif dan hari libur sekolah.
             </p>
           </div>
 
@@ -1189,7 +1189,7 @@ export const SchoolSettingsView: React.FC<SchoolSettingsViewProps> = ({
                     Hari Aktif Belajar Sekolah
                   </h3>
                   <p className="text-[11px] text-slate-500">
-                    Aturan presensi & Alpa otomatis hanya akan berjalan aktif pada hari-hari yang dicentang di bawah ini.
+                    Aturan presensi masuk dan pulang berjalan aktif pada hari-hari yang dicentang di bawah ini.
                   </p>
                 </div>
               </div>
@@ -1261,7 +1261,7 @@ export const SchoolSettingsView: React.FC<SchoolSettingsViewProps> = ({
             <div className="bg-white/80 border border-indigo-100 rounded-xl p-2.5 text-[11px] text-slate-600 flex items-start gap-2">
               <span className="font-bold text-indigo-700 shrink-0">ℹ️ Info Bekerja Aturan:</span>
               <span>
-                Pada hari non-aktif (seperti <strong>{ALL_WEEK_DAYS.filter(d => !currentActiveDays.includes(d)).join(', ') || 'tidak ada'}</strong>), sistem otomatis Alpa <strong>TIDAK akan berjalan</strong> dan scanner tidak akan mewajibkan presensi.
+                Pada hari non-aktif (seperti <strong>{ALL_WEEK_DAYS.filter(d => !currentActiveDays.includes(d)).join(', ') || 'tidak ada'}</strong>), scanner presensi ditutup dan jam KBM tidak dijadwalkan.
               </span>
             </div>
           </div>
@@ -1283,7 +1283,7 @@ export const SchoolSettingsView: React.FC<SchoolSettingsViewProps> = ({
                     </span>
                   </div>
                   <p className="text-xs text-slate-500 mt-0.5">
-                    Tambahkan tanggal libur nasional (Tahun Baru, Idul Fitri, dsb) atau libur khusus sekolah agar sistem presensi tidak menerapkan Alpa otomatis.
+                    Tambahkan tanggal libur nasional (Tahun Baru, Idul Fitri, dsb) atau libur khusus sekolah untuk penandaan laporan presensi.
                   </p>
                 </div>
               </div>
@@ -1635,14 +1635,14 @@ export const SchoolSettingsView: React.FC<SchoolSettingsViewProps> = ({
             </div>
 
             <div className="bg-white/90 border border-rose-100 rounded-xl p-2.5 text-[11px] text-slate-600 flex items-start gap-2">
-              <span className="font-bold text-rose-700 shrink-0">🛡️ Proteksi Otomatis:</span>
+              <span className="font-bold text-rose-700 shrink-0">🛡️ Proteksi Kalender:</span>
               <span>
-                Pada setiap tanggal libur yang tercatat di atas, sistem presensi akan <strong>menonaktifkan proses penetapan status Alpa otomatis</strong> serta menandai kolom presensi dengan kode <strong>'L' (Libur)</strong> pada laporan rekap bulanan kelas.
+                Pada setiap tanggal libur yang tercatat di atas, sistem presensi akan menandai kolom presensi dengan kode <strong>'L' (Libur)</strong> pada laporan rekap bulanan kelas.
               </span>
             </div>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 text-xs pt-1">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs pt-1">
             <div>
               <label className="block text-slate-700 font-semibold mb-1">Jam Masuk Sekolah (WITA)</label>
               <input
@@ -1666,56 +1666,6 @@ export const SchoolSettingsView: React.FC<SchoolSettingsViewProps> = ({
                 className="w-full bg-slate-50 border border-slate-200 text-slate-800 rounded-xl p-2.5 font-mono font-bold focus:ring-2 focus:ring-indigo-500"
               />
               <p className="text-[11px] text-slate-500 mt-1">Siswa hadir setelah menit ini berstatus Terlambat.</p>
-            </div>
-
-            {/* Waktu Batas Otomatis Alpa */}
-            <div className={`border rounded-2xl p-3 space-y-2 transition-all ${
-              formData.autoAlpaEnabled !== false
-                ? 'bg-rose-50/60 border-rose-200/80'
-                : 'bg-slate-50 border-slate-200 opacity-90'
-            }`}>
-              <div className="flex items-center justify-between gap-2 flex-wrap">
-                <div className="flex items-center gap-1.5">
-                  <label className="block text-slate-900 font-extrabold flex items-center gap-1.5 text-xs">
-                    <Clock className={`w-3.5 h-3.5 ${formData.autoAlpaEnabled !== false ? 'text-rose-600' : 'text-slate-400'}`} />
-                    Batas Otomatis Alpa (WITA)
-                  </label>
-                </div>
-
-                {/* Saklar / Toggle Switch Menonaktifkan / Mengaktifkan Otomatis Alpa */}
-                <label className="relative inline-flex items-center cursor-pointer shrink-0">
-                  <input
-                    type="checkbox"
-                    checked={formData.autoAlpaEnabled !== false}
-                    onChange={(e) => setFormData({ ...formData, autoAlpaEnabled: e.target.checked })}
-                    className="sr-only peer"
-                  />
-                  <div className="w-9 h-5 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-rose-600"></div>
-                  <span className="ml-1.5 text-[11px] font-bold text-slate-800">
-                    {formData.autoAlpaEnabled !== false ? 'Aktif' : 'Non-aktif'}
-                  </span>
-                </label>
-              </div>
-
-              <input
-                type="text"
-                disabled={formData.autoAlpaEnabled === false}
-                value={formData.autoAlpaTime || '08:30'}
-                onChange={(e) => setFormData({ ...formData, autoAlpaTime: e.target.value })}
-                className={`w-full rounded-xl p-2 font-mono font-bold focus:ring-2 shadow-xs text-xs transition-all ${
-                  formData.autoAlpaEnabled !== false
-                    ? 'bg-white border border-rose-300 text-slate-900 focus:ring-rose-500'
-                    : 'bg-slate-100 border border-slate-300 text-slate-400 cursor-not-allowed'
-                }`}
-                placeholder="08:30"
-              />
-              <p className="text-[10.5px] text-slate-500 leading-tight">
-                {formData.autoAlpaEnabled !== false ? (
-                  <span>Siswa yang belum presensi hingga jam ini otomatis berstatus <strong className="text-rose-700">ALPA</strong>.</span>
-                ) : (
-                  <span className="text-emerald-700 font-medium">✓ Fitur Alpa Otomatis dinonaktifkan. Mode Scan Masuk tetap terbuka.</span>
-                )}
-              </p>
             </div>
           </div>
 
@@ -2892,14 +2842,14 @@ export const SchoolSettingsView: React.FC<SchoolSettingsViewProps> = ({
                     />
                   </div>
 
-                  {/* Indikator Sumber [Time] Otomatis Batas Alpa */}
+                  {/* Indikator Format Waktu */}
                   <div className="bg-rose-50/90 border border-rose-200/80 rounded-xl px-2.5 py-1.5 flex items-center justify-between text-[11px] text-rose-900">
                     <span className="font-semibold flex items-center gap-1.5">
                       <Clock className="w-3.5 h-3.5 text-rose-600 shrink-0" />
-                      Variabel <code className="font-mono font-bold bg-white px-1.5 py-0.5 rounded border border-rose-300">[Time]</code> diambil dari:
+                      Variabel <code className="font-mono font-bold bg-white px-1.5 py-0.5 rounded border border-rose-300">[Time]</code> diisi dengan:
                     </span>
                     <span className="font-extrabold text-rose-700 bg-rose-100 px-2 py-0.5 rounded-md">
-                      Batas Otomatis Alpa ({formData.autoAlpaTime || '08:30'} WITA)
+                      Waktu Kirim / Konfirmasi Manual
                     </span>
                   </div>
 

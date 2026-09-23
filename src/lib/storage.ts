@@ -1,4 +1,4 @@
-import { SchoolProfile, SchoolClass, Student, AttendanceRecord, LeaveRequest, WhatsAppLog, Teacher, LearningJournal, CharacterTrait, StudentCharacterLog, CharacterPredicateSettings, UserSession, StudentGradeAssessment, LessonPeriod, ClassScheduleSlot, DirectChatMessage } from '../types';
+import { SchoolProfile, SchoolClass, Student, AttendanceRecord, LeaveRequest, WhatsAppLog, Teacher, LearningJournal, CharacterTrait, StudentCharacterLog, CharacterPredicateSettings, UserSession, StudentGradeAssessment, LessonPeriod, ClassScheduleSlot } from '../types';
 import { 
   INITIAL_SCHOOL_PROFILE, 
   INITIAL_CLASSES, 
@@ -14,6 +14,7 @@ import {
   INITIAL_CLASS_SCHEDULES
 } from '../data/mockData';
 import { db, doc, setDoc, getDoc, onSnapshot } from './firebase';
+import firebaseConfigData from '../../firebase-applet-config.json';
 
 export const KEYS = {
   PROFILE: 'sihadir_school_profile_v2',
@@ -31,8 +32,10 @@ export const KEYS = {
   PERIODS: 'sihadir_lesson_periods_v2',
   SCHEDULES: 'sihadir_class_schedules_v2',
   SESSION: 'sihadir_user_session_v2',
-  DIRECT_CHATS: 'sihadir_parent_direct_chats_v2',
 };
+
+// Cadangan aman lokal terpisah agar scan kehadiran siswa tidak pernah hilang
+export const SAFE_ATTENDANCE_BACKUP_KEY = 'sihadir_attendance_backup_safe';
 
 export type CloudSyncStatus = 'connected' | 'syncing' | 'offline' | 'quota_exceeded';
 let currentSyncStatus: CloudSyncStatus = 'syncing';
@@ -131,8 +134,21 @@ const inFlightKeys = new Set<string>();
 const pendingWritesByKey = new Map<string, { dataStr: string; timestamp: number }>();
 let writeBackoffUntil = 0;
 
+// Otomatis hapus cooldown quota lama jika menggunakan database Blaze (si-hadirqr-blaze)
+if (typeof window !== 'undefined') {
+  if (firebaseConfigData.firestoreDatabaseId && firebaseConfigData.firestoreDatabaseId !== '(default)') {
+    try {
+      localStorage.removeItem(QUOTA_COOLDOWN_KEY);
+    } catch {}
+  }
+}
+
 export function isFirestoreQuotaExceeded(): boolean {
   if (typeof window === 'undefined') return false;
+  // Database berbayar Blaze / custom database tidak terikat batas kuota harian gratis 20.000 write
+  if (firebaseConfigData.firestoreDatabaseId && firebaseConfigData.firestoreDatabaseId !== '(default)') {
+    return false;
+  }
   try {
     const stored = Number(localStorage.getItem(QUOTA_COOLDOWN_KEY) || '0');
     return Date.now() < stored;
@@ -161,17 +177,19 @@ export function handleFirestoreError(err: any): void {
     errMsg.includes('maximum backoff delay')
   ) {
     console.warn('[Firestore Sync] Antrean penulisan WebChannel jenuh (Write stream exhausted). Menerapkan jeda backoff singkat...');
-    writeBackoffUntil = Math.max(writeBackoffUntil, Date.now() + 3500);
+    writeBackoffUntil = Math.max(writeBackoffUntil, Date.now() + 2000);
     setCloudSyncStatus('syncing');
     return;
   }
 
-  // 2. Real Google Cloud Project Quota limit
+  // 2. Real Google Cloud Project Quota limit (hanya berlaku jika default free database)
+  const isPaidBlaze = Boolean(firebaseConfigData.firestoreDatabaseId && firebaseConfigData.firestoreDatabaseId !== '(default)');
   if (
-    errMsg.includes('Quota exceeded for quota metric') || 
-    errMsg.includes('Free daily write units') || 
-    errMsg.includes('Quota limit exceeded') ||
-    (err?.code === 'resource-exhausted' && !errMsg.includes('Write stream exhausted'))
+    !isPaidBlaze &&
+    (errMsg.includes('Quota exceeded for quota metric') || 
+     errMsg.includes('Free daily write units') || 
+     errMsg.includes('Quota limit exceeded') ||
+     (err?.code === 'resource-exhausted' && !errMsg.includes('Write stream exhausted')))
   ) {
     console.warn('[Firestore Sync] Kuota harian Firestore gratis telah tercapai. Beralih aman ke penyimpanan lokal.');
     if (activeUnsubscribes.length > 0) {
@@ -199,6 +217,15 @@ export function handleFirestoreError(err: any): void {
  */
 export function safeSetLocalStorage(key: string, value: string): void {
   if (typeof window === 'undefined') return;
+  // Selalu perbarui cadangan aman sekunder jika data presensi berisi riwayat aktif (mencegah data terhapus/hilang)
+  if (key === KEYS.ATTENDANCE) {
+    try {
+      const records = JSON.parse(value);
+      if (Array.isArray(records) && records.length > 0) {
+        localStorage.setItem(SAFE_ATTENDANCE_BACKUP_KEY, value);
+      }
+    } catch {}
+  }
   try {
     localStorage.setItem(key, value);
   } catch (err: any) {
@@ -470,7 +497,6 @@ export function exportAllDatabaseToJson(): string {
     grades: getStudentGradeAssessments(),
     periods: getLessonPeriods(),
     schedules: getClassSchedules(),
-    directChats: getDirectChats(),
   };
   return JSON.stringify(backupObject, null, 2);
 }
@@ -552,7 +578,6 @@ export function importAllDatabaseFromJson(jsonString: string): { success: boolea
     if (data.grades) setKey(KEYS.GRADES, data.grades);
     if (data.periods) setKey(KEYS.PERIODS, data.periods);
     if (data.schedules) setKey(KEYS.SCHEDULES, data.schedules);
-    if (data.directChats) setKey(KEYS.DIRECT_CHATS, data.directChats);
 
     const totalStudents = (data.students && Array.isArray(data.students)) ? data.students.length : getStudents().length;
 
@@ -907,47 +932,75 @@ export function isRealAttendance(rec?: AttendanceRecord | null): boolean {
 }
 
 export function mergeAttendanceLists(local: AttendanceRecord[], cloud: AttendanceRecord[]): AttendanceRecord[] {
+  const getValidEntryTime = (t1?: string, t2?: string): string => {
+    if (t1 && t1 !== '-' && t1.trim()) return t1;
+    if (t2 && t2 !== '-' && t2.trim()) return t2;
+    return '-';
+  };
+
+  const getValidReturnTime = (t1?: string, t2?: string): string | undefined => {
+    if (t1 && t1 !== '-' && t1.trim()) return t1;
+    if (t2 && t2 !== '-' && t2.trim()) return t2;
+    return undefined;
+  };
+
+  const getValidReturnStatus = (s1?: AttendanceRecord['returnStatus'], s2?: AttendanceRecord['returnStatus']): AttendanceRecord['returnStatus'] | undefined => {
+    const isCompleted = (s?: string) => s === 'PULANG' || s === 'PULANG_CEPAT' || s === 'PULANG_TEPAT';
+    if (isCompleted(s1)) return s1;
+    if (isCompleted(s2)) return s2;
+    if (s1 && s1 !== 'BELUM_PULANG') return s1;
+    if (s2 && s2 !== 'BELUM_PULANG') return s2;
+    return s1 || s2;
+  };
+
   const mergeSingleRecord = (localRec: AttendanceRecord, cloudRec: AttendanceRecord): AttendanceRecord => {
     const isLocalReal = isRealAttendance(localRec);
     const isCloudReal = isRealAttendance(cloudRec);
 
     let base: AttendanceRecord;
     if (isCloudReal && !isLocalReal) {
-      // Cloud has real scan, local was just auto-alpa or placeholder -> Cloud wins 100%!
       base = { ...cloudRec };
     } else if (!isCloudReal && isLocalReal) {
-      // Local has real scan, cloud was just auto-alpa -> Local wins 100%!
       base = { ...localRec };
-    } else if (isCloudReal && isLocalReal) {
-      // Both are real (e.g. one has morning scan, other has return scan, or teacher status edit)
+    } else {
+      // Both are real, or both are auto-alpa
+      const bestStatus = (cloudRec.status && cloudRec.status !== 'ALPA') 
+        ? cloudRec.status 
+        : (localRec.status && localRec.status !== 'ALPA' ? localRec.status : (cloudRec.status || localRec.status || 'HADIR'));
+      const bestMethod = (cloudRec.method === 'QR_SCAN' || localRec.method === 'QR_SCAN') 
+        ? 'QR_SCAN' 
+        : (cloudRec.method || localRec.method || 'QR_SCAN');
+      const bestScannedBy = (cloudRec.scannedBy && !cloudRec.scannedBy.includes('Sistem Otomatis')) 
+        ? cloudRec.scannedBy 
+        : (localRec.scannedBy || cloudRec.scannedBy);
+
       base = {
         ...localRec,
         ...cloudRec,
-        status: (cloudRec.status && cloudRec.status !== 'ALPA') ? cloudRec.status : localRec.status,
-        method: (cloudRec.method === 'QR_SCAN' || localRec.method === 'QR_SCAN') ? 'QR_SCAN' : (cloudRec.method || localRec.method),
-        scannedBy: (cloudRec.scannedBy && !cloudRec.scannedBy.includes('Sistem Otomatis')) ? cloudRec.scannedBy : localRec.scannedBy,
-        time: (cloudRec.time && cloudRec.time !== '-') ? cloudRec.time : (localRec.time || '-'),
+        status: bestStatus,
+        method: bestMethod,
+        scannedBy: bestScannedBy,
         notes: cloudRec.notes || localRec.notes || undefined,
-        returnTime: cloudRec.returnTime || localRec.returnTime || undefined,
-        returnStatus: cloudRec.returnStatus || localRec.returnStatus || undefined,
-        returnScannedBy: cloudRec.returnScannedBy || localRec.returnScannedBy || undefined,
       };
-    } else {
-      // Both are auto-alpa -> Cloud takes precedence
-      base = { ...localRec, ...cloudRec };
     }
 
-    // Always preserve returnTime if either has it
-    if (!base.returnTime && (localRec.returnTime || cloudRec.returnTime)) {
-      base.returnTime = cloudRec.returnTime || localRec.returnTime;
-      base.returnStatus = cloudRec.returnStatus || localRec.returnStatus;
-      base.returnScannedBy = cloudRec.returnScannedBy || localRec.returnScannedBy;
+    // Always merge entry time: if either has a non-'-' time, keep it!
+    base.time = getValidEntryTime(cloudRec.time, localRec.time);
+
+    // Always merge return time & return status: never lose pulang scan!
+    const returnTime = getValidReturnTime(cloudRec.returnTime, localRec.returnTime);
+    if (returnTime) {
+      base.returnTime = returnTime;
     }
-    // Always preserve entry time if base has '-' or missing but one had it
-    if ((!base.time || base.time === '-') && (cloudRec.time && cloudRec.time !== '-')) {
-      base.time = cloudRec.time;
-    } else if ((!base.time || base.time === '-') && (localRec.time && localRec.time !== '-')) {
-      base.time = localRec.time;
+    const returnStatus = getValidReturnStatus(cloudRec.returnStatus, localRec.returnStatus);
+    if (returnStatus) {
+      base.returnStatus = returnStatus;
+    }
+    const returnScannedBy = (cloudRec.returnScannedBy && !cloudRec.returnScannedBy.includes('Sistem Otomatis'))
+      ? cloudRec.returnScannedBy
+      : (localRec.returnScannedBy || cloudRec.returnScannedBy);
+    if (returnScannedBy) {
+      base.returnScannedBy = returnScannedBy;
     }
 
     return base;
@@ -1502,11 +1555,16 @@ export async function forceDownloadAllFromCloud(): Promise<{ success: boolean; e
             const cloudAtt = JSON.parse(cloudDoc.data);
             if (Array.isArray(cloudAtt)) {
               const localAtt = getAttendanceRecords();
-              const mergedAtt = mergeAttendanceLists(localAtt, cloudAtt);
-              const mergedStr = JSON.stringify(mergedAtt);
-              localStorage.setItem(key, mergedStr);
-              localStorage.setItem(key + '_updatedAt', String(cloudDoc.updatedAt || Date.now()));
-              lastSavedStringCache[key] = mergedStr;
+              if (cloudAtt.length === 0 && localAtt.length > 0) {
+                writeCloudDocument(key, JSON.stringify(localAtt), Date.now());
+                lastSavedStringCache[key] = JSON.stringify(localAtt);
+              } else {
+                const mergedAtt = mergeAttendanceLists(localAtt, cloudAtt);
+                const mergedStr = JSON.stringify(mergedAtt);
+                localStorage.setItem(key, mergedStr);
+                localStorage.setItem(key + '_updatedAt', String(cloudDoc.updatedAt || Date.now()));
+                lastSavedStringCache[key] = mergedStr;
+              }
             } else {
               localStorage.setItem(key, cloudDoc.data);
               localStorage.setItem(key + '_updatedAt', String(cloudDoc.updatedAt || Date.now()));
@@ -1582,7 +1640,6 @@ export function initFirestoreRealtimeSync() {
     { key: KEYS.GRADES, getDefault: () => [] },
     { key: KEYS.PERIODS, getDefault: () => INITIAL_LESSON_PERIODS },
     { key: KEYS.SCHEDULES, getDefault: () => INITIAL_CLASS_SCHEDULES },
-    { key: KEYS.DIRECT_CHATS, getDefault: () => ({}) },
   ];
 
   SYNC_KEYS.forEach(({ key }) => {
@@ -1643,7 +1700,14 @@ export function initFirestoreRealtimeSync() {
                 const cloudTeachers = typeof finalDataToSave === 'string' ? JSON.parse(finalDataToSave) : finalDataToSave;
                 if (Array.isArray(cloudTeachers)) {
                   const currentLocalTeachers = getTeachers();
-                  const mergedTeachers = localUpdatedAt <= 1 ? cloudTeachers : mergeTeacherLists(currentLocalTeachers, cloudTeachers);
+                  if (cloudTeachers.length === 0 && currentLocalTeachers.length > 0) {
+                    // Database baru masih kosong -> jangan hapus data lokal, unggah data lokal ke Cloud
+                    writeCloudDocument(key, JSON.stringify(currentLocalTeachers), Date.now());
+                    lastSavedStringCache[key] = JSON.stringify(currentLocalTeachers);
+                    setCloudSyncStatus('connected');
+                    return;
+                  }
+                  const mergedTeachers = mergeTeacherLists(currentLocalTeachers, cloudTeachers);
                   const mergedStr = JSON.stringify(mergedTeachers);
                   if (currentLocalStr !== mergedStr) {
                     lastSavedStringCache[key] = mergedStr;
@@ -1666,7 +1730,14 @@ export function initFirestoreRealtimeSync() {
                 const cloudStudents = typeof finalDataToSave === 'string' ? JSON.parse(finalDataToSave) : finalDataToSave;
                 if (Array.isArray(cloudStudents)) {
                   const currentLocalStudents = getStudents();
-                  const mergedStudents = localUpdatedAt <= 1 ? cloudStudents : mergeStudentLists(currentLocalStudents, cloudStudents);
+                  if (cloudStudents.length === 0 && currentLocalStudents.length > 0) {
+                    // Database baru masih kosong -> jangan hapus data lokal, unggah data lokal ke Cloud
+                    writeCloudDocument(key, JSON.stringify(currentLocalStudents), Date.now());
+                    lastSavedStringCache[key] = JSON.stringify(currentLocalStudents);
+                    setCloudSyncStatus('connected');
+                    return;
+                  }
+                  const mergedStudents = mergeStudentLists(currentLocalStudents, cloudStudents);
                   const mergedStr = JSON.stringify(mergedStudents);
                   if (currentLocalStr !== mergedStr) {
                     lastSavedStringCache[key] = mergedStr;
@@ -1689,7 +1760,16 @@ export function initFirestoreRealtimeSync() {
                 const cloudAtt = typeof finalDataToSave === 'string' ? JSON.parse(finalDataToSave) : finalDataToSave;
                 if (Array.isArray(cloudAtt)) {
                   const currentLocalAtt = getAttendanceRecords();
-                  const mergedAtt = localUpdatedAt <= 1 ? cloudAtt : mergeAttendanceLists(currentLocalAtt, cloudAtt);
+                  // PERLINDUNGAN KRUSIAL: Jika Cloud kosong tapi lokal memiliki data riwayat presensi/scan,
+                  // JANGAN PERNAH menimpa data lokal dengan array kosong! Sebaliknya unggah ke Cloud Firestore!
+                  if (cloudAtt.length === 0 && currentLocalAtt.length > 0) {
+                    console.log('[Firestore Sync] Cloud attendance kosong tapi lokal ada data. Menyimpan data lokal dan mengunggah ke Cloud Blaze.');
+                    writeCloudDocument(key, JSON.stringify(currentLocalAtt), Date.now());
+                    lastSavedStringCache[key] = JSON.stringify(currentLocalAtt);
+                    setCloudSyncStatus('connected');
+                    return;
+                  }
+                  const mergedAtt = mergeAttendanceLists(currentLocalAtt, cloudAtt);
                   const mergedStr = JSON.stringify(mergedAtt);
                   if (currentLocalStr !== mergedStr) {
                     lastSavedStringCache[key] = mergedStr;
@@ -1991,6 +2071,19 @@ export function deleteAllStudents(): void {
 export function getAttendanceRecords(): AttendanceRecord[] {
   const data = localStorage.getItem(KEYS.ATTENDANCE);
   if (data === null) {
+    // Cek cadangan aman terlebih dahulu jika localStorage pernah terhapus
+    try {
+      const backup = localStorage.getItem(SAFE_ATTENDANCE_BACKUP_KEY);
+      if (backup) {
+        const parsedBackup = JSON.parse(backup);
+        if (Array.isArray(parsedBackup) && parsedBackup.length > 0) {
+          safeSetLocalStorage(KEYS.ATTENDANCE, backup);
+          safeSetLocalStorage(KEYS.ATTENDANCE + '_updatedAt', String(Date.now()));
+          return parsedBackup;
+        }
+      }
+    } catch {}
+
     const initial = generateInitialAttendanceHistory(INITIAL_STUDENTS);
     safeSetLocalStorage(KEYS.ATTENDANCE, JSON.stringify(initial));
     safeSetLocalStorage(KEYS.ATTENDANCE + '_updatedAt', '1');
@@ -1998,17 +2091,33 @@ export function getAttendanceRecords(): AttendanceRecord[] {
   }
   try {
     const parsed = JSON.parse(data);
-    return Array.isArray(parsed) ? parsed : [];
+    if (Array.isArray(parsed)) {
+      if (parsed.length === 0) {
+        // Jika data kosong, selamatkan dari cadangan aman jika tersedia
+        try {
+          const backup = localStorage.getItem(SAFE_ATTENDANCE_BACKUP_KEY);
+          if (backup) {
+            const parsedBackup = JSON.parse(backup);
+            if (Array.isArray(parsedBackup) && parsedBackup.length > 0) {
+              safeSetLocalStorage(KEYS.ATTENDANCE, backup);
+              return parsedBackup;
+            }
+          }
+        } catch {}
+      }
+      return parsed;
+    }
+    return [];
   } catch {
     return [];
   }
 }
 
 // =========================================================================
-// SCAN BATCHING QUEUE WORKER (25 SISWA / INTERVAL 20 DETIK)
+// SCAN BATCHING QUEUE WORKER (REAL-TIME CLOUD SYNC)
 // =========================================================================
-export const SCAN_BATCH_THRESHOLD = 25; // Flush ke cloud jika antrean mencapai 25 siswa
-export const SCAN_IDLE_TIMEOUT_MS = 20000; // Flush ke cloud jika sudah 20 detik tanpa scan baru (idle)
+export const SCAN_BATCH_THRESHOLD = 3; // Flush ke cloud jika antrean mencapai 3 siswa
+export const SCAN_IDLE_TIMEOUT_MS = 1500; // Flush ke cloud jika 1.5 detik tanpa scan baru (idle)
 
 export interface ScanQueueStatus {
   pendingCount: number;
@@ -2024,7 +2133,7 @@ let scanQueueIdleTimer: any = null;
 let scanQueueLastFlushTime = Date.now();
 let isScanQueueFlushing = false;
 let scanQueueCountdownTimer: any = null;
-let scanQueueCountdownSeconds = 20;
+let scanQueueCountdownSeconds = 2;
 
 export function getScanQueueStatus(): ScanQueueStatus {
   return {
@@ -2543,27 +2652,6 @@ export function copyClassSchedule(sourceClassId: string, targetClassId: string, 
   }
 
   saveClassSchedules(updated);
-}
-
-// Direct Chat Storage (Parent & Selected Teacher Private Consultation)
-export function getDirectChats(): Record<string, DirectChatMessage[]> {
-  const data = localStorage.getItem(KEYS.DIRECT_CHATS);
-  if (!data) return {};
-  try {
-    const parsed = JSON.parse(data);
-    return typeof parsed === 'object' && parsed !== null ? parsed : {};
-  } catch {
-    return {};
-  }
-}
-
-export function saveDirectChats(chats: Record<string, DirectChatMessage[]>): void {
-  const now = Date.now();
-  const dataStr = JSON.stringify(chats);
-  safeSetLocalStorage(KEYS.DIRECT_CHATS, dataStr);
-  safeSetLocalStorage(KEYS.DIRECT_CHATS + '_updatedAt', String(now));
-  notifyStorageUpdated();
-  syncToCloud(KEYS.DIRECT_CHATS, chats, true, now);
 }
 
 export function resetToDefaultData(): void {

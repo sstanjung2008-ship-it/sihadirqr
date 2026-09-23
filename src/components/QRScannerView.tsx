@@ -510,7 +510,10 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
     const day = String(now.getDate()).padStart(2, '0');
     const dateStr = `${year}-${month}-${day}`;
 
-    const existingRecord = attendanceRecords.find(r => r.studentId === student.id && r.date === dateStr);
+    const existingRecord = attendanceRecords.find(r => (
+      (r.studentId === student.id) ||
+      (r.nisn && student.nisn && r.nisn === student.nisn)
+    ) && r.date === dateStr);
 
     if (scanMode === 'PULANG') {
       // MODE SCAN PULANG
@@ -567,10 +570,10 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
         nisn: student.nisn,
         className: student.className,
         date: dateStr,
-        time: existingRecord ? existingRecord.time : '-',
-        status: existingRecord ? existingRecord.status : 'HADIR',
-        method: existingRecord ? existingRecord.method : 'QR_SCAN',
-        scannedBy: existingRecord ? existingRecord.scannedBy : 'Pos Scanner Utama',
+        time: (existingRecord && existingRecord.time && existingRecord.time !== '-') ? existingRecord.time : '-',
+        status: (existingRecord && existingRecord.status && existingRecord.status !== 'ALPA') ? existingRecord.status : 'HADIR',
+        method: (existingRecord && existingRecord.method) ? existingRecord.method : 'QR_SCAN',
+        scannedBy: (existingRecord && existingRecord.scannedBy && !existingRecord.scannedBy.includes('Sistem Otomatis')) ? existingRecord.scannedBy : 'Pos Scanner Utama',
         parentNotified: false,
         returnTime: timeStr,
         returnStatus,
@@ -755,7 +758,7 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
               <div className="flex items-center justify-between gap-2 mb-1.5">
                 <div className="flex items-center gap-1.5 font-bold text-white">
                   <Zap className="w-4 h-4 text-amber-300" />
-                  <span>Cloud Batch Worker</span>
+                  <span>Cloud Sync Worker</span>
                 </div>
                 {queueStatus.isFlushing ? (
                   <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-amber-300 bg-amber-400/20 px-2 py-0.5 rounded-full border border-amber-400/30">
@@ -765,7 +768,7 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
                 ) : queueStatus.pendingCount > 0 ? (
                   <span className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-300 bg-emerald-500/20 px-2 py-0.5 rounded-full border border-emerald-400/30">
                     <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
-                    Antrean: {queueStatus.pendingCount} / 25
+                    Antrean: {queueStatus.pendingCount} / {queueStatus.maxBatch}
                   </span>
                 ) : (
                   <span className="inline-flex items-center gap-1 text-[11px] font-medium text-indigo-200 bg-white/10 px-2 py-0.5 rounded-full border border-white/15">
@@ -778,11 +781,11 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
               <p className="text-indigo-200 text-[11px] leading-relaxed">
                 {queueStatus.pendingCount > 0 ? (
                   <span>
-                    Disimpan instan di lokal. Terkirim ke Cloud saat mencapai <strong className="text-white font-bold">25 siswa</strong> atau dalam <strong className="text-amber-300 font-bold">{queueStatus.secondsRemaining} detik</strong> jeda.
+                    Disimpan instan di lokal & dikirim ke Cloud saat mencapai <strong className="text-white font-bold">{queueStatus.maxBatch} siswa</strong> atau dalam <strong className="text-amber-300 font-bold">{queueStatus.secondsRemaining} detik</strong>.
                   </span>
                 ) : (
                   <span>
-                    Worker batching aktif: kirim ke Cloud tiap <strong className="text-white font-bold">25 siswa</strong> atau jeda <strong className="text-white font-bold">20 detik</strong> untuk menghemat kuota Firestore.
+                    Real-time Cloud Sync aktif: data presensi tersimpan lokal instan (0ms) & otomatis tersinkron ke Firestore Cloud Blaze.
                   </span>
                 )}
               </p>
@@ -792,7 +795,7 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
                   <div className="flex-1 bg-indigo-900/80 rounded-full h-2 overflow-hidden border border-indigo-400/30">
                     <div 
                       className="bg-gradient-to-r from-amber-400 to-emerald-400 h-full transition-all duration-300"
-                      style={{ width: `${Math.min(100, (queueStatus.pendingCount / 25) * 100)}%` }}
+                      style={{ width: `${Math.min(100, (queueStatus.pendingCount / queueStatus.maxBatch) * 100)}%` }}
                     />
                   </div>
                   <button
@@ -800,7 +803,7 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
                     onClick={handleManualFlush}
                     disabled={queueStatus.isFlushing}
                     className="px-2.5 py-1 rounded-lg bg-white/20 hover:bg-white/30 text-white font-bold text-[10px] flex items-center gap-1 transition-all cursor-pointer whitespace-nowrap disabled:opacity-50"
-                    title="Kirim antrean sekarang ke Firestore tanpa menunggu 25 siswa"
+                    title="Kirim antrean sekarang ke Firestore tanpa menunggu"
                   >
                     <RotateCw className={`w-3 h-3 ${queueStatus.isFlushing ? 'animate-spin' : ''}`} />
                     Kirim Sekarang

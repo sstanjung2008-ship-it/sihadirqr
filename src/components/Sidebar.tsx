@@ -10,7 +10,6 @@ import {
   GraduationCap, 
   FileText, 
   Settings, 
-  MessageSquare, 
   BarChart3,
   Clock,
   Menu,
@@ -30,7 +29,7 @@ import {
   CalendarDays,
   UserCircle
 } from 'lucide-react';
-import { getCloudSyncStatus, CloudSyncStatus, getStudents, getLeaveRequests, getDirectChats, getAttendanceRecords, getTeachers, getStudentCharacterLogs, getSchoolClasses, getLocalDateString } from '../lib/storage';
+import { getCloudSyncStatus, CloudSyncStatus, getStudents, getLeaveRequests, getAttendanceRecords, getTeachers, getStudentCharacterLogs, getSchoolClasses, getLocalDateString } from '../lib/storage';
 import { MultiDeviceSyncModal } from './MultiDeviceSyncModal';
 import { PWAInstallButton } from './PWAInstallButton';
 import { NotificationModal } from './NotificationModal';
@@ -199,11 +198,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
     if (currentRole === 'TEACHER') {
       const pendingLeaves = getLeaveRequests().filter(l => l.status === 'PENDING').length;
-      const directChats = getDirectChats();
-      let parentChatCount = 0;
-      Object.values(directChats).forEach(msgs => {
-        parentChatCount += msgs.filter(m => m.senderRole === 'PARENT' && (!m.read && (new Date(m.timestamp).getTime() > lastRead))).length;
-      });
 
       // For Guru BK & Wali Kelas: include unread student character logs in badge count
       const charLogs = getStudentCharacterLogs();
@@ -233,7 +227,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         });
       }
 
-      return pendingLeaves + parentChatCount + unreadCharLogIds.size;
+      return pendingLeaves + unreadCharLogIds.size;
     }
 
     if (currentRole === 'PARENT') {
@@ -255,13 +249,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
       if (todayAtt && (!lastRead || lastRead < new Date().setHours(0, 0, 0, 0))) {
         count += 1;
       }
-
-      const directChats = getDirectChats();
-      Object.entries(directChats).forEach(([threadKey, msgs]) => {
-        if (threadKey.includes(student!.id) || threadKey.includes(student!.nisn) || threadKey.includes('parent')) {
-          count += msgs.filter(m => m.senderRole === 'STAFF' && (!m.read && new Date(m.timestamp).getTime() > lastRead)).length;
-        }
-      });
 
       const leaves = getLeaveRequests().filter(l => (l.studentId === student!.id || l.studentName === student!.name) && new Date(l.createdAt || l.startDate).getTime() > lastRead);
       count += leaves.length;
@@ -305,7 +292,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
         { id: 'dashboard', label: 'Kehadiran Anak', icon: UserCheck, desc: 'Status absensi putra/putri' },
         { id: 'schedule', label: 'Jadwal Pelajaran', icon: CalendarDays, desc: 'Jadwal belajar putra/putri' },
         { id: 'discipline_rules', label: 'Tata Tertib', icon: Scale, desc: 'Aturan & poin karakter sekolah' },
-        { id: 'chat', label: 'Fitur Chat Sekolah', icon: MessageSquare, desc: 'Hubungi Humas, Wali Kelas & BK' },
         { id: 'leaves', label: 'Izin / Sakit', icon: FileText, desc: 'Ajukan permohonan izin/sakit', badge: unreadLeavesCount },
         { id: 'account', label: 'Akun', icon: UserCircle, desc: 'Lihat Kartu Pelajar & Ganti Password' },
       ];
@@ -318,10 +304,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
         { id: 'learning', label: 'Fitur Pembelajaran', icon: BookOpen, desc: 'Jurnal KBM & keaktifan siswa' },
         { id: 'character_points', label: 'Nilai Karakter', icon: Award, desc: 'Poin & bukti foto karakter' },
         { id: 'analytics', label: 'Analitik & AI', icon: Sparkles, desc: 'Laporan AI & grafik tren' },
-        { id: 'leaves', label: 'Persetujuan Izin', icon: MessageSquare, desc: 'Persetujuan wali murid', badge: unreadLeavesCount },
+        { id: 'leaves', label: 'Persetujuan Izin', icon: FileText, desc: 'Persetujuan wali murid', badge: unreadLeavesCount },
         { id: 'recap', label: 'Rekap Laporan', icon: FileText, desc: 'Ekspor laporan bulanan' },
-        { id: 'chat', label: 'Fitur Chat Wali Murid', icon: MessageSquare, desc: 'Obrolan Wali Kelas, Humas & BK' },
-        { id: 'teacher_assistant', label: 'Asisten Guru (AI)', icon: Sparkles, desc: 'Buat Soal AI & Modul Ajar Word' },
         { id: 'account', label: 'Akun Guru', icon: UserCircle, desc: 'Identitas guru & ubah password' },
       ];
     }
@@ -334,14 +318,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
       { id: 'learning', label: 'Jurnal Pembelajaran', icon: BookOpen, desc: 'Rekap KBM & keaktifan kelas' },
       { id: 'character_input', label: 'Input Karakter Siswa', icon: Sparkles, desc: 'Master data & bobot karakter (+/-)' },
       { id: 'character_points', label: 'Nilai Karakter', icon: Award, desc: 'Poin & bukti foto karakter' },
-      { id: 'chat', label: 'Fitur Chat Wali Murid', icon: MessageSquare, desc: 'Pusat obrolan Wali Kelas, Humas & BK' },
       { id: 'analytics', label: 'Analitik & AI', icon: Sparkles, desc: 'Laporan AI & grafik tren' },
       { id: 'teachers', label: 'Database Guru & TU', icon: UserCheck, desc: 'Kelola data guru & staf TU' },
       { id: 'students', label: 'Database Siswa', icon: Users, desc: 'Kelola data & kartu KTS' },
       { id: 'classes', label: 'Kelola Data Kelas', icon: Building2, desc: 'Daftar & wali kelas' },
-      { id: 'leaves', label: 'Permohonan Izin', icon: MessageSquare, desc: 'Verifikasi surat izin/sakit', badge: unreadLeavesCount },
+      { id: 'leaves', label: 'Permohonan Izin', icon: FileText, desc: 'Verifikasi surat izin/sakit', badge: unreadLeavesCount },
       { id: 'recap', label: 'Rekap & Ekspor', icon: FileText, desc: 'Cetak laporan PDF/Excel' },
-      { id: 'teacher_assistant', label: 'Asisten Guru (AI)', icon: Sparkles, desc: 'Generator Soal & Modul Ajar Word' },
       { id: 'settings', label: 'Pengaturan Sekolah', icon: Settings, desc: 'Profil & jam operasional' },
     ];
 

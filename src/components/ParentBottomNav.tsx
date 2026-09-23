@@ -1,5 +1,5 @@
 import React from 'react';
-import { Home, CalendarDays, FileText, MessageSquare, UserCircle } from 'lucide-react';
+import { Home, CalendarDays, FileText, UserCircle } from 'lucide-react';
 
 interface ParentBottomNavProps {
   activeTab: string;
@@ -31,12 +31,6 @@ export const ParentBottomNav: React.FC<ParentBottomNavProps> = React.memo(({
       icon: FileText,
       badge: unreadLeavesCount,
       glowColor: 'from-amber-500 to-orange-600',
-    },
-    {
-      id: 'chat',
-      label: 'Chat',
-      icon: MessageSquare,
-      glowColor: 'from-sky-500 to-cyan-600',
     },
     {
       id: 'account',

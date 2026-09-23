@@ -164,10 +164,26 @@ export const LoginView: React.FC<LoginViewProps> = ({
       if (t.id && t.id.toLowerCase() === cleanInputUser.toLowerCase()) {
         return true;
       }
-      // Check Teacher Name match (case-insensitive)
+      // Check Teacher Name match (case-insensitive & titles tolerant)
       if (t.name) {
-        if (t.name.toLowerCase().trim() === cleanInputUser.toLowerCase()) return true;
-        if (t.name.toLowerCase().replace(/[^a-z0-9]/g, '') === cleanInputUser.toLowerCase().replace(/[^a-z0-9]/g, '')) return true;
+        const tLower = t.name.toLowerCase().trim();
+        const inputLower = cleanInputUser.toLowerCase();
+        if (tLower === inputLower) return true;
+        if (tLower.replace(/[^a-z0-9]/g, '') === inputLower.replace(/[^a-z0-9]/g, '')) return true;
+        
+        // Strip common Indonesian academic degrees (S.Kom, S.Pd, M.Pd, S.Ag, S.T, dll)
+        const tCleanTitle = tLower
+          .replace(/,\s*(s\.kom|s\.pd|m\.pd|s\.ag|s\.t|s\.si|m\.si|s\.sos|s\.e|s\.h|dra\.|drs\.|dr\.|gr\.)/gi, '')
+          .replace(/\b(s\.kom|s\.pd|m\.pd|s\.ag|s\.t|s\.si|m\.si|s\.sos|s\.e|s\.h|dra|drs|dr|h\.|hj\.)\b/gi, '')
+          .trim();
+        if (tCleanTitle === inputLower || tCleanTitle.replace(/[^a-z0-9]/g, '') === inputLower.replace(/[^a-z0-9]/g, '')) {
+          return true;
+        }
+
+        // Partial match if input has at least 4 characters (e.g. "Tino Saputra" inside "Tino saputra S.Kom")
+        if (inputLower.length >= 4 && (tLower.includes(inputLower) || tCleanTitle.includes(inputLower))) {
+          return true;
+        }
       }
       return false;
     });
@@ -204,6 +220,13 @@ export const LoginView: React.FC<LoginViewProps> = ({
       if (s.nisn && s.nisn.replace(/\s+/g, '') === cleanNoSpaceUser) return true;
       if (s.nisn && s.nisn.toLowerCase() === cleanInputUser.toLowerCase()) return true;
       if (s.nis && s.nis.toLowerCase() === cleanInputUser.toLowerCase()) return true;
+      if (s.name) {
+        const sLower = s.name.toLowerCase().trim();
+        const inputLower = cleanInputUser.toLowerCase();
+        if (sLower === inputLower) return true;
+        if (sLower.replace(/[^a-z0-9]/g, '') === inputLower.replace(/[^a-z0-9]/g, '')) return true;
+        if (inputLower.length >= 4 && sLower.includes(inputLower)) return true;
+      }
       return false;
     });
 

@@ -37,6 +37,7 @@ export const KEYS = {
 export type CloudSyncStatus = 'connected' | 'syncing' | 'offline' | 'quota_exceeded';
 let currentSyncStatus: CloudSyncStatus = 'syncing';
 let isFirestoreInitialized = false;
+let activeUnsubscribes: (() => void)[] = [];
 const debounceTimers: Record<string, any> = {};
 const lastSavedStringCache: Record<string, string> = {};
 
@@ -53,10 +54,15 @@ const setCloudSyncStatus = (status: CloudSyncStatus) => {
   }
 };
 
+let notifyStorageUpdatedTimer: any = null;
 const notifyStorageUpdated = () => {
-  setTimeout(() => {
-    window.dispatchEvent(new Event('sihadir_storage_updated'));
-  }, 0);
+  if (notifyStorageUpdatedTimer) return;
+  notifyStorageUpdatedTimer = setTimeout(() => {
+    notifyStorageUpdatedTimer = null;
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new Event('sihadir_storage_updated'));
+    }
+  }, 80);
 };
 
 // Helper to prevent any promise from hanging indefinitely
@@ -86,6 +92,45 @@ const QUOTA_COOLDOWN_KEY = 'sihadir_firestore_quota_cooldown_until';
 // Max chunk size per Firestore document: 450 KB (well below the 1MB Firestore threshold)
 const FIRESTORE_MAX_CHUNK_SIZE = 450 * 1024;
 
+// Firestore Rate Limiting and In-Flight Write Mutex
+const MAX_CONCURRENT_FIRESTORE_WRITES = 2;
+let activeFirestoreWriteCount = 0;
+const firestoreWriteWaiters: (() => void)[] = [];
+
+async function acquireFirestoreWriteSlot(): Promise<() => void> {
+  if (activeFirestoreWriteCount < MAX_CONCURRENT_FIRESTORE_WRITES) {
+    activeFirestoreWriteCount++;
+    let released = false;
+    return () => {
+      if (!released) {
+        released = true;
+        activeFirestoreWriteCount--;
+        const next = firestoreWriteWaiters.shift();
+        if (next) next();
+      }
+    };
+  }
+
+  await new Promise<void>((resolve) => {
+    firestoreWriteWaiters.push(resolve);
+  });
+  activeFirestoreWriteCount++;
+  let released = false;
+  return () => {
+    if (!released) {
+      released = true;
+      activeFirestoreWriteCount--;
+      const next = firestoreWriteWaiters.shift();
+      if (next) next();
+    }
+  };
+}
+
+// In-flight per-key write tracker and coalescer
+const inFlightKeys = new Set<string>();
+const pendingWritesByKey = new Map<string, { dataStr: string; timestamp: number }>();
+let writeBackoffUntil = 0;
+
 export function isFirestoreQuotaExceeded(): boolean {
   if (typeof window === 'undefined') return false;
   try {
@@ -100,6 +145,7 @@ export function resetFirestoreQuotaCooldown(): void {
   if (typeof window !== 'undefined') {
     try {
       localStorage.removeItem(QUOTA_COOLDOWN_KEY);
+      writeBackoffUntil = 0;
     } catch {}
   }
 }
@@ -107,12 +153,25 @@ export function resetFirestoreQuotaCooldown(): void {
 export function handleFirestoreError(err: any): void {
   if (!err) return;
   const errMsg = String(err?.message || err?.code || err || '');
+
+  // 1. Client-side write stream saturation / buffer backoff (NOT project quota exhaustion)
   if (
-    errMsg.includes('resource-exhausted') || 
-    errMsg.includes('Quota limit exceeded') || 
-    errMsg.includes('quota metric') || 
-    errMsg.includes('Free daily write units') ||
-    err?.code === 'resource-exhausted'
+    errMsg.includes('Write stream exhausted') || 
+    errMsg.includes('maximum allowed queued writes') ||
+    errMsg.includes('maximum backoff delay')
+  ) {
+    console.warn('[Firestore Sync] Antrean penulisan WebChannel jenuh (Write stream exhausted). Menerapkan jeda backoff singkat...');
+    writeBackoffUntil = Math.max(writeBackoffUntil, Date.now() + 3500);
+    setCloudSyncStatus('syncing');
+    return;
+  }
+
+  // 2. Real Google Cloud Project Quota limit
+  if (
+    errMsg.includes('Quota exceeded for quota metric') || 
+    errMsg.includes('Free daily write units') || 
+    errMsg.includes('Quota limit exceeded') ||
+    (err?.code === 'resource-exhausted' && !errMsg.includes('Write stream exhausted'))
   ) {
     console.warn('[Firestore Sync] Kuota harian Firestore gratis telah tercapai. Beralih aman ke penyimpanan lokal.');
     if (activeUnsubscribes.length > 0) {
@@ -128,7 +187,10 @@ export function handleFirestoreError(err: any): void {
       } catch {}
     }
     setCloudSyncStatus('quota_exceeded');
+    return;
   }
+
+  console.warn('[Firestore Error]:', errMsg);
 }
 
 /**
@@ -197,68 +259,95 @@ export function safeSetLocalStorage(key: string, value: string): void {
   }
 }
 
+async function performSingleDocWrite(key: string, dataStr: string, timestamp: number): Promise<void> {
+  const totalLength = dataStr.length;
+  if (totalLength <= FIRESTORE_MAX_CHUNK_SIZE) {
+    // Normal single document
+    const docRef = doc(db, 'sihadir_app_data', key);
+    await setDoc(docRef, {
+      data: dataStr,
+      updatedAt: timestamp,
+      isChunked: false,
+      totalChunks: 1,
+    });
+  } else {
+    // Multi-chunk document sharding
+    const numChunks = Math.ceil(totalLength / FIRESTORE_MAX_CHUNK_SIZE);
+    const chunks: string[] = [];
+    for (let i = 0; i < numChunks; i++) {
+      chunks.push(dataStr.slice(i * FIRESTORE_MAX_CHUNK_SIZE, (i + 1) * FIRESTORE_MAX_CHUNK_SIZE));
+    }
+
+    // Write chunks 1 to numChunks - 1 sequentially to prevent saturating the WebChannel write stream
+    for (let i = 1; i < numChunks; i++) {
+      const chunkDocRef = doc(db, 'sihadir_app_data', `${key}_chunk_${i}`);
+      await setDoc(chunkDocRef, {
+        data: chunks[i],
+        updatedAt: timestamp,
+        chunkIndex: i,
+        parentKey: key,
+      });
+    }
+
+    // Finally write the root document (chunk 0) which acts as the commit pointer
+    const rootDocRef = doc(db, 'sihadir_app_data', key);
+    await setDoc(rootDocRef, {
+      data: chunks[0],
+      updatedAt: timestamp,
+      isChunked: true,
+      totalChunks: numChunks,
+    });
+  }
+}
+
 export async function writeCloudDocument(key: string, dataStr: string, timestamp: number): Promise<void> {
   if (isFirestoreQuotaExceeded()) {
     return;
   }
 
+  // If currently in a brief backoff window due to client queue pressure, wait briefly
+  if (Date.now() < writeBackoffUntil) {
+    const waitMs = Math.min(writeBackoffUntil - Date.now(), 3000);
+    await new Promise((r) => setTimeout(r, waitMs));
+    if (isFirestoreQuotaExceeded()) return;
+  }
+
+  // If a write for this key is already running, coalesce:
+  // Update the pending payload and return. The running loop will commit this latest version.
+  if (inFlightKeys.has(key)) {
+    pendingWritesByKey.set(key, { dataStr, timestamp });
+    return;
+  }
+
+  inFlightKeys.add(key);
   try {
-    const totalLength = dataStr.length;
-    if (totalLength <= FIRESTORE_MAX_CHUNK_SIZE) {
-      // Normal single document
-      const docRef = doc(db, 'sihadir_app_data', key);
-      await withTimeout(
-        setDoc(docRef, {
-          data: dataStr,
-          updatedAt: timestamp,
-          isChunked: false,
-          totalChunks: 1,
-        }),
-        6000,
-        undefined
-      );
-    } else {
-      // Multi-chunk document sharding
-      const numChunks = Math.ceil(totalLength / FIRESTORE_MAX_CHUNK_SIZE);
-      const chunks: string[] = [];
-      for (let i = 0; i < numChunks; i++) {
-        chunks.push(dataStr.slice(i * FIRESTORE_MAX_CHUNK_SIZE, (i + 1) * FIRESTORE_MAX_CHUNK_SIZE));
+    let currentPayload: { dataStr: string; timestamp: number } | undefined = { dataStr, timestamp };
+
+    while (currentPayload) {
+      if (isFirestoreQuotaExceeded()) break;
+
+      const releaseSlot = await acquireFirestoreWriteSlot();
+      try {
+        await performSingleDocWrite(key, currentPayload.dataStr, currentPayload.timestamp);
+        lastSavedStringCache[key] = currentPayload.dataStr;
+      } catch (err) {
+        handleFirestoreError(err);
+        break;
+      } finally {
+        releaseSlot();
       }
 
-      // Write chunks 1 to numChunks - 1 first in parallel with timeout
-      const chunkPromises = [];
-      for (let i = 1; i < numChunks; i++) {
-        const chunkDocRef = doc(db, 'sihadir_app_data', `${key}_chunk_${i}`);
-        chunkPromises.push(
-          withTimeout(
-            setDoc(chunkDocRef, {
-              data: chunks[i],
-              updatedAt: timestamp,
-              chunkIndex: i,
-              parentKey: key,
-            }),
-            6000,
-            undefined
-          )
-        );
+      // Check if another write request arrived for this key while writing
+      if (pendingWritesByKey.has(key)) {
+        currentPayload = pendingWritesByKey.get(key);
+        pendingWritesByKey.delete(key);
+      } else {
+        currentPayload = undefined;
       }
-      await Promise.all(chunkPromises);
-
-      // Finally write the root document (chunk 0) which acts as the commit pointer
-      const rootDocRef = doc(db, 'sihadir_app_data', key);
-      await withTimeout(
-        setDoc(rootDocRef, {
-          data: chunks[0],
-          updatedAt: timestamp,
-          isChunked: true,
-          totalChunks: numChunks,
-        }),
-        6000,
-        undefined
-      );
     }
-  } catch (err) {
-    handleFirestoreError(err);
+  } finally {
+    inFlightKeys.delete(key);
+    pendingWritesByKey.delete(key);
   }
 }
 
@@ -548,25 +637,26 @@ export function compressBase64Image(
   });
 }
 
-// Background sanitizer to auto-compress any oversized student photos (>18KB)
+// Background sanitizer to compress oversized raw student photos (>90KB base64)
 export async function sanitizeAndCompressStudentPhotos(students: Student[]): Promise<Student[]> {
   let hasChanges = false;
-  const updated = await Promise.all(
-    students.map(async (std) => {
-      if (std.photoUrl && std.photoUrl.startsWith('data:') && std.photoUrl.length > 18000) {
-        try {
-          const compressed = await compressBase64Image(std.photoUrl, 200, 267, 0.65);
-          if (compressed.length < std.photoUrl.length) {
-            hasChanges = true;
-            return { ...std, photoUrl: compressed };
-          }
-        } catch (e) {
-          console.warn('[Photo Compress Error]:', e);
+  const updated: Student[] = [];
+  for (let i = 0; i < students.length; i++) {
+    const std = students[i];
+    if (std && std.photoUrl && std.photoUrl.startsWith('data:') && std.photoUrl.length > 90000) {
+      try {
+        const compressed = await compressBase64Image(std.photoUrl, 160, 213, 0.62);
+        if (compressed.length < std.photoUrl.length) {
+          hasChanges = true;
+          updated.push({ ...std, photoUrl: compressed });
+          continue;
         }
+      } catch (e) {
+        console.warn('[Photo Compress Error]:', e);
       }
-      return std;
-    })
-  );
+    }
+    updated.push(std);
+  }
   return hasChanges ? updated : students;
 }
 
@@ -864,38 +954,58 @@ export function mergeAttendanceLists(local: AttendanceRecord[], cloud: Attendanc
   };
 
   const recordsList: AttendanceRecord[] = [];
+  const indexById = new Map<string, number>();
+  const indexByStudentDate = new Map<string, number>();
+  const indexByNisnDate = new Map<string, number>();
 
-  const findIndexForRecord = (rec: AttendanceRecord): number => {
-    return recordsList.findIndex(existing => {
-      if (existing.date !== rec.date) return false;
-      if (rec.studentId && existing.studentId === rec.studentId) return true;
-      if (rec.nisn && existing.nisn && existing.nisn === rec.nisn) return true;
-      if (rec.id && existing.id === rec.id) return true;
-      return false;
-    });
+  const registerIndices = (idx: number, rec: AttendanceRecord) => {
+    if (rec.id) indexById.set(rec.id, idx);
+    if (rec.date && rec.studentId) indexByStudentDate.set(`${rec.date}__${rec.studentId}`, idx);
+    if (rec.date && rec.nisn) indexByNisnDate.set(`${rec.date}__${rec.nisn}`, idx);
   };
 
-  // 1. Add all local records
-  local.forEach(a => {
-    if (!a) return;
+  const findIndexForRecord = (rec: AttendanceRecord): number => {
+    if (rec.id && indexById.has(rec.id)) {
+      return indexById.get(rec.id)!;
+    }
+    if (rec.date && rec.studentId && indexByStudentDate.has(`${rec.date}__${rec.studentId}`)) {
+      return indexByStudentDate.get(`${rec.date}__${rec.studentId}`)!;
+    }
+    if (rec.date && rec.nisn && indexByNisnDate.has(`${rec.date}__${rec.nisn}`)) {
+      return indexByNisnDate.get(`${rec.date}__${rec.nisn}`)!;
+    }
+    return -1;
+  };
+
+  // 1. Add all local records (O(N))
+  for (let i = 0; i < local.length; i++) {
+    const a = local[i];
+    if (!a) continue;
     const idx = findIndexForRecord(a);
     if (idx >= 0) {
       recordsList[idx] = mergeSingleRecord(recordsList[idx], a);
+      registerIndices(idx, recordsList[idx]);
     } else {
+      const newIdx = recordsList.length;
       recordsList.push({ ...a });
+      registerIndices(newIdx, a);
     }
-  });
+  }
 
-  // 2. Merge cloud records
-  cloud.forEach(cloudRec => {
-    if (!cloudRec) return;
+  // 2. Merge cloud records (O(M))
+  for (let i = 0; i < cloud.length; i++) {
+    const cloudRec = cloud[i];
+    if (!cloudRec) continue;
     const idx = findIndexForRecord(cloudRec);
     if (idx >= 0) {
       recordsList[idx] = mergeSingleRecord(recordsList[idx], cloudRec);
+      registerIndices(idx, recordsList[idx]);
     } else {
+      const newIdx = recordsList.length;
       recordsList.push({ ...cloudRec });
+      registerIndices(newIdx, cloudRec);
     }
-  });
+  }
 
   return recordsList.sort((a, b) => (b.date + (b.time || '')).localeCompare(a.date + (a.time || '')));
 }
@@ -1141,23 +1251,33 @@ export async function smartSyncAndMergeAllWithCloud(): Promise<{ success: boolea
 
     notifyStorageUpdated();
 
-    // 3. Concurrently Push All Merged Data Back to Cloud (if quota is available)
+    // 3. Selectively Push Only Keys that Actually Changed Back to Cloud (avoids write stream flooding)
     if (!isFirestoreQuotaExceeded()) {
-      await Promise.allSettled([
-        writeCloudDocument(KEYS.PROFILE, profileStr, now),
-        writeCloudDocument(KEYS.STUDENTS, studentsJsonStr, now),
-        writeCloudDocument(KEYS.CLASSES, classesJsonStr, now),
-        writeCloudDocument(KEYS.TEACHERS, teachersJsonStr, now),
-        writeCloudDocument(KEYS.ATTENDANCE, attJsonStr, now),
-        writeCloudDocument(KEYS.LEAVES, leavesJsonStr, now),
-        writeCloudDocument(KEYS.LEARNING_JOURNALS, journalsJsonStr, now),
-        writeCloudDocument(KEYS.CHARACTER_TRAITS, traitsJsonStr, now),
-        writeCloudDocument(KEYS.CHARACTER_LOGS, logsJsonStr, now),
-        writeCloudDocument(KEYS.CHARACTER_PREDICATES, predicatesJsonStr, now),
-        writeCloudDocument(KEYS.GRADES, gradesJsonStr, now),
-        writeCloudDocument(KEYS.PERIODS, periodsJsonStr, now),
-        writeCloudDocument(KEYS.SCHEDULES, schedulesJsonStr, now),
-      ]);
+      const writePromises: Promise<void>[] = [];
+      const pushIfChanged = (key: string, localStr: string, cloudDoc: any) => {
+        const cloudStr = cloudDoc?.data;
+        if (localStr && localStr !== cloudStr) {
+          writePromises.push(writeCloudDocument(key, localStr, now));
+        }
+      };
+
+      pushIfChanged(KEYS.PROFILE, profileStr, profileCloud);
+      pushIfChanged(KEYS.STUDENTS, studentsJsonStr, studentCloud);
+      pushIfChanged(KEYS.CLASSES, classesJsonStr, classCloud);
+      pushIfChanged(KEYS.TEACHERS, teachersJsonStr, teacherCloud);
+      pushIfChanged(KEYS.ATTENDANCE, attJsonStr, attCloud);
+      pushIfChanged(KEYS.LEAVES, leavesJsonStr, leavesCloud);
+      pushIfChanged(KEYS.LEARNING_JOURNALS, journalsJsonStr, journalsCloud);
+      pushIfChanged(KEYS.CHARACTER_TRAITS, traitsJsonStr, traitsCloud);
+      pushIfChanged(KEYS.CHARACTER_LOGS, logsJsonStr, logsCloud);
+      pushIfChanged(KEYS.CHARACTER_PREDICATES, predicatesJsonStr, predicatesCloud);
+      pushIfChanged(KEYS.GRADES, gradesJsonStr, gradesCloud);
+      pushIfChanged(KEYS.PERIODS, periodsJsonStr, periodsCloud);
+      pushIfChanged(KEYS.SCHEDULES, schedulesJsonStr, schedulesCloud);
+
+      if (writePromises.length > 0) {
+        await Promise.allSettled(writePromises);
+      }
     }
 
     // Reset scan queue since all attendance is completely synchronized
@@ -1435,8 +1555,6 @@ export async function forceDownloadAllFromCloud(): Promise<{ success: boolean; e
   }
 }
 
-let activeUnsubscribes: (() => void)[] = [];
-
 // Initialize Realtime Sync from Firestore
 export function initFirestoreRealtimeSync() {
   if (isFirestoreInitialized || typeof window === 'undefined') return;
@@ -1643,18 +1761,19 @@ export function initFirestoreRealtimeSync() {
     }
   });
 
-  // Startup repair check: if any student photo was previously saved uncompressed (>18KB),
-  // automatically compress it in the background and push clean data to Firestore.
+  // Startup background check for raw uncompressed student photos (>90KB base64)
   try {
-    const existingStudents = getStudents();
-    const hasOversized = existingStudents.some(s => s.photoUrl?.startsWith('data:') && s.photoUrl.length > 18000);
-    if (hasOversized && !isFirestoreQuotaExceeded()) {
-      sanitizeAndCompressStudentPhotos(existingStudents).then(optimized => {
-        if (optimized !== existingStudents) {
-          saveStudents(optimized, true);
-        }
-      }).catch(() => {});
-    }
+    setTimeout(() => {
+      const existingStudents = getStudents();
+      const hasOversized = existingStudents.some(s => s.photoUrl?.startsWith('data:') && s.photoUrl.length > 90000);
+      if (hasOversized && !isFirestoreQuotaExceeded()) {
+        sanitizeAndCompressStudentPhotos(existingStudents).then(optimized => {
+          if (optimized !== existingStudents) {
+            saveStudents(optimized, false);
+          }
+        }).catch(() => {});
+      }
+    }, 3000);
   } catch {}
 
   // Register Automatic Network Status and Online Auto-Sync Listeners
@@ -1680,34 +1799,36 @@ export function initFirestoreRealtimeSync() {
       }));
     });
 
-    // 3. When returning to the app/tab from background
+    // 3. When returning to the app/tab from background (gentle check, at least 60s cooldown)
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState === 'visible' && typeof navigator !== 'undefined' && navigator.onLine && !isFirestoreQuotaExceeded()) {
         const timeSince = Date.now() - lastAutoSyncTime;
-        if (timeSince > 25000) {
+        if (timeSince > 60000) {
           triggerAutoSyncOnOnline(true);
         }
       }
     });
 
     // 4. Initial background auto-sync on startup after brief initialization delay
-    if (typeof navigator !== 'undefined' && navigator.onLine && !isFirestoreQuotaExceeded()) {
+    if (typeof navigator !== 'undefined' && navigator.onLine) {
+      // Self-heal: clear old quota cooldown from previous write-stream crashes
+      resetFirestoreQuotaCooldown();
       setTimeout(() => {
         if (!isFirestoreQuotaExceeded()) {
           triggerAutoSyncOnOnline(true);
         }
-      }, 1500);
+      }, 2000);
     }
 
-    // 5. Periodic lightweight background sync (every 60 seconds when online)
+    // 5. Periodic lightweight background sync heartbeat (every 3 minutes when online)
     setInterval(() => {
       if (typeof navigator !== 'undefined' && navigator.onLine && !isFirestoreQuotaExceeded()) {
         const timeSince = Date.now() - lastAutoSyncTime;
-        if (timeSince > 60000) {
+        if (timeSince > 180000) {
           triggerAutoSyncOnOnline(true);
         }
       }
-    }, 60000);
+    }, 180000);
   }
 }
 
@@ -1861,22 +1982,6 @@ export function saveStudents(students: Student[], instant: boolean = false): voi
   safeSetLocalStorage(KEYS.STUDENTS + '_updatedAt', String(now));
   notifyStorageUpdated();
   syncToCloud(KEYS.STUDENTS, students, instant || students.length === 0, now);
-
-  // Background auto-optimization: if any student has an oversized photo (>18KB Base64),
-  // automatically compress it and update Firestore so cross-device sync never hits 1MB document limit.
-  const hasOversizedPhoto = students.some(s => s.photoUrl?.startsWith('data:') && s.photoUrl.length > 18000);
-  if (hasOversizedPhoto) {
-    sanitizeAndCompressStudentPhotos(students).then(optimizedStudents => {
-      if (optimizedStudents !== students) {
-        const optNow = Date.now();
-        const optStr = JSON.stringify(optimizedStudents);
-        safeSetLocalStorage(KEYS.STUDENTS, optStr);
-        safeSetLocalStorage(KEYS.STUDENTS + '_updatedAt', String(optNow));
-        notifyStorageUpdated();
-        syncToCloud(KEYS.STUDENTS, optimizedStudents, true, optNow);
-      }
-    }).catch(() => {});
-  }
 }
 
 export function deleteAllStudents(): void {

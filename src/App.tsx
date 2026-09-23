@@ -320,36 +320,34 @@ export default function App() {
     message: string;
   } | null>(null);
 
-  // Sync state on local storage events
-  const refreshDataFromStorage = () => {
-    const rawProfile = getSchoolProfile();
-    const rawStudents = getStudents();
-    const rawClasses = getSchoolClasses();
-    const rawTeachers = getTeachers();
+  // Debounced sync state on local storage events to prevent UI freeze and DOM thrashing
+  const refreshTimerRef = useRef<any>(null);
+  const refreshDataFromStorage = useCallback(() => {
+    if (refreshTimerRef.current) return;
+    refreshTimerRef.current = setTimeout(() => {
+      refreshTimerRef.current = null;
+      const rawProfile = getSchoolProfile();
+      const rawStudents = getStudents();
+      const rawClasses = getSchoolClasses();
+      const rawTeachers = getTeachers();
 
-    const { updatedTeachers, updatedClasses, teachersChanged, classesChanged } = reconcileTeachersAndClasses(rawTeachers, rawClasses);
+      const { updatedTeachers, updatedClasses } = reconcileTeachersAndClasses(rawTeachers, rawClasses);
 
-    if (teachersChanged) {
-      localStorage.setItem(KEYS.TEACHERS, JSON.stringify(updatedTeachers));
-    }
-    if (classesChanged) {
-      localStorage.setItem(KEYS.CLASSES, JSON.stringify(updatedClasses));
-    }
-
-    setSchoolProfileState(rawProfile);
-    setStudentsState(rawStudents);
-    setClassesState(updatedClasses);
-    setTeachersState(updatedTeachers);
-    setAttendanceRecordsState(getAttendanceRecords());
-    setLeaveRequestsState(getLeaveRequests());
-    setJournalsState(getLearningJournals());
-    setTraitsState(getCharacterTraits());
-    setCharacterLogsState(getStudentCharacterLogs());
-    setPredicateSettingsState(getCharacterPredicateSettings());
-    setPeriodsState(getLessonPeriods());
-    setSchedulesState(getClassSchedules());
-    setUserSessionState(getUserSession());
-  };
+      setSchoolProfileState(rawProfile);
+      setStudentsState(rawStudents);
+      setClassesState(updatedClasses);
+      setTeachersState(updatedTeachers);
+      setAttendanceRecordsState(getAttendanceRecords());
+      setLeaveRequestsState(getLeaveRequests());
+      setJournalsState(getLearningJournals());
+      setTraitsState(getCharacterTraits());
+      setCharacterLogsState(getStudentCharacterLogs());
+      setPredicateSettingsState(getCharacterPredicateSettings());
+      setPeriodsState(getLessonPeriods());
+      setSchedulesState(getClassSchedules());
+      setUserSessionState(getUserSession());
+    }, 150);
+  }, []);
 
 
   useEffect(() => {
@@ -384,6 +382,18 @@ export default function App() {
       window.removeEventListener('sihadir_network_toast', handleNetworkToast);
     };
   }, []);
+
+  // Track latest state references to avoid cascading re-render loops in periodic background intervals
+  const attendanceRecordsRef = useRef(attendanceRecords);
+  attendanceRecordsRef.current = attendanceRecords;
+
+  const studentsRef = useRef(students);
+  studentsRef.current = students;
+
+  const leaveRequestsRef = useRef(leaveRequests);
+  leaveRequestsRef.current = leaveRequests;
+
+  const lastAutoAlpaDateRef = useRef<string>('');
 
   // Automatic ALPA status assignment when autoAlpaTime is reached
   useEffect(() => {
@@ -431,24 +441,42 @@ export default function App() {
         return;
       }
 
+      const curAttendance = attendanceRecordsRef.current;
+      const curStudents = studentsRef.current;
+      const curLeaves = leaveRequestsRef.current;
+
+      // High-performance O(1) Sets to eliminate O(N * M) nested looping on the main thread
+      const todayAttendedStudentIds = new Set<string>();
+      for (let i = 0; i < curAttendance.length; i++) {
+        const r = curAttendance[i];
+        if (r.date === dateStr) {
+          if (r.studentId) todayAttendedStudentIds.add(r.studentId);
+          if (r.nisn) todayAttendedStudentIds.add(r.nisn);
+        }
+      }
+
+      const todayApprovedLeaveStudentIds = new Set<string>();
+      for (let i = 0; i < curLeaves.length; i++) {
+        const l = curLeaves[i];
+        if (l.status === 'APPROVED' && l.startDate <= dateStr && l.endDate >= dateStr) {
+          if (l.studentId) todayApprovedLeaveStudentIds.add(l.studentId);
+        }
+      }
+
       let hasChanges = false;
-      const updatedAttendance = [...attendanceRecords];
+      const newAlpaRecords: AttendanceRecord[] = [];
 
-      students.forEach(student => {
-        // Check if student already has attendance today
-        const existingAtt = updatedAttendance.find(r => r.studentId === student.id && r.date === dateStr);
-        if (existingAtt) return;
+      for (let i = 0; i < curStudents.length; i++) {
+        const student = curStudents[i];
+        if (!student) continue;
 
-        // Check if student has approved leave request
-        const hasApprovedLeave = leaveRequests.some(l => 
-          l.studentId === student.id && 
-          l.status === 'APPROVED' && 
-          l.startDate <= dateStr && 
-          l.endDate >= dateStr
-        );
-        if (hasApprovedLeave) return;
+        if (todayAttendedStudentIds.has(student.id) || (student.nisn && todayAttendedStudentIds.has(student.nisn))) {
+          continue;
+        }
+        if (todayApprovedLeaveStudentIds.has(student.id)) {
+          continue;
+        }
 
-        // Auto assign ALPA
         const record: AttendanceRecord = {
           id: `att-autoalpa-${dateStr}-${student.id}`,
           studentId: student.id,
@@ -464,27 +492,26 @@ export default function App() {
           parentNotified: false,
         };
 
-        updatedAttendance.push(record);
+        newAlpaRecords.push(record);
         hasChanges = true;
-      });
+      }
 
-      if (hasChanges) {
+      if (hasChanges && newAlpaRecords.length > 0) {
+        const updatedAttendance = [...newAlpaRecords, ...curAttendance];
         setAttendanceRecordsState(updatedAttendance);
         saveAttendanceRecordsLocally(updatedAttendance);
       }
+      lastAutoAlpaDateRef.current = dateStr;
     };
 
     checkAndApplyAutoAlpa();
-    const interval = setInterval(checkAndApplyAutoAlpa, 30000);
+    const interval = setInterval(checkAndApplyAutoAlpa, 60000);
     return () => clearInterval(interval);
   }, [
     schoolProfile.autoAlpaEnabled,
     schoolProfile.autoAlpaTime, 
     schoolProfile.activeDays, 
-    schoolProfile.holidays, 
-    students, 
-    attendanceRecords, 
-    leaveRequests
+    schoolProfile.holidays
   ]);
 
   // -------------------------------------------------------------
@@ -938,7 +965,7 @@ export default function App() {
   const handleAddStudent = (newStudent: Student) => {
     setStudentsState(prev => {
       const updated = [newStudent, ...prev];
-      saveStudents(updated, true);
+      setTimeout(() => saveStudents(updated, true), 0);
       return updated;
     });
   };
@@ -946,7 +973,7 @@ export default function App() {
   const handleBatchAddStudents = (newStudents: Student[], newClasses?: SchoolClass[]) => {
     setStudentsState(prev => {
       const updated = [...newStudents, ...prev];
-      saveStudents(updated, true);
+      setTimeout(() => saveStudents(updated, true), 0);
       return updated;
     });
 
@@ -956,7 +983,7 @@ export default function App() {
         const uniqueNew = newClasses.filter(c => !existingNames.has(c.name.trim().toLowerCase()));
         if (uniqueNew.length > 0) {
           const updatedClasses = [...prevClasses, ...uniqueNew];
-          saveSchoolClasses(updatedClasses);
+          setTimeout(() => saveSchoolClasses(updatedClasses), 0);
           return updatedClasses;
         }
         return prevClasses;
@@ -967,7 +994,7 @@ export default function App() {
   const handleUpdateStudent = (updatedStudent: Student) => {
     setStudentsState(prev => {
       const updated = prev.map(s => s.id === updatedStudent.id ? updatedStudent : s);
-      saveStudents(updated, true);
+      setTimeout(() => saveStudents(updated, true), 0);
       return updated;
     });
   };
@@ -976,28 +1003,28 @@ export default function App() {
     // Filter students
     setStudentsState(prev => {
       const updated = prev.filter(s => s.id !== id);
-      saveStudents(updated, true);
+      setTimeout(() => saveStudents(updated, true), 0);
       return updated;
     });
 
     // Clean up related attendance records
     setAttendanceRecordsState(prev => {
       const updated = prev.filter(a => a.studentId !== id);
-      saveAttendanceRecords(updated);
+      setTimeout(() => saveAttendanceRecords(updated), 0);
       return updated;
     });
 
     // Clean up related leave requests
     setLeaveRequestsState(prev => {
       const updated = prev.filter(l => l.studentId !== id);
-      saveLeaveRequests(updated);
+      setTimeout(() => saveLeaveRequests(updated), 0);
       return updated;
     });
 
     // Clean up related character logs
     setCharacterLogsState(prev => {
       const updated = prev.filter(l => l.studentId !== id);
-      saveStudentCharacterLogs(updated);
+      setTimeout(() => saveStudentCharacterLogs(updated), 0);
       return updated;
     });
   };
@@ -1006,25 +1033,25 @@ export default function App() {
     const idSet = new Set(ids);
     setStudentsState(prev => {
       const updated = prev.filter(s => !idSet.has(s.id));
-      saveStudents(updated, true);
+      setTimeout(() => saveStudents(updated, true), 0);
       return updated;
     });
 
     setAttendanceRecordsState(prev => {
       const updated = prev.filter(a => !idSet.has(a.studentId));
-      saveAttendanceRecords(updated);
+      setTimeout(() => saveAttendanceRecords(updated), 0);
       return updated;
     });
 
     setLeaveRequestsState(prev => {
       const updated = prev.filter(l => !idSet.has(l.studentId));
-      saveLeaveRequests(updated);
+      setTimeout(() => saveLeaveRequests(updated), 0);
       return updated;
     });
 
     setCharacterLogsState(prev => {
       const updated = prev.filter(l => !idSet.has(l.studentId));
-      saveStudentCharacterLogs(updated);
+      setTimeout(() => saveStudentCharacterLogs(updated), 0);
       return updated;
     });
   };
@@ -1361,6 +1388,8 @@ export default function App() {
               schoolProfile={schoolProfile}
               attendanceRecords={attendanceRecords}
               onAddAttendance={handleAddAttendance}
+              currentRole={currentRole}
+              userRole={currentRole}
             />
           )}
 

@@ -1,12 +1,12 @@
 import React, { useEffect, useRef, useState, useMemo, useCallback } from 'react';
 import { Html5Qrcode } from 'html5-qrcode';
-import { Student, SchoolProfile, AttendanceRecord, SchoolClass } from '../types';
+import { Student, SchoolProfile, AttendanceRecord, SchoolClass, UserRole } from '../types';
 import { playScanSound } from '../lib/audioBeep';
 import { 
-  getSchoolCheckoutTimeForDay, 
-  getScanQueueStatus, 
-  flushAttendanceScanQueue, 
-  ScanQueueStatus 
+  getSchoolCheckoutTimeForDay,
+  getScanQueueStatus,
+  flushAttendanceScanQueue,
+  ScanQueueStatus
 } from '../lib/storage';
 import { 
   ScanLine, 
@@ -38,6 +38,8 @@ interface QRScannerViewProps {
   schoolProfile: SchoolProfile;
   attendanceRecords: AttendanceRecord[];
   onAddAttendance: (record: AttendanceRecord) => void;
+  userRole?: UserRole;
+  currentRole?: UserRole;
 }
 
 const DAY_NAMES = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
@@ -48,7 +50,32 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
   schoolProfile,
   attendanceRecords,
   onAddAttendance,
+  userRole,
+  currentRole,
 }) => {
+  const effectiveRole = userRole || currentRole || 'ADMIN';
+  const isAdmin = effectiveRole === 'ADMIN';
+
+  // Scan Batching Queue Worker Status (25 Siswa / Jeda 20 Detik) - Terpantau untuk Admin
+  const [queueStatus, setQueueStatus] = useState<ScanQueueStatus>(() => getScanQueueStatus());
+
+  useEffect(() => {
+    const handleQueueChange = (e: any) => {
+      if (e && e.detail) {
+        setQueueStatus(e.detail);
+      } else {
+        setQueueStatus(getScanQueueStatus());
+      }
+    };
+    window.addEventListener('sihadir_scan_queue_changed', handleQueueChange);
+    return () => {
+      window.removeEventListener('sihadir_scan_queue_changed', handleQueueChange);
+    };
+  }, []);
+
+  const handleManualFlush = async () => {
+    await flushAttendanceScanQueue(true);
+  };
   const todayName = DAY_NAMES[new Date().getDay()];
   const todayEndTimeStr = getSchoolCheckoutTimeForDay(schoolProfile, todayName);
   const autoAlpaTimeStr = schoolProfile.autoAlpaTime || '08:30';
@@ -95,27 +122,6 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
   const [isScanning, setIsScanning] = useState<boolean>(false);
   const [simClassFilter, setSimClassFilter] = useState<string>('ALL');
   const [simSearchQuery, setSimSearchQuery] = useState<string>('');
-
-  // Scan Batching Queue Worker Status (25 Siswa / Jeda 20 Detik)
-  const [queueStatus, setQueueStatus] = useState<ScanQueueStatus>(() => getScanQueueStatus());
-
-  useEffect(() => {
-    const handleQueueChange = (e: any) => {
-      if (e && e.detail) {
-        setQueueStatus(e.detail);
-      } else {
-        setQueueStatus(getScanQueueStatus());
-      }
-    };
-    window.addEventListener('sihadir_scan_queue_changed', handleQueueChange);
-    return () => {
-      window.removeEventListener('sihadir_scan_queue_changed', handleQueueChange);
-    };
-  }, []);
-
-  const handleManualFlush = async () => {
-    await flushAttendanceScanQueue(true);
-  };
 
   // Auto switch timer yang memantau waktu secara realtime dan beralih otomatis
   useEffect(() => {
@@ -335,7 +341,7 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
       }
 
       const qrConfig = {
-        fps: 20, // High-frequency frame rate (20 FPS) for lightning-fast scan detection
+        fps: 14, // Optimized frame rate (14 FPS) for instant detection while preserving CPU & battery
         qrbox: (viewfinderWidth: number, viewfinderHeight: number) => {
           const minEdge = Math.min(viewfinderWidth, viewfinderHeight);
           const boxSize = Math.max(220, Math.floor(minEdge * 0.75));
@@ -743,64 +749,66 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
             <p className="text-xs sm:text-sm text-indigo-200 mt-1">Presensi cepat, aman, dan offline-ready dengan sistem antrean batching otomatis.</p>
           </div>
 
-          {/* Cloud Batch Worker Status Card */}
-          <div className="bg-indigo-950/70 backdrop-blur-md border border-indigo-400/30 rounded-2xl p-3.5 text-xs max-w-sm w-full shadow-lg">
-            <div className="flex items-center justify-between gap-2 mb-1.5">
-              <div className="flex items-center gap-1.5 font-bold text-white">
-                <Zap className="w-4 h-4 text-amber-300" />
-                <span>Cloud Batch Worker</span>
+          {/* Cloud Batch Worker Status Card - HANYA DITAMPILKAN UNTUK ROLE ADMIN */}
+          {isAdmin && (
+            <div className="bg-indigo-950/70 backdrop-blur-md border border-indigo-400/30 rounded-2xl p-3.5 text-xs max-w-sm w-full shadow-lg">
+              <div className="flex items-center justify-between gap-2 mb-1.5">
+                <div className="flex items-center gap-1.5 font-bold text-white">
+                  <Zap className="w-4 h-4 text-amber-300" />
+                  <span>Cloud Batch Worker</span>
+                </div>
+                {queueStatus.isFlushing ? (
+                  <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-amber-300 bg-amber-400/20 px-2 py-0.5 rounded-full border border-amber-400/30">
+                    <RotateCw className="w-3 h-3 animate-spin" />
+                    Kirim ke Cloud...
+                  </span>
+                ) : queueStatus.pendingCount > 0 ? (
+                  <span className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-300 bg-emerald-500/20 px-2 py-0.5 rounded-full border border-emerald-400/30">
+                    <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
+                    Antrean: {queueStatus.pendingCount} / 25
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center gap-1 text-[11px] font-medium text-indigo-200 bg-white/10 px-2 py-0.5 rounded-full border border-white/15">
+                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+                    Tersinkron Cloud
+                  </span>
+                )}
               </div>
-              {queueStatus.isFlushing ? (
-                <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-amber-300 bg-amber-400/20 px-2 py-0.5 rounded-full border border-amber-400/30">
-                  <RotateCw className="w-3 h-3 animate-spin" />
-                  Kirim ke Cloud...
-                </span>
-              ) : queueStatus.pendingCount > 0 ? (
-                <span className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-300 bg-emerald-500/20 px-2 py-0.5 rounded-full border border-emerald-400/30">
-                  <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
-                  Antrean: {queueStatus.pendingCount} / 25
-                </span>
-              ) : (
-                <span className="inline-flex items-center gap-1 text-[11px] font-medium text-indigo-200 bg-white/10 px-2 py-0.5 rounded-full border border-white/15">
-                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
-                  Tersinkron Cloud
-                </span>
+
+              <p className="text-indigo-200 text-[11px] leading-relaxed">
+                {queueStatus.pendingCount > 0 ? (
+                  <span>
+                    Disimpan instan di lokal. Terkirim ke Cloud saat mencapai <strong className="text-white font-bold">25 siswa</strong> atau dalam <strong className="text-amber-300 font-bold">{queueStatus.secondsRemaining} detik</strong> jeda.
+                  </span>
+                ) : (
+                  <span>
+                    Worker batching aktif: kirim ke Cloud tiap <strong className="text-white font-bold">25 siswa</strong> atau jeda <strong className="text-white font-bold">20 detik</strong> untuk menghemat kuota Firestore.
+                  </span>
+                )}
+              </p>
+
+              {queueStatus.pendingCount > 0 && (
+                <div className="mt-2.5 pt-2 border-t border-indigo-500/30 flex items-center justify-between gap-3">
+                  <div className="flex-1 bg-indigo-900/80 rounded-full h-2 overflow-hidden border border-indigo-400/30">
+                    <div 
+                      className="bg-gradient-to-r from-amber-400 to-emerald-400 h-full transition-all duration-300"
+                      style={{ width: `${Math.min(100, (queueStatus.pendingCount / 25) * 100)}%` }}
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleManualFlush}
+                    disabled={queueStatus.isFlushing}
+                    className="px-2.5 py-1 rounded-lg bg-white/20 hover:bg-white/30 text-white font-bold text-[10px] flex items-center gap-1 transition-all cursor-pointer whitespace-nowrap disabled:opacity-50"
+                    title="Kirim antrean sekarang ke Firestore tanpa menunggu 25 siswa"
+                  >
+                    <RotateCw className={`w-3 h-3 ${queueStatus.isFlushing ? 'animate-spin' : ''}`} />
+                    Kirim Sekarang
+                  </button>
+                </div>
               )}
             </div>
-
-            <p className="text-indigo-200 text-[11px] leading-relaxed">
-              {queueStatus.pendingCount > 0 ? (
-                <span>
-                  Disimpan instan di lokal. Terkirim ke Cloud saat mencapai <strong className="text-white font-bold">25 siswa</strong> atau dalam <strong className="text-amber-300 font-bold">{queueStatus.secondsRemaining} detik</strong> jeda.
-                </span>
-              ) : (
-                <span>
-                  Worker batching aktif: kirim ke Cloud tiap <strong className="text-white font-bold">25 siswa</strong> atau jeda <strong className="text-white font-bold">20 detik</strong> untuk menghemat kuota Firestore.
-                </span>
-              )}
-            </p>
-
-            {queueStatus.pendingCount > 0 && (
-              <div className="mt-2.5 pt-2 border-t border-indigo-500/30 flex items-center justify-between gap-3">
-                <div className="flex-1 bg-indigo-900/80 rounded-full h-2 overflow-hidden border border-indigo-400/30">
-                  <div 
-                    className="bg-gradient-to-r from-amber-400 to-emerald-400 h-full transition-all duration-300"
-                    style={{ width: `${Math.min(100, (queueStatus.pendingCount / 25) * 100)}%` }}
-                  />
-                </div>
-                <button
-                  type="button"
-                  onClick={handleManualFlush}
-                  disabled={queueStatus.isFlushing}
-                  className="px-2.5 py-1 rounded-lg bg-white/20 hover:bg-white/30 text-white font-bold text-[10px] flex items-center gap-1 transition-all cursor-pointer whitespace-nowrap disabled:opacity-50"
-                  title="Kirim antrean sekarang ke Firestore tanpa menunggu 25 siswa"
-                >
-                  <RotateCw className={`w-3 h-3 ${queueStatus.isFlushing ? 'animate-spin' : ''}`} />
-                  Kirim Sekarang
-                </button>
-              </div>
-            )}
-          </div>
+          )}
         </div>
       </div>
 
@@ -1219,7 +1227,7 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
             </div>
 
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5 max-h-56 overflow-y-auto pr-1">
-              {filteredStudents.map((std) => (
+              {filteredStudents.slice(0, 36).map((std) => (
                 <button
                   key={std.id}
                   onClick={() => processAttendanceForStudent(std)}
@@ -1246,6 +1254,12 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
                   </div>
                 </button>
               ))}
+
+              {filteredStudents.length > 36 && (
+                <div className="col-span-full text-center py-2 text-slate-400 text-[11px] font-medium bg-slate-100/70 rounded-xl">
+                  Menampilkan 36 dari {filteredStudents.length} siswa. Ketik nama di kolom cari untuk menemukan siswa lain.
+                </div>
+              )}
 
               {filteredStudents.length === 0 && (
                 <div className="col-span-full text-center py-6 text-slate-400 text-xs font-medium">

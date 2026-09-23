@@ -283,6 +283,7 @@ export const AttendanceDashboard: React.FC<AttendanceDashboardProps> = ({
   let kurangAktifCount = 0;
   let menggangguCount = 0;
   let tidakHadirCount = 0;
+  let sakitIjinCount = 0;
 
   childJournals.forEach(j => {
     const att = j.studentAttendances?.find(a => 
@@ -296,6 +297,7 @@ export const AttendanceDashboard: React.FC<AttendanceDashboardProps> = ({
       else if (att.status === 'Kurang aktif') kurangAktifCount++;
       else if (att.status === 'Mengganggu') menggangguCount++;
       else if (att.status === 'Tidak hadir di kelas') tidakHadirCount++;
+      else if (att.status === 'Sakit / Ijin' || att.status === 'Sakit/Ijin' || att.status === 'Sakit / Izin') sakitIjinCount++;
     }
   });
 
@@ -840,6 +842,7 @@ export const AttendanceDashboard: React.FC<AttendanceDashboardProps> = ({
                         if (status === 'Cukup aktif') badgeClass = 'bg-blue-100 text-blue-800 border-blue-300';
                         else if (status === 'Kurang aktif') badgeClass = 'bg-amber-100 text-amber-800 border-amber-300';
                         else if (status === 'Mengganggu' || status === 'Tidak hadir di kelas') badgeClass = 'bg-rose-100 text-rose-800 border-rose-300';
+                        else if (status === 'Sakit / Ijin' || status === 'Sakit/Ijin' || status === 'Sakit / Izin') badgeClass = 'bg-purple-100 text-purple-800 border-purple-300';
 
                         return (
                           <tr key={j.id} className="hover:bg-slate-50/80 transition-colors">

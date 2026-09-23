@@ -106,6 +106,15 @@ const PARTICIPATION_OPTIONS: {
     iconBg: 'bg-orange-500'
   },
   { 
+    value: 'Sakit / Ijin', 
+    label: 'Sakit/Ijin', 
+    color: 'bg-purple-600 text-white border-purple-500', 
+    badgeBg: 'bg-purple-100 text-purple-800 border-purple-200', 
+    badgeText: 'text-purple-700',
+    borderColor: 'border-purple-300',
+    iconBg: 'bg-purple-500'
+  },
+  { 
     value: 'Tidak hadir di kelas', 
     label: 'Tidak Hadir di Kelas', 
     color: 'bg-rose-600 text-white border-rose-500', 
@@ -564,21 +573,30 @@ export const LearningJournalView: React.FC<LearningJournalViewProps> = ({
       .sort((a, b) => a.name.localeCompare(b.name, 'id', { numeric: true, sensitivity: 'base' }));
   }, [students, currentClass]);
 
-  // Initialize or update default ratings when selected class changes
+  // Initialize or update default ratings when selected class or date changes
   React.useEffect(() => {
     if (currentClassStudents.length > 0) {
       setStudentRatings(prev => {
         const initial: Record<string, { status: LearningParticipationStatus; notes: string }> = { ...prev };
         currentClassStudents.forEach(std => {
-          // preserve existing if already touched, else default 'Cukup aktif'
+          // preserve existing if already touched, else default 'Cukup aktif' or auto-detect Sakit/Izin from daily attendance
           if (!initial[std.id]) {
-            initial[std.id] = { status: 'Cukup aktif', notes: '' };
+            const studentAttendance = attendanceRecords.find(
+              (rec) =>
+                (rec.studentId === std.id || rec.nisn === std.nisn) &&
+                rec.date === journalDate
+            );
+            if (studentAttendance?.status === 'SAKIT' || studentAttendance?.status === 'IZIN') {
+              initial[std.id] = { status: 'Sakit / Ijin', notes: `Presensi: ${studentAttendance.status}` };
+            } else {
+              initial[std.id] = { status: 'Cukup aktif', notes: '' };
+            }
           }
         });
         return initial;
       });
     }
-  }, [selectedClassId, currentClassStudents]);
+  }, [selectedClassId, currentClassStudents, journalDate, attendanceRecords]);
 
   // Toggle Jam Ke (1-8)
   const togglePeriod = (periodNum: number) => {
@@ -1284,14 +1302,34 @@ export const LearningJournalView: React.FC<LearningJournalViewProps> = ({
                           <div>
                             <div className="flex items-center gap-2">
                               <h4 className="text-xs font-black text-slate-900">{std.name}</h4>
-                              {!hasScanned && (
-                                <span className="inline-flex items-center gap-1 text-[10px] font-bold bg-slate-100 text-slate-600 px-2 py-0.5 rounded-md border border-slate-200">
-                                  Belum Scan
+                              {studentAttendance?.status === 'SAKIT' && (
+                                <span className="inline-flex items-center gap-1 text-[10px] font-bold bg-rose-100 text-rose-800 px-2 py-0.5 rounded-md border border-rose-200">
+                                  Sakit
                                 </span>
                               )}
-                              {hasScanned && (
+                              {studentAttendance?.status === 'IZIN' && (
+                                <span className="inline-flex items-center gap-1 text-[10px] font-bold bg-purple-100 text-purple-800 px-2 py-0.5 rounded-md border border-purple-200">
+                                  Izin
+                                </span>
+                              )}
+                              {studentAttendance?.status === 'TERLAMBAT' && (
+                                <span className="inline-flex items-center gap-1 text-[10px] font-bold bg-amber-100 text-amber-800 px-2 py-0.5 rounded-md border border-amber-200">
+                                  Terlambat ({studentAttendance.time})
+                                </span>
+                              )}
+                              {studentAttendance?.status === 'HADIR' && (
                                 <span className="inline-flex items-center gap-1 text-[10px] font-bold bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-md border border-emerald-200">
-                                  Hadir ({studentAttendance?.time})
+                                  Hadir ({studentAttendance.time})
+                                </span>
+                              )}
+                              {studentAttendance?.status === 'ALPA' && (
+                                <span className="inline-flex items-center gap-1 text-[10px] font-bold bg-slate-200 text-slate-700 px-2 py-0.5 rounded-md border border-slate-300">
+                                  Alpa
+                                </span>
+                              )}
+                              {!studentAttendance && (
+                                <span className="inline-flex items-center gap-1 text-[10px] font-bold bg-slate-100 text-slate-600 px-2 py-0.5 rounded-md border border-slate-200">
+                                  Belum Scan
                                 </span>
                               )}
                             </div>
@@ -1301,10 +1339,10 @@ export const LearningJournalView: React.FC<LearningJournalViewProps> = ({
                           </div>
                         </div>
 
-                        {/* Rating Buttons Group (5 Options as requested) */}
+                        {/* Rating Buttons Group */}
                         <div className="flex items-center gap-1.5 flex-wrap flex-1 justify-start lg:justify-end">
                           {PARTICIPATION_OPTIONS.map((opt) => {
-                            const isSelected = rating.status === opt.value;
+                            const isSelected = rating.status === opt.value || (opt.value === 'Sakit / Ijin' && (rating.status === 'Sakit / Izin' || rating.status === 'Sakit/Ijin'));
                             return (
                               <button
                                 key={opt.value}
@@ -1551,6 +1589,7 @@ export const LearningJournalView: React.FC<LearningJournalViewProps> = ({
                       const sangatAktif = j.studentAttendances?.filter(a => a.status === 'Sangat aktif').length || 0;
                       const cukupAktif = j.studentAttendances?.filter(a => a.status === 'Cukup aktif').length || 0;
                       const kurangAktif = j.studentAttendances?.filter(a => a.status === 'Kurang aktif').length || 0;
+                      const sakitIzin = j.studentAttendances?.filter(a => a.status === 'Sakit / Ijin' || a.status === 'Sakit/Ijin' || a.status === 'Sakit / Izin').length || 0;
                       const menggangguOrAbsen = j.studentAttendances?.filter(a => a.status === 'Mengganggu' || a.status === 'Tidak hadir di kelas').length || 0;
                       const totalStudents = j.studentAttendances?.length || 0;
 
@@ -1623,6 +1662,11 @@ export const LearningJournalView: React.FC<LearningJournalViewProps> = ({
                                 {kurangAktif > 0 && (
                                   <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-md bg-amber-100 text-amber-800 border border-amber-200" title="Kurang Aktif">
                                     KA: {kurangAktif}
+                                  </span>
+                                )}
+                                {sakitIzin > 0 && (
+                                  <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-md bg-purple-100 text-purple-800 border border-purple-200" title="Sakit / Izin">
+                                    S/I: {sakitIzin}
                                   </span>
                                 )}
                                 {menggangguOrAbsen > 0 && (
@@ -1745,7 +1789,7 @@ export const LearningJournalView: React.FC<LearningJournalViewProps> = ({
 
               <div className="divide-y divide-slate-100 max-h-[350px] overflow-y-auto pr-1">
                 {selectedHistoryJournal.studentAttendances.map((sa, idx) => {
-                  const opt = PARTICIPATION_OPTIONS.find(p => p.value === sa.status) || PARTICIPATION_OPTIONS[0];
+                  const opt = PARTICIPATION_OPTIONS.find(p => p.value === sa.status || (p.value === 'Sakit / Ijin' && (sa.status === 'Sakit / Izin' || sa.status === 'Sakit/Ijin'))) || PARTICIPATION_OPTIONS[0];
 
                   return (
                     <div key={sa.studentId} className="py-2.5 flex items-center justify-between gap-3 text-xs">

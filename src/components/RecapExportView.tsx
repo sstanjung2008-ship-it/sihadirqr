@@ -1491,6 +1491,7 @@ export const RecapExportView: React.FC<RecapExportViewProps> = ({
                   <th className="py-3.5 px-4 text-center">Sangat Aktif</th>
                   <th className="py-3.5 px-4 text-center">Cukup Aktif</th>
                   <th className="py-3.5 px-4 text-center">Kurang Aktif</th>
+                  <th className="py-3.5 px-4 text-center">Sakit / Izin</th>
                   <th className="py-3.5 px-4 text-center">Mengganggu / Absen</th>
                   <th className="py-3.5 px-4 text-center">Predikat Keaktifan</th>
                   <th className="py-3.5 px-4">Catatan Guru Terakhir</th>
@@ -1510,6 +1511,7 @@ export const RecapExportView: React.FC<RecapExportViewProps> = ({
                     let kurangAktif = 0;
                     let mengganggu = 0;
                     let tidakHadir = 0;
+                    let sakitIzin = 0;
                     let totalPertemuan = 0;
                     let lastNotes = '-';
 
@@ -1522,6 +1524,7 @@ export const RecapExportView: React.FC<RecapExportViewProps> = ({
                         else if (match.status === 'Kurang aktif') kurangAktif++;
                         else if (match.status === 'Mengganggu') mengganggu++;
                         else if (match.status === 'Tidak hadir di kelas') tidakHadir++;
+                        else if (match.status === 'Sakit / Ijin' || match.status === 'Sakit/Ijin' || match.status === 'Sakit / Izin') sakitIzin++;
 
                         if (match.notes && match.notes.trim() !== '') {
                           lastNotes = match.notes;
@@ -1552,6 +1555,7 @@ export const RecapExportView: React.FC<RecapExportViewProps> = ({
                         <td className="py-3.5 px-4 text-center font-mono text-emerald-600 font-extrabold">{sangatAktif}</td>
                         <td className="py-3.5 px-4 text-center font-mono text-blue-600 font-extrabold">{cukupAktif}</td>
                         <td className="py-3.5 px-4 text-center font-mono text-amber-600 font-bold">{kurangAktif}</td>
+                        <td className="py-3.5 px-4 text-center font-mono text-purple-600 font-bold">{sakitIzin}</td>
                         <td className="py-3.5 px-4 text-center font-mono text-rose-600 font-bold">{mengganggu + tidakHadir}</td>
                         <td className="py-3.5 px-4 text-center">
                           <span className={`px-2.5 py-1 rounded-full text-[11px] font-extrabold border inline-block whitespace-nowrap ${predikat.color}`}>

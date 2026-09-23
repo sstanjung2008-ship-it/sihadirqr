@@ -1496,11 +1496,13 @@ export async function exportTeacherJournalPdf(
     const sangatAktif = j.studentAttendances?.filter(a => a.status === 'Sangat aktif').length || 0;
     const cukupAktif = j.studentAttendances?.filter(a => a.status === 'Cukup aktif').length || 0;
     const kurangAktif = j.studentAttendances?.filter(a => a.status === 'Kurang aktif').length || 0;
+    const sakitIzin = j.studentAttendances?.filter(a => a.status === 'Sakit / Ijin' || a.status === 'Sakit/Ijin' || a.status === 'Sakit / Izin').length || 0;
     const menggangguOrAbsen = j.studentAttendances?.filter(a => a.status === 'Mengganggu' || a.status === 'Tidak hadir di kelas').length || 0;
     const totalStudents = j.studentAttendances?.length || 0;
 
     let rekapText = `SA: ${sangatAktif}, CA: ${cukupAktif}`;
     if (kurangAktif > 0) rekapText += `, KA: ${kurangAktif}`;
+    if (sakitIzin > 0) rekapText += `, S/I: ${sakitIzin}`;
     if (menggangguOrAbsen > 0) rekapText += `, M/A: ${menggangguOrAbsen}`;
     rekapText += ` (${totalStudents} Siswa)`;
 
@@ -1647,6 +1649,7 @@ export async function exportClassParticipationPdf(
     let kurangAktif = 0;
     let mengganggu = 0;
     let tidakHadir = 0;
+    let sakitIzin = 0;
     let totalPertemuan = 0;
     let lastNotes = '-';
 
@@ -1659,6 +1662,7 @@ export async function exportClassParticipationPdf(
         else if (match.status === 'Kurang aktif') kurangAktif++;
         else if (match.status === 'Mengganggu') mengganggu++;
         else if (match.status === 'Tidak hadir di kelas') tidakHadir++;
+        else if (match.status === 'Sakit / Ijin' || match.status === 'Sakit/Ijin' || match.status === 'Sakit / Izin') sakitIzin++;
 
         if (match.notes && match.notes.trim() !== '') {
           lastNotes = match.notes;
@@ -2146,6 +2150,7 @@ export function exportKeaktifanExcel(
     let kurangAktif = 0;
     let mengganggu = 0;
     let tidakHadir = 0;
+    let sakitIzin = 0;
     let totalPertemuan = 0;
     let lastNotes = '-';
 
@@ -2158,6 +2163,7 @@ export function exportKeaktifanExcel(
         else if (match.status === 'Kurang aktif') kurangAktif++;
         else if (match.status === 'Mengganggu') mengganggu++;
         else if (match.status === 'Tidak hadir di kelas') tidakHadir++;
+        else if (match.status === 'Sakit / Ijin' || match.status === 'Sakit/Ijin' || match.status === 'Sakit / Izin') sakitIzin++;
 
         if (match.notes && match.notes.trim() !== '') {
           lastNotes = match.notes;
@@ -2189,6 +2195,7 @@ export function exportKeaktifanExcel(
       'Sangat Aktif': sangatAktif,
       'Cukup Aktif': cukupAktif,
       'Kurang Aktif': kurangAktif,
+      'Sakit / Izin': sakitIzin,
       'Mengganggu / Absen': mengganggu + tidakHadir,
       'Predikat Keaktifan': predikat,
       'Catatan Terakhir': lastNotes
@@ -2316,6 +2323,7 @@ export async function exportKeaktifanPdf(
     let kurangAktif = 0;
     let mengganggu = 0;
     let tidakHadir = 0;
+    let sakitIzin = 0;
     let totalPertemuan = 0;
     let lastNotes = '-';
 
@@ -2328,6 +2336,7 @@ export async function exportKeaktifanPdf(
         else if (match.status === 'Kurang aktif') kurangAktif++;
         else if (match.status === 'Mengganggu') mengganggu++;
         else if (match.status === 'Tidak hadir di kelas') tidakHadir++;
+        else if (match.status === 'Sakit / Ijin' || match.status === 'Sakit/Ijin' || match.status === 'Sakit / Izin') sakitIzin++;
 
         if (match.notes && match.notes.trim() !== '') {
           lastNotes = match.notes;

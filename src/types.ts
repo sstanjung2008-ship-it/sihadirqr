@@ -224,7 +224,10 @@ export type LearningParticipationStatus =
   | 'Cukup aktif' 
   | 'Kurang aktif' 
   | 'Mengganggu' 
-  | 'Tidak hadir di kelas';
+  | 'Tidak hadir di kelas'
+  | 'Sakit / Ijin'
+  | 'Sakit/Ijin'
+  | 'Sakit / Izin';
 
 export interface StudentLearningAttendance {
   studentId: string;

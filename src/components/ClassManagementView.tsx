@@ -252,6 +252,7 @@ export const ClassManagementView: React.FC<ClassManagementViewProps> = ({
         else if (att.status === 'Kurang aktif') kurangAktif++;
         else if (att.status === 'Mengganggu') mengganggu++;
         else if (att.status === 'Tidak hadir di kelas') tidakHadir++;
+        else if (att.status === 'Sakit / Ijin' || att.status === 'Sakit/Ijin' || att.status === 'Sakit / Izin') tidakHadir++;
       });
     });
 
@@ -1826,6 +1827,7 @@ export const ClassManagementView: React.FC<ClassManagementViewProps> = ({
                           h.status === 'Sangat aktif' ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30' :
                           h.status === 'Cukup aktif' ? 'bg-blue-500/20 text-blue-300 border-blue-500/30' :
                           h.status === 'Kurang aktif' ? 'bg-amber-500/20 text-amber-300 border-amber-500/30' :
+                          (h.status === 'Sakit / Ijin' || h.status === 'Sakit/Ijin' || h.status === 'Sakit / Izin') ? 'bg-purple-500/20 text-purple-300 border-purple-500/30' :
                           'bg-rose-500/20 text-rose-300 border-rose-500/30'
                         }`}>
                           {h.status}

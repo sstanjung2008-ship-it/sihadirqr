@@ -392,14 +392,28 @@ export default function App() {
   const leaveRequestsRef = useRef(leaveRequests);
   leaveRequestsRef.current = leaveRequests;
 
-  // Automatic ALPA feature completely removed as requested (sistem tidak lagi merubah belum scan menjadi alpa otomatis)
+  // Membersihkan record korup atau auto-alpa peninggalan versi lama saat aplikasi dimuat
   useEffect(() => {
-    // Clean up any remaining auto-alpa records if present
     setAttendanceRecordsState(prev => {
-      const hasAutoAlpa = prev.some(r => r.id?.startsWith('att-autoalpa-') || r.scannedBy?.includes('Sistem Otomatis (Batas Alpa)'));
-      if (!hasAutoAlpa) return prev;
-      const cleaned = prev.filter(r => !r.id?.startsWith('att-autoalpa-') && !r.scannedBy?.includes('Sistem Otomatis (Batas Alpa)'));
-      saveAttendanceRecordsLocally(cleaned);
+      const hasCorrupt = prev.some(r => (
+        !r ||
+        !r.studentId ||
+        !r.date ||
+        !/^\d{4}-\d{2}-\d{2}$/.test(r.date) ||
+        r.id?.startsWith('att-autoalpa-') ||
+        r.scannedBy?.includes('Sistem Otomatis (Batas Alpa)') ||
+        r.notes?.includes('Otomatis Alpa')
+      ));
+      if (!hasCorrupt) return prev;
+      const cleaned = prev.filter(r => (
+        r &&
+        r.studentId &&
+        /^\d{4}-\d{2}-\d{2}$/.test(r.date) &&
+        !r.id?.startsWith('att-autoalpa-') &&
+        !r.scannedBy?.includes('Sistem Otomatis (Batas Alpa)') &&
+        !r.notes?.includes('Otomatis Alpa')
+      ));
+      saveAttendanceRecords(cleaned, true);
       return cleaned;
     });
   }, []);
@@ -629,8 +643,15 @@ export default function App() {
 
   // Add Attendance Record (from scanner or manual)
   const handleAddAttendance = (record: AttendanceRecord) => {
+    if (!record || !record.studentId || !record.date || !/^\d{4}-\d{2}-\d{2}$/.test(record.date)) {
+      console.warn('[Attendance] Record presensi tidak valid diabaikan:', record);
+      return;
+    }
+
     setAttendanceRecordsState(prev => {
-      const existingIndex = prev.findIndex(r => (
+      // Pastikan array lama bebas dari item rusak
+      const validPrev = prev.filter(r => r && r.studentId && /^\d{4}-\d{2}-\d{2}$/.test(r.date));
+      const existingIndex = validPrev.findIndex(r => (
         (record.id && r.id === record.id) ||
         (r.studentId && record.studentId && r.studentId === record.studentId) ||
         (r.nisn && record.nisn && r.nisn === record.nisn)
@@ -638,7 +659,7 @@ export default function App() {
 
       let newRecord = { ...record };
       if (existingIndex >= 0) {
-        const existing = prev[existingIndex];
+        const existing = validPrev[existingIndex];
         const mergedTime = (record.time && record.time !== '-')
           ? record.time
           : (existing.time && existing.time !== '-' ? existing.time : '-');
@@ -662,7 +683,7 @@ export default function App() {
           returnScannedBy: record.returnScannedBy || existing.returnScannedBy,
         };
       }
-      const updated = [newRecord, ...prev.filter((_, idx) => idx !== existingIndex)];
+      const updated = [newRecord, ...validPrev.filter((_, idx) => idx !== existingIndex)];
       // Simpan segera ke antrean/cloud dengan auto-flush cepat (1.5 detik)
       if (newRecord.method === 'QR_SCAN') {
         queueAttendanceScanRecord(updated);
@@ -1185,12 +1206,26 @@ export default function App() {
   };
 
   const handleDeleteTeacher = (id: string) => {
-    const updated = teachers.filter(t => t.id !== id);
-    const { updatedTeachers, updatedClasses } = reconcileTeachersAndClasses(updated, classes);
-    setTeachersState(updatedTeachers);
-    setClassesState(updatedClasses);
-    saveTeachers(updatedTeachers);
-    saveSchoolClasses(updatedClasses);
+    setTeachersState(prev => {
+      const updated = prev.filter(t => t.id !== id);
+      const { updatedTeachers, updatedClasses } = reconcileTeachersAndClasses(updated, classes);
+      setClassesState(updatedClasses);
+      saveTeachers(updatedTeachers, true);
+      saveSchoolClasses(updatedClasses);
+      return updatedTeachers;
+    });
+  };
+
+  const handleBatchDeleteTeachers = (ids: string[]) => {
+    const idSet = new Set(ids);
+    setTeachersState(prev => {
+      const updated = prev.filter(t => !idSet.has(t.id));
+      const { updatedTeachers, updatedClasses } = reconcileTeachersAndClasses(updated, classes);
+      setClassesState(updatedClasses);
+      saveTeachers(updatedTeachers, true);
+      saveSchoolClasses(updatedClasses);
+      return updatedTeachers;
+    });
   };
 
   // Character Traits Catalog Handlers
@@ -1428,6 +1463,7 @@ export default function App() {
               onAddTeacher={handleAddTeacher}
               onUpdateTeacher={handleUpdateTeacher}
               onDeleteTeacher={handleDeleteTeacher}
+              onBatchDeleteTeachers={handleBatchDeleteTeachers}
               onImportTeachers={handleImportTeachers}
             />
           )}

@@ -13,7 +13,7 @@ import {
   INITIAL_LESSON_PERIODS,
   INITIAL_CLASS_SCHEDULES
 } from '../data/mockData';
-import { db, doc, setDoc, getDoc, onSnapshot } from './firebase';
+import { db, doc, setDoc, getDoc, deleteDoc, onSnapshot } from './firebase';
 import firebaseConfigData from '../../firebase-applet-config.json';
 
 export const KEYS = {
@@ -212,32 +212,107 @@ export function handleFirestoreError(err: any): void {
 }
 
 /**
+ * Memvalidasi apakah suatu objek adalah catatan presensi siswa yang valid:
+ * - Memiliki studentId (string tidak kosong)
+ * - Format tanggal ISO YYYY-MM-DD (menolak record rusak seperti date: 'ALPA')
+ * - Bukan data sampah autoalpa
+ */
+export function isValidAttendanceRecord(rec: any): boolean {
+  if (!rec || typeof rec !== 'object') return false;
+  if (!rec.studentId || typeof rec.studentId !== 'string' || !rec.studentId.trim()) return false;
+  if (!rec.date || typeof rec.date !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(rec.date.trim())) return false;
+  if (
+    rec.id?.startsWith('att-autoalpa-') ||
+    rec.scannedBy?.includes('Sistem Otomatis (Batas Alpa)') ||
+    rec.notes?.includes('Otomatis Alpa')
+  ) {
+    return false;
+  }
+  return true;
+}
+
+/**
+ * Membersihkan, memvalidasi, mendeduplikasi, dan mengurutkan riwayat presensi siswa
+ */
+export function validateAndSanitizeAttendanceRecords(records: any[]): AttendanceRecord[] {
+  if (!Array.isArray(records)) return [];
+  const cleanList: AttendanceRecord[] = [];
+  const seenKeys = new Set<string>();
+
+  for (let i = 0; i < records.length; i++) {
+    const r = records[i];
+    if (!isValidAttendanceRecord(r)) continue;
+
+    const dedupeKey = r.id ? `id_${r.id}` : `${r.date}__${r.studentId}`;
+    if (seenKeys.has(dedupeKey)) continue;
+    seenKeys.add(dedupeKey);
+
+    const cleanRecord: AttendanceRecord = {
+      id: r.id || `att-${Date.now()}-${r.studentId}`,
+      studentId: String(r.studentId).trim(),
+      studentName: String(r.studentName || 'Siswa').trim(),
+      nisn: String(r.nisn || '').trim(),
+      className: String(r.className || '').trim(),
+      date: String(r.date).trim(),
+      time: (r.time && r.time !== '-') ? String(r.time).trim() : '-',
+      status: r.status || 'HADIR',
+      method: r.method || 'QR_SCAN',
+      scannedBy: r.scannedBy || 'Pos Scanner Utama',
+      parentNotified: Boolean(r.parentNotified),
+    };
+
+    if (r.returnTime && r.returnTime !== '-') cleanRecord.returnTime = String(r.returnTime).trim();
+    if (r.returnStatus) cleanRecord.returnStatus = r.returnStatus;
+    if (r.returnScannedBy) cleanRecord.returnScannedBy = String(r.returnScannedBy).trim();
+    if (r.notes) cleanRecord.notes = String(r.notes).trim();
+    if (r.waLogId) cleanRecord.waLogId = String(r.waLogId).trim();
+
+    cleanList.push(cleanRecord);
+  }
+
+  // Urutkan berdasarkan tanggal terbaru (descending), lalu jam (descending)
+  return cleanList.sort((a, b) => {
+    const dComp = (b.date || '').localeCompare(a.date || '');
+    if (dComp !== 0) return dComp;
+    return (b.time || '').localeCompare(a.time || '');
+  });
+}
+
+/**
  * Safe LocalStorage setter that gracefully catches QuotaExceededError,
  * compacts attendance records, and removes stale temporary cache without crashing.
  */
 export function safeSetLocalStorage(key: string, value: string): void {
   if (typeof window === 'undefined') return;
-  // Selalu perbarui cadangan aman sekunder jika data presensi berisi riwayat aktif (mencegah data terhapus/hilang)
+
+  let valueToStore = value;
+
+  // Selalu validasi & bersihkan data presensi sebelum disimpan ke LocalStorage & cadangan aman
   if (key === KEYS.ATTENDANCE) {
     try {
       const records = JSON.parse(value);
-      if (Array.isArray(records) && records.length > 0) {
-        localStorage.setItem(SAFE_ATTENDANCE_BACKUP_KEY, value);
+      if (Array.isArray(records)) {
+        const clean = validateAndSanitizeAttendanceRecords(records);
+        valueToStore = JSON.stringify(clean);
+        if (clean.length > 0) {
+          localStorage.setItem(SAFE_ATTENDANCE_BACKUP_KEY, valueToStore);
+        }
       }
     } catch {}
   }
+
   try {
-    localStorage.setItem(key, value);
+    localStorage.setItem(key, valueToStore);
   } catch (err: any) {
     console.warn(`[Storage Quota Warning] LocalStorage penuh saat menyimpan ${key}. Mengoptimalkan data...`);
     
-    // 1. If key is ATTENDANCE, compact & trim older history to avoid crash
+    // 1. If key is ATTENDANCE, compact & trim older history with guaranteed real-date priority
     if (key === KEYS.ATTENDANCE) {
       try {
-        const records = JSON.parse(value);
+        const records = JSON.parse(valueToStore);
         if (Array.isArray(records)) {
-          // Compact fields
-          const compacted = records.map((r: any) => {
+          const clean = validateAndSanitizeAttendanceRecords(records);
+          const compacted = clean.map((r: any) => {
             const item: any = {
               id: r.id,
               studentId: r.studentId,
@@ -262,9 +337,13 @@ export function safeSetLocalStorage(key: string, value: string): void {
             localStorage.setItem(key, compStr);
             return;
           } catch {
-            // Keep the most recent 1,200 records (covers ample school days of 431 active students)
-            compacted.sort((a: any, b: any) => (b.date || '').localeCompare(a.date || ''));
-            const recent = compacted.slice(0, 1200);
+            // Keep the most recent 1,500 real records (strictly sorted by valid date)
+            compacted.sort((a: any, b: any) => {
+              const dComp = (b.date || '').localeCompare(a.date || '');
+              if (dComp !== 0) return dComp;
+              return (b.time || '').localeCompare(a.time || '');
+            });
+            const recent = compacted.slice(0, 1500);
             compStr = JSON.stringify(recent);
             localStorage.setItem(key, compStr);
             return;
@@ -279,7 +358,7 @@ export function safeSetLocalStorage(key: string, value: string): void {
     try {
       const keysToClear = ['sihadir_temp_cache', 'sihadir_cached_export', 'sihadir_wa_queue'];
       keysToClear.forEach(k => localStorage.removeItem(k));
-      localStorage.setItem(key, value);
+      localStorage.setItem(key, valueToStore);
     } catch {
       console.warn(`[Storage Quota Warning] Tidak dapat menulis ${key} ke LocalStorage (kuota penuh).`);
     }
@@ -297,6 +376,10 @@ async function performSingleDocWrite(key: string, dataStr: string, timestamp: nu
       isChunked: false,
       totalChunks: 1,
     });
+    // Hapus sisa pecahan chunk jika dokumen sebelumnya pernah terpecah
+    for (let i = 1; i <= 10; i++) {
+      deleteDoc(doc(db, 'sihadir_app_data', `${key}_chunk_${i}`)).catch(() => {});
+    }
   } else {
     // Multi-chunk document sharding
     const numChunks = Math.ceil(totalLength / FIRESTORE_MAX_CHUNK_SIZE);
@@ -332,6 +415,17 @@ export async function writeCloudDocument(key: string, dataStr: string, timestamp
     return;
   }
 
+  let sanitizedDataStr = dataStr;
+  if (key === KEYS.ATTENDANCE) {
+    try {
+      const parsed = JSON.parse(dataStr);
+      if (Array.isArray(parsed)) {
+        const clean = validateAndSanitizeAttendanceRecords(parsed);
+        sanitizedDataStr = JSON.stringify(clean);
+      }
+    } catch {}
+  }
+
   // If currently in a brief backoff window due to client queue pressure, wait briefly
   if (Date.now() < writeBackoffUntil) {
     const waitMs = Math.min(writeBackoffUntil - Date.now(), 3000);
@@ -342,13 +436,13 @@ export async function writeCloudDocument(key: string, dataStr: string, timestamp
   // If a write for this key is already running, coalesce:
   // Update the pending payload and return. The running loop will commit this latest version.
   if (inFlightKeys.has(key)) {
-    pendingWritesByKey.set(key, { dataStr, timestamp });
+    pendingWritesByKey.set(key, { dataStr: sanitizedDataStr, timestamp });
     return;
   }
 
   inFlightKeys.add(key);
   try {
-    let currentPayload: { dataStr: string; timestamp: number } | undefined = { dataStr, timestamp };
+    let currentPayload: { dataStr: string; timestamp: number } | undefined = { dataStr: sanitizedDataStr, timestamp };
 
     while (currentPayload) {
       if (isFirestoreQuotaExceeded()) break;
@@ -428,7 +522,17 @@ export async function readCloudDocument(key: string): Promise<{ data: string; up
 export function syncToCloud(key: string, data: any, instant: boolean = false, explicitTimestamp?: number) {
   if (typeof window === 'undefined') return;
 
-  const dataStr = typeof data === 'string' ? data : JSON.stringify(data);
+  let finalData = data;
+  if (key === KEYS.ATTENDANCE) {
+    try {
+      const records = typeof data === 'string' ? JSON.parse(data) : data;
+      if (Array.isArray(records)) {
+        finalData = validateAndSanitizeAttendanceRecords(records);
+      }
+    } catch {}
+  }
+
+  const dataStr = typeof finalData === 'string' ? finalData : JSON.stringify(finalData);
   
   // Skip if data is identical to what is already stored in cloud
   if (lastSavedStringCache[key] === dataStr) {
@@ -685,18 +789,56 @@ export async function sanitizeAndCompressStudentPhotos(students: Student[]): Pro
   return hasChanges ? updated : students;
 }
 
+export const DEMO_STUDENT_IDS = new Set([
+  'std-001', 'std-002', 'std-003', 'std-004',
+  'std-005', 'std-006', 'std-007', 'std-008',
+  'std-009', 'std-010', 'std-011', 'std-012'
+]);
+
+export const DEMO_STUDENT_NISNS = new Set([
+  '0081234561', '0081234562', '0081234563', '0081234564',
+  '0081234565', '0081234566', '0081234567', '0081234568',
+  '0081234569', '0081234570', '0081234571', '0081234572'
+]);
+
+export const DEMO_TEACHER_IDS = new Set([
+  'tch-001', 'tch-002', 'tch-003', 'tch-004',
+  'tch-005', 'tch-006', 'tch-007', 'tch-008'
+]);
+
+export const DEMO_TEACHER_NIPS = new Set([
+  '19850312 201001 2 015',
+  '19790820 200501 1 008',
+  '19881105 201402 2 009',
+  '19910403 201903 1 011',
+  '19830218 200902 2 004',
+  '19820514 200801 2 006',
+  '19900210 201801 1 003',
+  '19870615 201101 1 005'
+]);
+
+export const DEMO_DATA_CLEARED_KEY = 'sihadir_demo_data_cleared';
+
 // Intelligent entity mergers to ensure no data is lost across multiple devices
 export function mergeStudentLists(local: Student[], cloud: Student[]): Student[] {
+  const isDemo = (s: Student) => DEMO_STUDENT_IDS.has(s.id) || (!!s.nisn && DEMO_STUDENT_NISNS.has(s.nisn.trim()));
+  const hasRealStudents = local.some(s => !isDemo(s)) || cloud.some(s => !isDemo(s));
+  const isDemoCleared = (typeof window !== 'undefined' && localStorage.getItem(DEMO_DATA_CLEARED_KEY) === 'true') || hasRealStudents;
+
+  // Once real students exist in local or cloud, demo students must never be preserved or resurrected!
+  const effectiveCloud = isDemoCleared ? cloud.filter(s => !isDemo(s)) : cloud;
+  const effectiveLocal = isDemoCleared ? local.filter(s => !isDemo(s)) : local;
+
   const map = new Map<string, Student>();
   
   // 1. Index cloud items
-  cloud.forEach(s => {
+  effectiveCloud.forEach(s => {
     const key = (s.nisn && s.nisn.trim()) || (s.nis && s.nis.trim()) || s.id;
     if (key) map.set(key, { ...s });
   });
 
   // 2. Merge local items
-  local.forEach(localItem => {
+  effectiveLocal.forEach(localItem => {
     const key = (localItem.nisn && localItem.nisn.trim()) || (localItem.nis && localItem.nis.trim()) || localItem.id;
     if (!key) return;
 
@@ -762,16 +904,24 @@ export function mergeClassLists(local: SchoolClass[], cloud: SchoolClass[]): Sch
 }
 
 export function mergeTeacherLists(local: Teacher[], cloud: Teacher[]): Teacher[] {
+  const isDemoTeacher = (t: Teacher) => DEMO_TEACHER_IDS.has(t.id) || (!!t.nip && DEMO_TEACHER_NIPS.has(t.nip.trim()));
+  const hasRealTeachers = local.some(t => !isDemoTeacher(t)) || cloud.some(t => !isDemoTeacher(t));
+  const isDemoCleared = (typeof window !== 'undefined' && localStorage.getItem(DEMO_DATA_CLEARED_KEY) === 'true') || hasRealTeachers;
+
+  // Once real teachers exist in local or cloud, demo teachers must never be preserved or resurrected!
+  const effectiveCloud = isDemoCleared ? cloud.filter(t => !isDemoTeacher(t)) : cloud;
+  const effectiveLocal = isDemoCleared ? local.filter(t => !isDemoTeacher(t)) : local;
+
   const map = new Map<string, Teacher>();
   
   // 1. Index cloud teachers
-  cloud.forEach(t => {
+  effectiveCloud.forEach(t => {
     const key = (t.nip && t.nip.trim()) || t.id;
     if (key) map.set(key, { ...t });
   });
 
   // 2. Merge local teachers preserving custom passwords & photos across devices
-  local.forEach(localItem => {
+  effectiveLocal.forEach(localItem => {
     const key = (localItem.nip && localItem.nip.trim()) || localItem.id;
     if (!key) return;
 
@@ -932,6 +1082,12 @@ export function isRealAttendance(rec?: AttendanceRecord | null): boolean {
 }
 
 export function mergeAttendanceLists(local: AttendanceRecord[], cloud: AttendanceRecord[]): AttendanceRecord[] {
+  const cleanLocal = validateAndSanitizeAttendanceRecords(local);
+  const cleanCloud = validateAndSanitizeAttendanceRecords(cloud);
+
+  if (cleanLocal.length === 0) return cleanCloud;
+  if (cleanCloud.length === 0) return cleanLocal;
+
   const getValidEntryTime = (t1?: string, t2?: string): string => {
     if (t1 && t1 !== '-' && t1.trim()) return t1;
     if (t2 && t2 !== '-' && t2.trim()) return t2;
@@ -1031,8 +1187,8 @@ export function mergeAttendanceLists(local: AttendanceRecord[], cloud: Attendanc
   };
 
   // 1. Add all local records (O(N))
-  for (let i = 0; i < local.length; i++) {
-    const a = local[i];
+  for (let i = 0; i < cleanLocal.length; i++) {
+    const a = cleanLocal[i];
     if (!a) continue;
     const idx = findIndexForRecord(a);
     if (idx >= 0) {
@@ -1046,8 +1202,8 @@ export function mergeAttendanceLists(local: AttendanceRecord[], cloud: Attendanc
   }
 
   // 2. Merge cloud records (O(M))
-  for (let i = 0; i < cloud.length; i++) {
-    const cloudRec = cloud[i];
+  for (let i = 0; i < cleanCloud.length; i++) {
+    const cloudRec = cleanCloud[i];
     if (!cloudRec) continue;
     const idx = findIndexForRecord(cloudRec);
     if (idx >= 0) {
@@ -1060,7 +1216,7 @@ export function mergeAttendanceLists(local: AttendanceRecord[], cloud: Attendanc
     }
   }
 
-  return recordsList.sort((a, b) => (b.date + (b.time || '')).localeCompare(a.date + (a.time || '')));
+  return validateAndSanitizeAttendanceRecords(recordsList);
 }
 
 export function mergeGenericListsById<T extends { id: string }>(local: T[], cloud: T[]): T[] {
@@ -1242,12 +1398,18 @@ export async function smartSyncAndMergeAllWithCloud(): Promise<{ success: boolea
     let cloudAtt: AttendanceRecord[] = [];
     if (attCloud && attCloud.data) {
       try {
-        cloudAtt = JSON.parse(attCloud.data);
-      } catch {}
+        const parsed = JSON.parse(attCloud.data);
+        if (Array.isArray(parsed)) {
+          cloudAtt = validateAndSanitizeAttendanceRecords(parsed);
+        }
+      } catch (e) {
+        console.warn('[Sync] Attendance cloud parse error:', e);
+      }
     }
     const currentLocalAtt = getAttendanceRecords();
     const mergedAtt = mergeAttendanceLists(currentLocalAtt, cloudAtt);
-    const attJsonStr = JSON.stringify(mergedAtt);
+    const cleanMergedAtt = validateAndSanitizeAttendanceRecords(mergedAtt);
+    const attJsonStr = JSON.stringify(cleanMergedAtt);
     safeSetLocalStorage(KEYS.ATTENDANCE, attJsonStr);
     safeSetLocalStorage(KEYS.ATTENDANCE + '_updatedAt', String(now));
 
@@ -1552,28 +1714,24 @@ export async function forceDownloadAllFromCloud(): Promise<{ success: boolean; e
           }
         } else if (key === KEYS.ATTENDANCE) {
           try {
-            const cloudAtt = JSON.parse(cloudDoc.data);
-            if (Array.isArray(cloudAtt)) {
+            const parsed = JSON.parse(cloudDoc.data);
+            if (Array.isArray(parsed)) {
+              const cleanCloud = validateAndSanitizeAttendanceRecords(parsed);
               const localAtt = getAttendanceRecords();
-              if (cloudAtt.length === 0 && localAtt.length > 0) {
+              if (cleanCloud.length === 0 && localAtt.length > 0) {
                 writeCloudDocument(key, JSON.stringify(localAtt), Date.now());
                 lastSavedStringCache[key] = JSON.stringify(localAtt);
               } else {
-                const mergedAtt = mergeAttendanceLists(localAtt, cloudAtt);
-                const mergedStr = JSON.stringify(mergedAtt);
-                localStorage.setItem(key, mergedStr);
-                localStorage.setItem(key + '_updatedAt', String(cloudDoc.updatedAt || Date.now()));
+                const mergedAtt = mergeAttendanceLists(localAtt, cleanCloud);
+                const cleanMerged = validateAndSanitizeAttendanceRecords(mergedAtt);
+                const mergedStr = JSON.stringify(cleanMerged);
+                safeSetLocalStorage(key, mergedStr);
+                safeSetLocalStorage(key + '_updatedAt', String(cloudDoc.updatedAt || Date.now()));
                 lastSavedStringCache[key] = mergedStr;
               }
-            } else {
-              localStorage.setItem(key, cloudDoc.data);
-              localStorage.setItem(key + '_updatedAt', String(cloudDoc.updatedAt || Date.now()));
-              lastSavedStringCache[key] = cloudDoc.data;
             }
-          } catch {
-            localStorage.setItem(key, cloudDoc.data);
-            localStorage.setItem(key + '_updatedAt', String(cloudDoc.updatedAt || Date.now()));
-            lastSavedStringCache[key] = cloudDoc.data;
+          } catch (e) {
+            console.warn('[Storage] Gagal memuat attendance records dari cloud:', e);
           }
         } else {
           localStorage.setItem(key, cloudDoc.data);
@@ -1760,17 +1918,22 @@ export function initFirestoreRealtimeSync() {
                 const cloudAtt = typeof finalDataToSave === 'string' ? JSON.parse(finalDataToSave) : finalDataToSave;
                 if (Array.isArray(cloudAtt)) {
                   const currentLocalAtt = getAttendanceRecords();
+                  const cleanCloudAtt = validateAndSanitizeAttendanceRecords(cloudAtt);
+                  
                   // PERLINDUNGAN KRUSIAL: Jika Cloud kosong tapi lokal memiliki data riwayat presensi/scan,
                   // JANGAN PERNAH menimpa data lokal dengan array kosong! Sebaliknya unggah ke Cloud Firestore!
-                  if (cloudAtt.length === 0 && currentLocalAtt.length > 0) {
+                  if (cleanCloudAtt.length === 0 && currentLocalAtt.length > 0) {
                     console.log('[Firestore Sync] Cloud attendance kosong tapi lokal ada data. Menyimpan data lokal dan mengunggah ke Cloud Blaze.');
                     writeCloudDocument(key, JSON.stringify(currentLocalAtt), Date.now());
                     lastSavedStringCache[key] = JSON.stringify(currentLocalAtt);
                     setCloudSyncStatus('connected');
                     return;
                   }
-                  const mergedAtt = mergeAttendanceLists(currentLocalAtt, cloudAtt);
-                  const mergedStr = JSON.stringify(mergedAtt);
+                  
+                  const mergedAtt = mergeAttendanceLists(currentLocalAtt, cleanCloudAtt);
+                  const cleanMergedAtt = validateAndSanitizeAttendanceRecords(mergedAtt);
+                  const mergedStr = JSON.stringify(cleanMergedAtt);
+                  
                   if (currentLocalStr !== mergedStr) {
                     lastSavedStringCache[key] = mergedStr;
                     safeSetLocalStorage(key, mergedStr);
@@ -1781,8 +1944,11 @@ export function initFirestoreRealtimeSync() {
                   return;
                 }
               } catch (e) {
-                console.warn('[Firestore Sync] Error updating attendance data:', e);
+                console.warn('[Firestore Sync] Error updating attendance data dari Cloud, mempertahankan data lokal:', e);
               }
+              // PERLINDUNGAN UTAMA: Jangan pernah biarkan data presensi lolos ke fallback bawah
+              // yang berpotensi menyimpan string rusak ke LocalStorage
+              return;
             }
 
             // SPECIAL SCHOOL PROFILE SYNC:
@@ -2043,13 +2209,25 @@ export function saveSchoolClasses(classes: SchoolClass[]): void {
 export function getStudents(): Student[] {
   const data = localStorage.getItem(KEYS.STUDENTS);
   if (data === null) {
+    if (typeof window !== 'undefined' && localStorage.getItem(DEMO_DATA_CLEARED_KEY) === 'true') {
+      safeSetLocalStorage(KEYS.STUDENTS, JSON.stringify([]));
+      safeSetLocalStorage(KEYS.STUDENTS + '_updatedAt', '1');
+      return [];
+    }
     safeSetLocalStorage(KEYS.STUDENTS, JSON.stringify(INITIAL_STUDENTS));
     safeSetLocalStorage(KEYS.STUDENTS + '_updatedAt', '1');
     return INITIAL_STUDENTS;
   }
   try {
     const parsed = JSON.parse(data);
-    return Array.isArray(parsed) ? parsed : [];
+    if (!Array.isArray(parsed)) return [];
+    const isDemo = (s: Student) => DEMO_STUDENT_IDS.has(s.id) || (!!s.nisn && DEMO_STUDENT_NISNS.has(s.nisn.trim()));
+    if (parsed.some(s => !isDemo(s)) && parsed.some(isDemo)) {
+      const cleaned = parsed.filter(s => !isDemo(s));
+      safeSetLocalStorage(KEYS.STUDENTS, JSON.stringify(cleaned));
+      return cleaned;
+    }
+    return parsed;
   } catch {
     return [];
   }
@@ -2069,6 +2247,7 @@ export function deleteAllStudents(): void {
 }
 
 export function getAttendanceRecords(): AttendanceRecord[] {
+  if (typeof window === 'undefined') return [];
   const data = localStorage.getItem(KEYS.ATTENDANCE);
   if (data === null) {
     // Cek cadangan aman terlebih dahulu jika localStorage pernah terhapus
@@ -2076,39 +2255,72 @@ export function getAttendanceRecords(): AttendanceRecord[] {
       const backup = localStorage.getItem(SAFE_ATTENDANCE_BACKUP_KEY);
       if (backup) {
         const parsedBackup = JSON.parse(backup);
-        if (Array.isArray(parsedBackup) && parsedBackup.length > 0) {
-          safeSetLocalStorage(KEYS.ATTENDANCE, backup);
+        const validBackup = validateAndSanitizeAttendanceRecords(parsedBackup);
+        if (validBackup.length > 0) {
+          const str = JSON.stringify(validBackup);
+          safeSetLocalStorage(KEYS.ATTENDANCE, str);
           safeSetLocalStorage(KEYS.ATTENDANCE + '_updatedAt', String(Date.now()));
-          return parsedBackup;
+          return validBackup;
         }
       }
     } catch {}
 
     const initial = generateInitialAttendanceHistory(INITIAL_STUDENTS);
-    safeSetLocalStorage(KEYS.ATTENDANCE, JSON.stringify(initial));
+    const validInitial = validateAndSanitizeAttendanceRecords(initial);
+    safeSetLocalStorage(KEYS.ATTENDANCE, JSON.stringify(validInitial));
     safeSetLocalStorage(KEYS.ATTENDANCE + '_updatedAt', '1');
-    return initial;
+    return validInitial;
   }
   try {
     const parsed = JSON.parse(data);
     if (Array.isArray(parsed)) {
-      if (parsed.length === 0) {
-        // Jika data kosong, selamatkan dari cadangan aman jika tersedia
+      const sanitized = validateAndSanitizeAttendanceRecords(parsed);
+      // Jika ada data rusak yang dibersihkan, perbarui LocalStorage agar tetap bersih
+      if (sanitized.length !== parsed.length) {
+        const cleanStr = JSON.stringify(sanitized);
         try {
-          const backup = localStorage.getItem(SAFE_ATTENDANCE_BACKUP_KEY);
-          if (backup) {
-            const parsedBackup = JSON.parse(backup);
-            if (Array.isArray(parsedBackup) && parsedBackup.length > 0) {
-              safeSetLocalStorage(KEYS.ATTENDANCE, backup);
-              return parsedBackup;
-            }
+          localStorage.setItem(KEYS.ATTENDANCE, cleanStr);
+          if (sanitized.length > 0) {
+            localStorage.setItem(SAFE_ATTENDANCE_BACKUP_KEY, cleanStr);
           }
         } catch {}
       }
-      return parsed;
+
+      if (sanitized.length > 0) {
+        return sanitized;
+      }
+
+      // Jika data kosong, selamatkan dari cadangan aman jika tersedia
+      try {
+        const backup = localStorage.getItem(SAFE_ATTENDANCE_BACKUP_KEY);
+        if (backup) {
+          const parsedBackup = JSON.parse(backup);
+          const validBackup = validateAndSanitizeAttendanceRecords(parsedBackup);
+          if (validBackup.length > 0) {
+            const cleanStr = JSON.stringify(validBackup);
+            safeSetLocalStorage(KEYS.ATTENDANCE, cleanStr);
+            return validBackup;
+          }
+        }
+      } catch {}
+
+      return [];
     }
     return [];
-  } catch {
+  } catch (err) {
+    console.warn('[Storage] Gagal parse attendance records, memulihkan dari cadangan aman:', err);
+    try {
+      const backup = localStorage.getItem(SAFE_ATTENDANCE_BACKUP_KEY);
+      if (backup) {
+        const parsedBackup = JSON.parse(backup);
+        const validBackup = validateAndSanitizeAttendanceRecords(parsedBackup);
+        if (validBackup.length > 0) {
+          const cleanStr = JSON.stringify(validBackup);
+          safeSetLocalStorage(KEYS.ATTENDANCE, cleanStr);
+          return validBackup;
+        }
+      }
+    } catch {}
     return [];
   }
 }
@@ -2188,62 +2400,27 @@ export async function flushAttendanceScanQueue(force: boolean = false): Promise<
 }
 
 /**
- * Menyimpan hasil scan QR dengan sistem Worker Batching:
- * 1. Simpan segera ke localStorage lokal (zero-delay bagi layar kamera & audio beep)
- * 2. Tambah antrean pending
- * 3. Jika antrean mencapai 25 siswa -> langsung kirim ke Cloud Firestore
- * 4. Jika antrean belum mencapai 25 siswa -> antrean di-buffer dengan timer 20 detik (idle timer)
+ * Menyimpan hasil scan QR secara real-time dan aman:
+ * 1. Sanitasi dan validasi data agar tidak ada record rusak/hilang
+ * 2. Simpan segera ke localStorage lokal & backup aman (zero-delay bagi layar kamera & audio beep)
+ * 3. Sinkronkan langsung ke Cloud Firestore tanpa resiko data hilang saat refresh/pindah menu
  */
 export function queueAttendanceScanRecord(records: AttendanceRecord[]): void {
+  const cleanRecords = validateAndSanitizeAttendanceRecords(records);
   const now = Date.now();
-  const dataStr = JSON.stringify(records);
+  const dataStr = JSON.stringify(cleanRecords);
   
-  // 1. Simpan segera ke penyimpanan lokal (Zero-delay untuk UI & feedback audio)
+  // 1. Simpan segera ke penyimpanan lokal & backup aman (Zero-delay untuk UI & feedback audio)
   safeSetLocalStorage(KEYS.ATTENDANCE, dataStr);
   safeSetLocalStorage(KEYS.ATTENDANCE + '_updatedAt', String(now));
   notifyStorageUpdated();
 
-  // 2. Tambah jumlah antrean scan pending
+  // 2. Tambah jumlah antrean scan pending untuk status UI
   scanQueuePendingCount += 1;
+  notifyScanQueueChanged();
 
-  // 3. Evaluasi kondisi Batching Worker
-  if (scanQueuePendingCount >= SCAN_BATCH_THRESHOLD) {
-    // KONDISI A: Kuota batch 25 siswa terpenuhi -> langsung flush ke Cloud
-    flushAttendanceScanQueue(true);
-  } else {
-    // KONDISI B: Masih di bawah 25 siswa -> reset timer idle 20 detik
-    if (scanQueueIdleTimer) {
-      clearTimeout(scanQueueIdleTimer);
-      scanQueueIdleTimer = null;
-    }
-    if (scanQueueCountdownTimer) {
-      clearInterval(scanQueueCountdownTimer);
-      scanQueueCountdownTimer = null;
-    }
-
-    scanQueueCountdownSeconds = Math.round(SCAN_IDLE_TIMEOUT_MS / 1000);
-    notifyScanQueueChanged();
-
-    // Countdown per detik untuk tampilan UI
-    scanQueueCountdownTimer = setInterval(() => {
-      if (scanQueueCountdownSeconds > 1) {
-        scanQueueCountdownSeconds -= 1;
-        notifyScanQueueChanged();
-      } else {
-        if (scanQueueCountdownTimer) {
-          clearInterval(scanQueueCountdownTimer);
-          scanQueueCountdownTimer = null;
-        }
-      }
-    }, 1000);
-
-    // Timer idle 20 detik untuk auto-flush
-    scanQueueIdleTimer = setTimeout(() => {
-      if (scanQueuePendingCount > 0) {
-        flushAttendanceScanQueue(true);
-      }
-    }, SCAN_IDLE_TIMEOUT_MS);
-  }
+  // 3. Langsung sinkronkan ke Cloud Firestore (instant write) agar hasil scan tidak pernah hilang
+  syncToCloud(KEYS.ATTENDANCE, cleanRecords, true, now);
 }
 
 if (typeof window !== 'undefined') {
@@ -2267,18 +2444,22 @@ export function saveAttendanceRecords(records: AttendanceRecord[], instant: bool
   scanQueueCountdownSeconds = 0;
   notifyScanQueueChanged();
 
+  const cleanRecords = validateAndSanitizeAttendanceRecords(records);
   const now = Date.now();
-  const dataStr = JSON.stringify(records);
+  const dataStr = JSON.stringify(cleanRecords);
   safeSetLocalStorage(KEYS.ATTENDANCE, dataStr);
   safeSetLocalStorage(KEYS.ATTENDANCE + '_updatedAt', String(now));
   notifyStorageUpdated();
-  syncToCloud(KEYS.ATTENDANCE, records, instant, now);
+  syncToCloud(KEYS.ATTENDANCE, cleanRecords, instant, now);
 }
 
 // Local-only save for automatic ALPA calculation so local device NEVER overwrites real Cloud scans
 export function saveAttendanceRecordsLocally(records: AttendanceRecord[]): void {
-  const dataStr = JSON.stringify(records);
+  const cleanRecords = validateAndSanitizeAttendanceRecords(records);
+  const now = Date.now();
+  const dataStr = JSON.stringify(cleanRecords);
   safeSetLocalStorage(KEYS.ATTENDANCE, dataStr);
+  safeSetLocalStorage(KEYS.ATTENDANCE + '_updatedAt', String(now));
   notifyStorageUpdated();
 }
 
@@ -2332,13 +2513,25 @@ export function saveWaLogs(logs: WhatsAppLog[]): void {
 export function getTeachers(): Teacher[] {
   const data = localStorage.getItem(KEYS.TEACHERS);
   if (data === null) {
+    if (typeof window !== 'undefined' && localStorage.getItem(DEMO_DATA_CLEARED_KEY) === 'true') {
+      safeSetLocalStorage(KEYS.TEACHERS, JSON.stringify([]));
+      safeSetLocalStorage(KEYS.TEACHERS + '_updatedAt', '1');
+      return [];
+    }
     safeSetLocalStorage(KEYS.TEACHERS, JSON.stringify(INITIAL_TEACHERS));
     safeSetLocalStorage(KEYS.TEACHERS + '_updatedAt', '1');
     return INITIAL_TEACHERS;
   }
   try {
     const parsed = JSON.parse(data);
-    return Array.isArray(parsed) ? parsed : [];
+    if (!Array.isArray(parsed)) return [];
+    const isDemoTeacher = (t: Teacher) => DEMO_TEACHER_IDS.has(t.id) || (!!t.nip && DEMO_TEACHER_NIPS.has(t.nip.trim()));
+    if (parsed.some(t => !isDemoTeacher(t)) && parsed.some(isDemoTeacher)) {
+      const cleaned = parsed.filter(t => !isDemoTeacher(t));
+      safeSetLocalStorage(KEYS.TEACHERS, JSON.stringify(cleaned));
+      return cleaned;
+    }
+    return parsed;
   } catch {
     return [];
   }

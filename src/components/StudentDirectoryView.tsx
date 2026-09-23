@@ -252,6 +252,9 @@ export const StudentDirectoryView: React.FC<StudentDirectoryViewProps> = ({
     }
 
     if (window.confirm(`Hapus permanen ${demoStudentIds.length} data siswa contoh bawaan demo? Data siswa asli Anda (beserta foto yang diupload) akan tetap aman.`)) {
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('sihadir_demo_data_cleared', 'true');
+      }
       if (onBatchDeleteStudents) {
         onBatchDeleteStudents(demoStudentIds);
       } else {

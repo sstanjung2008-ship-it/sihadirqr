@@ -41,6 +41,7 @@ interface TeacherDirectoryViewProps {
   onAddTeacher: (teacher: Omit<Teacher, 'id'>) => void;
   onUpdateTeacher: (teacher: Teacher) => void;
   onDeleteTeacher: (id: string) => void;
+  onBatchDeleteTeachers?: (ids: string[]) => void;
   onImportTeachers?: (newTeachers: Teacher[]) => void;
 }
 
@@ -67,6 +68,7 @@ export const TeacherDirectoryView: React.FC<TeacherDirectoryViewProps> = ({
   onAddTeacher,
   onUpdateTeacher,
   onDeleteTeacher,
+  onBatchDeleteTeachers,
   onImportTeachers,
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
@@ -119,7 +121,14 @@ export const TeacherDirectoryView: React.FC<TeacherDirectoryViewProps> = ({
     }
 
     if (window.confirm(`Hapus permanen ${demoTeacherIds.length} data guru contoh bawaan demo? Data guru & TU asli sekolah Anda akan tetap aman 100%.`)) {
-      demoTeacherIds.forEach(id => onDeleteTeacher(id));
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('sihadir_demo_data_cleared', 'true');
+      }
+      if (onBatchDeleteTeachers) {
+        onBatchDeleteTeachers(demoTeacherIds);
+      } else {
+        demoTeacherIds.forEach(id => onDeleteTeacher(id));
+      }
       alert(`Berhasil menghapus permanen ${demoTeacherIds.length} guru demo!`);
     }
   };

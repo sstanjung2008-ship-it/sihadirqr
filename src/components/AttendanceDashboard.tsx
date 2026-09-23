@@ -45,10 +45,12 @@ import {
   BarChart3,
   UserX,
   UserCheck,
-  Trash2
+  Trash2,
+  LogOut
 } from 'lucide-react';
 import { createWhatsAppUrl } from '../lib/exportUtils';
 import { BulkAlpaManagementModal } from './BulkAlpaManagementModal';
+import { BulkReturnManagementModal, BulkReturnUpdatePayload } from './BulkReturnManagementModal';
 import { getLocalDateString } from '../lib/storage';
 
 interface AttendanceDashboardProps {
@@ -74,6 +76,7 @@ interface AttendanceDashboardProps {
     notes?: string;
     existingRecordId?: string;
   }[]) => void;
+  onBulkUpdateReturnStatus?: (updates: BulkReturnUpdatePayload[]) => void;
   currentRole: UserRole;
   selectedChildId?: string;
   learningJournals?: LearningJournal[];
@@ -93,6 +96,7 @@ export const AttendanceDashboard: React.FC<AttendanceDashboardProps> = ({
   onUpdateStatus,
   onDeleteAttendanceRecords,
   onBulkUpdateAttendanceRecords,
+  onBulkUpdateReturnStatus,
   currentRole,
   selectedChildId,
   learningJournals = [],
@@ -120,6 +124,7 @@ export const AttendanceDashboard: React.FC<AttendanceDashboardProps> = ({
   const [editReturnStatus, setEditReturnStatus] = useState<AttendanceRecord['returnStatus']>('PULANG');
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
   const [showBulkAlpaModal, setShowBulkAlpaModal] = useState<boolean>(false);
+  const [showBulkReturnModal, setShowBulkReturnModal] = useState<boolean>(false);
   const [highlightedCharLogId, setHighlightedCharLogId] = useState<string | null>(null);
 
   // Listen to deep linking notification event for PARENT role
@@ -240,6 +245,7 @@ export const AttendanceDashboard: React.FC<AttendanceDashboardProps> = ({
   });
 
   const totalPresent = countHadir + countTerlambat;
+  const countBelumPulang = Math.max(0, totalStudentsCount - countPulang);
   const attendanceRate = totalStudentsCount > 0 ? Math.round((totalPresent / totalStudentsCount) * 100) : 0;
 
   const displayDateFormatted = React.useMemo(() => {
@@ -1126,20 +1132,37 @@ export const AttendanceDashboard: React.FC<AttendanceDashboardProps> = ({
 
               {/* KHUSUS ADMIN: Tombol Ubah Status Masuk Massal */}
               {currentRole === 'ADMIN' && (
-                <button
-                  type="button"
-                  onClick={() => setShowBulkAlpaModal(true)}
-                  className="bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-700 hover:to-violet-700 text-white font-extrabold px-3.5 py-1.5 rounded-xl text-xs flex items-center gap-1.5 transition-all cursor-pointer shadow-sm shadow-indigo-600/25 active:scale-95 shrink-0"
-                  title="Ubah Status Masuk Siswa secara Massal (Khusus Admin)"
-                >
-                  <UserCheck className="w-3.5 h-3.5 text-indigo-200 shrink-0" />
-                  <span>Ubah Status Masuk Massal</span>
-                  {countAlpa > 0 && (
-                    <span className="bg-white text-indigo-700 text-[10px] font-black px-1.5 py-0.2 rounded-full shadow-2xs">
-                      {countAlpa}
-                    </span>
-                  )}
-                </button>
+                <>
+                  <button
+                    type="button"
+                    onClick={() => setShowBulkAlpaModal(true)}
+                    className="bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-700 hover:to-violet-700 text-white font-extrabold px-3.5 py-1.5 rounded-xl text-xs flex items-center gap-1.5 transition-all cursor-pointer shadow-sm shadow-indigo-600/25 active:scale-95 shrink-0"
+                    title="Ubah Status Masuk Siswa secara Massal (Khusus Admin)"
+                  >
+                    <UserCheck className="w-3.5 h-3.5 text-indigo-200 shrink-0" />
+                    <span>Ubah Status Masuk Massal</span>
+                    {countAlpa > 0 && (
+                      <span className="bg-white text-indigo-700 text-[10px] font-black px-1.5 py-0.2 rounded-full shadow-2xs">
+                        {countAlpa}
+                      </span>
+                    )}
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setShowBulkReturnModal(true)}
+                    className="bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white font-extrabold px-3.5 py-1.5 rounded-xl text-xs flex items-center gap-1.5 transition-all cursor-pointer shadow-sm shadow-emerald-600/25 active:scale-95 shrink-0"
+                    title="Ubah Status Pulang Siswa secara Massal (Khusus Admin)"
+                  >
+                    <LogOut className="w-3.5 h-3.5 text-emerald-200 shrink-0" />
+                    <span>Ubah Status Pulang Massal</span>
+                    {countBelumPulang > 0 && (
+                      <span className="bg-white text-emerald-700 text-[10px] font-black px-1.5 py-0.2 rounded-full shadow-2xs">
+                        {countBelumPulang}
+                      </span>
+                    )}
+                  </button>
+                </>
               )}
             </div>
           </div>
@@ -1512,6 +1535,24 @@ export const AttendanceDashboard: React.FC<AttendanceDashboardProps> = ({
           onBulkUpdateStatus={(updates) => {
             if (onBulkUpdateAttendanceRecords) {
               onBulkUpdateAttendanceRecords(updates);
+            }
+          }}
+        />
+      )}
+
+      {/* Modal Kelola & Ubah Status Pulang Massal (Khusus Admin) */}
+      {currentRole === 'ADMIN' && showBulkReturnModal && (
+        <BulkReturnManagementModal
+          isOpen={showBulkReturnModal}
+          onClose={() => setShowBulkReturnModal(false)}
+          students={students}
+          classes={classes}
+          attendanceRecords={attendanceRecords}
+          initialDate={selectedDate}
+          userSession={userSession}
+          onBulkUpdateReturnStatus={(updates) => {
+            if (onBulkUpdateReturnStatus) {
+              onBulkUpdateReturnStatus(updates);
             }
           }}
         />

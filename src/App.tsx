@@ -58,6 +58,7 @@ import { AnalyticsView } from './components/AnalyticsView';
 import { StudentDirectoryView } from './components/StudentDirectoryView';
 import { ClassManagementView } from './components/ClassManagementView';
 import { LeaveRequestView } from './components/LeaveRequestView';
+import { BulkReturnUpdatePayload } from './components/BulkReturnManagementModal';
 import { SchoolSettingsView } from './components/SchoolSettingsView';
 import { RecapExportView } from './components/RecapExportView';
 import { TeacherDirectoryView } from './components/TeacherDirectoryView';
@@ -866,6 +867,66 @@ export default function App() {
     }
   };
 
+  // Bulk update return status (e.g. mark multiple students as Pulang / Pulang Cepat or reset return status)
+  const handleBulkUpdateReturnStatus = (updates: BulkReturnUpdatePayload[]) => {
+    const nowTime = new Date().toTimeString().substring(0, 5);
+
+    setAttendanceRecordsState(prev => {
+      const updated = [...prev];
+
+      updates.forEach(u => {
+        const existingIdx = updated.findIndex(r =>
+          (u.existingRecordId && r.id === u.existingRecordId) ||
+          (r.studentId === u.studentId && r.date === u.date)
+        );
+
+        if (existingIdx >= 0) {
+          if (u.newReturnStatus === 'BELUM_PULANG') {
+            updated[existingIdx] = {
+              ...updated[existingIdx],
+              returnTime: undefined,
+              returnStatus: undefined,
+              returnScannedBy: undefined,
+            };
+          } else {
+            updated[existingIdx] = {
+              ...updated[existingIdx],
+              returnTime: u.newReturnTime || nowTime,
+              returnStatus: u.newReturnStatus,
+              returnScannedBy: userSession?.displayName ? `Admin (${userSession.displayName})` : 'Admin (Update Massal)',
+              notes: u.notes !== undefined ? u.notes : updated[existingIdx].notes,
+            };
+          }
+        } else {
+          // If record does not exist yet for this student on this date:
+          if (u.newReturnStatus !== 'BELUM_PULANG') {
+            const newRecord: AttendanceRecord = {
+              id: `att-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`,
+              studentId: u.studentId,
+              studentName: u.studentName,
+              nisn: u.nisn,
+              className: u.className,
+              date: u.date,
+              time: '-',
+              status: 'HADIR',
+              method: 'MANUAL',
+              scannedBy: userSession?.displayName ? `Admin (${userSession.displayName})` : 'Admin Sekolah',
+              returnTime: u.newReturnTime || nowTime,
+              returnStatus: u.newReturnStatus,
+              returnScannedBy: userSession?.displayName ? `Admin (${userSession.displayName})` : 'Admin (Update Massal)',
+              notes: u.notes,
+              parentNotified: false,
+            };
+            updated.unshift(newRecord);
+          }
+        }
+      });
+
+      saveAttendanceRecords(updated);
+      return updated;
+    });
+  };
+
   // Student CRUD
   const handleAddStudent = (newStudent: Student) => {
     setStudentsState(prev => {
@@ -1306,6 +1367,7 @@ export default function App() {
               onUpdateStatus={handleUpdateAttendanceStatus}
               onDeleteAttendanceRecords={handleDeleteAttendanceRecords}
               onBulkUpdateAttendanceRecords={handleBulkUpdateAttendanceRecords}
+              onBulkUpdateReturnStatus={handleBulkUpdateReturnStatus}
               currentRole={currentRole}
               selectedChildId={effectiveChildId}
               learningJournals={journals}

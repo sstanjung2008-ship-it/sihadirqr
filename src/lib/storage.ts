@@ -365,6 +365,8 @@ export function safeSetLocalStorage(key: string, value: string): void {
   }
 }
 
+const knownChunkedDocs = new Map<string, number>();
+
 async function performSingleDocWrite(key: string, dataStr: string, timestamp: number): Promise<void> {
   const totalLength = dataStr.length;
   if (totalLength <= FIRESTORE_MAX_CHUNK_SIZE) {
@@ -376,13 +378,18 @@ async function performSingleDocWrite(key: string, dataStr: string, timestamp: nu
       isChunked: false,
       totalChunks: 1,
     });
-    // Hapus sisa pecahan chunk jika dokumen sebelumnya pernah terpecah
-    for (let i = 1; i <= 10; i++) {
-      deleteDoc(doc(db, 'sihadir_app_data', `${key}_chunk_${i}`)).catch(() => {});
+    // HANYA hapus pecahan chunk jika dokumen ini sebelumnya memang pernah terpecah (hemat operasi write!)
+    const previousChunks = knownChunkedDocs.get(key) || 0;
+    if (previousChunks > 1) {
+      for (let i = 1; i < previousChunks; i++) {
+        deleteDoc(doc(db, 'sihadir_app_data', `${key}_chunk_${i}`)).catch(() => {});
+      }
+      knownChunkedDocs.delete(key);
     }
   } else {
     // Multi-chunk document sharding
     const numChunks = Math.ceil(totalLength / FIRESTORE_MAX_CHUNK_SIZE);
+    knownChunkedDocs.set(key, numChunks);
     const chunks: string[] = [];
     for (let i = 0; i < numChunks; i++) {
       chunks.push(dataStr.slice(i * FIRESTORE_MAX_CHUNK_SIZE, (i + 1) * FIRESTORE_MAX_CHUNK_SIZE));
@@ -1940,6 +1947,20 @@ export function initFirestoreRealtimeSync() {
                     safeSetLocalStorage(key + '_updatedAt', String(Math.max(cloudUpdatedAt, localUpdatedAt, Date.now())));
                     notifyStorageUpdated();
                   }
+
+                  // PERLINDUNGAN MULTI-DEVICE ANTI-TIMPA (CONCURRENT SCANNING SAFETY):
+                  // HANYA sinkronkan balik ke Cloud jika perangkat ini memiliki antrean scan lokal yang sedang aktif (scanQueuePendingCount > 0)!
+                  // JANGAN sinkronkan balik jika scanQueuePendingCount === 0 untuk mencegah loop ping-pong yang memboroskan kuota!
+                  if (scanQueuePendingCount > 0) {
+                    const hasLocalScansMissingInCloud = cleanMergedAtt.some(m =>
+                      isRealAttendance(m) && !cleanCloudAtt.some(c => c.id === m.id || (c.studentId === m.studentId && c.date === m.date && isRealAttendance(c)))
+                    );
+
+                    if (hasLocalScansMissingInCloud) {
+                      writeCloudDocument(key, mergedStr, Date.now());
+                    }
+                  }
+
                   setCloudSyncStatus('connected');
                   return;
                 }
@@ -2326,10 +2347,10 @@ export function getAttendanceRecords(): AttendanceRecord[] {
 }
 
 // =========================================================================
-// SCAN BATCHING QUEUE WORKER (REAL-TIME CLOUD SYNC)
+// SCAN BATCHING QUEUE WORKER (REAL-TIME CLOUD SYNC & QUOTA SAVER)
 // =========================================================================
-export const SCAN_BATCH_THRESHOLD = 3; // Flush ke cloud jika antrean mencapai 3 siswa
-export const SCAN_IDLE_TIMEOUT_MS = 1500; // Flush ke cloud jika 1.5 detik tanpa scan baru (idle)
+export const SCAN_BATCH_THRESHOLD = 20; // Flush ke cloud jika antrean mencapai 20 siswa
+export const SCAN_IDLE_TIMEOUT_MS = 10000; // Flush ke cloud jika 10 detik tanpa scan baru (idle)
 
 export interface ScanQueueStatus {
   pendingCount: number;
@@ -2345,7 +2366,7 @@ let scanQueueIdleTimer: any = null;
 let scanQueueLastFlushTime = Date.now();
 let isScanQueueFlushing = false;
 let scanQueueCountdownTimer: any = null;
-let scanQueueCountdownSeconds = 2;
+let scanQueueCountdownSeconds = 10;
 
 export function getScanQueueStatus(): ScanQueueStatus {
   return {
@@ -2400,10 +2421,10 @@ export async function flushAttendanceScanQueue(force: boolean = false): Promise<
 }
 
 /**
- * Menyimpan hasil scan QR secara real-time dan aman:
- * 1. Sanitasi dan validasi data agar tidak ada record rusak/hilang
- * 2. Simpan segera ke localStorage lokal & backup aman (zero-delay bagi layar kamera & audio beep)
- * 3. Sinkronkan langsung ke Cloud Firestore tanpa resiko data hilang saat refresh/pindah menu
+ * Menyimpan hasil scan QR secara hemat kuota & berkinerja tinggi:
+ * 1. Simpan segera ke localStorage lokal & backup aman (zero-delay bagi layar kamera & audio beep)
+ * 2. Kumpulkan dalam batch (flush jika mencapai 20 siswa atau idle 10 detik)
+ * 3. Mencegah ribuan write sia-sia ke Firestore Cloud Blaze
  */
 export function queueAttendanceScanRecord(records: AttendanceRecord[]): void {
   const cleanRecords = validateAndSanitizeAttendanceRecords(records);
@@ -2417,10 +2438,42 @@ export function queueAttendanceScanRecord(records: AttendanceRecord[]): void {
 
   // 2. Tambah jumlah antrean scan pending untuk status UI
   scanQueuePendingCount += 1;
+
+  // 3. Batched Cloud Sync:
+  // Jika antrean mencapai threshold (20 siswa), kirim SEGERA ke Cloud!
+  if (scanQueuePendingCount >= SCAN_BATCH_THRESHOLD) {
+    flushAttendanceScanQueue(true);
+    return;
+  }
+
+  // Jika belum 20 siswa, atur countdown timer 10 detik & jadwalkan flush otomatis
+  scanQueueCountdownSeconds = Math.round(SCAN_IDLE_TIMEOUT_MS / 1000);
   notifyScanQueueChanged();
 
-  // 3. Langsung sinkronkan ke Cloud Firestore (instant write) agar hasil scan tidak pernah hilang
-  syncToCloud(KEYS.ATTENDANCE, cleanRecords, true, now);
+  if (scanQueueIdleTimer) {
+    clearTimeout(scanQueueIdleTimer);
+    scanQueueIdleTimer = null;
+  }
+  if (scanQueueCountdownTimer) {
+    clearInterval(scanQueueCountdownTimer);
+    scanQueueCountdownTimer = null;
+  }
+
+  // Countdown timer setiap 1 detik untuk tampilan hitung mundur di UI
+  scanQueueCountdownTimer = setInterval(() => {
+    if (scanQueueCountdownSeconds > 1) {
+      scanQueueCountdownSeconds -= 1;
+      notifyScanQueueChanged();
+    } else {
+      clearInterval(scanQueueCountdownTimer);
+      scanQueueCountdownTimer = null;
+    }
+  }, 1000);
+
+  // Jadwalkan flush setelah 10 detik tanpa scan baru
+  scanQueueIdleTimer = setTimeout(() => {
+    flushAttendanceScanQueue(true);
+  }, SCAN_IDLE_TIMEOUT_MS);
 }
 
 if (typeof window !== 'undefined') {

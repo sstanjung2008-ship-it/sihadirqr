@@ -910,6 +910,68 @@ export function mergeClassLists(local: SchoolClass[], cloud: SchoolClass[]): Sch
   return Array.from(map.values());
 }
 
+export function mergeLearningJournals(local: LearningJournal[], cloud: LearningJournal[]): LearningJournal[] {
+  if (!Array.isArray(local) || local.length === 0) return Array.isArray(cloud) ? cloud : [];
+  if (!Array.isArray(cloud) || cloud.length === 0) return local;
+
+  const map = new Map<string, LearningJournal>();
+  
+  // 1. Masukkan semua journal dari Cloud
+  cloud.forEach(j => {
+    if (j && j.id) map.set(j.id, j);
+  });
+
+  // 2. Gabungkan journal dari Lokal (jika ada id sama, ambil yang lebih baru)
+  local.forEach(j => {
+    if (!j || !j.id) return;
+    if (map.has(j.id)) {
+      const existing = map.get(j.id)!;
+      const localTime = new Date(j.createdAt || 0).getTime();
+      const existingTime = new Date(existing.createdAt || 0).getTime();
+      if (localTime >= existingTime) {
+        map.set(j.id, { ...existing, ...j });
+      }
+    } else {
+      map.set(j.id, j);
+    }
+  });
+
+  return Array.from(map.values()).sort((a, b) => 
+    (b.date || '').localeCompare(a.date || '') || (b.createdAt || '').localeCompare(a.createdAt || '')
+  );
+}
+
+export function mergeStudentGradeAssessments(local: StudentGradeAssessment[], cloud: StudentGradeAssessment[]): StudentGradeAssessment[] {
+  if (!Array.isArray(local) || local.length === 0) return Array.isArray(cloud) ? cloud : [];
+  if (!Array.isArray(cloud) || cloud.length === 0) return local;
+
+  const map = new Map<string, StudentGradeAssessment>();
+
+  // 1. Masukkan semua nilai dari Cloud
+  cloud.forEach(g => {
+    if (g && g.id) map.set(g.id, g);
+  });
+
+  // 2. Gabungkan nilai dari Lokal
+  local.forEach(g => {
+    if (!g || !g.id) return;
+    if (map.has(g.id)) {
+      const existing = map.get(g.id)!;
+      const localTime = new Date(g.updatedAt || g.createdAt || 0).getTime();
+      const existingTime = new Date(existing.updatedAt || existing.createdAt || 0).getTime();
+      if (localTime >= existingTime) {
+        map.set(g.id, { ...existing, ...g });
+      }
+    } else {
+      map.set(g.id, g);
+    }
+  });
+
+  return Array.from(map.values()).sort((a, b) => 
+    (b.date || '').localeCompare(a.date || '') || (b.createdAt || '').localeCompare(a.createdAt || '')
+  );
+}
+
 export function mergeTeacherLists(local: Teacher[], cloud: Teacher[]): Teacher[] {
   const isDemoTeacher = (t: Teacher) => DEMO_TEACHER_IDS.has(t.id) || (!!t.nip && DEMO_TEACHER_NIPS.has(t.nip.trim()));
   const hasRealTeachers = local.some(t => !isDemoTeacher(t)) || cloud.some(t => !isDemoTeacher(t));
@@ -1994,6 +2056,64 @@ export function initFirestoreRealtimeSync() {
                 }
               } catch (e) {
                 console.warn('[Firestore Sync] Error updating school profile data:', e);
+              }
+            }
+
+            // SPECIAL LEARNING JOURNALS (KBM) SYNC:
+            // Multi-guru concurrent safety: gabungkan input jurnal guru dari berbagai kelas tanpa saling tindih
+            if (key === KEYS.LEARNING_JOURNALS) {
+              try {
+                const cloudJournals = typeof finalDataToSave === 'string' ? JSON.parse(finalDataToSave) : finalDataToSave;
+                if (Array.isArray(cloudJournals)) {
+                  const currentLocalJournals = getLearningJournals();
+                  if (cloudJournals.length === 0 && currentLocalJournals.length > 0) {
+                    writeCloudDocument(key, JSON.stringify(currentLocalJournals), Date.now());
+                    lastSavedStringCache[key] = JSON.stringify(currentLocalJournals);
+                    setCloudSyncStatus('connected');
+                    return;
+                  }
+                  const mergedJournals = mergeLearningJournals(currentLocalJournals, cloudJournals);
+                  const mergedStr = JSON.stringify(mergedJournals);
+                  if (currentLocalStr !== mergedStr) {
+                    lastSavedStringCache[key] = mergedStr;
+                    safeSetLocalStorage(key, mergedStr);
+                    safeSetLocalStorage(key + '_updatedAt', String(Math.max(cloudUpdatedAt, localUpdatedAt, Date.now())));
+                    notifyStorageUpdated();
+                  }
+                  setCloudSyncStatus('connected');
+                  return;
+                }
+              } catch (e) {
+                console.warn('[Firestore Sync] Error updating learning journals data:', e);
+              }
+            }
+
+            // SPECIAL STUDENT GRADES SYNC:
+            // Multi-guru concurrent safety: gabungkan input nilai siswa dari berbagai mapel/guru tanpa saling tindih
+            if (key === KEYS.GRADES) {
+              try {
+                const cloudGrades = typeof finalDataToSave === 'string' ? JSON.parse(finalDataToSave) : finalDataToSave;
+                if (Array.isArray(cloudGrades)) {
+                  const currentLocalGrades = getStudentGradeAssessments();
+                  if (cloudGrades.length === 0 && currentLocalGrades.length > 0) {
+                    writeCloudDocument(key, JSON.stringify(currentLocalGrades), Date.now());
+                    lastSavedStringCache[key] = JSON.stringify(currentLocalGrades);
+                    setCloudSyncStatus('connected');
+                    return;
+                  }
+                  const mergedGrades = mergeStudentGradeAssessments(currentLocalGrades, cloudGrades);
+                  const mergedStr = JSON.stringify(mergedGrades);
+                  if (currentLocalStr !== mergedStr) {
+                    lastSavedStringCache[key] = mergedStr;
+                    safeSetLocalStorage(key, mergedStr);
+                    safeSetLocalStorage(key + '_updatedAt', String(Math.max(cloudUpdatedAt, localUpdatedAt, Date.now())));
+                    notifyStorageUpdated();
+                  }
+                  setCloudSyncStatus('connected');
+                  return;
+                }
+              } catch (e) {
+                console.warn('[Firestore Sync] Error updating student grades data:', e);
               }
             }
 

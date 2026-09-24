@@ -1,11 +1,10 @@
-import { SchoolProfile, SchoolClass, Student, AttendanceRecord, LeaveRequest, WhatsAppLog, Teacher, LearningJournal, CharacterTrait, StudentCharacterLog, CharacterPredicateSettings, UserSession, StudentGradeAssessment, LessonPeriod, ClassScheduleSlot } from '../types';
+import { SchoolProfile, SchoolClass, Student, AttendanceRecord, LeaveRequest, Teacher, LearningJournal, CharacterTrait, StudentCharacterLog, CharacterPredicateSettings, UserSession, StudentGradeAssessment, LessonPeriod, ClassScheduleSlot } from '../types';
 import { 
   INITIAL_SCHOOL_PROFILE, 
   INITIAL_CLASSES, 
   INITIAL_STUDENTS, 
   generateInitialAttendanceHistory, 
   INITIAL_LEAVE_REQUESTS, 
-  INITIAL_WA_LOGS,
   INITIAL_TEACHERS,
   INITIAL_CHARACTER_TRAITS,
   INITIAL_STUDENT_CHARACTER_LOGS,
@@ -22,7 +21,6 @@ export const KEYS = {
   STUDENTS: 'sihadir_school_students_v2',
   ATTENDANCE: 'sihadir_attendance_records_v2',
   LEAVES: 'sihadir_leave_requests_v2',
-  WA_LOGS: 'sihadir_wa_logs_v2',
   TEACHERS: 'sihadir_teachers_v2',
   LEARNING_JOURNALS: 'sihadir_learning_journals_v2',
   CHARACTER_TRAITS: 'sihadir_character_traits_v2',
@@ -92,8 +90,8 @@ function withTimeout<T>(promise: Promise<T>, ms: number = 12000, fallbackVal: T)
 
 const QUOTA_COOLDOWN_KEY = 'sihadir_firestore_quota_cooldown_until';
 
-// Max chunk size per Firestore document: 450 KB (well below the 1MB Firestore threshold)
-const FIRESTORE_MAX_CHUNK_SIZE = 450 * 1024;
+// Max chunk size per Firestore document: 880 KB (safe headroom below the 1MB Firestore limit, avoids unnecessary chunking)
+const FIRESTORE_MAX_CHUNK_SIZE = 880 * 1024;
 
 // Firestore Rate Limiting and In-Flight Write Mutex
 const MAX_CONCURRENT_FIRESTORE_WRITES = 2;
@@ -265,7 +263,6 @@ export function validateAndSanitizeAttendanceRecords(records: any[]): Attendance
     if (r.returnStatus) cleanRecord.returnStatus = r.returnStatus;
     if (r.returnScannedBy) cleanRecord.returnScannedBy = String(r.returnScannedBy).trim();
     if (r.notes) cleanRecord.notes = String(r.notes).trim();
-    if (r.waLogId) cleanRecord.waLogId = String(r.waLogId).trim();
 
     cleanList.push(cleanRecord);
   }
@@ -378,13 +375,16 @@ async function performSingleDocWrite(key: string, dataStr: string, timestamp: nu
       isChunked: false,
       totalChunks: 1,
     });
-    // HANYA hapus pecahan chunk jika dokumen ini sebelumnya memang pernah terpecah (hemat operasi write!)
+    // Hapus pecahan chunk lama jika ada agar tidak lagi memicu getDoc read berlebih
     const previousChunks = knownChunkedDocs.get(key) || 0;
     if (previousChunks > 1) {
       for (let i = 1; i < previousChunks; i++) {
         deleteDoc(doc(db, 'sihadir_app_data', `${key}_chunk_${i}`)).catch(() => {});
       }
       knownChunkedDocs.delete(key);
+    } else if (key === KEYS.ATTENDANCE) {
+      // Pastikan chunk_1 lama dari riwayat presensi sebelumnya dibersihkan sekali
+      deleteDoc(doc(db, 'sihadir_app_data', `${key}_chunk_1`)).catch(() => {});
     }
   } else {
     // Multi-chunk document sharding
@@ -428,7 +428,27 @@ export async function writeCloudDocument(key: string, dataStr: string, timestamp
       const parsed = JSON.parse(dataStr);
       if (Array.isArray(parsed)) {
         const clean = validateAndSanitizeAttendanceRecords(parsed);
-        sanitizedDataStr = JSON.stringify(clean);
+        // Kompaksi payload: buang field kosong / default untuk menghemat 40-50% ukuran JSON di Firestore
+        const compacted = clean.map((r: any) => {
+          const item: any = {
+            id: r.id,
+            studentId: r.studentId,
+            studentName: r.studentName,
+            className: r.className,
+            date: r.date,
+            time: r.time,
+            status: r.status,
+            method: r.method,
+          };
+          if (r.nisn) item.nisn = r.nisn;
+          if (r.returnTime && r.returnTime !== '-') item.returnTime = r.returnTime;
+          if (r.returnStatus && r.returnStatus !== 'BELUM_PULANG') item.returnStatus = r.returnStatus;
+          if (r.scannedBy && !r.scannedBy.includes('Sistem Otomatis')) item.scannedBy = r.scannedBy;
+          if (r.returnScannedBy && !r.returnScannedBy.includes('Sistem Otomatis')) item.returnScannedBy = r.returnScannedBy;
+          if (r.notes) item.notes = r.notes;
+          return item;
+        });
+        sanitizedDataStr = JSON.stringify(compacted);
       }
     } catch {}
   }
@@ -582,8 +602,8 @@ export function syncToCloud(key: string, data: any, instant: boolean = false, ex
   if (instant || dataStr === '[]') {
     doWrite();
   } else {
-    // Ultra-fast debounce (400ms) to ensure near-instant real-time sync across all devices
-    debounceTimers[key] = setTimeout(doWrite, 400);
+    // Smart debounce (1200ms) to coalesce rapid typing/edits and save Cloud Firestore writes
+    debounceTimers[key] = setTimeout(doWrite, 1200);
   }
 }
 
@@ -599,7 +619,6 @@ export function exportAllDatabaseToJson(): string {
     students: getStudents(),
     attendance: getAttendanceRecords(),
     leaves: getLeaveRequests(),
-    waLogs: getWaLogs(),
     teachers: getTeachers(),
     learningJournals: getLearningJournals(),
     characterTraits: getCharacterTraits(),
@@ -680,7 +699,6 @@ export function importAllDatabaseFromJson(jsonString: string): { success: boolea
     if (data.students) setKey(KEYS.STUDENTS, data.students);
     if (data.attendance) setKey(KEYS.ATTENDANCE, data.attendance);
     if (data.leaves) setKey(KEYS.LEAVES, data.leaves);
-    if (data.waLogs) setKey(KEYS.WA_LOGS, data.waLogs);
     if (data.teachers) setKey(KEYS.TEACHERS, data.teachers);
     if (data.learningJournals) setKey(KEYS.LEARNING_JOURNALS, data.learningJournals);
     if (data.characterTraits) setKey(KEYS.CHARACTER_TRAITS, data.characterTraits);
@@ -1724,7 +1742,6 @@ export async function forceDownloadAllFromCloud(): Promise<{ success: boolean; e
       KEYS.STUDENTS,
       KEYS.ATTENDANCE,
       KEYS.LEAVES,
-      KEYS.WA_LOGS,
       KEYS.TEACHERS,
       KEYS.LEARNING_JOURNALS,
       KEYS.CHARACTER_TRAITS,
@@ -1872,7 +1889,6 @@ export function initFirestoreRealtimeSync() {
     { key: KEYS.STUDENTS, getDefault: () => INITIAL_STUDENTS },
     { key: KEYS.ATTENDANCE, getDefault: () => generateInitialAttendanceHistory(INITIAL_STUDENTS) },
     { key: KEYS.LEAVES, getDefault: () => INITIAL_LEAVE_REQUESTS },
-    { key: KEYS.WA_LOGS, getDefault: () => INITIAL_WA_LOGS },
     { key: KEYS.TEACHERS, getDefault: () => INITIAL_TEACHERS },
     { key: KEYS.LEARNING_JOURNALS, getDefault: () => INITIAL_LEARNING_JOURNALS },
     { key: KEYS.CHARACTER_TRAITS, getDefault: () => INITIAL_CHARACTER_TRAITS },
@@ -2203,6 +2219,14 @@ export function initFirestoreRealtimeSync() {
     // 3. Listener online: Realtime Firestore onSnapshot sudah aktif mendengarkan perubahan secara real-time.
     // Tidak memerlukan polling berkala (setInterval) atau trigger tab visibility
     // agar kuota write/read Firestore tidak terkuras saat aplikasi/tab dibiarkan terbuka.
+
+    // 4. Bersihkan residual cache & log WA lama dari lokal dan Cloud Firestore
+    try {
+      localStorage.removeItem('sihadir_wa_logs_v2');
+      localStorage.removeItem('sihadir_wa_logs_v2_updatedAt');
+      localStorage.removeItem('sihadir_wa_logs');
+      deleteDoc(doc(db, 'sihadir_app_data', 'sihadir_wa_logs_v2')).catch(() => {});
+    } catch {}
   }
 }
 
@@ -2647,29 +2671,6 @@ export function saveLeaveRequests(requests: LeaveRequest[]): void {
   syncToCloud(KEYS.LEAVES, requests, requests.length === 0, now);
 }
 
-export function getWaLogs(): WhatsAppLog[] {
-  const data = localStorage.getItem(KEYS.WA_LOGS);
-  if (data === null) {
-    safeSetLocalStorage(KEYS.WA_LOGS, JSON.stringify(INITIAL_WA_LOGS));
-    safeSetLocalStorage(KEYS.WA_LOGS + '_updatedAt', '1');
-    return INITIAL_WA_LOGS;
-  }
-  try {
-    const parsed = JSON.parse(data);
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
-  }
-}
-
-export function saveWaLogs(logs: WhatsAppLog[]): void {
-  const now = Date.now();
-  const dataStr = JSON.stringify(logs);
-  safeSetLocalStorage(KEYS.WA_LOGS, dataStr);
-  safeSetLocalStorage(KEYS.WA_LOGS + '_updatedAt', String(now));
-  notifyStorageUpdated();
-}
-
 export function getTeachers(): Teacher[] {
   const data = localStorage.getItem(KEYS.TEACHERS);
   if (data === null) {
@@ -3016,7 +3017,6 @@ export function resetToDefaultData(): void {
   getSchoolClasses();
   getAttendanceRecords();
   getLeaveRequests();
-  getWaLogs();
   getTeachers();
   getCharacterTraits();
   getStudentCharacterLogs();

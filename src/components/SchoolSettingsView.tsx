@@ -157,7 +157,7 @@ export const SchoolSettingsView: React.FC<SchoolSettingsViewProps> = ({
     }
 
     setIsTestingTeacherVoice(true);
-    const template = formData.aiVoiceTemplateTeacherReminder || formData.waTemplateTeacherReminder || DEFAULT_TEACHER_SPEECH_TEMPLATE;
+    const template = formData.aiVoiceTemplateTeacherReminder || DEFAULT_TEACHER_SPEECH_TEMPLATE;
     const info = {
       teacherName: teacher.name,
       subject: teacher.subject1 || 'Mata Pelajaran',
@@ -184,8 +184,7 @@ export const SchoolSettingsView: React.FC<SchoolSettingsViewProps> = ({
   const handleResetTeacherVoiceTemplate = () => {
     setFormData(prev => ({
       ...prev,
-      aiVoiceTemplateTeacherReminder: DEFAULT_TEACHER_SPEECH_TEMPLATE,
-      waTemplateTeacherReminder: DEFAULT_TEACHER_SPEECH_TEMPLATE
+      aiVoiceTemplateTeacherReminder: DEFAULT_TEACHER_SPEECH_TEMPLATE
     }));
     setTemplateResetToast('Format Suara AI & Pengingat Jadwal Guru berhasil dikembalikan ke format awal.');
     setTimeout(() => setTemplateResetToast(null), 3500);
@@ -249,35 +248,27 @@ export const SchoolSettingsView: React.FC<SchoolSettingsViewProps> = ({
     if (type === 'ARRIVAL') {
       setFormData(prev => ({
         ...prev,
-        parentTemplateArrival: DEFAULT_PARENT_ARRIVAL_MESSAGE,
-        waTemplateArrival: DEFAULT_PARENT_ARRIVAL_MESSAGE,
         parentVoiceTemplateArrival: DEFAULT_PARENT_VOICE_ARRIVAL
       }));
-      setTemplateResetToast('Format pesan & Suara AI Hadir Tepat Waktu berhasil di-reset ke format awal.');
+      setTemplateResetToast('Format Suara AI Hadir Tepat Waktu berhasil di-reset ke format awal.');
     } else if (type === 'LATE') {
       setFormData(prev => ({
         ...prev,
-        parentTemplateLate: DEFAULT_PARENT_LATE_MESSAGE,
-        waTemplateLate: DEFAULT_PARENT_LATE_MESSAGE,
         parentVoiceTemplateLate: DEFAULT_PARENT_VOICE_LATE
       }));
-      setTemplateResetToast('Format pesan & Suara AI Terlambat berhasil di-reset ke format awal.');
+      setTemplateResetToast('Format Suara AI Terlambat berhasil di-reset ke format awal.');
     } else if (type === 'DEPARTURE') {
       setFormData(prev => ({
         ...prev,
-        parentTemplateDeparture: DEFAULT_PARENT_DEPARTURE_MESSAGE,
-        waTemplateDeparture: DEFAULT_PARENT_DEPARTURE_MESSAGE,
         parentVoiceTemplateDeparture: DEFAULT_PARENT_VOICE_DEPARTURE
       }));
-      setTemplateResetToast('Format pesan & Suara AI Pulang Sekolah berhasil di-reset ke format awal.');
+      setTemplateResetToast('Format Suara AI Pulang Sekolah berhasil di-reset ke format awal.');
     } else if (type === 'ABSENT') {
       setFormData(prev => ({
         ...prev,
-        parentTemplateAbsent: DEFAULT_PARENT_ABSENT_MESSAGE,
-        waTemplateAbsent: DEFAULT_PARENT_ABSENT_MESSAGE,
         parentVoiceTemplateAbsent: DEFAULT_PARENT_VOICE_ABSENT
       }));
-      setTemplateResetToast('Format pesan & Suara AI Belum Absen / Alpa berhasil di-reset ke format awal.');
+      setTemplateResetToast('Format Suara AI Belum Absen / Alpa berhasil di-reset ke format awal.');
     }
     setTimeout(() => setTemplateResetToast(null), 3500);
   };
@@ -285,20 +276,12 @@ export const SchoolSettingsView: React.FC<SchoolSettingsViewProps> = ({
   const handleResetAllParentTemplates = () => {
     setFormData(prev => ({
       ...prev,
-      parentTemplateArrival: DEFAULT_PARENT_ARRIVAL_MESSAGE,
-      waTemplateArrival: DEFAULT_PARENT_ARRIVAL_MESSAGE,
       parentVoiceTemplateArrival: DEFAULT_PARENT_VOICE_ARRIVAL,
-      parentTemplateLate: DEFAULT_PARENT_LATE_MESSAGE,
-      waTemplateLate: DEFAULT_PARENT_LATE_MESSAGE,
       parentVoiceTemplateLate: DEFAULT_PARENT_VOICE_LATE,
-      parentTemplateDeparture: DEFAULT_PARENT_DEPARTURE_MESSAGE,
-      waTemplateDeparture: DEFAULT_PARENT_DEPARTURE_MESSAGE,
       parentVoiceTemplateDeparture: DEFAULT_PARENT_VOICE_DEPARTURE,
-      parentTemplateAbsent: DEFAULT_PARENT_ABSENT_MESSAGE,
-      waTemplateAbsent: DEFAULT_PARENT_ABSENT_MESSAGE,
       parentVoiceTemplateAbsent: DEFAULT_PARENT_VOICE_ABSENT
     }));
-    setTemplateResetToast('Semua format pesan & Suara AI notifikasi orang tua berhasil dikembalikan ke format awal.');
+    setTemplateResetToast('Semua format Suara AI pengumuman presensi siswa berhasil dikembalikan ke format awal.');
     setTimeout(() => setTemplateResetToast(null), 3500);
   };
 
@@ -889,7 +872,7 @@ export const SchoolSettingsView: React.FC<SchoolSettingsViewProps> = ({
             Pengaturan Profil & Sistem Sekolah
           </h1>
           <p className="text-xs text-slate-500 mt-1">
-            Atur identitas sekolah, logo kabupaten, logo sekolah, aturan jam masuk presensi, serta pemicu notifikasi WhatsApp.
+            Atur identitas sekolah, logo kabupaten, logo sekolah, serta aturan jam masuk presensi.
           </p>
         </div>
 
@@ -1817,7 +1800,7 @@ export const SchoolSettingsView: React.FC<SchoolSettingsViewProps> = ({
             <div className="bg-amber-100/70 border border-amber-300/80 rounded-2xl p-3 text-xs text-amber-950 flex items-start gap-2">
               <Sparkles className="w-4 h-4 text-amber-700 shrink-0 mt-0.5" />
               <div className="space-y-0.5">
-                <span className="font-extrabold text-amber-950">Otomatisasi Scanner Presensi & Notifikasi WhatsApp:</span>
+                <span className="font-extrabold text-amber-950">Otomatisasi Scanner Presensi:</span>
                 <p className="text-[11.5px] text-amber-900 leading-relaxed font-medium">
                   Modul Scanner QR akan secara otomatis beralih dari <strong>Mode Scan Masuk</strong> ke <strong>Mode Scan Pulang</strong> tepat pada jam kepulangan hari yang bersangkutan (misal: hari Jumat pukul <strong>{currentDailyEndTimes['Jumat'] || '11:30'} WITA</strong>, hari Senin-Kamis pukul <strong>{currentDailyEndTimes['Senin'] || '15:00'} WITA</strong>). Pada pukul 01:00 WITA, modul scanner akan otomatis reset kembali ke Mode Masuk.
                 </p>
@@ -2370,7 +2353,7 @@ export const SchoolSettingsView: React.FC<SchoolSettingsViewProps> = ({
                   </span>
                 </div>
                 <p className="text-xs text-slate-500 mt-1 leading-relaxed">
-                  Kelola notifikasi suara pintar berbasis AI dan template pesan otomatis untuk pengingat jadwal mengajar Guru serta notifikasi kehadiran Putra-Putri bagi Orang Tua/Wali Murid.
+                  Kelola notifikasi suara pintar berbasis AI untuk pengingat jadwal mengajar Guru serta pengumuman kehadiran presensi siswa.
                 </p>
               </div>
             </div>
@@ -2479,11 +2462,10 @@ export const SchoolSettingsView: React.FC<SchoolSettingsViewProps> = ({
 
               <textarea
                 rows={3}
-                value={formData.aiVoiceTemplateTeacherReminder ?? formData.waTemplateTeacherReminder ?? DEFAULT_TEACHER_SPEECH_TEMPLATE}
+                value={formData.aiVoiceTemplateTeacherReminder ?? DEFAULT_TEACHER_SPEECH_TEMPLATE}
                 onChange={(e) => setFormData({
                   ...formData,
-                  aiVoiceTemplateTeacherReminder: e.target.value,
-                  waTemplateTeacherReminder: e.target.value
+                  aiVoiceTemplateTeacherReminder: e.target.value
                 })}
                 placeholder="Contoh: Pemberitahuan kepada [TeacherName]. Anda memiliki jadwal mengajar mata pelajaran [Subject] di [ClassName] [PeriodLabel]..."
                 className="w-full text-xs bg-slate-50 border border-slate-200 rounded-xl p-3 text-slate-800 focus:bg-white focus:ring-2 focus:ring-violet-500 focus:outline-none font-mono leading-relaxed"
@@ -2496,11 +2478,10 @@ export const SchoolSettingsView: React.FC<SchoolSettingsViewProps> = ({
                   <span
                     key={v}
                     onClick={() => {
-                      const cur = formData.aiVoiceTemplateTeacherReminder ?? formData.waTemplateTeacherReminder ?? DEFAULT_TEACHER_SPEECH_TEMPLATE;
+                      const cur = formData.aiVoiceTemplateTeacherReminder ?? DEFAULT_TEACHER_SPEECH_TEMPLATE;
                       setFormData({
                         ...formData,
-                        aiVoiceTemplateTeacherReminder: `${cur} ${v}`,
-                        waTemplateTeacherReminder: `${cur} ${v}`
+                        aiVoiceTemplateTeacherReminder: `${cur} ${v}`
                       });
                     }}
                     className="bg-violet-100/70 hover:bg-violet-200 text-violet-800 border border-violet-300/60 font-mono font-bold px-2 py-0.5 rounded-md cursor-pointer transition shadow-2xs"
@@ -2582,26 +2563,26 @@ export const SchoolSettingsView: React.FC<SchoolSettingsViewProps> = ({
                 </div>
                 <div>
                   <h3 className="text-sm font-extrabold text-slate-900">
-                    2. Notifikasi & Suara AI untuk Role Orang Tua (Wali Murid)
+                    2. Suara AI Pengumuman Presensi Kehadiran Siswa
                   </h3>
                   <p className="text-xs text-slate-500">
-                    Konfigurasi pesan teks dan pembacaan Suara AI untuk status kehadiran Datang Tepat Waktu, Terlambat, Belum Absen/Alpa, dan Pulang.
+                    Konfigurasi kalimat pengumuman Suara AI saat presensi kehadiran Datang Tepat Waktu, Terlambat, Belum Absen/Alpa, dan Pulang Sekolah.
                   </p>
                 </div>
               </div>
 
               <div className="flex items-center gap-3 flex-wrap">
-                {/* Master Switch Notifikasi Orang Tua */}
+                {/* Master Switch Suara AI Presensi Siswa */}
                 <label className="relative inline-flex items-center cursor-pointer select-none">
                   <input
                     type="checkbox"
-                    checked={formData.aiVoiceParentEnabled ?? formData.waParentNotificationEnabled ?? true}
+                    checked={formData.aiVoiceParentEnabled ?? true}
                     onChange={(e) => {
                       const val = e.target.checked;
                       setFormData({
                         ...formData,
                         aiVoiceParentEnabled: val,
-                        waParentNotificationEnabled: val
+                        waParentNotificationEnabled: false
                       });
                       setParentVoiceEnabled(val);
                     }}
@@ -2609,7 +2590,7 @@ export const SchoolSettingsView: React.FC<SchoolSettingsViewProps> = ({
                   />
                   <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-600"></div>
                   <span className="ml-2 text-xs font-bold text-slate-800">
-                    {(formData.aiVoiceParentEnabled ?? formData.waParentNotificationEnabled ?? true) ? 'Notifikasi Aktif' : 'Non-aktif'}
+                    {(formData.aiVoiceParentEnabled ?? true) ? 'Suara AI Aktif' : 'Non-aktif'}
                   </span>
                 </label>
 
@@ -2620,7 +2601,7 @@ export const SchoolSettingsView: React.FC<SchoolSettingsViewProps> = ({
                   className="px-3 py-1.5 bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 rounded-xl text-xs font-bold transition flex items-center gap-1.5 shadow-2xs cursor-pointer"
                 >
                   <RotateCcw className="w-3.5 h-3.5 text-emerald-600" />
-                  <span>Reset Semua Format Orang Tua</span>
+                  <span>Reset Format Suara AI Siswa</span>
                 </button>
               </div>
             </div>
@@ -2633,7 +2614,7 @@ export const SchoolSettingsView: React.FC<SchoolSettingsViewProps> = ({
                   Putar Suara AI Saat Presensi Kehadiran Siswa
                 </span>
                 <p className="text-[11px] text-slate-500 mt-0.5">
-                  AI akan mengumumkan status kehadiran siswa dengan suara natural dan nada lonceng harmonis saat scan presensi tercatat.
+                  AI akan mengumumkan nama dan status kehadiran siswa dengan suara natural dan nada lonceng harmonis saat scan presensi tercatat.
                 </p>
               </div>
               <label className="relative inline-flex items-center cursor-pointer select-none self-start sm:self-auto">
@@ -2656,7 +2637,7 @@ export const SchoolSettingsView: React.FC<SchoolSettingsViewProps> = ({
               </label>
             </div>
 
-            {/* 4 BENTO CARDS FOR PARENT NOTIFICATION ROLES */}
+            {/* 4 BENTO CARDS FOR AI VOICE ANNOUNCEMENT ROLES */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
 
               {/* CARD 1: DATANG TEPAT WAKTU (HADIR) */}
@@ -2674,10 +2655,13 @@ export const SchoolSettingsView: React.FC<SchoolSettingsViewProps> = ({
                     </span>
                   </div>
 
-                  {/* Pesan Teks */}
+                  {/* Kalimat Suara AI */}
                   <div className="space-y-1">
-                    <label className="text-[11px] font-bold text-slate-700 flex items-center justify-between">
-                      <span>Format Pesan Notifikasi:</span>
+                    <div className="flex items-center justify-between">
+                      <label className="text-[11px] font-bold text-slate-700 flex items-center gap-1">
+                        <Volume2 className="w-3 h-3 text-emerald-600" />
+                        Kalimat yang Diucapkan Suara AI:
+                      </label>
                       <button
                         type="button"
                         onClick={() => handleResetSingleParentTemplate('ARRIVAL')}
@@ -2685,27 +2669,9 @@ export const SchoolSettingsView: React.FC<SchoolSettingsViewProps> = ({
                       >
                         Reset Default
                       </button>
-                    </label>
+                    </div>
                     <textarea
-                      rows={2}
-                      value={formData.parentTemplateArrival ?? formData.waTemplateArrival ?? DEFAULT_PARENT_ARRIVAL_MESSAGE}
-                      onChange={(e) => setFormData({
-                        ...formData,
-                        parentTemplateArrival: e.target.value,
-                        waTemplateArrival: e.target.value
-                      })}
-                      className="w-full text-xs bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-slate-800 focus:bg-white focus:ring-2 focus:ring-emerald-500 focus:outline-none font-mono"
-                    />
-                  </div>
-
-                  {/* Kalimat Suara AI */}
-                  <div className="space-y-1">
-                    <label className="text-[11px] font-bold text-slate-700 flex items-center gap-1">
-                      <Volume2 className="w-3 h-3 text-emerald-600" />
-                      Kalimat yang Diucapkan Suara AI:
-                    </label>
-                    <textarea
-                      rows={2}
+                      rows={3}
                       value={formData.parentVoiceTemplateArrival ?? DEFAULT_PARENT_VOICE_ARRIVAL}
                       onChange={(e) => setFormData({
                         ...formData,
@@ -2745,10 +2711,13 @@ export const SchoolSettingsView: React.FC<SchoolSettingsViewProps> = ({
                     </span>
                   </div>
 
-                  {/* Pesan Teks */}
+                  {/* Kalimat Suara AI */}
                   <div className="space-y-1">
-                    <label className="text-[11px] font-bold text-slate-700 flex items-center justify-between">
-                      <span>Format Pesan Notifikasi:</span>
+                    <div className="flex items-center justify-between">
+                      <label className="text-[11px] font-bold text-slate-700 flex items-center gap-1">
+                        <Volume2 className="w-3 h-3 text-amber-600" />
+                        Kalimat yang Diucapkan Suara AI:
+                      </label>
                       <button
                         type="button"
                         onClick={() => handleResetSingleParentTemplate('LATE')}
@@ -2756,27 +2725,9 @@ export const SchoolSettingsView: React.FC<SchoolSettingsViewProps> = ({
                       >
                         Reset Default
                       </button>
-                    </label>
+                    </div>
                     <textarea
-                      rows={2}
-                      value={formData.parentTemplateLate ?? formData.waTemplateLate ?? DEFAULT_PARENT_LATE_MESSAGE}
-                      onChange={(e) => setFormData({
-                        ...formData,
-                        parentTemplateLate: e.target.value,
-                        waTemplateLate: e.target.value
-                      })}
-                      className="w-full text-xs bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-slate-800 focus:bg-white focus:ring-2 focus:ring-amber-500 focus:outline-none font-mono"
-                    />
-                  </div>
-
-                  {/* Kalimat Suara AI */}
-                  <div className="space-y-1">
-                    <label className="text-[11px] font-bold text-slate-700 flex items-center gap-1">
-                      <Volume2 className="w-3 h-3 text-amber-600" />
-                      Kalimat yang Diucapkan Suara AI:
-                    </label>
-                    <textarea
-                      rows={2}
+                      rows={3}
                       value={formData.parentVoiceTemplateLate ?? DEFAULT_PARENT_VOICE_LATE}
                       onChange={(e) => setFormData({
                         ...formData,
@@ -2816,11 +2767,12 @@ export const SchoolSettingsView: React.FC<SchoolSettingsViewProps> = ({
                     </span>
                   </div>
 
-                  {/* Pesan Teks */}
+                  {/* Kalimat Suara AI */}
                   <div className="space-y-1">
                     <div className="flex items-center justify-between">
-                      <label className="text-[11px] font-bold text-slate-700">
-                        Format Pesan Notifikasi:
+                      <label className="text-[11px] font-bold text-slate-700 flex items-center gap-1">
+                        <Volume2 className="w-3 h-3 text-rose-600" />
+                        Kalimat yang Diucapkan Suara AI:
                       </label>
                       <button
                         type="button"
@@ -2831,36 +2783,7 @@ export const SchoolSettingsView: React.FC<SchoolSettingsViewProps> = ({
                       </button>
                     </div>
                     <textarea
-                      rows={2}
-                      value={formData.parentTemplateAbsent ?? formData.waTemplateAbsent ?? DEFAULT_PARENT_ABSENT_MESSAGE}
-                      onChange={(e) => setFormData({
-                        ...formData,
-                        parentTemplateAbsent: e.target.value,
-                        waTemplateAbsent: e.target.value
-                      })}
-                      className="w-full text-xs bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-slate-800 focus:bg-white focus:ring-2 focus:ring-rose-500 focus:outline-none font-mono"
-                    />
-                  </div>
-
-                  {/* Indikator Format Waktu */}
-                  <div className="bg-rose-50/90 border border-rose-200/80 rounded-xl px-2.5 py-1.5 flex items-center justify-between text-[11px] text-rose-900">
-                    <span className="font-semibold flex items-center gap-1.5">
-                      <Clock className="w-3.5 h-3.5 text-rose-600 shrink-0" />
-                      Variabel <code className="font-mono font-bold bg-white px-1.5 py-0.5 rounded border border-rose-300">[Time]</code> diisi dengan:
-                    </span>
-                    <span className="font-extrabold text-rose-700 bg-rose-100 px-2 py-0.5 rounded-md">
-                      Waktu Kirim / Konfirmasi Manual
-                    </span>
-                  </div>
-
-                  {/* Kalimat Suara AI */}
-                  <div className="space-y-1">
-                    <label className="text-[11px] font-bold text-slate-700 flex items-center gap-1">
-                      <Volume2 className="w-3 h-3 text-rose-600" />
-                      Kalimat yang Diucapkan Suara AI:
-                    </label>
-                    <textarea
-                      rows={2}
+                      rows={3}
                       value={formData.parentVoiceTemplateAbsent ?? DEFAULT_PARENT_VOICE_ABSENT}
                       onChange={(e) => setFormData({
                         ...formData,
@@ -2885,14 +2808,14 @@ export const SchoolSettingsView: React.FC<SchoolSettingsViewProps> = ({
                 </div>
               </div>
 
-              {/* CARD 4: NOTIFIKASI PULANG SEKOLAH */}
+              {/* CARD 4: PENGUMUMAN PULANG SEKOLAH */}
               <div className="bg-white border border-blue-200/90 rounded-2xl p-4 space-y-3.5 shadow-xs relative overflow-hidden flex flex-col justify-between">
                 <div className="space-y-3">
                   <div className="flex items-center justify-between border-b border-slate-100 pb-2.5">
                     <div className="flex items-center gap-2">
                       <span className="w-2.5 h-2.5 rounded-full bg-blue-500"></span>
                       <h4 className="text-xs font-extrabold text-blue-950 uppercase tracking-wider">
-                        D. Notifikasi Pulang Sekolah
+                        D. Pengumuman Pulang Sekolah
                       </h4>
                     </div>
                     <span className="bg-blue-100 text-blue-800 text-[10px] font-bold px-2 py-0.5 rounded-md">
@@ -2900,10 +2823,13 @@ export const SchoolSettingsView: React.FC<SchoolSettingsViewProps> = ({
                     </span>
                   </div>
 
-                  {/* Pesan Teks */}
+                  {/* Kalimat Suara AI */}
                   <div className="space-y-1">
-                    <label className="text-[11px] font-bold text-slate-700 flex items-center justify-between">
-                      <span>Format Pesan Notifikasi:</span>
+                    <div className="flex items-center justify-between">
+                      <label className="text-[11px] font-bold text-slate-700 flex items-center gap-1">
+                        <Volume2 className="w-3 h-3 text-blue-600" />
+                        Kalimat yang Diucapkan Suara AI:
+                      </label>
                       <button
                         type="button"
                         onClick={() => handleResetSingleParentTemplate('DEPARTURE')}
@@ -2911,27 +2837,9 @@ export const SchoolSettingsView: React.FC<SchoolSettingsViewProps> = ({
                       >
                         Reset Default
                       </button>
-                    </label>
+                    </div>
                     <textarea
-                      rows={2}
-                      value={formData.parentTemplateDeparture ?? formData.waTemplateDeparture ?? DEFAULT_PARENT_DEPARTURE_MESSAGE}
-                      onChange={(e) => setFormData({
-                        ...formData,
-                        parentTemplateDeparture: e.target.value,
-                        waTemplateDeparture: e.target.value
-                      })}
-                      className="w-full text-xs bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-slate-800 focus:bg-white focus:ring-2 focus:ring-blue-500 focus:outline-none font-mono"
-                    />
-                  </div>
-
-                  {/* Kalimat Suara AI */}
-                  <div className="space-y-1">
-                    <label className="text-[11px] font-bold text-slate-700 flex items-center gap-1">
-                      <Volume2 className="w-3 h-3 text-blue-600" />
-                      Kalimat yang Diucapkan Suara AI:
-                    </label>
-                    <textarea
-                      rows={2}
+                      rows={3}
                       value={formData.parentVoiceTemplateDeparture ?? DEFAULT_PARENT_VOICE_DEPARTURE}
                       onChange={(e) => setFormData({
                         ...formData,
@@ -2960,8 +2868,8 @@ export const SchoolSettingsView: React.FC<SchoolSettingsViewProps> = ({
 
             {/* Variable Tag Chips for Parent Notifications */}
             <div className="bg-white border border-emerald-100 rounded-2xl p-3 flex flex-wrap items-center gap-1.5 text-[11px]">
-              <span className="text-slate-500 font-bold">Variabel Format Orang Tua:</span>
-              {['[ParentName]', '[StudentName]', '[ClassName]', '[Time]', '[SchoolName]'].map((v) => (
+              <span className="text-slate-500 font-bold">Variabel Suara AI Siswa:</span>
+              {['[StudentName]', '[ClassName]', '[Time]', '[SchoolName]'].map((v) => (
                 <span
                   key={v}
                   className="bg-emerald-100/70 text-emerald-800 border border-emerald-300/60 font-mono font-bold px-2 py-0.5 rounded-md"

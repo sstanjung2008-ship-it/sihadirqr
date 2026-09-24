@@ -52,11 +52,9 @@ export interface AttendanceRecord {
   scannedBy: string; // e.g., "Pos Satpam 1", "Pak Budi (Guru Piket)"
   notes?: string;
   parentNotified: boolean;
-  waLogId?: string;
   returnTime?: string; // HH:mm:ss (Waktu Pulang)
   returnStatus?: 'PULANG' | 'PULANG_CEPAT' | 'PULANG_TEPAT' | 'BELUM_PULANG';
   returnScannedBy?: string;
-  returnWaLogId?: string;
 }
 
 export type LeaveType = 'SAKIT' | 'IZIN' | 'DESAK';
@@ -200,23 +198,6 @@ export interface Teacher {
   status?: 'AKTIF' | 'NON_AKTIF';
   photoUrl?: string;
   password?: string;
-}
-
-export interface WhatsAppLog {
-  id: string;
-  studentId: string;
-  studentName: string;
-  className: string;
-  phone: string;
-  message: string;
-  status: 'TERKIRIM' | 'PENDING' | 'GAGAL';
-  timestamp: string;
-  type: 'HADIR' | 'TERLAMBAT' | 'ALPA' | 'IZIN' | 'SAKIT' | 'PULANG' | 'JADWAL_GURU';
-  recipientRole?: 'PARENT' | 'TEACHER';
-  teacherId?: string;
-  teacherName?: string;
-  slotId?: string;
-  periodNumber?: number;
 }
 
 export type LearningParticipationStatus = 

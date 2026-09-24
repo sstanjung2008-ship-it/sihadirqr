@@ -21,7 +21,6 @@ import {
   Search, 
   Filter, 
   Edit3, 
-  Send,
   Zap,
   TrendingUp,
   Home,
@@ -48,7 +47,6 @@ import {
   Trash2,
   LogOut
 } from 'lucide-react';
-import { createWhatsAppUrl } from '../lib/exportUtils';
 import { BulkAlpaManagementModal } from './BulkAlpaManagementModal';
 import { BulkReturnManagementModal, BulkReturnUpdatePayload } from './BulkReturnManagementModal';
 import { getLocalDateString } from '../lib/storage';
@@ -1390,20 +1388,6 @@ export const AttendanceDashboard: React.FC<AttendanceDashboardProps> = ({
                       {/* Actions */}
                       <td className="py-3.5 px-5 text-right">
                         <div className="flex items-center justify-end gap-2">
-                          {/* WA Alert Button */}
-                          <a
-                            href={createWhatsAppUrl(
-                              student.parentPhone,
-                              `Yth. Bpk/Ibu ${student.parentName}, memberitahukan bahwa status presensi ${student.name} (${student.className}) hari ini adalah: ${status}.`
-                            )}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            title="Kirim Notifikasi WA"
-                            className="p-1.5 rounded-xl bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200 transition-colors shadow-2xs"
-                          >
-                            <Send className="w-3.5 h-3.5" />
-                          </a>
-
                           {/* Edit Status Button (for Admin & Teacher) */}
                           {currentRole !== 'PARENT' && (
                             <button

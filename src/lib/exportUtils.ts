@@ -3555,8 +3555,7 @@ export async function exportSingleStudentBiodataPdf(
     ['1.', 'Nama Orang Tua / Wali', `: ${student.parentName || '-'}`],
     ['2.', 'Nomor Telepon / WhatsApp', `: ${student.parentPhone || '-'}`],
     ['3.', 'Alamat Email Orang Tua', `: ${student.parentEmail || '-'}`],
-    ['4.', 'Alamat Rumah Orang Tua / Wali', `: ${student.address || '-'}`],
-    ['5.', 'Keterangan Notifikasi WA Presensi', ': Aktif / Terhubung Otomatis']
+    ['4.', 'Alamat Rumah Orang Tua / Wali', `: ${student.address || '-'}`]
   ];
 
   parentDetails.forEach(([num, label, val]) => {
@@ -3764,8 +3763,7 @@ export async function exportBatchStudentBiodataSheetsPdf(
       ['1.', 'Nama Orang Tua / Wali', `: ${student.parentName || '-'}`],
       ['2.', 'Nomor Telepon / WhatsApp', `: ${student.parentPhone || '-'}`],
       ['3.', 'Alamat Email Orang Tua', `: ${student.parentEmail || '-'}`],
-      ['4.', 'Alamat Rumah Orang Tua / Wali', `: ${student.address || '-'}`],
-      ['5.', 'Keterangan Notifikasi WA Presensi', ': Aktif / Terhubung Otomatis']
+      ['4.', 'Alamat Rumah Orang Tua / Wali', `: ${student.address || '-'}`]
     ];
 
     parentDetails.forEach(([num, label, val]) => {

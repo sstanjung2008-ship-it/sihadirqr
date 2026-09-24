@@ -200,8 +200,6 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
     mode: 'MASUK' | 'PULANG';
     isRejected?: boolean;
     rejectionReason?: string;
-    waMsg?: string;
-    waUrl?: string;
   } | null>(null);
   const [scanNotification, setScanNotification] = useState<{
     type: 'SUCCESS' | 'REJECTED';
@@ -539,8 +537,6 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
         setLastScannedResult({
           student,
           record: existingRecord,
-          waMsg: `[SCAN DITOLAK] Siswa ${student.name} (${student.className}) sudah tercatat presensi Pulang pada pukul ${recordedTime} WITA. Scan QR hanya berlaku 1 kali!`,
-          waUrl: '',
           mode: 'PULANG',
           isRejected: true,
           rejectionReason: `QR Code Sudah Digunakan (Sudah Scan Pulang Pukul ${recordedTime} WITA)`
@@ -558,10 +554,7 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
       const currentMinutes = now.getHours() * 60 + now.getMinutes();
       const isBeforeEndTime = currentMinutes < endMinutes;
 
-      const returnWaLogId = `wa-pulang-${Date.now()}`;
       const returnStatus = isBeforeEndTime ? 'PULANG_CEPAT' : 'PULANG';
-
-      const isParentWaEnabled = schoolProfile.waParentNotificationEnabled !== false;
 
       const record: AttendanceRecord = {
         id: existingRecord ? existingRecord.id : `att-${Date.now()}-${student.id}`,
@@ -636,8 +629,6 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
             scannedBy: 'Pos Scanner Utama',
             parentNotified: false
           },
-          waMsg: `[SCAN DITOLAK] Mode Scan Masuk telah ditutup karena telah memasuki jam pulang sekolah (${todayEndTimeStr} WITA). Silakan beralih ke Mode Scan Pulang.`,
-          waUrl: '',
           mode: 'MASUK',
           isRejected: true,
           rejectionReason: `Mode Scan Masuk TUTUP (Lewat Jam Pulang ${todayEndTimeStr} WITA)`
@@ -676,8 +667,6 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
         setLastScannedResult({
           student,
           record: existingRecord!,
-          waMsg: `[SCAN DITOLAK] Siswa ${student.name} (${student.className}) sudah tercatat presensi Masuk pada pukul ${recordedTime} WITA. Scan QR hanya berlaku 1 kali per sesi!`,
-          waUrl: '',
           mode: 'MASUK',
           isRejected: true,
           rejectionReason: `QR Code Sudah Digunakan (Sudah Scan Masuk Pukul ${recordedTime} WITA)`
@@ -1274,7 +1263,7 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
 
         </div>
 
-        {/* Right Panel: Last Scan Result Card & WA Trigger (5 cols) */}
+        {/* Right Panel: Last Scan Result Card (5 cols) */}
         <div className="lg:col-span-5 space-y-6">
           {lastScannedResult ? (
             <div className={`rounded-3xl p-5 border shadow-md transition-all duration-300 bg-white ${

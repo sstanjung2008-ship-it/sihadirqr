@@ -1540,8 +1540,22 @@ export async function smartSyncAndMergeAllWithCloud(): Promise<{ success: boolea
       const writePromises: Promise<void>[] = [];
       const pushIfChanged = (key: string, localStr: string, cloudDoc: any) => {
         const cloudStr = cloudDoc?.data;
-        if (localStr && localStr !== cloudStr) {
-          writePromises.push(writeCloudDocument(key, localStr, now));
+        if (!localStr) return;
+        
+        // Hanya tulis ke Cloud jika:
+        // 1. Cloud masih kosong sama sekali tapi lokal punya data, ATAU
+        // 2. Data presensi dan ada antrean scan pending, ATAU
+        // 3. Timestamp lokal terbukti lebih baru daripada Cloud (ada perubahan nyata dari user perangkat ini)
+        const cloudUpdatedAt = Number(cloudDoc?.updatedAt || 0);
+        const localUpdatedAt = Number(localStorage.getItem(key + '_updatedAt') || 0);
+        const isCloudEmpty = !cloudStr || cloudStr === '[]' || cloudStr === '{}';
+        const hasPendingScans = key === KEYS.ATTENDANCE && scanQueuePendingCount > 0;
+        const isLocallyModified = localUpdatedAt > (cloudUpdatedAt + 1000);
+
+        if ((isCloudEmpty && localStr !== '[]' && localStr !== '{}') || hasPendingScans || isLocallyModified) {
+          if (localStr !== cloudStr) {
+            writePromises.push(writeCloudDocument(key, localStr, now));
+          }
         }
       };
 
@@ -2186,36 +2200,9 @@ export function initFirestoreRealtimeSync() {
       }));
     });
 
-    // 3. When returning to the app/tab from background (gentle check, at least 60s cooldown)
-    document.addEventListener('visibilitychange', () => {
-      if (document.visibilityState === 'visible' && typeof navigator !== 'undefined' && navigator.onLine && !isFirestoreQuotaExceeded()) {
-        const timeSince = Date.now() - lastAutoSyncTime;
-        if (timeSince > 60000) {
-          triggerAutoSyncOnOnline(true);
-        }
-      }
-    });
-
-    // 4. Initial background auto-sync on startup after brief initialization delay
-    if (typeof navigator !== 'undefined' && navigator.onLine) {
-      // Self-heal: clear old quota cooldown from previous write-stream crashes
-      resetFirestoreQuotaCooldown();
-      setTimeout(() => {
-        if (!isFirestoreQuotaExceeded()) {
-          triggerAutoSyncOnOnline(true);
-        }
-      }, 2000);
-    }
-
-    // 5. Periodic lightweight background sync heartbeat (every 3 minutes when online)
-    setInterval(() => {
-      if (typeof navigator !== 'undefined' && navigator.onLine && !isFirestoreQuotaExceeded()) {
-        const timeSince = Date.now() - lastAutoSyncTime;
-        if (timeSince > 180000) {
-          triggerAutoSyncOnOnline(true);
-        }
-      }
-    }, 180000);
+    // 3. Listener online: Realtime Firestore onSnapshot sudah aktif mendengarkan perubahan secara real-time.
+    // Tidak memerlukan polling berkala (setInterval) atau trigger tab visibility
+    // agar kuota write/read Firestore tidak terkuras saat aplikasi/tab dibiarkan terbuka.
   }
 }
 

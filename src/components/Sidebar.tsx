@@ -392,41 +392,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
           </div>
         </div>
 
-        <div className="flex items-center gap-1.5">
-          {/* Cloud Sync Quick Button for Mobile Header (Teachers, Admins, Scanner Pos) */}
-          <button
-            type="button"
-            onClick={() => setShowSyncModal(true)}
-            className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer shadow-xs active:scale-95 ${
-              syncStatus === 'connected'
-                ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-400/40 hover:bg-emerald-500/30'
-                : syncStatus === 'syncing'
-                ? 'bg-amber-500/20 text-amber-300 border border-amber-400/40 animate-pulse'
-                : 'bg-sky-500/20 text-sky-300 border border-sky-400/40 hover:bg-sky-500/30'
-            }`}
-            title="Sinkronisasi Cloud & Multi-Perangkat (Upload/Tarik Data)"
-          >
-            {syncStatus === 'syncing' ? (
-              <RefreshCw className="w-3.5 h-3.5 animate-spin text-amber-300" />
-            ) : syncStatus === 'connected' ? (
-              <span className="relative flex h-2 w-2">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-400"></span>
-              </span>
-            ) : (
-              <Cloud className="w-3.5 h-3.5 text-sky-300" />
-            )}
-            <span className="text-[11px] font-extrabold">
-              {syncStatus === 'connected' ? 'Cloud Live' : syncStatus === 'syncing' ? 'Sync...' : 'Sinkron'}
-            </span>
-          </button>
-
+        <div className="flex items-center gap-2">
           {/* Bell Notification Icon for Teacher and Parent in Mobile Mode */}
           {(currentRole === 'TEACHER' || currentRole === 'PARENT') && (
             <button
               type="button"
               onClick={() => setShowNotificationModal(true)}
-              className="relative p-2 rounded-xl bg-transparent hover:bg-white/10 text-yellow-400 active:scale-95 transition-all cursor-pointer flex items-center justify-center"
+              className="relative p-2 rounded-xl bg-transparent hover:bg-white/10 text-yellow-400 active:scale-95 transition-all cursor-pointer flex items-center justify-center shrink-0"
               title="Pusat Notifikasi"
               aria-label="Pusat Notifikasi"
             >
@@ -439,13 +411,81 @@ export const Sidebar: React.FC<SidebarProps> = ({
             </button>
           )}
 
-          <span className={`text-[11px] font-mono px-2 py-1 rounded-lg font-bold border ${
-            currentRole === 'PARENT'
-              ? 'bg-white/10 text-emerald-300 border-white/15 backdrop-blur-md'
-              : 'bg-indigo-900/80 text-amber-300 border-indigo-700'
-          }`}>
-            {timeStr}
-          </span>
+          {currentRole === 'TEACHER' ? (
+            /* Khusus Role Guru: Tampilan Waktu di Bawah Tampilan Cloud Live */
+            <div className="flex flex-col items-center gap-1 shrink-0 min-w-[76px]">
+              {/* Cloud Sync Quick Button on top */}
+              <button
+                type="button"
+                onClick={() => setShowSyncModal(true)}
+                className={`flex items-center justify-center gap-1 px-2 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer shadow-xs active:scale-95 w-full ${
+                  syncStatus === 'connected'
+                    ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-400/40 hover:bg-emerald-500/30'
+                    : syncStatus === 'syncing'
+                    ? 'bg-amber-500/20 text-amber-300 border border-amber-400/40 animate-pulse'
+                    : 'bg-sky-500/20 text-sky-300 border border-sky-400/40 hover:bg-sky-500/30'
+                }`}
+                title="Sinkronisasi Cloud & Multi-Perangkat (Upload/Tarik Data)"
+              >
+                {syncStatus === 'syncing' ? (
+                  <RefreshCw className="w-3 h-3 animate-spin text-amber-300" />
+                ) : syncStatus === 'connected' ? (
+                  <span className="relative flex h-2 w-2">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-400"></span>
+                  </span>
+                ) : (
+                  <Cloud className="w-3 h-3 text-sky-300" />
+                )}
+                <span className="text-[10px] font-extrabold leading-none">
+                  {syncStatus === 'connected' ? 'Cloud Live' : syncStatus === 'syncing' ? 'Sync...' : 'Sinkron'}
+                </span>
+              </button>
+
+              {/* Tampilan Waktu di Bawah Cloud Live */}
+              <span className="text-[10px] font-mono px-2 py-0.5 rounded-md font-bold border bg-indigo-900/90 text-amber-300 border-indigo-700 leading-tight text-center w-full shadow-inner tracking-tight">
+                {timeStr}
+              </span>
+            </div>
+          ) : (
+            <>
+              {/* Cloud Sync Quick Button for Mobile Header (Admins, Scanner Pos, etc.) */}
+              <button
+                type="button"
+                onClick={() => setShowSyncModal(true)}
+                className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer shadow-xs active:scale-95 ${
+                  syncStatus === 'connected'
+                    ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-400/40 hover:bg-emerald-500/30'
+                    : syncStatus === 'syncing'
+                    ? 'bg-amber-500/20 text-amber-300 border border-amber-400/40 animate-pulse'
+                    : 'bg-sky-500/20 text-sky-300 border border-sky-400/40 hover:bg-sky-500/30'
+                }`}
+                title="Sinkronisasi Cloud & Multi-Perangkat (Upload/Tarik Data)"
+              >
+                {syncStatus === 'syncing' ? (
+                  <RefreshCw className="w-3.5 h-3.5 animate-spin text-amber-300" />
+                ) : syncStatus === 'connected' ? (
+                  <span className="relative flex h-2 w-2">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-400"></span>
+                  </span>
+                ) : (
+                  <Cloud className="w-3.5 h-3.5 text-sky-300" />
+                )}
+                <span className="text-[11px] font-extrabold">
+                  {syncStatus === 'connected' ? 'Cloud Live' : syncStatus === 'syncing' ? 'Sync...' : 'Sinkron'}
+                </span>
+              </button>
+
+              <span className={`text-[11px] font-mono px-2 py-1 rounded-lg font-bold border ${
+                currentRole === 'PARENT'
+                  ? 'bg-white/10 text-emerald-300 border-white/15 backdrop-blur-md'
+                  : 'bg-indigo-900/80 text-amber-300 border-indigo-700'
+              }`}>
+                {timeStr}
+              </span>
+            </>
+          )}
         </div>
       </div>
 

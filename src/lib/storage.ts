@@ -382,9 +382,6 @@ async function performSingleDocWrite(key: string, dataStr: string, timestamp: nu
         deleteDoc(doc(db, 'sihadir_app_data', `${key}_chunk_${i}`)).catch(() => {});
       }
       knownChunkedDocs.delete(key);
-    } else if (key === KEYS.ATTENDANCE) {
-      // Pastikan chunk_1 lama dari riwayat presensi sebelumnya dibersihkan sekali
-      deleteDoc(doc(db, 'sihadir_app_data', `${key}_chunk_1`)).catch(() => {});
     }
   } else {
     // Multi-chunk document sharding
@@ -2220,12 +2217,11 @@ export function initFirestoreRealtimeSync() {
     // Tidak memerlukan polling berkala (setInterval) atau trigger tab visibility
     // agar kuota write/read Firestore tidak terkuras saat aplikasi/tab dibiarkan terbuka.
 
-    // 4. Bersihkan residual cache & log WA lama dari lokal dan Cloud Firestore
+    // 4. Bersihkan residual cache lokal WA lama
     try {
       localStorage.removeItem('sihadir_wa_logs_v2');
       localStorage.removeItem('sihadir_wa_logs_v2_updatedAt');
       localStorage.removeItem('sihadir_wa_logs');
-      deleteDoc(doc(db, 'sihadir_app_data', 'sihadir_wa_logs_v2')).catch(() => {});
     } catch {}
   }
 }

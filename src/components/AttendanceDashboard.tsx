@@ -45,11 +45,12 @@ import {
   UserX,
   UserCheck,
   Trash2,
-  LogOut
+  LogOut,
+  RefreshCw
 } from 'lucide-react';
 import { BulkAlpaManagementModal } from './BulkAlpaManagementModal';
 import { BulkReturnManagementModal, BulkReturnUpdatePayload } from './BulkReturnManagementModal';
-import { getLocalDateString } from '../lib/storage';
+import { getLocalDateString, refreshParentChildAttendance } from '../lib/storage';
 
 interface AttendanceDashboardProps {
   students: Student[];
@@ -125,6 +126,25 @@ export const AttendanceDashboard: React.FC<AttendanceDashboardProps> = ({
   const [showBulkAlpaModal, setShowBulkAlpaModal] = useState<boolean>(false);
   const [showBulkReturnModal, setShowBulkReturnModal] = useState<boolean>(false);
   const [highlightedCharLogId, setHighlightedCharLogId] = useState<string | null>(null);
+
+  // Status Sinkronisasi On-Demand Khusus Akun Orang Tua (100% Hemat Kuota)
+  const [isRefreshingParent, setIsRefreshingParent] = useState(false);
+  const [parentRefreshNotice, setParentRefreshNotice] = useState<string | null>(null);
+
+  const handleParentRefresh = async () => {
+    setIsRefreshingParent(true);
+    setParentRefreshNotice(null);
+    try {
+      const res = await refreshParentChildAttendance(true);
+      setParentRefreshNotice(res.message);
+      setTimeout(() => setParentRefreshNotice(null), 4000);
+    } catch {
+      setParentRefreshNotice('Gagal menyinkronkan status presensi.');
+      setTimeout(() => setParentRefreshNotice(null), 4000);
+    } finally {
+      setIsRefreshingParent(false);
+    }
+  };
 
   // Listen to deep linking notification event for PARENT role
   useEffect(() => {
@@ -443,14 +463,34 @@ export const AttendanceDashboard: React.FC<AttendanceDashboardProps> = ({
                   </div>
                 </div>
 
-                {/* Right: Date info in Modern Glass */}
-                <div className="flex items-center gap-2 self-start md:self-auto shrink-0 bg-white/80 backdrop-blur-md border border-slate-200/80 rounded-2xl px-3.5 py-2 text-xs shadow-xs">
-                  <Calendar className="w-4 h-4 text-indigo-600 shrink-0" />
-                  <span className="text-[11px] font-bold text-slate-700 font-mono">
-                    {displayDateFormatted}
-                  </span>
+                {/* Right: Date info & On-Demand Sync Button */}
+                <div className="flex flex-col sm:flex-row items-start sm:items-center gap-2.5 self-start md:self-auto shrink-0">
+                  <button
+                    type="button"
+                    onClick={handleParentRefresh}
+                    disabled={isRefreshingParent}
+                    className="flex items-center gap-1.5 px-3 py-2 rounded-2xl text-xs font-bold transition-all shadow-xs cursor-pointer active:scale-95 bg-emerald-600 hover:bg-emerald-700 text-white disabled:opacity-75"
+                    title="Perbarui status kehadiran anak dari Cloud (Hemat kuota 100% gratis)"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${isRefreshingParent ? 'animate-spin' : ''}`} />
+                    <span>{isRefreshingParent ? 'Menyinkronkan...' : 'Segarkan Status'}</span>
+                  </button>
+
+                  <div className="flex items-center gap-2 bg-white/80 backdrop-blur-md border border-slate-200/80 rounded-2xl px-3.5 py-2 text-xs shadow-xs">
+                    <Calendar className="w-4 h-4 text-indigo-600 shrink-0" />
+                    <span className="text-[11px] font-bold text-slate-700 font-mono">
+                      {displayDateFormatted}
+                    </span>
+                  </div>
                 </div>
               </div>
+
+              {parentRefreshNotice && (
+                <div className="mt-3 py-1.5 px-3 bg-emerald-100/90 border border-emerald-300 rounded-xl text-emerald-800 text-[11px] font-bold flex items-center gap-2">
+                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                  <span>{parentRefreshNotice}</span>
+                </div>
+              )}
             </div>
 
             {/* 2. MENU NAVIGASI TEMA KACA MODERN (5 FITUR UTAMA DENGAN LOGO/ICON) */}
@@ -661,8 +701,19 @@ export const AttendanceDashboard: React.FC<AttendanceDashboardProps> = ({
                   </p>
                 </div>
 
-                {/* Date Filter */}
-                <div className="flex items-center gap-2 self-start md:self-auto shrink-0">
+                {/* Date Filter & Refresh Button */}
+                <div className="flex flex-col sm:flex-row items-start sm:items-center gap-2.5 self-start md:self-auto shrink-0">
+                  <button
+                    type="button"
+                    onClick={handleParentRefresh}
+                    disabled={isRefreshingParent}
+                    className="flex items-center gap-1.5 px-3 py-2 rounded-2xl text-xs font-bold transition-all shadow-xs cursor-pointer active:scale-95 bg-emerald-600 hover:bg-emerald-700 text-white disabled:opacity-75"
+                    title="Perbarui status kehadiran anak dari Cloud (Hemat kuota 100% gratis)"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${isRefreshingParent ? 'animate-spin' : ''}`} />
+                    <span>{isRefreshingParent ? 'Menyinkronkan...' : 'Segarkan Status'}</span>
+                  </button>
+
                   <div className="flex items-center gap-2 bg-white/90 backdrop-blur-md border border-slate-200/80 rounded-2xl px-3.5 py-2 text-xs shadow-xs">
                     <Calendar className="w-4 h-4 text-indigo-600 shrink-0" />
                     <span className="text-[11px] font-bold text-slate-500">Tanggal:</span>
@@ -684,6 +735,13 @@ export const AttendanceDashboard: React.FC<AttendanceDashboardProps> = ({
                   )}
                 </div>
               </div>
+
+              {parentRefreshNotice && (
+                <div className="mt-3 py-1.5 px-3 bg-emerald-100/90 border border-emerald-300 rounded-xl text-emerald-800 text-[11px] font-bold flex items-center gap-2">
+                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                  <span>{parentRefreshNotice}</span>
+                </div>
+              )}
             </div>
 
             {/* 4 KARTU STATUS PRESENSI (MASUK, PULANG, KEAKTIFAN KBM, NILAI KARAKTER) */}

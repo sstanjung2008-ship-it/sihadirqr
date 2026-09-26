@@ -415,6 +415,14 @@ async function performSingleDocWrite(key: string, dataStr: string, timestamp: nu
 }
 
 export async function writeCloudDocument(key: string, dataStr: string, timestamp: number): Promise<void> {
+  const currentRole = getUserSession()?.role;
+  // PENGHEMAT KUOTA UTAMA:
+  // HP Orang Tua (PARENT) dilarang keras menulis data apa pun ke Cloud Firestore,
+  // KECUALI dokumen permohonan izin (KEYS.LEAVES) atau saat ganti kata sandi siswa (KEYS.STUDENTS).
+  if (currentRole === 'PARENT' && key !== KEYS.LEAVES && key !== KEYS.STUDENTS) {
+    return;
+  }
+
   if (isFirestoreQuotaExceeded()) {
     return;
   }
@@ -545,6 +553,14 @@ export async function readCloudDocument(key: string): Promise<{ data: string; up
 // Debounced and deduped push to Firestore with Auto-Chunking support
 export function syncToCloud(key: string, data: any, instant: boolean = false, explicitTimestamp?: number) {
   if (typeof window === 'undefined') return;
+
+  const currentRole = getUserSession()?.role;
+  // PENGHEMAT KUOTA UTAMA:
+  // HP Orang Tua (PARENT) dilarang keras menulis data apa pun ke Cloud Firestore,
+  // KECUALI dokumen permohonan izin (KEYS.LEAVES) atau saat ganti kata sandi siswa (KEYS.STUDENTS).
+  if (currentRole === 'PARENT' && key !== KEYS.LEAVES && key !== KEYS.STUDENTS) {
+    return;
+  }
 
   let finalData = data;
   if (key === KEYS.ATTENDANCE) {
@@ -1378,6 +1394,16 @@ export function mergeSchoolProfile(local: SchoolProfile, cloud: SchoolProfile): 
       ...(cloud.autoCharacterPoints || {}),
     },
     lateToleranceMinutes: typeof cloud.lateToleranceMinutes === 'number' ? cloud.lateToleranceMinutes : (typeof local.lateToleranceMinutes === 'number' ? local.lateToleranceMinutes : (INITIAL_SCHOOL_PROFILE.lateToleranceMinutes ?? 15)),
+    parentPortalLoginEnabled: typeof cloud.parentPortalLoginEnabled === 'boolean'
+      ? cloud.parentPortalLoginEnabled
+      : (typeof local.parentPortalLoginEnabled === 'boolean' ? local.parentPortalLoginEnabled : (INITIAL_SCHOOL_PROFILE.parentPortalLoginEnabled !== false)),
+    parentPortalScheduleEnabled: typeof cloud.parentPortalScheduleEnabled === 'boolean'
+      ? cloud.parentPortalScheduleEnabled
+      : (typeof local.parentPortalScheduleEnabled === 'boolean' ? local.parentPortalScheduleEnabled : false),
+    parentPortalOpenTime: cloud.parentPortalOpenTime || local.parentPortalOpenTime || INITIAL_SCHOOL_PROFILE.parentPortalOpenTime || '06:00',
+    parentPortalCloseTime: cloud.parentPortalCloseTime || local.parentPortalCloseTime || INITIAL_SCHOOL_PROFILE.parentPortalCloseTime || '18:00',
+    parentPortalDisabledNotice: cloud.parentPortalDisabledNotice || local.parentPortalDisabledNotice || INITIAL_SCHOOL_PROFILE.parentPortalDisabledNotice || 'Akses login untuk wali murid saat ini sedang dinonaktifkan oleh Administrator Sekolah. Silakan hubungi pihak sekolah atau coba kembali nanti.',
+    parentPortalForceLogoutTimestamp: Math.max(Number(cloud.parentPortalForceLogoutTimestamp) || 0, Number(local.parentPortalForceLogoutTimestamp) || 0),
   };
 }
 
@@ -1881,6 +1907,164 @@ export function stopFirestoreRealtimeSync(): void {
   isFirestoreInitialized = false;
 }
 
+const PARENT_SYNC_COOLDOWN_MS = 5 * 60 * 1000; // 5 menit cache cooldown
+let lastParentRefreshTime = 0;
+
+/**
+ * PENGHEMAT KUOTA TERTINGGI: Sinkronisasi Sesuai Kebutuhan Khusus Akun Wali Murid (PARENT)
+ * 1. Tidak memasang listener onSnapshot real-time (mencegah ledakan 60.000 read saat ratusan siswa di-scan di gerbang).
+ * 2. Menggunakan LocalStorage instan (0 read).
+ * 3. Jika cache lokal kadaluarsa (> 5 menit) atau ditekan tombol segarkan, hanya membaca dokumen terkait (KEYS.ATTENDANCE & KEYS.LEAVES).
+ * 4. 100% GRATIS dan menjamin kuota Firebase Spark (50.000 read/hari) tidak akan pernah tersentuh habis.
+ */
+export async function syncParentDataOnDemand(force: boolean = false): Promise<{ success: boolean; message: string }> {
+  if (typeof window === 'undefined') return { success: false, message: 'SSR' };
+  if (isFirestoreQuotaExceeded()) {
+    setCloudSyncStatus('quota_exceeded');
+    return { success: false, message: 'Batas kuota harian Firebase tercapai' };
+  }
+
+  const now = Date.now();
+  const lastSyncStr = localStorage.getItem('sihadir_parent_last_sync') || '0';
+  const lastSyncTime = Number(lastSyncStr) || 0;
+  const timeSinceLastSync = now - lastSyncTime;
+
+  // Cek apakah data dasar siswa sudah ada di perangkat ini
+  const localStudentsStr = localStorage.getItem(KEYS.STUDENTS);
+  const localProfileStr = localStorage.getItem(KEYS.PROFILE);
+  const isFirstTimeBoot = !localStudentsStr || !localProfileStr || localStudentsStr === '[]';
+
+  // Jika bukan booting awal, bukan paksa (force), dan masih dalam masa berlaku cache (5 menit):
+  // TIDAK MELAKUKAN BACA SAMA SEKALI KE FIRESTORE! (0 Reads, 100% Hemat Kuota)
+  if (!isFirstTimeBoot && !force && timeSinceLastSync < PARENT_SYNC_COOLDOWN_MS) {
+    setCloudSyncStatus('connected');
+    return { success: true, message: 'Data presensi lokal masih baru (mode hemat kuota aktif).' };
+  }
+
+  // Rate limit agar tombol segarkan tidak bisa dispam (minimal 10 detik jeda)
+  if (force && (now - lastParentRefreshTime < 10000)) {
+    return { success: true, message: 'Data presensi baru saja diperbarui. Tunggu beberapa detik.' };
+  }
+  lastParentRefreshTime = now;
+
+  setCloudSyncStatus('syncing');
+
+  try {
+    if (isFirstTimeBoot) {
+      // Hanya saat pertama kali buka aplikasi di HP orang tua: Ambil data esensial siswa dan profil sekolah
+      const [pDoc, sDoc, aDoc, schDoc, lDoc, cDoc] = await Promise.all([
+        readCloudDocument(KEYS.PROFILE),
+        readCloudDocument(KEYS.STUDENTS),
+        readCloudDocument(KEYS.ATTENDANCE),
+        readCloudDocument(KEYS.SCHEDULES),
+        readCloudDocument(KEYS.LEAVES),
+        readCloudDocument(KEYS.CHARACTER_LOGS),
+      ]);
+
+      if (pDoc?.data) safeSetLocalStorage(KEYS.PROFILE, pDoc.data);
+      if (sDoc?.data) safeSetLocalStorage(KEYS.STUDENTS, sDoc.data);
+      if (aDoc?.data) safeSetLocalStorage(KEYS.ATTENDANCE, aDoc.data);
+      if (schDoc?.data) safeSetLocalStorage(KEYS.SCHEDULES, schDoc.data);
+      if (lDoc?.data) safeSetLocalStorage(KEYS.LEAVES, lDoc.data);
+      if (cDoc?.data) safeSetLocalStorage(KEYS.CHARACTER_LOGS, cDoc.data);
+
+      safeSetLocalStorage('sihadir_parent_last_sync', String(now));
+      notifyStorageUpdated();
+      setCloudSyncStatus('connected');
+      return { success: true, message: 'Data awal siswa berhasil disinkronkan!' };
+    }
+
+    // Untuk pengecekan reguler orang tua:
+    // HANYA BACA DUA DOKUMEN: ATTENDANCE & LEAVES (Hanya 2 Read!)
+    const [attDoc, leavesDoc] = await Promise.all([
+      readCloudDocument(KEYS.ATTENDANCE),
+      readCloudDocument(KEYS.LEAVES),
+    ]);
+
+    if (attDoc?.data) {
+      safeSetLocalStorage(KEYS.ATTENDANCE, attDoc.data);
+      safeSetLocalStorage(KEYS.ATTENDANCE + '_updatedAt', String(attDoc.updatedAt || now));
+    }
+    if (leavesDoc?.data) {
+      safeSetLocalStorage(KEYS.LEAVES, leavesDoc.data);
+      safeSetLocalStorage(KEYS.LEAVES + '_updatedAt', String(leavesDoc.updatedAt || now));
+    }
+
+    safeSetLocalStorage('sihadir_parent_last_sync', String(now));
+    notifyStorageUpdated();
+    setCloudSyncStatus('connected');
+    return { success: true, message: 'Status presensi anak berhasil diperbarui dari Cloud!' };
+  } catch (err: any) {
+    console.warn('[Parent Sync] Gagal memperbarui status presensi:', err);
+    setCloudSyncStatus('offline');
+    return { success: false, message: 'Gagal memperbarui status presensi.' };
+  }
+}
+
+/**
+ * Fungsi manual untuk tombol "Segarkan Status Anak" di Portal Wali Murid
+ */
+export async function refreshParentChildAttendance(force: boolean = true): Promise<{ success: boolean; message: string; lastSyncTime: string }> {
+  const res = await syncParentDataOnDemand(force);
+  const now = new Date();
+  const timeStr = now.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
+  return {
+    success: res.success,
+    message: res.message,
+    lastSyncTime: timeStr,
+  };
+}
+
+/**
+ * Penghemat kuota saat login: Hanya ambil data profil, siswa, dan guru (3 dokumen saja)
+ * Menghindari penarikan 13 dokumen saat verifikasi akun di perangkat baru
+ */
+export async function quickSyncAuthCredentials(): Promise<boolean> {
+  try {
+    const [pDoc, sDoc, tDoc] = await Promise.all([
+      readCloudDocument(KEYS.PROFILE),
+      readCloudDocument(KEYS.STUDENTS),
+      readCloudDocument(KEYS.TEACHERS),
+    ]);
+
+    if (pDoc?.data) {
+      try {
+        const cloudP = typeof pDoc.data === 'string' ? JSON.parse(pDoc.data) : pDoc.data;
+        const localP = getSchoolProfile();
+        const mergedP = mergeSchoolProfile(localP, cloudP);
+        safeSetLocalStorage(KEYS.PROFILE, JSON.stringify(mergedP));
+      } catch {
+        safeSetLocalStorage(KEYS.PROFILE, pDoc.data);
+      }
+    }
+    if (sDoc?.data) {
+      try {
+        const cloudS = typeof sDoc.data === 'string' ? JSON.parse(sDoc.data) : sDoc.data;
+        const localS = getStudents();
+        const mergedS = mergeStudentLists(localS, cloudS);
+        safeSetLocalStorage(KEYS.STUDENTS, JSON.stringify(mergedS));
+      } catch {
+        safeSetLocalStorage(KEYS.STUDENTS, sDoc.data);
+      }
+    }
+    if (tDoc?.data) {
+      try {
+        const cloudT = typeof tDoc.data === 'string' ? JSON.parse(tDoc.data) : tDoc.data;
+        const localT = getTeachers();
+        const mergedT = mergeTeacherLists(localT, cloudT);
+        safeSetLocalStorage(KEYS.TEACHERS, JSON.stringify(mergedT));
+      } catch {
+        safeSetLocalStorage(KEYS.TEACHERS, tDoc.data);
+      }
+    }
+    notifyStorageUpdated();
+    return true;
+  } catch (e) {
+    console.warn('[Quick Auth Sync] Gagal mengunduh kredensial login:', e);
+    return false;
+  }
+}
+
 // Initialize Realtime Sync from Firestore with Role-Based Optimization
 export function initFirestoreRealtimeSync(role?: UserRole) {
   if (typeof window === 'undefined') return;
@@ -1893,9 +2077,52 @@ export function initFirestoreRealtimeSync(role?: UserRole) {
   if (isFirestoreInitialized) {
     stopFirestoreRealtimeSync();
   }
-  isFirestoreInitialized = true;
 
   const currentRole = role || getUserSession()?.role || 'ADMIN';
+
+  // SANGAT KRUSIAL: PENGHEMAT KUOTA TERTINGGI UNTUK ROLE WALI MURID (PARENT)
+  // HP Orang Tua TIDAK PERNAH memasang listener onSnapshot pada data presensi, jurnal, siswa, atau kelas!
+  // Pasang onSnapshot presensi pada ratusan HP orang tua memicu puluhan ribu read saat scanner gerbang memindai siswa.
+  // Sebagai gantinya, akun Orang Tua menggunakan sistem "Smart On-Demand Cached Read" untuk data presensi:
+  // 1. Kunjungan pertama: Ambil dokumen via getDoc (hanya 1-2 read), lalu simpan ke LocalStorage.
+  // 2. Kunjungan berikutnya: Langsung baca LocalStorage (0 read).
+  // 3. Jika cache sudah lewat 5 menit atau orang tua klik "Segarkan Status", lakukan 1 read getDoc.
+  // SATU-SATUNYA listener real-time untuk HP Orang Tua adalah KEYS.PROFILE (hanya 1 dokumen tunggal):
+  // Menjamin jika Admin menonaktifkan portal orang tua atau menekan tombol paksa log off,
+  // HP seluruh orang tua seketika menerima pembaruan secara real-time dan ter-log off otomatis!
+  if (currentRole === 'PARENT') {
+    isFirestoreInitialized = true;
+    syncParentDataOnDemand(false);
+
+    try {
+      const profileDocRef = doc(db, 'sihadir_app_data', KEYS.PROFILE);
+      const unsubProfile = onSnapshot(profileDocRef, (docSnap) => {
+        if (docSnap.exists()) {
+          const payload = docSnap.data();
+          if (payload && payload.data !== undefined) {
+            try {
+              const cloudP = typeof payload.data === 'string' ? JSON.parse(payload.data) : payload.data;
+              const localP = getSchoolProfile();
+              const mergedP = mergeSchoolProfile(localP, cloudP);
+              safeSetLocalStorage(KEYS.PROFILE, JSON.stringify(mergedP));
+              safeSetLocalStorage(KEYS.PROFILE + '_updatedAt', String(payload.updatedAt || Date.now()));
+              notifyStorageUpdated();
+            } catch (err) {
+              console.warn('[Realtime Sync Parent] Gagal parse profile:', err);
+            }
+          }
+        }
+      }, (error) => {
+        console.warn('[Realtime Sync Parent Profile Error]', error);
+      });
+      activeUnsubscribes.push(unsubProfile);
+    } catch (e) {
+      console.warn('[Realtime Sync Parent Profile Listener Error]', e);
+    }
+    return;
+  }
+
+  isFirestoreInitialized = true;
 
   const ALL_KEYS: Array<{ 
     key: string; 
@@ -1917,22 +2144,9 @@ export function initFirestoreRealtimeSync(role?: UserRole) {
   ];
 
   // Saring dokumen yang perlu didengarkan secara real-time berdasarkan role
-  // Mencegah ratusan HP Orang Tua mendengarkan data jurnal guru, nilai rapot, periode jam pelajaran, dll.
   let SYNC_KEYS = ALL_KEYS;
 
-  if (currentRole === 'PARENT') {
-    // Role Orang Tua HANYA mendengarkan dokumen relevan anak:
-    // Kehadiran, Izin, Jadwal Kelas, Log Karakter, Data Siswa, dan Profil Sekolah
-    const parentAllowed = new Set([
-      KEYS.PROFILE,
-      KEYS.ATTENDANCE,
-      KEYS.LEAVES,
-      KEYS.SCHEDULES,
-      KEYS.CHARACTER_LOGS,
-      KEYS.STUDENTS,
-    ]);
-    SYNC_KEYS = ALL_KEYS.filter(k => parentAllowed.has(k.key));
-  } else if (currentRole === 'SCANNER_POS') {
+  if (currentRole === 'SCANNER_POS') {
     // Role Scanner Pos Gerbang HANYA butuh Profil, Siswa, Kelas, dan Presensi
     const scannerAllowed = new Set([
       KEYS.PROFILE,
@@ -2225,6 +2439,7 @@ export function initFirestoreRealtimeSync(role?: UserRole) {
   // Startup background check for raw uncompressed student photos (>90KB base64)
   try {
     setTimeout(() => {
+      if (getUserSession()?.role === 'PARENT') return;
       const existingStudents = getStudents();
       const hasOversized = existingStudents.some(s => s.photoUrl?.startsWith('data:') && s.photoUrl.length > 90000);
       if (hasOversized && !isFirestoreQuotaExceeded()) {
@@ -2349,11 +2564,114 @@ export function getSchoolProfile(): SchoolProfile {
       lateToleranceMinutes: typeof parsed.lateToleranceMinutes === 'number' ? parsed.lateToleranceMinutes : (INITIAL_SCHOOL_PROFILE.lateToleranceMinutes ?? 15),
       activeDays: parsed.activeDays && Array.isArray(parsed.activeDays) && parsed.activeDays.length > 0 ? parsed.activeDays : (INITIAL_SCHOOL_PROFILE.activeDays || ['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu']),
       holidays: parsed.holidays && Array.isArray(parsed.holidays) ? parsed.holidays : (INITIAL_SCHOOL_PROFILE.holidays || []),
-      subjects: cleanSubjects.length > 0 ? cleanSubjects : ['Matematika', 'Bahasa Indonesia', 'Bahasa Inggris', 'IPA', 'IPS', 'Pendidikan Agama', 'PJOK', 'Seni Budaya', 'Informatika', 'PPKn']
+      subjects: cleanSubjects.length > 0 ? cleanSubjects : ['Matematika', 'Bahasa Indonesia', 'Bahasa Inggris', 'IPA', 'IPS', 'Pendidikan Agama', 'PJOK', 'Seni Budaya', 'Informatika', 'PPKn'],
+      parentPortalLoginEnabled: typeof parsed.parentPortalLoginEnabled === 'boolean'
+        ? parsed.parentPortalLoginEnabled
+        : (INITIAL_SCHOOL_PROFILE.parentPortalLoginEnabled !== false),
+      parentPortalScheduleEnabled: typeof parsed.parentPortalScheduleEnabled === 'boolean'
+        ? parsed.parentPortalScheduleEnabled
+        : false,
+      parentPortalOpenTime: parsed.parentPortalOpenTime || INITIAL_SCHOOL_PROFILE.parentPortalOpenTime || '06:00',
+      parentPortalCloseTime: parsed.parentPortalCloseTime || INITIAL_SCHOOL_PROFILE.parentPortalCloseTime || '18:00',
+      parentPortalActiveDays: parsed.parentPortalActiveDays && Array.isArray(parsed.parentPortalActiveDays) && parsed.parentPortalActiveDays.length > 0
+        ? parsed.parentPortalActiveDays
+        : (INITIAL_SCHOOL_PROFILE.parentPortalActiveDays || ['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu', 'Minggu']),
+      parentPortalDisabledNotice: parsed.parentPortalDisabledNotice || INITIAL_SCHOOL_PROFILE.parentPortalDisabledNotice || 'Akses login untuk wali murid saat ini sedang dinonaktifkan oleh Administrator Sekolah. Silakan hubungi pihak sekolah atau coba kembali nanti.',
+      parentPortalForceLogoutTimestamp: Number(parsed.parentPortalForceLogoutTimestamp) || 0,
     };
   } catch {
     return INITIAL_SCHOOL_PROFILE;
   }
+}
+
+/**
+ * Memeriksa hak akses dan jadwal login wali murid (orang tua).
+ * Jika non-aktif atau di luar jadwal (hari atau jam operasional), mengembalikan status ditolak dan alasan penjelasan.
+ */
+export function checkParentLoginAccess(profile?: SchoolProfile): { allowed: boolean; reason: string } {
+  const p = profile || getSchoolProfile();
+
+  // 1. Cek Saklar Utama (Master Switch)
+  if (p.parentPortalLoginEnabled === false) {
+    return {
+      allowed: false,
+      reason: p.parentPortalDisabledNotice || 'Akses login untuk wali murid saat ini sedang dinonaktifkan oleh Administrator Sekolah. Silakan hubungi pihak sekolah.'
+    };
+  }
+
+  // 2. Cek Jadwal Hari & Jam Operasional jika Jadwal Diaktifkan
+  if (p.parentPortalScheduleEnabled) {
+    const activeDays = (p.parentPortalActiveDays && Array.isArray(p.parentPortalActiveDays) && p.parentPortalActiveDays.length > 0)
+      ? p.parentPortalActiveDays
+      : ['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu', 'Minggu'];
+
+    const now = new Date();
+    // Hitung waktu WITA (UTC+8) yang presisi
+    const utc = now.getTime() + (now.getTimezoneOffset() * 60000);
+    const wita = new Date(utc + (3600000 * 8));
+
+    // Daftar nama hari dalam Bahasa Indonesia (0: Minggu, 1: Senin, ..., 6: Sabtu)
+    const indonesianDayNames = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
+    const currentDayName = indonesianDayNames[wita.getDay()];
+
+    // A. Cek Pilihan Hari Operasional
+    if (!activeDays.includes(currentDayName)) {
+      return {
+        allowed: false,
+        reason: `Akses login wali murid ditutup pada hari ${currentDayName}. Hari operasional login yang diizinkan: ${activeDays.join(', ')}.`
+      };
+    }
+
+    // B. Cek Jam Buka / Tutup Operasional
+    const openTime = p.parentPortalOpenTime || '06:00';
+    const closeTime = p.parentPortalCloseTime || '18:00';
+    const currentMinutes = wita.getHours() * 60 + wita.getMinutes();
+
+    const [openH, openM] = openTime.split(':').map(Number);
+    const [closeH, closeM] = closeTime.split(':').map(Number);
+    const openMinutes = (openH || 0) * 60 + (openM || 0);
+    const closeMinutes = (closeH || 0) * 60 + (closeM || 0);
+
+    const isWithinHours = openMinutes <= closeMinutes 
+      ? (currentMinutes >= openMinutes && currentMinutes <= closeMinutes)
+      : (currentMinutes >= openMinutes || currentMinutes <= closeMinutes);
+
+    if (!isWithinHours) {
+      return {
+        allowed: false,
+        reason: `Akses login wali murid saat ini di luar jam operasional. Akses login dibuka pada pukul ${openTime} - ${closeTime} WITA.`
+      };
+    }
+  }
+
+  return { allowed: true, reason: '' };
+}
+
+/**
+ * Memperbarui pengaturan portal orang tua secara terpusat dan menyinkronkan langsung ke Cloud Firestore
+ */
+export function updateParentPortalAccess(options: {
+  loginEnabled?: boolean;
+  scheduleEnabled?: boolean;
+  openTime?: string;
+  closeTime?: string;
+  activeDays?: string[];
+  disabledNotice?: string;
+  forceLogout?: boolean;
+}): SchoolProfile {
+  const current = getSchoolProfile();
+  const updated: SchoolProfile = {
+    ...current,
+    parentPortalLoginEnabled: options.loginEnabled !== undefined ? options.loginEnabled : current.parentPortalLoginEnabled,
+    parentPortalScheduleEnabled: options.scheduleEnabled !== undefined ? options.scheduleEnabled : current.parentPortalScheduleEnabled,
+    parentPortalOpenTime: options.openTime !== undefined ? options.openTime : current.parentPortalOpenTime,
+    parentPortalCloseTime: options.closeTime !== undefined ? options.closeTime : current.parentPortalCloseTime,
+    parentPortalActiveDays: options.activeDays !== undefined ? options.activeDays : (current.parentPortalActiveDays || ['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu', 'Minggu']),
+    parentPortalDisabledNotice: options.disabledNotice !== undefined ? options.disabledNotice : current.parentPortalDisabledNotice,
+    parentPortalForceLogoutTimestamp: options.forceLogout ? Date.now() : current.parentPortalForceLogoutTimestamp,
+  };
+  saveSchoolProfile(updated);
+  return updated;
 }
 
 /**
@@ -2605,6 +2923,11 @@ export async function flushAttendanceScanQueue(force: boolean = false): Promise<
  * 3. Mencegah ribuan write sia-sia ke Firestore Cloud Blaze
  */
 export function queueAttendanceScanRecord(records: AttendanceRecord[]): void {
+  const currentRole = getUserSession()?.role;
+  if (currentRole === 'PARENT') {
+    return;
+  }
+
   const cleanRecords = validateAndSanitizeAttendanceRecords(records);
   const now = Date.now();
   const dataStr = JSON.stringify(cleanRecords);

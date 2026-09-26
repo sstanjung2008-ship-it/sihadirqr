@@ -29,7 +29,7 @@ import {
   CalendarDays,
   UserCircle
 } from 'lucide-react';
-import { getCloudSyncStatus, CloudSyncStatus, getStudents, getLeaveRequests, getAttendanceRecords, getTeachers, getStudentCharacterLogs, getSchoolClasses, getLocalDateString } from '../lib/storage';
+import { getCloudSyncStatus, CloudSyncStatus, getStudents, getLeaveRequests, getAttendanceRecords, getTeachers, getStudentCharacterLogs, getSchoolClasses, getLocalDateString, refreshParentChildAttendance } from '../lib/storage';
 import { MultiDeviceSyncModal } from './MultiDeviceSyncModal';
 import { PWAInstallButton } from './PWAInstallButton';
 import { NotificationModal } from './NotificationModal';
@@ -63,7 +63,18 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const [syncStatus, setSyncStatus] = useState<CloudSyncStatus>(() => getCloudSyncStatus());
   const [showSyncModal, setShowSyncModal] = useState(false);
   const [showNotificationModal, setShowNotificationModal] = useState(false);
+  const [isParentRefreshing, setIsParentRefreshing] = useState(false);
   const currentStudentCount = studentCount !== undefined ? studentCount : getStudents().length;
+
+  const handleParentRefresh = async () => {
+    setIsParentRefreshing(true);
+    try {
+      await refreshParentChildAttendance(true);
+    } catch {}
+    finally {
+      setIsParentRefreshing(false);
+    }
+  };
 
   // Check if active user is a Teacher with BK role
   const isTeacherBk = useMemo(() => {
@@ -411,7 +422,27 @@ export const Sidebar: React.FC<SidebarProps> = ({
             </button>
           )}
 
-          {currentRole === 'TEACHER' ? (
+          {currentRole === 'PARENT' ? (
+            /* Khusus Role Wali Murid: Tombol Segarkan On-Demand Hemat Kuota */
+            <div className="flex items-center gap-1.5">
+              <button
+                type="button"
+                onClick={handleParentRefresh}
+                disabled={isParentRefreshing}
+                className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer shadow-xs active:scale-95 bg-emerald-500/20 text-emerald-200 border border-emerald-400/40 hover:bg-emerald-500/30 disabled:opacity-75"
+                title="Perbarui data kehadiran anak dari Cloud (Mode Hemat Kuota)"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${isParentRefreshing ? 'animate-spin' : ''} text-emerald-300`} />
+                <span className="text-[11px] font-extrabold text-emerald-100">
+                  {isParentRefreshing ? 'Memperbarui...' : 'Segarkan'}
+                </span>
+              </button>
+
+              <span className="text-[11px] font-mono px-2 py-1 rounded-lg font-bold border bg-white/10 text-emerald-300 border-white/15 backdrop-blur-md">
+                {timeStr}
+              </span>
+            </div>
+          ) : currentRole === 'TEACHER' ? (
             /* Khusus Role Guru: Tampilan Waktu di Bawah Tampilan Cloud Live */
             <div className="flex flex-col items-center gap-1 shrink-0 min-w-[76px]">
               {/* Cloud Sync Quick Button on top */}
@@ -477,11 +508,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 </span>
               </button>
 
-              <span className={`text-[11px] font-mono px-2 py-1 rounded-lg font-bold border ${
-                currentRole === 'PARENT'
-                  ? 'bg-white/10 text-emerald-300 border-white/15 backdrop-blur-md'
-                  : 'bg-indigo-900/80 text-amber-300 border-indigo-700'
-              }`}>
+              <span className="text-[11px] font-mono px-2 py-1 rounded-lg font-bold border bg-indigo-900/80 text-amber-300 border-indigo-700">
                 {timeStr}
               </span>
             </>
@@ -732,35 +759,55 @@ export const Sidebar: React.FC<SidebarProps> = ({
           </div>
 
           {/* Cloud Database Sync Indicator (Interactive for all roles to sync data across devices) */}
-          <button
-            type="button"
-            onClick={() => setShowSyncModal(true)}
-            className="w-full flex items-center justify-between text-[11px] bg-sky-950/60 hover:bg-sky-900/70 border border-sky-700/60 p-2 rounded-xl text-sky-200 transition-all cursor-pointer text-left shadow-xs group"
-            title="Klik untuk menyamakan dan menyinkronkan data antar-perangkat (Upload / Tarik Data Cloud)"
-          >
-            <div className="flex items-center space-x-2 truncate mr-1.5">
-              {syncStatus === 'syncing' ? (
-                <RefreshCw className="w-3.5 h-3.5 text-amber-400 animate-spin shrink-0" />
-              ) : syncStatus === 'connected' ? (
-                <span className="relative flex h-2 w-2 shrink-0">
-                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                  <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-400"></span>
+          {currentRole === 'PARENT' ? (
+            <button
+              type="button"
+              onClick={handleParentRefresh}
+              disabled={isParentRefreshing}
+              className="w-full flex items-center justify-between text-[11px] bg-emerald-950/60 hover:bg-emerald-900/70 border border-emerald-700/60 p-2 rounded-xl text-emerald-200 transition-all cursor-pointer text-left shadow-xs group disabled:opacity-75"
+              title="Perbarui status kehadiran anak dari Cloud (Mode Hemat Kuota)"
+            >
+              <div className="flex items-center space-x-2 truncate mr-1.5">
+                <RefreshCw className={`w-3.5 h-3.5 text-emerald-400 ${isParentRefreshing ? 'animate-spin' : ''} shrink-0`} />
+                <span className="font-bold text-[11px] text-emerald-100 group-hover:text-white transition-colors truncate">
+                  {isParentRefreshing ? 'Menyinkronkan...' : 'Mode Hemat: Terhubung'}
                 </span>
-              ) : syncStatus === 'quota_exceeded' ? (
-                <span className="relative flex h-2 w-2 shrink-0">
-                  <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-400"></span>
-                </span>
-              ) : (
-                <Cloud className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-              )}
-              <span className="font-bold text-[11px] text-sky-100 group-hover:text-white transition-colors truncate">
-                {syncStatus === 'connected' ? 'Database: Live' : syncStatus === 'quota_exceeded' ? 'Cloud: Kuota Habis' : syncStatus === 'syncing' ? 'Menyinkronkan...' : 'Database: Offline'}
+              </div>
+              <span className="text-[10px] font-extrabold px-1.5 py-0.5 rounded-md border border-emerald-600 bg-emerald-900/80 text-emerald-300 group-hover:bg-emerald-600 group-hover:text-white transition-colors shrink-0">
+                Segarkan ↗
               </span>
-            </div>
-            <span className={`text-[10px] font-extrabold px-1.5 py-0.5 rounded-md border transition-colors shrink-0 ${syncStatus === 'quota_exceeded' ? 'text-amber-300 bg-amber-950/80 border-amber-700 group-hover:bg-amber-600 group-hover:text-white' : 'text-sky-300 bg-sky-900/80 border-sky-600 group-hover:bg-sky-600 group-hover:text-white'}`}>
-              {syncStatus === 'quota_exceeded' ? 'File ↗' : 'Sinkron ↗'}
-            </span>
-          </button>
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setShowSyncModal(true)}
+              className="w-full flex items-center justify-between text-[11px] bg-sky-950/60 hover:bg-sky-900/70 border border-sky-700/60 p-2 rounded-xl text-sky-200 transition-all cursor-pointer text-left shadow-xs group"
+              title="Klik untuk menyamakan dan menyinkronkan data antar-perangkat (Upload / Tarik Data Cloud)"
+            >
+              <div className="flex items-center space-x-2 truncate mr-1.5">
+                {syncStatus === 'syncing' ? (
+                  <RefreshCw className="w-3.5 h-3.5 text-amber-400 animate-spin shrink-0" />
+                ) : syncStatus === 'connected' ? (
+                  <span className="relative flex h-2 w-2 shrink-0">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-400"></span>
+                  </span>
+                ) : syncStatus === 'quota_exceeded' ? (
+                  <span className="relative flex h-2 w-2 shrink-0">
+                    <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-400"></span>
+                  </span>
+                ) : (
+                  <Cloud className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                )}
+                <span className="font-bold text-[11px] text-sky-100 group-hover:text-white transition-colors truncate">
+                  {syncStatus === 'connected' ? 'Database: Live' : syncStatus === 'quota_exceeded' ? 'Cloud: Kuota Habis' : syncStatus === 'syncing' ? 'Menyinkronkan...' : 'Database: Offline'}
+                </span>
+              </div>
+              <span className={`text-[10px] font-extrabold px-1.5 py-0.5 rounded-md border transition-colors shrink-0 ${syncStatus === 'quota_exceeded' ? 'text-amber-300 bg-amber-950/80 border-amber-700 group-hover:bg-amber-600 group-hover:text-white' : 'text-sky-300 bg-sky-900/80 border-sky-600 group-hover:bg-sky-600 group-hover:text-white'}`}>
+                {syncStatus === 'quota_exceeded' ? 'File ↗' : 'Sinkron ↗'}
+              </span>
+            </button>
+          )}
         </div>
 
       </aside>

@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { SchoolProfile, Teacher, Student, SchoolHoliday } from '../types';
-import { Settings, Save, School, Clock, RotateCcw, CreditCard, CheckCircle2, Upload, Image as ImageIcon, Link, BookOpen, Plus, X, KeyRound, Key, Lock, Eye, EyeOff, User, GraduationCap, Search, Check, RefreshCw, Users, ShieldAlert, ShieldCheck, AlertCircle, Calendar, Trash2, Edit3, Tag, Flag, AlertTriangle, Sparkles, Filter, Cloud, CloudDownload, CloudUpload, FileJson, Download, Volume2, VolumeX, Mic, Headphones, BellRing, UserCheck, Smile, UserX, Play, Square, MessageSquare, Flame, CalendarCheck2, Layers } from 'lucide-react';
-import { resetToDefaultData, forceUploadAllToCloud, forceDownloadAllFromCloud, getCloudSyncStatus, CloudSyncStatus, downloadDatabaseBackupFile, getLocalDateString } from '../lib/storage';
+import { Settings, Save, School, Clock, RotateCcw, CreditCard, CheckCircle2, Upload, Image as ImageIcon, Link, BookOpen, Plus, X, KeyRound, Key, Lock, Unlock, Eye, EyeOff, User, GraduationCap, Search, Check, RefreshCw, Users, ShieldAlert, ShieldCheck, AlertCircle, Calendar, CalendarDays, Trash2, Edit3, Tag, Flag, AlertTriangle, Sparkles, Filter, Cloud, CloudDownload, CloudUpload, FileJson, Download, Volume2, VolumeX, Mic, Headphones, BellRing, UserCheck, Smile, UserX, Play, Square, MessageSquare, Flame, CalendarCheck2, Layers, Power, Ban } from 'lucide-react';
+import { resetToDefaultData, forceUploadAllToCloud, forceDownloadAllFromCloud, getCloudSyncStatus, CloudSyncStatus, downloadDatabaseBackupFile, getLocalDateString, updateParentPortalAccess } from '../lib/storage';
 import { run16WitaAutoCharacterAssessment } from '../lib/autoCharacterScheduler';
 import { 
   DEFAULT_TEACHER_SPEECH_TEMPLATE,
@@ -68,14 +68,185 @@ export const SchoolSettingsView: React.FC<SchoolSettingsViewProps> = ({
   // Top Section Navigation State
   const [activeNavTab, setActiveNavTab] = useState<string>('profil');
 
+  // Parent Portal Access & Schedule Management State
+  const [parentPortalFeedback, setParentPortalFeedback] = useState<{ type: 'success' | 'info' | 'warning'; msg: string } | null>(null);
+
   const navItems = [
     { id: 'section-profil-sekolah', key: 'profil', label: 'Profil Sekolah', icon: School, color: 'text-indigo-600', activeBg: 'bg-indigo-600 text-white shadow-indigo-100' },
     { id: 'section-jam-libur', key: 'jam-libur', label: 'Jam Masuk & Libur', icon: Clock, color: 'text-amber-600', activeBg: 'bg-amber-600 text-white shadow-amber-100' },
     { id: 'section-akademik', key: 'akademik', label: 'Akademik & Mapel', icon: GraduationCap, color: 'text-blue-600', activeBg: 'bg-blue-600 text-white shadow-blue-100' },
     { id: 'section-suara-ai', key: 'suara-ai', label: 'Suara AI & Notifikasi', icon: Volume2, color: 'text-violet-600', activeBg: 'bg-violet-600 text-white shadow-violet-100' },
+    { id: 'section-parent-portal', key: 'parent-portal', label: 'Akses & Jadwal Orang Tua', icon: Users, color: 'text-emerald-600', activeBg: 'bg-emerald-600 text-white shadow-emerald-100' },
     { id: 'section-password', key: 'password', label: 'Pengaturan & Reset Password', icon: KeyRound, color: 'text-purple-600', activeBg: 'bg-purple-600 text-white shadow-purple-100' },
-    { id: 'section-database', key: 'database', label: 'Database & Sinkronisasi', icon: Cloud, color: 'text-sky-600', activeBg: 'bg-sky-600 text-white shadow-sky-100' },
+    { id: 'section-database', key: 'database', label: 'Database & Reset', icon: Cloud, color: 'text-sky-600', activeBg: 'bg-sky-600 text-white shadow-sky-100' },
   ];
+
+  // Helper status real-time portal orang tua berdasarkan jam WITA & hari aktif
+  const parentAccessStatus = useMemo(() => {
+    const isMasterEnabled = formData.parentPortalLoginEnabled !== false;
+    if (!isMasterEnabled) {
+      return {
+        status: 'DISABLED',
+        badge: '🔴 Akses Ditutup (Non-Aktif)',
+        color: 'text-rose-700 bg-rose-50 border-rose-200',
+        desc: 'Seluruh akun orang tua otomatis di-log off dan login baru ditolak.'
+      };
+    }
+    if (formData.parentPortalScheduleEnabled) {
+      const activeDays = (formData.parentPortalActiveDays && Array.isArray(formData.parentPortalActiveDays) && formData.parentPortalActiveDays.length > 0)
+        ? formData.parentPortalActiveDays
+        : ['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu', 'Minggu'];
+
+      const openTime = formData.parentPortalOpenTime || '06:00';
+      const closeTime = formData.parentPortalCloseTime || '18:00';
+      const now = new Date();
+      const utc = now.getTime() + (now.getTimezoneOffset() * 60000);
+      const wita = new Date(utc + (3600000 * 8));
+
+      // Hari dalam Bahasa Indonesia
+      const indonesianDayNames = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
+      const currentDayName = indonesianDayNames[wita.getDay()];
+
+      // 1. Cek Hari Operasional
+      if (!activeDays.includes(currentDayName)) {
+        return {
+          status: 'SCHEDULE_DAY_OFF',
+          badge: '🟡 Hari Ini Akses Tutup',
+          color: 'text-amber-700 bg-amber-50 border-amber-200',
+          desc: `Hari ini (${currentDayName}) portal login orang tua ditutup. Hari operasional: ${activeDays.join(', ')}.`
+        };
+      }
+
+      // 2. Cek Jam Operasional
+      const currentMinutes = wita.getHours() * 60 + wita.getMinutes();
+      const [openH, openM] = openTime.split(':').map(Number);
+      const [closeH, closeM] = closeTime.split(':').map(Number);
+      const openMinutes = (openH || 0) * 60 + (openM || 0);
+      const closeMinutes = (closeH || 0) * 60 + (closeM || 0);
+
+      const isWithinHours = openMinutes <= closeMinutes 
+        ? (currentMinutes >= openMinutes && currentMinutes <= closeMinutes)
+        : (currentMinutes >= openMinutes || currentMinutes <= closeMinutes);
+
+      if (!isWithinHours) {
+        return {
+          status: 'SCHEDULE_CLOSED',
+          badge: '🟡 Di Luar Jam Operasional',
+          color: 'text-amber-700 bg-amber-50 border-amber-200',
+          desc: `Jadwal hari ${currentDayName}: ${openTime} - ${closeTime} WITA. Saat ini login ditolak & akun orang tua di-log off.`
+        };
+      }
+      return {
+        status: 'SCHEDULE_OPEN',
+        badge: '🟢 Aktif (Dalam Jam Operasional)',
+        color: 'text-emerald-700 bg-emerald-50 border-emerald-200',
+        desc: `Jadwal hari ${currentDayName}: ${openTime} - ${closeTime} WITA. Wali murid diizinkan login.`
+      };
+    }
+    return {
+      status: 'ACTIVE',
+      badge: '🟢 Aktif (Bebas 24 Jam)',
+      color: 'text-emerald-700 bg-emerald-50 border-emerald-200',
+      desc: 'Wali murid diizinkan login kapan saja 24 jam.'
+    };
+  }, [formData.parentPortalLoginEnabled, formData.parentPortalScheduleEnabled, formData.parentPortalOpenTime, formData.parentPortalCloseTime, formData.parentPortalActiveDays]);
+
+  // Hari Operasional Login Orang Tua
+  const PARENT_PORTAL_ALL_DAYS = ['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu', 'Minggu'];
+  const currentParentActiveDays = (formData.parentPortalActiveDays && Array.isArray(formData.parentPortalActiveDays) && formData.parentPortalActiveDays.length > 0)
+    ? formData.parentPortalActiveDays
+    : PARENT_PORTAL_ALL_DAYS;
+
+  const handleToggleParentActiveDay = (day: string) => {
+    let updatedDays: string[];
+    if (currentParentActiveDays.includes(day)) {
+      if (currentParentActiveDays.length <= 1) {
+        alert('Minimal harus ada 1 hari operasional login yang aktif.');
+        return;
+      }
+      updatedDays = currentParentActiveDays.filter(d => d !== day);
+    } else {
+      updatedDays = [...currentParentActiveDays, day];
+    }
+    const updated = updateParentPortalAccess({
+      activeDays: updatedDays,
+    });
+    setFormData(updated);
+    onSaveProfile(updated);
+    setParentPortalFeedback({
+      type: 'info',
+      msg: `✓ Hari operasional portal orang tua diperbarui (${updatedDays.length} hari aktif: ${updatedDays.join(', ')}).`
+    });
+    setTimeout(() => setParentPortalFeedback(null), 5000);
+  };
+
+  const handleSelectParentDaysPreset = (preset: '5_DAYS' | '6_DAYS' | 'ALL') => {
+    let targetDays: string[];
+    if (preset === '5_DAYS') {
+      targetDays = ['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat'];
+    } else if (preset === '6_DAYS') {
+      targetDays = ['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
+    } else {
+      targetDays = PARENT_PORTAL_ALL_DAYS;
+    }
+    const updated = updateParentPortalAccess({
+      activeDays: targetDays,
+    });
+    setFormData(updated);
+    onSaveProfile(updated);
+    setParentPortalFeedback({
+      type: 'success',
+      msg: `✓ Preset hari operasional diterapkan: ${preset === '5_DAYS' ? 'Senin - Jumat (5 Hari)' : preset === '6_DAYS' ? 'Senin - Sabtu (6 Hari)' : 'Semua Hari (Senin - Minggu)'}.`
+    });
+    setTimeout(() => setParentPortalFeedback(null), 5000);
+  };
+
+  // Handler toggle portal orang tua (Aktif / Non-aktif)
+  const handleToggleParentPortal = (enable: boolean) => {
+    const updated = updateParentPortalAccess({
+      loginEnabled: enable,
+      forceLogout: !enable, // jika dimatikan, seketika kick semua sesi orang tua
+    });
+    setFormData(updated);
+    onSaveProfile(updated);
+    setParentPortalFeedback({
+      type: enable ? 'success' : 'warning',
+      msg: enable 
+        ? '✓ Portal Orang Tua berhasil DIAKTIFKAN. Wali murid kini dapat login kembali.'
+        : '✓ Portal Orang Tua berhasil DINONAKTIFKAN. Seluruh akun orang tua otomatis di-log off dan login baru akan ditolak.'
+    });
+    setTimeout(() => setParentPortalFeedback(null), 6000);
+  };
+
+  // Handler paksa log off seluruh akun orang tua
+  const handleForceLogoutAllParents = () => {
+    const updated = updateParentPortalAccess({
+      forceLogout: true,
+    });
+    setFormData(updated);
+    onSaveProfile(updated);
+    setParentPortalFeedback({
+      type: 'info',
+      msg: '✓ Seluruh akun wali murid (orang tua) berhasil di-log off dari semua perangkat!'
+    });
+    setTimeout(() => setParentPortalFeedback(null), 6000);
+  };
+
+  // Handler toggle jadwal operasional
+  const handleToggleParentSchedule = (enable: boolean) => {
+    const updated = updateParentPortalAccess({
+      scheduleEnabled: enable,
+    });
+    setFormData(updated);
+    onSaveProfile(updated);
+    setParentPortalFeedback({
+      type: 'info',
+      msg: enable 
+        ? `✓ Pembatasan jadwal login DIAKTIFKAN (${updated.parentPortalOpenTime || '06:00'} - ${updated.parentPortalCloseTime || '18:00'} WITA).`
+        : '✓ Pembatasan jadwal login DINONAKTIFKAN. Wali murid dapat login 24 jam bebas.'
+    });
+    setTimeout(() => setParentPortalFeedback(null), 6000);
+  };
 
   const handleJumpToSection = (sectionId: string, key: string) => {
     setActiveNavTab(key);
@@ -3133,6 +3304,397 @@ export const SchoolSettingsView: React.FC<SchoolSettingsViewProps> = ({
     )}
 
     {/* ========================================================================= */}
+    {/* TAB: KONTROL AKSES & JADWAL LOGIN WALI MURID (ORANG TUA) */}
+    {/* ========================================================================= */}
+    {activeNavTab === 'parent-portal' && (
+      <div id="section-parent-portal" className="space-y-6 animate-fadeIn">
+        
+        {/* Header & Status Banner */}
+        <div className="bg-white border border-slate-200/80 rounded-3xl p-6 shadow-sm space-y-5">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-100 pb-4">
+            <div className="flex items-start gap-3">
+              <div className="w-10 h-10 rounded-2xl bg-emerald-50 border border-emerald-200 flex items-center justify-center text-emerald-600 shrink-0">
+                <Users className="w-5 h-5" />
+              </div>
+              <div>
+                <h2 className="text-base font-extrabold text-slate-800 tracking-tight flex items-center gap-2">
+                  Kontrol Akses & Jadwal Login Wali Murid
+                  <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-mono font-extrabold border ${parentAccessStatus.color}`}>
+                    {parentAccessStatus.badge}
+                  </span>
+                </h2>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Atur tombol izin login orang tua, jadwal jam operasional akses, dan paksa log off seluruh akun wali murid.
+                </p>
+              </div>
+            </div>
+
+            {/* Quick Master Toggle */}
+            <div className="flex items-center gap-2 shrink-0">
+              <button
+                type="button"
+                onClick={() => handleToggleParentPortal(formData.parentPortalLoginEnabled === false ? true : false)}
+                className={`px-4 py-2.5 rounded-xl text-xs font-extrabold flex items-center gap-2 transition-all cursor-pointer shadow-sm ${
+                  formData.parentPortalLoginEnabled !== false
+                    ? 'bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 shadow-rose-100'
+                    : 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-emerald-600/20'
+                }`}
+              >
+                <Power className="w-4 h-4" />
+                <span>{formData.parentPortalLoginEnabled !== false ? 'Nonaktifkan Portal Orang Tua' : 'Aktifkan Portal Orang Tua'}</span>
+              </button>
+            </div>
+          </div>
+
+          {parentPortalFeedback && (
+            <div className={`p-4 rounded-2xl text-xs font-bold border flex items-center gap-2.5 animate-fadeIn ${
+              parentPortalFeedback.type === 'success' 
+                ? 'bg-emerald-50 text-emerald-800 border-emerald-200' 
+                : parentPortalFeedback.type === 'warning'
+                ? 'bg-rose-50 text-rose-800 border-rose-200'
+                : 'bg-sky-50 text-sky-800 border-sky-200'
+            }`}>
+              <CheckCircle2 className="w-4 h-4 shrink-0" />
+              <span>{parentPortalFeedback.msg}</span>
+            </div>
+          )}
+
+          {/* Master Switch Detail Card */}
+          <div className={`p-5 rounded-2xl border transition-all ${
+            formData.parentPortalLoginEnabled !== false 
+              ? 'bg-emerald-50/60 border-emerald-200' 
+              : 'bg-rose-50/70 border-rose-300'
+          }`}>
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div className="space-y-1">
+                <div className="flex items-center gap-2">
+                  <span className="text-sm font-black text-slate-800">
+                    Status Izin Login Portal Wali Murid
+                  </span>
+                  <span className={`text-[10px] font-mono px-2 py-0.5 rounded-full font-bold ${
+                    formData.parentPortalLoginEnabled !== false 
+                      ? 'bg-emerald-200 text-emerald-800' 
+                      : 'bg-rose-200 text-rose-800'
+                  }`}>
+                    {formData.parentPortalLoginEnabled !== false ? 'AKTIF' : 'NON-AKTIF'}
+                  </span>
+                </div>
+                <p className="text-xs text-slate-600 leading-relaxed">
+                  {formData.parentPortalLoginEnabled !== false
+                    ? 'Saat ini tombol dalam posisi AKTIF. Wali murid dapat melakukan login dengan NISN anak untuk melihat riwayat kehadiran, rekap nilai karakter, jadwal pelajaran, dan mengajukan surat izin/sakit.'
+                    : 'Saat ini tombol dalam posisi NON-AKTIF. Seluruh akun wali murid yang sedang membuka aplikasi telah di-log off secara otomatis. Setiap upaya login dari wali murid akan ditolak oleh sistem sampai Administrator mengaktifkannya kembali.'}
+                </p>
+              </div>
+
+              <div className="flex items-center gap-2 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => handleToggleParentPortal(formData.parentPortalLoginEnabled === false ? true : false)}
+                  className={`w-14 h-8 flex items-center rounded-full p-1 cursor-pointer transition-colors duration-200 ease-in-out ${
+                    formData.parentPortalLoginEnabled !== false ? 'bg-emerald-600' : 'bg-slate-300'
+                  }`}
+                  aria-label="Toggle Portal Login Orang Tua"
+                >
+                  <div
+                    className={`bg-white w-6 h-6 rounded-full shadow-md transform transition-transform duration-200 ease-in-out ${
+                      formData.parentPortalLoginEnabled !== false ? 'translate-x-6' : 'translate-x-0'
+                    }`}
+                  />
+                </button>
+              </div>
+            </div>
+
+            {/* Tombol Paksa Log Off Seluruh Akun Orang Tua */}
+            <div className="mt-4 pt-4 border-t border-slate-200/60 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="text-[11px] text-slate-500">
+                <span className="font-semibold text-slate-700">Tindakan Cepat: </span>
+                Tekan tombol ini untuk memutuskan seluruh sesi login aktif orang tua di semua perangkat saat ini tanpa harus menonaktifkan portal secara permanen.
+                {Number(formData.parentPortalForceLogoutTimestamp) > 0 && (
+                  <span className="block text-[10px] text-slate-400 mt-0.5 font-mono">
+                    Terakhir di-log off paksa: {new Date(Number(formData.parentPortalForceLogoutTimestamp)).toLocaleString('id-ID')}
+                  </span>
+                )}
+              </div>
+
+              <button
+                type="button"
+                onClick={handleForceLogoutAllParents}
+                className="bg-white hover:bg-rose-50 text-rose-700 border border-rose-200 hover:border-rose-300 font-extrabold px-3.5 py-2 rounded-xl text-xs flex items-center gap-1.5 transition-all cursor-pointer shrink-0 shadow-2xs"
+              >
+                <Ban className="w-3.5 h-3.5 text-rose-600" />
+                <span>Paksa Log Off Semua Orang Tua</span>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* Kartu 2: Pengaturan Jadwal Jam Operasional Login */}
+        <div className="bg-white border border-slate-200/80 rounded-3xl p-6 shadow-sm space-y-5">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-100 pb-4">
+            <div className="flex items-start gap-3">
+              <div className="w-10 h-10 rounded-2xl bg-amber-50 border border-amber-200 flex items-center justify-center text-amber-600 shrink-0">
+                <Clock className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="text-sm font-extrabold text-slate-800 tracking-tight flex items-center gap-2">
+                  Jadwal Jam Operasional Login Orang Tua
+                  <span className={`px-2 py-0.5 rounded-full text-[10px] font-mono font-bold ${
+                    formData.parentPortalScheduleEnabled 
+                      ? 'bg-amber-100 text-amber-800 border border-amber-200' 
+                      : 'bg-slate-100 text-slate-600'
+                  }`}>
+                    {formData.parentPortalScheduleEnabled ? 'JADWAL AKTIF' : '24 JAM (BEBAS)'}
+                  </span>
+                </h3>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Tentukan rentang jam saat wali murid diperbolehkan mengakses aplikasi. Di luar jam tersebut, login ditolak dan sesi otomatis ter-log off.
+                </p>
+              </div>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => handleToggleParentSchedule(!formData.parentPortalScheduleEnabled)}
+              className={`w-14 h-8 flex items-center rounded-full p-1 cursor-pointer transition-colors duration-200 ease-in-out shrink-0 ${
+                formData.parentPortalScheduleEnabled ? 'bg-amber-600' : 'bg-slate-300'
+              }`}
+              aria-label="Toggle Jadwal Jam Operasional"
+            >
+              <div
+                className={`bg-white w-6 h-6 rounded-full shadow-md transform transition-transform duration-200 ease-in-out ${
+                  formData.parentPortalScheduleEnabled ? 'translate-x-6' : 'translate-x-0'
+                }`}
+              />
+            </button>
+          </div>
+
+          {formData.parentPortalScheduleEnabled ? (
+            <div className="space-y-4 animate-fadeIn">
+              {/* Pilihan Hari Operasional Login Orang Tua */}
+              <div className="bg-amber-50/50 p-4 sm:p-5 rounded-2xl border border-amber-200/80 space-y-3">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 border-b border-amber-200/60 pb-3">
+                  <div>
+                    <label className="text-xs font-black text-slate-800 flex items-center gap-2">
+                      <CalendarDays className="w-4 h-4 text-amber-600" />
+                      Pilihan Hari Operasional Login Orang Tua
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-amber-200/80 text-amber-900 border border-amber-300">
+                        {currentParentActiveDays.length} Hari Aktif
+                      </span>
+                    </label>
+                    <p className="text-[11px] text-slate-500 mt-0.5">
+                      Pilih hari-hari apa saja wali murid diizinkan untuk login ke aplikasi. Pada hari yang tidak dipilih, login akan ditolak secara otomatis.
+                    </p>
+                  </div>
+
+                  {/* Preset Cepat Hari */}
+                  <div className="flex flex-wrap items-center gap-1.5 self-start sm:self-auto">
+                    <span className="text-[10px] font-bold text-slate-500 mr-0.5">Preset:</span>
+                    <button
+                      type="button"
+                      onClick={() => handleSelectParentDaysPreset('5_DAYS')}
+                      className="px-2.5 py-1 bg-white hover:bg-amber-100 text-amber-900 text-[11px] font-bold rounded-lg border border-amber-300 shadow-2xs transition-all cursor-pointer"
+                      title="Senin sampai Jumat (5 Hari Kerja)"
+                    >
+                      Senin - Jumat
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleSelectParentDaysPreset('6_DAYS')}
+                      className="px-2.5 py-1 bg-white hover:bg-amber-100 text-amber-900 text-[11px] font-bold rounded-lg border border-amber-300 shadow-2xs transition-all cursor-pointer"
+                      title="Senin sampai Sabtu (6 Hari Belajar)"
+                    >
+                      Senin - Sabtu
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleSelectParentDaysPreset('ALL')}
+                      className="px-2.5 py-1 bg-white hover:bg-amber-100 text-amber-900 text-[11px] font-bold rounded-lg border border-amber-300 shadow-2xs transition-all cursor-pointer"
+                      title="Semua 7 hari (Senin sampai Minggu)"
+                    >
+                      Semua Hari
+                    </button>
+                  </div>
+                </div>
+
+                {/* Day Selection Pills */}
+                <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-7 gap-2 pt-1">
+                  {PARENT_PORTAL_ALL_DAYS.map((day) => {
+                    const isSelected = currentParentActiveDays.includes(day);
+                    return (
+                      <button
+                        key={day}
+                        type="button"
+                        onClick={() => handleToggleParentActiveDay(day)}
+                        className={`flex items-center justify-between px-3 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer border ${
+                          isSelected
+                            ? 'bg-amber-600 text-white border-amber-700 shadow-xs ring-2 ring-amber-300/60'
+                            : 'bg-white text-slate-500 border-slate-200 hover:border-amber-300 hover:text-slate-800'
+                        }`}
+                      >
+                        <span>{day}</span>
+                        {isSelected ? (
+                          <Check className="w-3.5 h-3.5 text-white stroke-[3]" />
+                        ) : (
+                          <span className="w-2 h-2 rounded-full bg-slate-300"></span>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                <div className="bg-white/80 border border-amber-200/60 rounded-xl p-2.5 text-[11px] text-amber-900 flex items-start gap-2">
+                  <span className="font-bold text-amber-700 shrink-0">🛡️ Proteksi Kuota:</span>
+                  <span>
+                    Hari aktif saat ini: <strong>{currentParentActiveDays.join(', ')}</strong>. Pada hari di luar daftar ini, akun wali murid otomatis ditolak saat mencoba login dan sesi yang aktif langsung ter-log off demi menjaga kuota Cloud Firestore Spark tetap hemat dan 100% gratis.
+                  </span>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="bg-amber-50/50 p-4 rounded-2xl border border-amber-200/80 space-y-2">
+                  <label className="text-xs font-bold text-slate-700 flex items-center justify-between">
+                    <span className="flex items-center gap-1.5">
+                      <Unlock className="w-3.5 h-3.5 text-amber-600" />
+                      Jam Buka Akses Login
+                    </span>
+                    <span className="text-[10px] text-amber-700 font-mono font-bold">WITA</span>
+                  </label>
+                  <input
+                    type="time"
+                    value={formData.parentPortalOpenTime || '06:00'}
+                    onChange={(e) => {
+                      const updated = { ...formData, parentPortalOpenTime: e.target.value };
+                      setFormData(updated);
+                      onSaveProfile(updated);
+                    }}
+                    className="w-full bg-white border border-amber-300 text-slate-800 font-mono font-bold text-sm px-3.5 py-2 rounded-xl focus:ring-2 focus:ring-amber-500 focus:outline-none"
+                  />
+                  <p className="text-[10px] text-slate-500">
+                    Wali murid mulai diizinkan login sejak jam ini (contoh: 06:00 WITA).
+                  </p>
+                </div>
+
+                <div className="bg-amber-50/50 p-4 rounded-2xl border border-amber-200/80 space-y-2">
+                  <label className="text-xs font-bold text-slate-700 flex items-center justify-between">
+                    <span className="flex items-center gap-1.5">
+                      <Lock className="w-3.5 h-3.5 text-rose-600" />
+                      Jam Tutup Akses Login
+                    </span>
+                    <span className="text-[10px] text-amber-700 font-mono font-bold">WITA</span>
+                  </label>
+                  <input
+                    type="time"
+                    value={formData.parentPortalCloseTime || '18:00'}
+                    onChange={(e) => {
+                      const updated = { ...formData, parentPortalCloseTime: e.target.value };
+                      setFormData(updated);
+                      onSaveProfile(updated);
+                    }}
+                    className="w-full bg-white border border-amber-300 text-slate-800 font-mono font-bold text-sm px-3.5 py-2 rounded-xl focus:ring-2 focus:ring-amber-500 focus:outline-none"
+                  />
+                  <p className="text-[10px] text-slate-500">
+                    Setelah jam ini, login baru ditolak dan akun yang masih aktif otomatis di-log off (contoh: 18:00 WITA).
+                  </p>
+                </div>
+              </div>
+
+              {/* Realtime Schedule Status Indicator */}
+              <div className="p-3.5 rounded-2xl border bg-slate-50 border-slate-200 flex items-center gap-3">
+                <div className="p-2 bg-amber-500/10 text-amber-700 rounded-xl">
+                  <Clock className="w-4 h-4 text-amber-600" />
+                </div>
+                <div className="text-xs">
+                  <span className="font-extrabold text-slate-800">Status Operasional Jam Saat Ini: </span>
+                  <span className="font-medium text-slate-600">{parentAccessStatus.desc}</span>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="p-4 rounded-2xl border border-slate-200 bg-slate-50/80 text-xs text-slate-500 flex items-center gap-2.5">
+              <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+              <span>
+                Pembatasan jadwal jam operasional saat ini dinonaktifkan. Wali murid dapat login kapan saja selama 24 jam (selama Saklar Utama di atas berstatus AKTIF).
+              </span>
+            </div>
+          )}
+        </div>
+
+        {/* Kartu 3: Kustomisasi Pesan Penolakan Login */}
+        <div className="bg-white border border-slate-200/80 rounded-3xl p-6 shadow-sm space-y-4">
+          <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+            <h3 className="text-sm font-extrabold text-slate-800 flex items-center gap-2">
+              <MessageSquare className="w-4 h-4 text-indigo-600" />
+              Pesan Penjelasan saat Login Ditolak
+            </h3>
+            <button
+              type="button"
+              onClick={() => {
+                const defaultNotice = 'Akses login untuk wali murid saat ini sedang dinonaktifkan oleh Administrator Sekolah. Silakan hubungi pihak sekolah atau coba kembali nanti.';
+                const updated = { ...formData, parentPortalDisabledNotice: defaultNotice };
+                setFormData(updated);
+                onSaveProfile(updated);
+              }}
+              className="text-[11px] text-indigo-600 hover:text-indigo-800 font-bold hover:underline cursor-pointer"
+            >
+              Reset ke Pesan Bawaan
+            </button>
+          </div>
+
+          <div className="space-y-1.5">
+            <label className="text-xs font-semibold text-slate-600">
+              Pesan yang tampil pada layar HP orang tua saat login ditolak:
+            </label>
+            <textarea
+              rows={2}
+              value={formData.parentPortalDisabledNotice || ''}
+              onChange={(e) => setFormData(prev => ({ ...prev, parentPortalDisabledNotice: e.target.value }))}
+              onBlur={() => onSaveProfile(formData)}
+              placeholder="Akses login untuk wali murid saat ini sedang dinonaktifkan oleh Administrator Sekolah..."
+              className="w-full bg-slate-50 border border-slate-200 rounded-2xl p-3 text-xs text-slate-800 focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            />
+            <p className="text-[10px] text-slate-400 italic">
+              Pesan ini akan langsung muncul dalam kotak peringatan kuning/merah saat wali murid mencoba memasukkan NISN anak ketika portal ditutup.
+            </p>
+          </div>
+        </div>
+
+        {/* Kartu 4: Edukasi Bebas Tagihan Cloud & Hemat Kuota Spark */}
+        <div className="bg-gradient-to-br from-indigo-900 via-slate-900 to-sky-950 border border-indigo-700/60 rounded-3xl p-6 shadow-sm text-white space-y-3">
+          <div className="flex items-center gap-2.5">
+            <div className="w-8 h-8 rounded-xl bg-amber-500/20 border border-amber-400/30 flex items-center justify-center text-amber-300">
+              <Sparkles className="w-4 h-4" />
+            </div>
+            <div>
+              <h4 className="text-xs font-extrabold text-white">
+                Solusi Mengapa Tagihan Cloud Bisa Bertambah & Cara Memastikan Tetap 100% Gratis
+              </h4>
+              <p className="text-[11px] text-indigo-200/80">
+                Optimasi arsitektur database untuk menjamin paket Firebase Spark tetap Rp 0 (Bebas Biaya).
+              </p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-[11px] pt-1 text-slate-300">
+            <div className="bg-white/5 border border-white/10 p-3 rounded-2xl space-y-1">
+              <span className="font-bold text-amber-300">Penyebab Tagihan Meningkat Sebelumnya:</span>
+              <p className="text-slate-300 leading-relaxed text-[10.5px]">
+                Jika ratusan HP wali murid membuka aplikasi bersamaan di pagi hari dengan listener aktif, setiap kali siswa discan di gerbang, seluruh HP orang tua akan membaca pembaruan tersebut berulang kali (ribuan read per jam).
+              </p>
+            </div>
+
+            <div className="bg-white/5 border border-white/10 p-3 rounded-2xl space-y-1">
+              <span className="font-bold text-emerald-300">Perbaikan Sistem Baru (Smart On-Demand):</span>
+              <p className="text-slate-300 leading-relaxed text-[10.5px]">
+                Akun orang tua kini menggunakan cache pintar 5 menit (0 read dari Firestore). Dengan ditambahkannya fitur jadwal operasional dan tombol nonaktif ini, kuota gratis Firebase Spark (50.000 read/hari) tidak akan pernah terlampaui.
+              </p>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    )}
+
+    {/* ========================================================================= */}
     {/* TAB 5: HALAMAN TERPISAH PENGATURAN & RESET PASSWORD (ADMIN, GURU & SISWA) */}
     {/* ========================================================================= */}
     {activeNavTab === 'password' && (
@@ -3858,6 +4420,68 @@ export const SchoolSettingsView: React.FC<SchoolSettingsViewProps> = ({
           </div>
         </div>
 
+        {/* Kontrol Cepat Akses & Reset Sesi Orang Tua */}
+        <div className="bg-white border border-slate-200/80 rounded-3xl p-6 shadow-sm space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-100 pb-4">
+            <div className="flex items-start gap-3">
+              <div className="w-10 h-10 rounded-2xl bg-emerald-50 border border-emerald-200 flex items-center justify-center text-emerald-600 shrink-0">
+                <Users className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="text-sm font-extrabold text-slate-800 tracking-tight flex items-center gap-2">
+                  Kontrol Cepat Akses & Reset Sesi Orang Tua
+                  <span className={`px-2 py-0.5 rounded-full text-[10px] font-mono font-bold border ${parentAccessStatus.color}`}>
+                    {parentAccessStatus.badge}
+                  </span>
+                </h3>
+                <p className="text-xs text-slate-500">
+                  Putuskan seluruh sesi akun wali murid seketika atau non-aktifkan akses login portal orang tua.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 shrink-0">
+              <button
+                type="button"
+                onClick={() => handleToggleParentPortal(formData.parentPortalLoginEnabled === false ? true : false)}
+                className={`px-3.5 py-2 rounded-xl text-xs font-extrabold flex items-center gap-1.5 transition-all cursor-pointer shadow-sm ${
+                  formData.parentPortalLoginEnabled !== false
+                    ? 'bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200'
+                    : 'bg-emerald-600 hover:bg-emerald-700 text-white'
+                }`}
+              >
+                <Power className="w-3.5 h-3.5" />
+                <span>{formData.parentPortalLoginEnabled !== false ? 'Nonaktifkan Akses' : 'Aktifkan Akses'}</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={handleForceLogoutAllParents}
+                className="bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 font-bold px-3.5 py-2 rounded-xl text-xs flex items-center gap-1.5 transition-all cursor-pointer"
+                title="Log off paksa seluruh orang tua di semua perangkat"
+              >
+                <Ban className="w-3.5 h-3.5 text-amber-600" />
+                <span>Log Off Semua Orang Tua</span>
+              </button>
+            </div>
+          </div>
+
+          <div className="text-xs text-slate-600 bg-slate-50 p-3 rounded-2xl border border-slate-200/80 leading-relaxed flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <span>
+              {formData.parentPortalLoginEnabled !== false
+                ? 'Portal Orang Tua saat ini AKTIF. Jika Anda menekan "Nonaktifkan Akses", seluruh orang tua akan seketika di-log off dan login baru akan ditolak.'
+                : 'Portal Orang Tua saat ini NON-AKTIF. Semua akun orang tua sedang di-log off dan ditolak hingga tombol Aktifkan ditekan kembali.'}
+            </span>
+            <button
+              type="button"
+              onClick={() => handleJumpToSection('section-parent-portal', 'parent-portal')}
+              className="text-indigo-600 hover:text-indigo-800 font-bold whitespace-nowrap text-[11px] underline cursor-pointer"
+            >
+              Atur Jadwal Lengkap →
+            </button>
+          </div>
+        </div>
+
         {/* Reset Data Default / Sampel Card */}
         <div className="bg-white border border-slate-200/80 rounded-3xl p-6 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div className="space-y-1">
@@ -3900,6 +4524,30 @@ export const SchoolSettingsView: React.FC<SchoolSettingsViewProps> = ({
             <p className="text-xs text-slate-600 leading-relaxed bg-amber-50/50 p-3 rounded-2xl border border-amber-100">
               Apakah Anda yakin ingin mereset ulang seluruh data siswa, kelas, dan riwayat presensi ke sampel default sekolah? Data yang baru ditambahkan akan terhapus.
             </p>
+
+            {/* Quick parent portal control inside Reset modal */}
+            <div className="p-3 bg-slate-50 border border-slate-200 rounded-2xl space-y-2 text-xs">
+              <div className="flex items-center justify-between">
+                <span className="font-bold text-slate-700">Status Akses Orang Tua:</span>
+                <span className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold ${
+                  formData.parentPortalLoginEnabled !== false ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'
+                }`}>
+                  {formData.parentPortalLoginEnabled !== false ? 'AKTIF' : 'NON-AKTIF'}
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => handleToggleParentPortal(formData.parentPortalLoginEnabled === false ? true : false)}
+                className={`w-full py-1.5 px-2.5 rounded-xl font-bold text-[11px] flex items-center justify-center gap-1.5 transition-colors cursor-pointer border ${
+                  formData.parentPortalLoginEnabled !== false
+                    ? 'bg-rose-50 text-rose-700 border-rose-200 hover:bg-rose-100'
+                    : 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100'
+                }`}
+              >
+                <Power className="w-3 h-3" />
+                <span>{formData.parentPortalLoginEnabled !== false ? 'Tutup / Nonaktifkan Akses Orang Tua' : 'Buka / Aktifkan Akses Orang Tua'}</span>
+              </button>
+            </div>
 
             <div className="flex items-center justify-end gap-2 pt-2">
               <button

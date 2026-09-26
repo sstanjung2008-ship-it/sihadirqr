@@ -48,6 +48,7 @@ import {
   initFirestoreRealtimeSync,
   stopFirestoreRealtimeSync,
   reconcileTeachersAndClasses,
+  checkParentLoginAccess,
   KEYS
 } from './lib/storage';
 import { ShieldCheck, CheckCircle2, WifiOff, RefreshCw, Wifi } from 'lucide-react';
@@ -403,6 +404,9 @@ export default function App() {
 
   // Penilaian Karakter Otomatis 16:00 WITA (Belum Scan & Belum Pulang)
   useEffect(() => {
+    // PENGHEMAT KUOTA: Khusus Admin & Scanner Pos, jangan pernah dijalankan oleh akun Wali Murid (PARENT)!
+    if (currentRole === 'PARENT') return;
+
     // Jalankan pemeriksaan saat aplikasi dimuat
     run16WitaAutoCharacterAssessment();
 
@@ -428,7 +432,7 @@ export default function App() {
       clearInterval(interval);
       window.removeEventListener('sihadir_auto_assessment_completed', handleAutoAssessmentEvent);
     };
-  }, []);
+  }, [currentRole]);
 
   // Track latest state references to avoid cascading re-render loops in periodic background intervals
   const attendanceRecordsRef = useRef(attendanceRecords);
@@ -442,6 +446,7 @@ export default function App() {
 
   // Membersihkan record korup atau auto-alpa peninggalan versi lama saat aplikasi dimuat
   useEffect(() => {
+    if (currentRole === 'PARENT') return;
     setAttendanceRecordsState(prev => {
       const hasCorrupt = prev.some(r => (
         !r ||
@@ -688,6 +693,38 @@ export default function App() {
     setUserSessionState(null);
     saveUserSession(null);
   };
+
+  // Pemeriksaan Hak Akses & Jadwal Login Orang Tua (Otomatis Log Off jika dinonaktifkan Admin atau di luar jadwal)
+  useEffect(() => {
+    if (userSession?.role !== 'PARENT') return;
+
+    const performParentAccessValidation = () => {
+      const accessCheck = checkParentLoginAccess(schoolProfile);
+      const forceLogoutTime = Number(schoolProfile.parentPortalForceLogoutTimestamp) || 0;
+      const userLoginTime = Number(userSession.loginTimestamp) || 0;
+      const isForceLoggedOut = forceLogoutTime > 0 && (!userLoginTime || userLoginTime <= forceLogoutTime);
+
+      if (!accessCheck.allowed || isForceLoggedOut) {
+        handleLogout();
+        setNetworkToast({
+          type: 'warning',
+          title: '🔒 Sesi Akses Ditutup',
+          message: !accessCheck.allowed 
+            ? accessCheck.reason 
+            : 'Akses seluruh akun orang tua telah di-log off oleh Administrator Sekolah.'
+        });
+        setTimeout(() => setNetworkToast(null), 8000);
+      }
+    };
+
+    // Periksa seketika saat schoolProfile atau sesi berubah
+    performParentAccessValidation();
+
+    // Periksa secara berkala setiap 25 detik untuk pembatasan jam operasional
+    const interval = setInterval(performParentAccessValidation, 25000);
+
+    return () => clearInterval(interval);
+  }, [schoolProfile, userSession]);
 
   // Add Attendance Record (from scanner or manual)
   const handleAddAttendance = (record: AttendanceRecord) => {

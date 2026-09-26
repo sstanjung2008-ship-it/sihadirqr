@@ -54,6 +54,13 @@ export const INITIAL_SCHOOL_PROFILE: SchoolProfile = {
   waGatewayEnabled: true,
   adminPassword: "admin123",
   scannerPassword: "123456",
+  parentPortalLoginEnabled: true,
+  parentPortalScheduleEnabled: false,
+  parentPortalOpenTime: "06:00",
+  parentPortalCloseTime: "18:00",
+  parentPortalActiveDays: ["Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu", "Minggu"],
+  parentPortalDisabledNotice: "Akses login untuk wali murid saat ini sedang dinonaktifkan oleh Administrator Sekolah. Silakan hubungi pihak sekolah atau coba kembali nanti.",
+  parentPortalForceLogoutTimestamp: 0,
   activeDays: ["Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu"],
   holidays: [
     {

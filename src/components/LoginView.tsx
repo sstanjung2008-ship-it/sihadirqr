@@ -14,7 +14,7 @@ import {
   CheckCircle2
 } from 'lucide-react';
 import { PWAInstallBanner } from './PWAInstallBanner';
-import { smartSyncAndMergeAllWithCloud, getTeachers, getStudents, getSchoolProfile } from '../lib/storage';
+import { quickSyncAuthCredentials, getTeachers, getStudents, getSchoolProfile, checkParentLoginAccess } from '../lib/storage';
 
 interface LoginViewProps {
   schoolProfile: SchoolProfile;
@@ -77,7 +77,7 @@ export const LoginView: React.FC<LoginViewProps> = ({
     setErrorMessage(null);
     setSyncSuccessMsg(null);
     try {
-      const res = await smartSyncAndMergeAllWithCloud();
+      await quickSyncAuthCredentials();
       const updatedTeachers = getTeachers();
       const updatedStudents = getStudents();
       const updatedProfile = getSchoolProfile();
@@ -231,6 +231,13 @@ export const LoginView: React.FC<LoginViewProps> = ({
     });
 
     if (matchedStudent) {
+      // PERIKSA KONTROL AKSES & JADWAL LOGIN WALI MURID (ORANG TUA)
+      const accessCheck = checkParentLoginAccess(schoolProfile);
+      if (!accessCheck.allowed) {
+        setErrorMessage(accessCheck.reason);
+        return true;
+      }
+
       const expectedPassword = matchedStudent.password || '123456';
       if (password === expectedPassword) {
         const session: UserSession = {
@@ -240,7 +247,8 @@ export const LoginView: React.FC<LoginViewProps> = ({
           displayName: `${matchedStudent.parentName || 'Orang Tua'} (Wali ${matchedStudent.name})`,
           nipOrNisn: matchedStudent.nisn,
           studentId: matchedStudent.id,
-          photoUrl: matchedStudent.photoUrl
+          photoUrl: matchedStudent.photoUrl,
+          loginTimestamp: Date.now()
         };
         onLoginSuccess(session);
         return true;
@@ -273,10 +281,10 @@ export const LoginView: React.FC<LoginViewProps> = ({
     const localFound = performLoginCheck(teachers, students, schoolProfile);
     if (localFound) return;
 
-    // If not found locally, attempt instant cloud sync in case this device just installed the app
+    // If not found locally, attempt lightweight cloud credentials sync (only 3 docs, 0 writes)
     setIsSyncing(true);
     try {
-      await smartSyncAndMergeAllWithCloud();
+      await quickSyncAuthCredentials();
       const freshTeachers = getTeachers();
       const freshStudents = getStudents();
       const freshProfile = getSchoolProfile();
@@ -286,7 +294,7 @@ export const LoginView: React.FC<LoginViewProps> = ({
 
       const cloudFound = performLoginCheck(freshTeachers, freshStudents, freshProfile);
       if (!cloudFound) {
-        setErrorMessage('No. HP/WA, NIP, Email, atau Akun tidak ditemukan di Database Sekolah. Pastikan data guru sudah diinput oleh Admin di Master Data Guru.');
+        setErrorMessage('No. HP/WA, NIP, NISN, atau Akun tidak ditemukan di Database Sekolah. Pastikan data akun sudah diinput oleh Admin Sekolah.');
       }
     } catch {
       setErrorMessage('No. HP/WA, NIP, NISN, atau Akun tidak terdaftar. Periksa kembali atau hubungi Admin Sekolah.');
@@ -373,6 +381,24 @@ export const LoginView: React.FC<LoginViewProps> = ({
               </p>
             </div>
           </div>
+
+          {/* Banner Info Penutupan Akses Wali Murid jika Nonaktif atau Di Luar Jadwal */}
+          {!checkParentLoginAccess(schoolProfile).allowed && (
+            <div className="bg-amber-50/95 border border-amber-200/90 rounded-2xl p-3.5 text-xs flex items-start gap-2.5 text-amber-900 shadow-2xs animate-fadeIn">
+              <div className="p-1.5 bg-amber-500 text-white rounded-lg shrink-0 mt-0.5">
+                <Lock className="w-3.5 h-3.5" />
+              </div>
+              <div className="space-y-0.5">
+                <p className="font-extrabold text-[11px] text-amber-950 flex items-center gap-1.5">
+                  <span>Portal Wali Murid Ditutup Sementara</span>
+                  <span className="bg-amber-200/80 text-amber-900 px-1.5 py-0.5 rounded text-[9px] font-mono">Tutup</span>
+                </p>
+                <p className="text-[11px] text-amber-800 leading-snug font-medium">
+                  {checkParentLoginAccess(schoolProfile).reason}
+                </p>
+              </div>
+            </div>
+          )}
 
           {/* Error Message Alert */}
           {errorMessage && (

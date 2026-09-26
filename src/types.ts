@@ -9,6 +9,7 @@ export interface UserSession {
   teacherId?: string;
   studentId?: string;
   photoUrl?: string;
+  loginTimestamp?: number;
 }
 
 export type AttendanceStatus = 'HADIR' | 'TERLAMBAT' | 'IZIN' | 'SAKIT' | 'ALPA';
@@ -181,6 +182,14 @@ export interface SchoolProfile {
   subjects?: string[];
   adminPassword?: string; // Kata sandi login Administrator Sekolah (Default: admin123)
   scannerPassword?: string; // Kata sandi login Pos Scanner Satpam (Default: 123456)
+  // Kontrol Akses & Jadwal Login Wali Murid (Orang Tua)
+  parentPortalLoginEnabled?: boolean; // Saklar aktif/nonaktif izin login wali murid (default true)
+  parentPortalScheduleEnabled?: boolean; // Saklar pembatasan login wali murid berbasis jadwal hari & jam operasional (default false)
+  parentPortalOpenTime?: string; // Jam buka akses login (default "06:00")
+  parentPortalCloseTime?: string; // Jam tutup akses login (default "18:00")
+  parentPortalActiveDays?: string[]; // Pilihan hari operasional izin login orang tua, misal: ['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu', 'Minggu']
+  parentPortalDisabledNotice?: string; // Pesan penjelasan ketika login orang tua ditolak / dinonaktifkan
+  parentPortalForceLogoutTimestamp?: number; // Timestamp saat admin menekan paksa log off seluruh akun orang tua
 }
 
 export interface Teacher {

@@ -4,7 +4,8 @@ import {
   getAttendanceRecords, 
   getStudentCharacterLogs, 
   saveStudentCharacterLogs, 
-  getCharacterTraits 
+  getCharacterTraits,
+  getUserSession
 } from './storage';
 import { StudentCharacterLog } from '../types';
 
@@ -38,6 +39,12 @@ export function getWitaDateTime(): { witaDate: Date; witaDateStr: string; witaTi
  * Ditulis serentak oleh sistem dan dikirim dalam 1 pengiriman (single write) ke Cloud Firestore.
  */
 export function run16WitaAutoCharacterAssessment(force: boolean = false): { executed: boolean; count: number; message: string } {
+  // PENGHEMAT KUOTA UTAMA: Dilarang keras dijalankan oleh akun Wali Murid (PARENT)
+  const session = getUserSession();
+  if (session?.role === 'PARENT') {
+    return { executed: false, count: 0, message: 'Role Orang Tua tidak menjalankan evaluasi otomatis sekolah.' };
+  }
+
   const profile = getSchoolProfile();
 
   // Jika saklar master penilaian karakter dinonaktifkan

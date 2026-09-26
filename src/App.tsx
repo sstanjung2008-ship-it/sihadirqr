@@ -46,6 +46,7 @@ import {
   getUserSession,
   saveUserSession,
   initFirestoreRealtimeSync,
+  stopFirestoreRealtimeSync,
   reconcileTeachersAndClasses,
   KEYS
 } from './lib/storage';
@@ -351,7 +352,8 @@ export default function App() {
 
 
   useEffect(() => {
-    initFirestoreRealtimeSync();
+    // Jalankan sinkronisasi real-time berbasis role
+    initFirestoreRealtimeSync(currentRole);
 
     // Initial reconciliation on boot to make sure in-memory state is consistent without overwriting Cloud Firestore
     const initialRawClasses = getSchoolClasses();
@@ -366,6 +368,18 @@ export default function App() {
       setClassesState(updatedClasses);
     }
 
+    // PENGHEMAT KUOTA UTAMA:
+    // Saat HP Orang Tua atau Guru mengunci layar, beralih ke aplikasi lain (WA), atau tab diminimalkan (document.hidden),
+    // HENTIKAN sementara seluruh listener Firestore onSnapshot (stopFirestoreRealtimeSync).
+    // Saat tab dibuka kembali (visible), sambungkan ulang. Ini memangkas ribuan read pasif di latar belakang!
+    const handleVisibilityChange = () => {
+      if (document.hidden) {
+        stopFirestoreRealtimeSync();
+      } else {
+        initFirestoreRealtimeSync(currentRole);
+      }
+    };
+
     const handleNetworkToast = (e: any) => {
       if (e?.detail) {
         setNetworkToast(e.detail);
@@ -377,11 +391,15 @@ export default function App() {
 
     window.addEventListener('sihadir_storage_updated', refreshDataFromStorage);
     window.addEventListener('sihadir_network_toast', handleNetworkToast);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
     return () => {
       window.removeEventListener('sihadir_storage_updated', refreshDataFromStorage);
       window.removeEventListener('sihadir_network_toast', handleNetworkToast);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      stopFirestoreRealtimeSync();
     };
-  }, []);
+  }, [currentRole]);
 
   // Penilaian Karakter Otomatis 16:00 WITA (Belum Scan & Belum Pulang)
   useEffect(() => {

@@ -1,4 +1,4 @@
-import { SchoolProfile, SchoolClass, Student, AttendanceRecord, LeaveRequest, Teacher, LearningJournal, CharacterTrait, StudentCharacterLog, CharacterPredicateSettings, UserSession, StudentGradeAssessment, LessonPeriod, ClassScheduleSlot } from '../types';
+import { SchoolProfile, SchoolClass, Student, AttendanceRecord, LeaveRequest, Teacher, LearningJournal, CharacterTrait, StudentCharacterLog, CharacterPredicateSettings, UserSession, UserRole, StudentGradeAssessment, LessonPeriod, ClassScheduleSlot } from '../types';
 import { 
   INITIAL_SCHOOL_PROFILE, 
   INITIAL_CLASSES, 
@@ -1870,16 +1870,34 @@ export async function forceDownloadAllFromCloud(): Promise<{ success: boolean; e
   }
 }
 
-// Initialize Realtime Sync from Firestore
-export function initFirestoreRealtimeSync() {
-  if (isFirestoreInitialized || typeof window === 'undefined') return;
+// Stop and unsubscribe all active Firestore Realtime listeners
+export function stopFirestoreRealtimeSync(): void {
+  if (activeUnsubscribes.length > 0) {
+    activeUnsubscribes.forEach(unsub => {
+      try { unsub(); } catch {}
+    });
+    activeUnsubscribes = [];
+  }
+  isFirestoreInitialized = false;
+}
+
+// Initialize Realtime Sync from Firestore with Role-Based Optimization
+export function initFirestoreRealtimeSync(role?: UserRole) {
+  if (typeof window === 'undefined') return;
   if (isFirestoreQuotaExceeded()) {
     setCloudSyncStatus('quota_exceeded');
     return;
   }
+
+  // If already initialized, safely stop existing listeners to re-bind based on new role or visibility
+  if (isFirestoreInitialized) {
+    stopFirestoreRealtimeSync();
+  }
   isFirestoreInitialized = true;
 
-  const SYNC_KEYS: Array<{ 
+  const currentRole = role || getUserSession()?.role || 'ADMIN';
+
+  const ALL_KEYS: Array<{ 
     key: string; 
     getDefault: () => any;
   }> = [
@@ -1897,6 +1915,33 @@ export function initFirestoreRealtimeSync() {
     { key: KEYS.PERIODS, getDefault: () => INITIAL_LESSON_PERIODS },
     { key: KEYS.SCHEDULES, getDefault: () => INITIAL_CLASS_SCHEDULES },
   ];
+
+  // Saring dokumen yang perlu didengarkan secara real-time berdasarkan role
+  // Mencegah ratusan HP Orang Tua mendengarkan data jurnal guru, nilai rapot, periode jam pelajaran, dll.
+  let SYNC_KEYS = ALL_KEYS;
+
+  if (currentRole === 'PARENT') {
+    // Role Orang Tua HANYA mendengarkan dokumen relevan anak:
+    // Kehadiran, Izin, Jadwal Kelas, Log Karakter, Data Siswa, dan Profil Sekolah
+    const parentAllowed = new Set([
+      KEYS.PROFILE,
+      KEYS.ATTENDANCE,
+      KEYS.LEAVES,
+      KEYS.SCHEDULES,
+      KEYS.CHARACTER_LOGS,
+      KEYS.STUDENTS,
+    ]);
+    SYNC_KEYS = ALL_KEYS.filter(k => parentAllowed.has(k.key));
+  } else if (currentRole === 'SCANNER_POS') {
+    // Role Scanner Pos Gerbang HANYA butuh Profil, Siswa, Kelas, dan Presensi
+    const scannerAllowed = new Set([
+      KEYS.PROFILE,
+      KEYS.STUDENTS,
+      KEYS.CLASSES,
+      KEYS.ATTENDANCE,
+    ]);
+    SYNC_KEYS = ALL_KEYS.filter(k => scannerAllowed.has(k.key));
+  }
 
   SYNC_KEYS.forEach(({ key }) => {
     try {

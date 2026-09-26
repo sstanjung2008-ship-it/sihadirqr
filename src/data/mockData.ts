@@ -35,6 +35,8 @@ export const INITIAL_SCHOOL_PROFILE: SchoolProfile = {
     veryActiveKbmPoints: 1,
     onTimePoints: 1,
     onTimeRequiredDays: 3,
+    unscannedPoints: 1,
+    unreturnedPoints: 1,
   },
   lateToleranceMinutes: 15,
   educationLevel: "SMP / MTs",
@@ -595,7 +597,9 @@ export const INITIAL_CHARACTER_TRAITS: any[] = [
   { id: "trait-011", name: "Membolos Jam Pelajaran", type: "NEGATIF", points: 15, category: "Pelanggaran Berat" },
   { id: "trait-012", name: "Merusak Fasilitas / Coreti Meja", type: "NEGATIF", points: 15, category: "Ketertiban" },
   { id: "trait-013", name: "Sangat Aktif saat KBM", type: "POSITIF", points: 1, category: "Keaktifan" },
-  { id: "trait-014", name: "Tidak Hadir di Kelas saat KBM", type: "NEGATIF", points: 2, category: "Kedisiplinan" }
+  { id: "trait-014", name: "Tidak Hadir di Kelas saat KBM", type: "NEGATIF", points: 2, category: "Kedisiplinan" },
+  { id: "trait-015", name: "Belum Melakukan Scan Presensi", type: "NEGATIF", points: 1, category: "Kedisiplinan" },
+  { id: "trait-016", name: "Belum Melakukan Scan Pulang", type: "NEGATIF", points: 1, category: "Kedisiplinan" }
 ];
 
 export const INITIAL_STUDENT_CHARACTER_LOGS: any[] = [

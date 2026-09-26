@@ -79,6 +79,7 @@ import {
   playTeacherKbmVoiceReminder, 
   isKbmVoiceReminderEnabled 
 } from './lib/kbmVoiceReminder';
+import { run16WitaAutoCharacterAssessment } from './lib/autoCharacterScheduler';
 
 export default function App() {
   const [userSession, setUserSessionState] = useState<UserSession | null>(() => getUserSession());
@@ -379,6 +380,35 @@ export default function App() {
     return () => {
       window.removeEventListener('sihadir_storage_updated', refreshDataFromStorage);
       window.removeEventListener('sihadir_network_toast', handleNetworkToast);
+    };
+  }, []);
+
+  // Penilaian Karakter Otomatis 16:00 WITA (Belum Scan & Belum Pulang)
+  useEffect(() => {
+    // Jalankan pemeriksaan saat aplikasi dimuat
+    run16WitaAutoCharacterAssessment();
+
+    // Periksa secara berkala setiap 20 detik
+    const interval = setInterval(() => {
+      run16WitaAutoCharacterAssessment();
+    }, 20000);
+
+    const handleAutoAssessmentEvent = (e: any) => {
+      if (e.detail?.newLogsCount > 0) {
+        setNetworkToast({
+          type: 'info',
+          title: '⭐ Penilaian Karakter Otomatis (16:00 WITA)',
+          message: `Sistem otomatis mencatat ${e.detail.newLogsCount} penilaian karakter negatif baru (${e.detail.unscannedCount} Belum Scan, ${e.detail.unreturnedCount} Belum Pulang) dan disinkronkan ke Cloud dalam 1 pengiriman.`
+        });
+        setTimeout(() => setNetworkToast(null), 6000);
+      }
+    };
+
+    window.addEventListener('sihadir_auto_assessment_completed', handleAutoAssessmentEvent);
+
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('sihadir_auto_assessment_completed', handleAutoAssessmentEvent);
     };
   }, []);
 
@@ -716,6 +746,7 @@ export default function App() {
         return { 
           ...r, 
           status: newStatus, 
+          time: fullRecord?.time !== undefined ? fullRecord.time : r.time,
           notes: notes !== undefined ? notes : r.notes,
           returnTime: returnTime !== undefined ? (returnTime || undefined) : r.returnTime,
           returnStatus: returnTime !== undefined ? (returnTime ? (returnStatus || 'PULANG') : undefined) : r.returnStatus

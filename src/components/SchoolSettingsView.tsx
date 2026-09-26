@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { SchoolProfile, Teacher, Student, SchoolHoliday } from '../types';
 import { Settings, Save, School, Clock, RotateCcw, CreditCard, CheckCircle2, Upload, Image as ImageIcon, Link, BookOpen, Plus, X, KeyRound, Key, Lock, Eye, EyeOff, User, GraduationCap, Search, Check, RefreshCw, Users, ShieldAlert, ShieldCheck, AlertCircle, Calendar, Trash2, Edit3, Tag, Flag, AlertTriangle, Sparkles, Filter, Cloud, CloudDownload, CloudUpload, FileJson, Download, Volume2, VolumeX, Mic, Headphones, BellRing, UserCheck, Smile, UserX, Play, Square, MessageSquare, Flame, CalendarCheck2, Layers } from 'lucide-react';
 import { resetToDefaultData, forceUploadAllToCloud, forceDownloadAllFromCloud, getCloudSyncStatus, CloudSyncStatus, downloadDatabaseBackupFile, getLocalDateString } from '../lib/storage';
+import { run16WitaAutoCharacterAssessment } from '../lib/autoCharacterScheduler';
 import { 
   DEFAULT_TEACHER_SPEECH_TEMPLATE,
   DEFAULT_PARENT_ARRIVAL_MESSAGE,
@@ -135,6 +136,29 @@ export const SchoolSettingsView: React.FC<SchoolSettingsViewProps> = ({
   const [showRegencyLogoUrlInput, setShowRegencyLogoUrlInput] = useState(false);
   const [newSubjectInput, setNewSubjectInput] = useState('');
   const [subjectSavedNotice, setSubjectSavedNotice] = useState<string | null>(null);
+
+  // Penilaian Karakter Otomatis 16:00 WITA Manual Test State
+  const [manualAssessmentResult, setManualAssessmentResult] = useState<{ message: string; type: 'success' | 'info' | 'error' } | null>(null);
+  const [isRunningAutoAssessment, setIsRunningAutoAssessment] = useState(false);
+
+  const handleRunManual16WitaAssessment = () => {
+    setIsRunningAutoAssessment(true);
+    try {
+      const res = run16WitaAutoCharacterAssessment(true);
+      setManualAssessmentResult({
+        message: res.message,
+        type: res.executed ? 'success' : 'info'
+      });
+    } catch (e: any) {
+      setManualAssessmentResult({
+        message: `Terjadi kendala: ${e?.message || 'Gagal menjalankan evaluasi otomatis'}`,
+        type: 'error'
+      });
+    } finally {
+      setIsRunningAutoAssessment(false);
+      setTimeout(() => setManualAssessmentResult(null), 6000);
+    }
+  };
 
   // ==========================================
   // FITUR SUARA AI & NOTIFIKASI PERAN (GURU & ORANG TUA)
@@ -2302,6 +2326,8 @@ export const SchoolSettingsView: React.FC<SchoolSettingsViewProps> = ({
                           veryActiveKbmPoints: 1,
                           onTimePoints: 1,
                           onTimeRequiredDays: 3,
+                          unscannedPoints: 1,
+                          unreturnedPoints: 1,
                         }),
                         alpaPoints: Math.max(1, Math.abs(Number(e.target.value)) || 5)
                       }
@@ -2311,6 +2337,143 @@ export const SchoolSettingsView: React.FC<SchoolSettingsViewProps> = ({
                   <span className="text-[11px] font-bold text-rose-700">-Poin</span>
                 </div>
               </div>
+            </div>
+
+            {/* 7. Belum Scan Presensi (Otomatis 16:00 WITA) */}
+            <div className="p-3.5 bg-orange-50/40 border border-orange-200 rounded-2xl space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="font-extrabold text-orange-950 flex items-center gap-1.5">
+                  <UserX className="w-4 h-4 text-orange-600" />
+                  Belum Scan Presensi
+                </span>
+                <span className="text-[10px] font-black bg-orange-100 text-orange-800 px-2 py-0.5 rounded-full">
+                  -NEGATIF
+                </span>
+              </div>
+              <p className="text-[10px] text-slate-500 leading-tight">
+                Hanya dinilai jika kriteria status masuk Hadir tetapi pada kolom Jam Masuk belum scan (status Sakit, Izin, Alpa, Terlambat tidak dinilai).
+              </p>
+              <div className="flex items-center justify-between pt-1">
+                <span className="text-[11px] text-slate-600 font-medium">Nilai Poin:</span>
+                <div className="flex items-center gap-1">
+                  <input
+                    type="number"
+                    min="1"
+                    max="50"
+                    value={formData.autoCharacterPoints?.unscannedPoints ?? 1}
+                    onChange={(e) => setFormData({
+                      ...formData,
+                      autoCharacterPoints: {
+                        ...(formData.autoCharacterPoints || {
+                          latePoints: 2,
+                          alpaPoints: 5,
+                          disruptivePoints: 1,
+                          absentKbmPoints: 2,
+                          veryActiveKbmPoints: 1,
+                          onTimePoints: 1,
+                          onTimeRequiredDays: 3,
+                          unscannedPoints: 1,
+                          unreturnedPoints: 1,
+                        }),
+                        unscannedPoints: Math.max(1, Math.abs(Number(e.target.value)) || 1)
+                      }
+                    })}
+                    className="w-14 px-2 py-1 bg-white border border-orange-300 rounded-lg text-xs font-black text-center text-orange-900 focus:outline-none focus:ring-1 focus:ring-orange-500"
+                  />
+                  <span className="text-[11px] font-bold text-orange-700">-Poin</span>
+                </div>
+              </div>
+            </div>
+
+            {/* 8. Belum Pulang Sekolah (Otomatis 16:00 WITA) */}
+            <div className="p-3.5 bg-amber-50/40 border border-amber-200 rounded-2xl space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="font-extrabold text-amber-950 flex items-center gap-1.5">
+                  <Clock className="w-4 h-4 text-amber-600" />
+                  Belum Scan Pulang
+                </span>
+                <span className="text-[10px] font-black bg-amber-100 text-amber-800 px-2 py-0.5 rounded-full">
+                  -NEGATIF
+                </span>
+              </div>
+              <p className="text-[10px] text-slate-500 leading-tight">
+                Hanya dinilai jika status masuk Hadir atau Terlambat. Status selain Hadir/Terlambat (Sakit, Izin, Alpa) tidak dinilai negatif belum pulang.
+              </p>
+              <div className="flex items-center justify-between pt-1">
+                <span className="text-[11px] text-slate-600 font-medium">Nilai Poin:</span>
+                <div className="flex items-center gap-1">
+                  <input
+                    type="number"
+                    min="1"
+                    max="50"
+                    value={formData.autoCharacterPoints?.unreturnedPoints ?? 1}
+                    onChange={(e) => setFormData({
+                      ...formData,
+                      autoCharacterPoints: {
+                        ...(formData.autoCharacterPoints || {
+                          latePoints: 2,
+                          alpaPoints: 5,
+                          disruptivePoints: 1,
+                          absentKbmPoints: 2,
+                          veryActiveKbmPoints: 1,
+                          onTimePoints: 1,
+                          onTimeRequiredDays: 3,
+                          unscannedPoints: 1,
+                          unreturnedPoints: 1,
+                        }),
+                        unreturnedPoints: Math.max(1, Math.abs(Number(e.target.value)) || 1)
+                      }
+                    })}
+                    className="w-14 px-2 py-1 bg-white border border-amber-300 rounded-lg text-xs font-black text-center text-amber-900 focus:outline-none focus:ring-1 focus:ring-amber-500"
+                  />
+                  <span className="text-[11px] font-bold text-amber-700">-Poin</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Banner Penjadwalan Eksekusi Otomatis 16:00 WITA */}
+          <div className="mt-4 p-4 rounded-2xl bg-gradient-to-r from-indigo-900/90 to-slate-900 text-white flex flex-col md:flex-row items-start md:items-center justify-between gap-4 border border-indigo-700/60 shadow-md">
+            <div className="space-y-1">
+              <div className="flex items-center gap-2">
+                <span className="bg-amber-400 text-slate-950 text-[10px] font-black px-2 py-0.5 rounded-full">
+                  ⏰ Eksekusi 16:00 WITA
+                </span>
+                <span className="text-xs font-extrabold text-amber-200">
+                  Sinkronisasi Otomatis Terjadwal & Hemat Kuota Cloud
+                </span>
+              </div>
+              <p className="text-[11px] text-slate-300 max-w-2xl leading-relaxed">
+                Setiap hari pada pukul <strong>16:00 WITA</strong>, sistem secara otomatis memeriksa seluruh data absensi siswa hari ini. Siswa yang <strong>Belum Scan Presensi (-{formData.autoCharacterPoints?.unscannedPoints ?? 1} Poin)</strong> atau <strong>Belum Scan Pulang (-{formData.autoCharacterPoints?.unreturnedPoints ?? 1} Poin)</strong> akan langsung dicatat ke log karakter dan <strong>dikirim serentak dalam 1 kali pengiriman (single write) ke Cloud Firestore</strong>.
+              </p>
+            </div>
+
+            <div className="shrink-0 flex flex-col items-end gap-1.5 w-full md:w-auto">
+              <button
+                type="button"
+                onClick={handleRunManual16WitaAssessment}
+                disabled={isRunningAutoAssessment}
+                className="w-full md:w-auto px-4 py-2 bg-amber-400 hover:bg-amber-300 text-slate-950 font-black text-xs rounded-xl transition-all shadow-xs flex items-center justify-center gap-2 cursor-pointer active:scale-95 disabled:opacity-50"
+              >
+                {isRunningAutoAssessment ? (
+                  <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  <Sparkles className="w-3.5 h-3.5 text-slate-950" />
+                )}
+                <span>Jalankan Evaluasi 16:00 WITA Sekarang</span>
+              </button>
+
+              {manualAssessmentResult && (
+                <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md ${
+                  manualAssessmentResult.type === 'success' 
+                    ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30' 
+                    : manualAssessmentResult.type === 'error'
+                    ? 'bg-rose-500/20 text-rose-300 border border-rose-500/30'
+                    : 'bg-sky-500/20 text-sky-300 border border-sky-500/30'
+                }`}>
+                  {manualAssessmentResult.message}
+                </span>
+              )}
             </div>
           </div>
         </div>

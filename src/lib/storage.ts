@@ -1371,6 +1371,8 @@ export function mergeSchoolProfile(local: SchoolProfile, cloud: SchoolProfile): 
         veryActiveKbmPoints: 1,
         onTimePoints: 1,
         onTimeRequiredDays: 3,
+        unscannedPoints: 1,
+        unreturnedPoints: 1,
       }),
       ...(local.autoCharacterPoints || {}),
       ...(cloud.autoCharacterPoints || {}),
@@ -2285,6 +2287,8 @@ export function getSchoolProfile(): SchoolProfile {
             veryActiveKbmPoints: Number(parsed.autoCharacterPoints.veryActiveKbmPoints) || 1,
             onTimePoints: Number(parsed.autoCharacterPoints.onTimePoints) || 1,
             onTimeRequiredDays: Number(parsed.autoCharacterPoints.onTimeRequiredDays) || 3,
+            unscannedPoints: Number(parsed.autoCharacterPoints.unscannedPoints) || 1,
+            unreturnedPoints: Number(parsed.autoCharacterPoints.unreturnedPoints) || 1,
           }
         : (INITIAL_SCHOOL_PROFILE.autoCharacterPoints || {
             latePoints: 2,
@@ -2294,6 +2298,8 @@ export function getSchoolProfile(): SchoolProfile {
             veryActiveKbmPoints: 1,
             onTimePoints: 1,
             onTimeRequiredDays: 3,
+            unscannedPoints: 1,
+            unreturnedPoints: 1,
           }),
       lateToleranceMinutes: typeof parsed.lateToleranceMinutes === 'number' ? parsed.lateToleranceMinutes : (INITIAL_SCHOOL_PROFILE.lateToleranceMinutes ?? 15),
       activeDays: parsed.activeDays && Array.isArray(parsed.activeDays) && parsed.activeDays.length > 0 ? parsed.activeDays : (INITIAL_SCHOOL_PROFILE.activeDays || ['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu']),
@@ -2782,9 +2788,36 @@ export function getCharacterTraits(): CharacterTrait[] {
   }
   try {
     const parsed = JSON.parse(data);
-    return Array.isArray(parsed) ? parsed : [];
+    if (!Array.isArray(parsed)) return INITIAL_CHARACTER_TRAITS;
+
+    // Pastikan trait penilaian otomatis "Belum Scan" dan "Belum Pulang" selalu ada
+    let updated = false;
+    if (!parsed.some(t => t.id === 'trait-015' || (t.name.toLowerCase().includes('belum') && t.name.toLowerCase().includes('scan')))) {
+      parsed.push({
+        id: 'trait-015',
+        name: 'Belum Melakukan Scan Presensi',
+        type: 'NEGATIF',
+        points: 1,
+        category: 'Kedisiplinan'
+      });
+      updated = true;
+    }
+    if (!parsed.some(t => t.id === 'trait-016' || (t.name.toLowerCase().includes('belum') && t.name.toLowerCase().includes('pulang')))) {
+      parsed.push({
+        id: 'trait-016',
+        name: 'Belum Melakukan Scan Pulang',
+        type: 'NEGATIF',
+        points: 1,
+        category: 'Kedisiplinan'
+      });
+      updated = true;
+    }
+    if (updated) {
+      safeSetLocalStorage(KEYS.CHARACTER_TRAITS, JSON.stringify(parsed));
+    }
+    return parsed;
   } catch {
-    return [];
+    return INITIAL_CHARACTER_TRAITS;
   }
 }
 

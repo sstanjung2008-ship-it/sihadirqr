@@ -995,7 +995,19 @@ export function mergeStudentLists(local: Student[], cloud: Student[]): Student[]
     }
   });
 
-  return Array.from(map.values());
+  // Ensure strictly unique student IDs in the final merged array to prevent React duplicate key warnings
+  const finalStudentMap = new Map<string, Student>();
+  for (const s of map.values()) {
+    if (!s || !s.id) continue;
+    const cleanId = s.id.trim();
+    if (!finalStudentMap.has(cleanId)) {
+      finalStudentMap.set(cleanId, s);
+    } else {
+      finalStudentMap.set(cleanId, { ...finalStudentMap.get(cleanId)!, ...s });
+    }
+  }
+
+  return Array.from(finalStudentMap.values());
 }
 
 export function mergeClassLists(local: SchoolClass[], cloud: SchoolClass[]): SchoolClass[] {
@@ -1136,7 +1148,19 @@ export function mergeTeacherLists(local: Teacher[], cloud: Teacher[]): Teacher[]
     }
   });
 
-  return Array.from(map.values());
+  // Ensure strictly unique teacher IDs in the final merged array to prevent React duplicate key warnings
+  const finalTeacherMap = new Map<string, Teacher>();
+  for (const t of map.values()) {
+    if (!t || !t.id) continue;
+    const cleanId = t.id.trim();
+    if (!finalTeacherMap.has(cleanId)) {
+      finalTeacherMap.set(cleanId, t);
+    } else {
+      finalTeacherMap.set(cleanId, { ...finalTeacherMap.get(cleanId)!, ...t });
+    }
+  }
+
+  return Array.from(finalTeacherMap.values());
 }
 
 /**
@@ -1971,14 +1995,14 @@ export function stopFirestoreRealtimeSync(): void {
   isFirestoreInitialized = false;
 }
 
-const PARENT_SYNC_COOLDOWN_MS = 5 * 60 * 1000; // 5 menit cache cooldown
+const PARENT_SYNC_COOLDOWN_MS = 30 * 60 * 1000; // 30 menit cache cooldown
 let lastParentRefreshTime = 0;
 
 /**
  * PENGHEMAT KUOTA TERTINGGI: Sinkronisasi Sesuai Kebutuhan Khusus Akun Wali Murid (PARENT)
  * 1. Tidak memasang listener onSnapshot real-time (mencegah ledakan 60.000 read saat ratusan siswa di-scan di gerbang).
  * 2. Menggunakan LocalStorage instan (0 read).
- * 3. Jika cache lokal kadaluarsa (> 5 menit) atau ditekan tombol segarkan, hanya membaca dokumen terkait (KEYS.ATTENDANCE & KEYS.LEAVES).
+ * 3. Jika cache lokal kadaluarsa (> 30 menit) atau ditekan tombol segarkan, hanya membaca dokumen terkait (KEYS.ATTENDANCE & KEYS.LEAVES).
  * 4. 100% GRATIS dan menjamin kuota Firebase Spark (50.000 read/hari) tidak akan pernah tersentuh habis.
  */
 export async function syncParentDataOnDemand(force: boolean = false): Promise<{ success: boolean; message: string }> {
@@ -1998,11 +2022,11 @@ export async function syncParentDataOnDemand(force: boolean = false): Promise<{ 
   const localProfileStr = localStorage.getItem(KEYS.PROFILE);
   const isFirstTimeBoot = !localStudentsStr || !localProfileStr || localStudentsStr === '[]';
 
-  // Jika bukan booting awal, bukan paksa (force), dan masih dalam masa berlaku cache (5 menit):
+  // Jika bukan booting awal, bukan paksa (force), dan masih dalam masa berlaku cache (30 menit):
   // TIDAK MELAKUKAN BACA SAMA SEKALI KE FIRESTORE! (0 Reads, 100% Hemat Kuota)
   if (!isFirstTimeBoot && !force && timeSinceLastSync < PARENT_SYNC_COOLDOWN_MS) {
     setCloudSyncStatus('connected');
-    return { success: true, message: 'Data presensi lokal masih baru (mode hemat kuota aktif).' };
+    return { success: true, message: 'Data presensi lokal masih baru (mode hemat kuota 30 menit aktif).' };
   }
 
   // Rate limit agar tombol segarkan tidak bisa dispam (minimal 10 detik jeda)
@@ -2150,7 +2174,7 @@ export function initFirestoreRealtimeSync(role?: UserRole) {
   // Sebagai gantinya, akun Orang Tua menggunakan sistem "Smart On-Demand Cached Read" untuk data presensi:
   // 1. Kunjungan pertama: Ambil dokumen via getDoc (hanya 1-2 read), lalu simpan ke LocalStorage.
   // 2. Kunjungan berikutnya: Langsung baca LocalStorage (0 read).
-  // 3. Jika cache sudah lewat 5 menit atau orang tua klik "Segarkan Status", lakukan 1 read getDoc.
+  // 3. Jika cache sudah lewat 30 menit atau orang tua klik "Segarkan Status", lakukan 1 read getDoc.
   // SATU-SATUNYA listener real-time untuk HP Orang Tua adalah KEYS.PROFILE (hanya 1 dokumen tunggal):
   // Menjamin jika Admin menonaktifkan portal orang tua atau menekan tombol paksa log off,
   // HP seluruh orang tua seketika menerima pembaruan secara real-time dan ter-log off otomatis!
@@ -3114,12 +3138,28 @@ export function getTeachers(): Teacher[] {
     const parsed = JSON.parse(data);
     if (!Array.isArray(parsed)) return [];
     const isDemoTeacher = (t: Teacher) => DEMO_TEACHER_IDS.has(t.id) || (!!t.nip && DEMO_TEACHER_NIPS.has(t.nip.trim()));
-    if (parsed.some(t => !isDemoTeacher(t)) && parsed.some(isDemoTeacher)) {
-      const cleaned = parsed.filter(t => !isDemoTeacher(t));
-      safeSetLocalStorage(KEYS.TEACHERS, JSON.stringify(cleaned));
-      return cleaned;
+    let list = parsed;
+    if (list.some(t => !isDemoTeacher(t)) && list.some(isDemoTeacher)) {
+      list = list.filter(t => !isDemoTeacher(t));
     }
-    return parsed;
+    // Deduplicate teachers by ID and NIP so duplicate keys never occur in React renders
+    const teacherMap = new Map<string, Teacher>();
+    for (let i = 0; i < list.length; i++) {
+      const t = list[i];
+      if (!t || !t.id) continue;
+      const key = t.id.trim();
+      if (!teacherMap.has(key)) {
+        teacherMap.set(key, t);
+      } else {
+        // Merge attributes if duplicate id is encountered
+        teacherMap.set(key, { ...teacherMap.get(key)!, ...t });
+      }
+    }
+    const deduplicated = Array.from(teacherMap.values());
+    if (deduplicated.length !== parsed.length) {
+      safeSetLocalStorage(KEYS.TEACHERS, JSON.stringify(deduplicated));
+    }
+    return deduplicated;
   } catch {
     return [];
   }

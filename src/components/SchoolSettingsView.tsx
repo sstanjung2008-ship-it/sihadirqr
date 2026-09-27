@@ -3734,7 +3734,7 @@ export const SchoolSettingsView: React.FC<SchoolSettingsViewProps> = ({
             <div className="bg-white/5 border border-white/10 p-3 rounded-2xl space-y-1">
               <span className="font-bold text-emerald-300">Perbaikan Sistem Baru (Smart On-Demand):</span>
               <p className="text-slate-300 leading-relaxed text-[10.5px]">
-                Akun orang tua kini menggunakan cache pintar 5 menit (0 read dari Firestore). Dengan ditambahkannya fitur jadwal operasional dan tombol nonaktif ini, kuota gratis Firebase Spark (50.000 read/hari) tidak akan pernah terlampaui.
+                Akun orang tua kini menggunakan cache pintar 30 menit (0 read dari Firestore). Dengan ditambahkannya fitur jadwal operasional dan tombol nonaktif ini, kuota gratis Firebase Spark (50.000 read/hari) tidak akan pernah terlampaui.
               </p>
             </div>
           </div>

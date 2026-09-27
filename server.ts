@@ -62,6 +62,11 @@ app.get("/api/health", (_req, res) => {
   res.json({ status: "ok", timestamp: new Date().toISOString() });
 });
 
+// Centralized Cloud Server Time endpoint to prevent clock drift across devices
+app.get("/api/time", (_req, res) => {
+  res.json({ serverTime: Date.now(), iso: new Date().toISOString() });
+});
+
 // Robots.txt endpoint
 app.get("/robots.txt", (_req, res) => {
   res.type("text/plain").send("User-agent: *\nDisallow: /api/\nAllow: /");

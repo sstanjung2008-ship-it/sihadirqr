@@ -2534,7 +2534,11 @@ export const RecapExportView: React.FC<RecapExportViewProps> = ({
 
             {/* Modal Score Overview Bar */}
             {(() => {
-              const studentLogs = (characterLogs || []).filter(l => l.studentId === selectedCharacterStudentDetail.id);
+              const studentLogs = (characterLogs || []).filter(l => 
+                l.studentId === selectedCharacterStudentDetail.id || 
+                (selectedCharacterStudentDetail.nisn && selectedCharacterStudentDetail.nisn !== '-' && l.nisn === selectedCharacterStudentDetail.nisn) || 
+                (selectedCharacterStudentDetail.name && l.studentName && l.studentName.toLowerCase() === selectedCharacterStudentDetail.name.toLowerCase())
+              );
               const posLogs = studentLogs.filter(l => l.traitType === 'POSITIF');
               const negLogs = studentLogs.filter(l => l.traitType === 'NEGATIF');
               const posPoints = posLogs.reduce((sum, item) => sum + (item.points || 0), 0);
@@ -2599,7 +2603,11 @@ export const RecapExportView: React.FC<RecapExportViewProps> = ({
 
               {(() => {
                 const logs = (characterLogs || [])
-                  .filter(l => l.studentId === selectedCharacterStudentDetail.id)
+                  .filter(l => 
+                    l.studentId === selectedCharacterStudentDetail.id || 
+                    (selectedCharacterStudentDetail.nisn && selectedCharacterStudentDetail.nisn !== '-' && l.nisn === selectedCharacterStudentDetail.nisn) || 
+                    (selectedCharacterStudentDetail.name && l.studentName && l.studentName.toLowerCase() === selectedCharacterStudentDetail.name.toLowerCase())
+                  )
                   .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
 
                 if (logs.length === 0) {

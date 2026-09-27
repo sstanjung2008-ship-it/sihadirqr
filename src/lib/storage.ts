@@ -234,38 +234,102 @@ export function isValidAttendanceRecord(rec: any): boolean {
  */
 export function validateAndSanitizeAttendanceRecords(records: any[]): AttendanceRecord[] {
   if (!Array.isArray(records)) return [];
-  const cleanList: AttendanceRecord[] = [];
-  const seenKeys = new Set<string>();
+
+  // Group and intelligently merge by student and date so a student can NEVER have duplicate conflicting records on the same day!
+  const recordMap = new Map<string, AttendanceRecord>();
 
   for (let i = 0; i < records.length; i++) {
     const r = records[i];
     if (!isValidAttendanceRecord(r)) continue;
 
-    const dedupeKey = r.id ? `id_${r.id}` : `${r.date}__${r.studentId}`;
-    if (seenKeys.has(dedupeKey)) continue;
-    seenKeys.add(dedupeKey);
+    const studentId = String(r.studentId).trim();
+    const date = String(r.date).trim();
+    const nisn = String(r.nisn || '').trim();
+    const primaryKey = `${date}__${studentId}`;
 
-    const cleanRecord: AttendanceRecord = {
-      id: r.id || `att-${Date.now()}-${r.studentId}`,
-      studentId: String(r.studentId).trim(),
-      studentName: String(r.studentName || 'Siswa').trim(),
-      nisn: String(r.nisn || '').trim(),
-      className: String(r.className || '').trim(),
-      date: String(r.date).trim(),
-      time: (r.time && r.time !== '-') ? String(r.time).trim() : '-',
-      status: r.status || 'HADIR',
-      method: r.method || 'QR_SCAN',
-      scannedBy: r.scannedBy || 'Pos Scanner Utama',
-      parentNotified: Boolean(r.parentNotified),
-    };
+    const rawTime = (r.time && r.time !== '-' && !String(r.time).toLowerCase().includes('belum')) ? String(r.time).trim() : '-';
+    const rawReturnTime = (r.returnTime && r.returnTime !== '-' && !String(r.returnTime).toLowerCase().includes('belum')) ? String(r.returnTime).trim() : undefined;
+    const rawReturnStatus = (r.returnStatus && r.returnStatus !== 'BELUM_PULANG') ? r.returnStatus : undefined;
 
-    if (r.returnTime && r.returnTime !== '-') cleanRecord.returnTime = String(r.returnTime).trim();
-    if (r.returnStatus) cleanRecord.returnStatus = r.returnStatus;
-    if (r.returnScannedBy) cleanRecord.returnScannedBy = String(r.returnScannedBy).trim();
-    if (r.notes) cleanRecord.notes = String(r.notes).trim();
+    const existing = recordMap.get(primaryKey) || (nisn ? recordMap.get(`${date}__nisn_${nisn}`) : undefined);
 
-    cleanList.push(cleanRecord);
+    if (!existing) {
+      const cleanRecord: AttendanceRecord = {
+        id: r.id || `att-${date}-${studentId}`,
+        studentId,
+        studentName: String(r.studentName || 'Siswa').trim(),
+        nisn,
+        className: String(r.className || '').trim(),
+        date,
+        time: rawTime,
+        status: r.status || 'HADIR',
+        method: r.method || 'QR_SCAN',
+        scannedBy: r.scannedBy || 'Pos Scanner Utama',
+        parentNotified: Boolean(r.parentNotified),
+      };
+
+      if (rawReturnTime) cleanRecord.returnTime = rawReturnTime;
+      if (rawReturnStatus) cleanRecord.returnStatus = rawReturnStatus;
+      if (r.returnScannedBy) cleanRecord.returnScannedBy = String(r.returnScannedBy).trim();
+      if (r.notes) cleanRecord.notes = String(r.notes).trim();
+
+      recordMap.set(primaryKey, cleanRecord);
+      if (nisn) recordMap.set(`${date}__nisn_${nisn}`, cleanRecord);
+    } else {
+      // MERGE existing with incoming record: NEVER overwrite a real scan with empty/unscanned data!
+      // 1. Time (Jam Masuk): prefer real scan time
+      if (rawTime !== '-' && existing.time === '-') {
+        existing.time = rawTime;
+      }
+
+      // 2. Return Time (Jam Pulang): prefer real return time
+      if (rawReturnTime && !existing.returnTime) {
+        existing.returnTime = rawReturnTime;
+      }
+
+      // 3. Return Status: prefer completed return status
+      const isCompleted = (s?: string) => s === 'PULANG' || s === 'PULANG_CEPAT' || s === 'PULANG_TEPAT';
+      if (isCompleted(rawReturnStatus)) {
+        existing.returnStatus = rawReturnStatus;
+      } else if (!existing.returnStatus && rawReturnStatus) {
+        existing.returnStatus = rawReturnStatus;
+      }
+
+      // 4. Status Masuk: prefer non-ALPA
+      if (existing.status === 'ALPA' && r.status && r.status !== 'ALPA') {
+        existing.status = r.status;
+      }
+
+      // 5. Method: prefer QR_SCAN
+      if (r.method === 'QR_SCAN') {
+        existing.method = 'QR_SCAN';
+      }
+
+      // 6. Scanners
+      if (r.scannedBy && !r.scannedBy.includes('Sistem Otomatis')) {
+        existing.scannedBy = r.scannedBy;
+      }
+      if (r.returnScannedBy && !r.returnScannedBy.includes('Sistem Otomatis')) {
+        existing.returnScannedBy = r.returnScannedBy;
+      }
+
+      // 7. Notes
+      if (r.notes && !existing.notes) {
+        existing.notes = r.notes;
+      }
+
+      // 8. NISN / studentName / className
+      if (!existing.nisn && nisn) existing.nisn = nisn;
+      if ((!existing.studentName || existing.studentName === 'Siswa') && r.studentName) {
+        existing.studentName = String(r.studentName).trim();
+      }
+      if (!existing.className && r.className) {
+        existing.className = String(r.className).trim();
+      }
+    }
   }
+
+  const cleanList = Array.from(new Set(recordMap.values()));
 
   // Urutkan berdasarkan tanggal terbaru (descending), lalu jam (descending)
   return cleanList.sort((a, b) => {
@@ -2227,7 +2291,7 @@ export function initFirestoreRealtimeSync(role?: UserRole) {
                   if (currentLocalStr !== mergedStr) {
                     lastSavedStringCache[key] = mergedStr;
                     safeSetLocalStorage(key, mergedStr);
-                    safeSetLocalStorage(key + '_updatedAt', String(Math.max(cloudUpdatedAt, localUpdatedAt, Date.now())));
+                    safeSetLocalStorage(key + '_updatedAt', String(cloudUpdatedAt || Date.now()));
                     notifyStorageUpdated();
                   }
                   setCloudSyncStatus('connected');
@@ -2257,7 +2321,7 @@ export function initFirestoreRealtimeSync(role?: UserRole) {
                   if (currentLocalStr !== mergedStr) {
                     lastSavedStringCache[key] = mergedStr;
                     safeSetLocalStorage(key, mergedStr);
-                    safeSetLocalStorage(key + '_updatedAt', String(Math.max(cloudUpdatedAt, localUpdatedAt, Date.now())));
+                    safeSetLocalStorage(key + '_updatedAt', String(cloudUpdatedAt || Date.now()));
                     notifyStorageUpdated();
                   }
                   setCloudSyncStatus('connected');
@@ -2290,25 +2354,18 @@ export function initFirestoreRealtimeSync(role?: UserRole) {
                   const mergedAtt = mergeAttendanceLists(currentLocalAtt, cleanCloudAtt);
                   const cleanMergedAtt = validateAndSanitizeAttendanceRecords(mergedAtt);
                   const mergedStr = JSON.stringify(cleanMergedAtt);
-                  
+
+                  // PENGHEMAT KUOTA TERTINGGI & ANTI-PING-PONG WRITE LOOP:
+                  // onSnapshot adalah saluran BACA (incoming stream).
+                  // JANGAN PERNAH memanggil writeCloudDocument dari dalam onSnapshot callback!
+                  // Setiap perangkat hanya menyinkronkan data masuk ke LocalStorage dan memperbarui UI.
+                  // Penulisan ke Cloud HANYA dilakukan saat ada aksi pemindaian aktif (flushAttendanceScanQueue)
+                  // atau aksi input pengguna (saveAttendanceRecords).
                   if (currentLocalStr !== mergedStr) {
                     lastSavedStringCache[key] = mergedStr;
                     safeSetLocalStorage(key, mergedStr);
-                    safeSetLocalStorage(key + '_updatedAt', String(Math.max(cloudUpdatedAt, localUpdatedAt, Date.now())));
+                    safeSetLocalStorage(key + '_updatedAt', String(cloudUpdatedAt || Date.now()));
                     notifyStorageUpdated();
-                  }
-
-                  // PERLINDUNGAN MULTI-DEVICE ANTI-TIMPA (CONCURRENT SCANNING SAFETY):
-                  // HANYA sinkronkan balik ke Cloud jika perangkat ini memiliki antrean scan lokal yang sedang aktif (scanQueuePendingCount > 0)!
-                  // JANGAN sinkronkan balik jika scanQueuePendingCount === 0 untuk mencegah loop ping-pong yang memboroskan kuota!
-                  if (scanQueuePendingCount > 0) {
-                    const hasLocalScansMissingInCloud = cleanMergedAtt.some(m =>
-                      isRealAttendance(m) && !cleanCloudAtt.some(c => c.id === m.id || (c.studentId === m.studentId && c.date === m.date && isRealAttendance(c)))
-                    );
-
-                    if (hasLocalScansMissingInCloud) {
-                      writeCloudDocument(key, mergedStr, Date.now());
-                    }
                   }
 
                   setCloudSyncStatus('connected');
@@ -2336,7 +2393,7 @@ export function initFirestoreRealtimeSync(role?: UserRole) {
                   if (currentLocalStr !== mergedStr) {
                     lastSavedStringCache[key] = mergedStr;
                     safeSetLocalStorage(key, mergedStr);
-                    safeSetLocalStorage(key + '_updatedAt', String(Math.max(cloudUpdatedAt, localUpdatedAt, Date.now())));
+                    safeSetLocalStorage(key + '_updatedAt', String(cloudUpdatedAt || Date.now()));
                     notifyStorageUpdated();
                   }
                   setCloudSyncStatus('connected');
@@ -2365,7 +2422,7 @@ export function initFirestoreRealtimeSync(role?: UserRole) {
                   if (currentLocalStr !== mergedStr) {
                     lastSavedStringCache[key] = mergedStr;
                     safeSetLocalStorage(key, mergedStr);
-                    safeSetLocalStorage(key + '_updatedAt', String(Math.max(cloudUpdatedAt, localUpdatedAt, Date.now())));
+                    safeSetLocalStorage(key + '_updatedAt', String(cloudUpdatedAt || Date.now()));
                     notifyStorageUpdated();
                   }
                   setCloudSyncStatus('connected');
@@ -2394,7 +2451,7 @@ export function initFirestoreRealtimeSync(role?: UserRole) {
                   if (currentLocalStr !== mergedStr) {
                     lastSavedStringCache[key] = mergedStr;
                     safeSetLocalStorage(key, mergedStr);
-                    safeSetLocalStorage(key + '_updatedAt', String(Math.max(cloudUpdatedAt, localUpdatedAt, Date.now())));
+                    safeSetLocalStorage(key + '_updatedAt', String(cloudUpdatedAt || Date.now()));
                     notifyStorageUpdated();
                   }
                   setCloudSyncStatus('connected');
@@ -3158,9 +3215,49 @@ export function getCharacterTraits(): CharacterTrait[] {
     const parsed = JSON.parse(data);
     if (!Array.isArray(parsed)) return INITIAL_CHARACTER_TRAITS;
 
-    // Pastikan trait penilaian otomatis "Belum Scan" dan "Belum Pulang" selalu ada
+    // Pastikan trait penilaian otomatis selalu ada
     let updated = false;
-    if (!parsed.some(t => t.id === 'trait-015' || (t.name.toLowerCase().includes('belum') && t.name.toLowerCase().includes('scan')))) {
+    if (!parsed.some(t => t.id === 'trait-auto-ontime' || (t.type === 'POSITIF' && t.name.toLowerCase().includes('tepat') && t.name.toLowerCase().includes('waktu')))) {
+      parsed.push({
+        id: 'trait-auto-ontime',
+        name: 'Datang Tepat Waktu Presensi',
+        type: 'POSITIF',
+        points: 1,
+        category: 'Kedisiplinan'
+      });
+      updated = true;
+    }
+    if (!parsed.some(t => t.id === 'trait-auto-late' || (t.type === 'NEGATIF' && t.name.toLowerCase().includes('terlambat') && t.name.toLowerCase().includes('sekolah')))) {
+      parsed.push({
+        id: 'trait-auto-late',
+        name: 'Terlambat Masuk Sekolah',
+        type: 'NEGATIF',
+        points: 2,
+        category: 'Kedisiplinan'
+      });
+      updated = true;
+    }
+    if (!parsed.some(t => t.id === 'trait-auto-alpa' || (t.type === 'NEGATIF' && (t.name.toLowerCase().includes('alpa') || t.name.toLowerCase().includes('tanpa keterangan') || t.name.toLowerCase().includes('tidak masuk sekolah'))))) {
+      parsed.push({
+        id: 'trait-auto-alpa',
+        name: 'Tidak Masuk Sekolah Tanpa Keterangan / Alpa',
+        type: 'NEGATIF',
+        points: 5,
+        category: 'Kedisiplinan'
+      });
+      updated = true;
+    } else {
+      // Pastikan nama trait ALPA diperbarui ke format resmi "Tidak Masuk Sekolah Tanpa Keterangan / Alpa"
+      parsed.forEach(t => {
+        if (t.id === 'trait-auto-alpa' || t.id === 'trait-011' || (t.type === 'NEGATIF' && (t.name.toLowerCase() === 'alpa / tanpa keterangan' || t.name.toLowerCase().includes('membolos jam')))) {
+          if (t.name !== 'Tidak Masuk Sekolah Tanpa Keterangan / Alpa') {
+            t.name = 'Tidak Masuk Sekolah Tanpa Keterangan / Alpa';
+            updated = true;
+          }
+        }
+      });
+    }
+    if (!parsed.some(t => t.id === 'trait-015' || (t.name.toLowerCase().includes('belum') && t.name.toLowerCase().includes('scan') && !t.name.toLowerCase().includes('masuk dan pulang')))) {
       parsed.push({
         id: 'trait-015',
         name: 'Belum Melakukan Scan Presensi',
@@ -3170,12 +3267,22 @@ export function getCharacterTraits(): CharacterTrait[] {
       });
       updated = true;
     }
-    if (!parsed.some(t => t.id === 'trait-016' || (t.name.toLowerCase().includes('belum') && t.name.toLowerCase().includes('pulang')))) {
+    if (!parsed.some(t => t.id === 'trait-016' || (t.name.toLowerCase().includes('belum') && t.name.toLowerCase().includes('pulang') && !t.name.toLowerCase().includes('masuk dan pulang')))) {
       parsed.push({
         id: 'trait-016',
         name: 'Belum Melakukan Scan Pulang',
         type: 'NEGATIF',
         points: 1,
+        category: 'Kedisiplinan'
+      });
+      updated = true;
+    }
+    if (!parsed.some(t => t.id === 'trait-auto-unscanned-both' || (t.type === 'NEGATIF' && t.name.toLowerCase().includes('belum scan masuk dan pulang')))) {
+      parsed.push({
+        id: 'trait-auto-unscanned-both',
+        name: 'Karakter Belum scan Masuk dan Pulang',
+        type: 'NEGATIF',
+        points: 3,
         category: 'Kedisiplinan'
       });
       updated = true;
@@ -3215,11 +3322,16 @@ export function getStudentCharacterLogs(): StudentCharacterLog[] {
 
 export function saveStudentCharacterLogs(logs: StudentCharacterLog[]): void {
   const now = Date.now();
-  const dataStr = JSON.stringify(logs);
+  // PENGHEMAT KUOTA & BILLING FIRESTORE:
+  // Batasi total log karakter agar tidak membengkak tanpa batas menjadi dokumen raksasa (>700KB)
+  // yang memicu multi-chunk sharding dan meledakkan tagihan Firestore.
+  // Ambil maksimal 1200 log terbaru (mencakup 3-6 bulan riwayat aktif sekolah).
+  const boundedLogs = Array.isArray(logs) ? logs.slice(-1200) : [];
+  const dataStr = JSON.stringify(boundedLogs);
   safeSetLocalStorage(KEYS.CHARACTER_LOGS, dataStr);
   safeSetLocalStorage(KEYS.CHARACTER_LOGS + '_updatedAt', String(now));
   notifyStorageUpdated();
-  syncToCloud(KEYS.CHARACTER_LOGS, logs, false, now);
+  syncToCloud(KEYS.CHARACTER_LOGS, boundedLogs, false, now);
 }
 
 export function getCharacterPredicateSettings(): CharacterPredicateSettings {

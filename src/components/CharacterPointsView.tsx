@@ -280,7 +280,12 @@ export const CharacterPointsView: React.FC<CharacterPointsViewProps> = ({
 
   // Calculate character score summary for a student
   const getStudentScoreSummary = (studentId: string) => {
-    const studentLogs = logs.filter(l => l.studentId === studentId);
+    const student = students.find(s => s.id === studentId);
+    const studentLogs = logs.filter(l => 
+      l.studentId === studentId || 
+      (student?.nisn && student.nisn !== '-' && l.nisn === student.nisn) || 
+      (student?.name && l.studentName && l.studentName.toLowerCase() === student.name.toLowerCase())
+    );
     
     let positivePoints = 0;
     let negativePoints = 0;

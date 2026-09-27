@@ -121,6 +121,7 @@ export interface AutoCharacterPointSettings {
   onTimeRequiredDays: number; // default 3
   unscannedPoints?: number; // default 1 (Belum Scan Presensi)
   unreturnedPoints?: number; // default 1 (Belum Scan Pulang)
+  unscannedBothPoints?: number; // default 3 (Karakter Belum scan Masuk dan Pulang)
 }
 
 export interface SchoolProfile {

@@ -37,6 +37,7 @@ export const INITIAL_SCHOOL_PROFILE: SchoolProfile = {
     onTimeRequiredDays: 3,
     unscannedPoints: 1,
     unreturnedPoints: 1,
+    unscannedBothPoints: 3,
   },
   lateToleranceMinutes: 15,
   educationLevel: "SMP / MTs",
@@ -601,12 +602,16 @@ export const INITIAL_CHARACTER_TRAITS: any[] = [
   { id: "trait-008", name: "Membuang Sampah Sembarangan", type: "NEGATIF", points: 5, category: "Kebersihan" },
   { id: "trait-009", name: "Bermain HP / Tidur Saat KBM", type: "NEGATIF", points: 10, category: "Pelanggaran" },
   { id: "trait-010", name: "Tidak Mengerjakan Tugas / PR", type: "NEGATIF", points: 10, category: "Tanggung Jawab" },
-  { id: "trait-011", name: "Membolos Jam Pelajaran", type: "NEGATIF", points: 15, category: "Pelanggaran Berat" },
+  { id: "trait-011", name: "Tidak Masuk Sekolah Tanpa Keterangan / Alpa", type: "NEGATIF", points: 5, category: "Kedisiplinan" },
   { id: "trait-012", name: "Merusak Fasilitas / Coreti Meja", type: "NEGATIF", points: 15, category: "Ketertiban" },
   { id: "trait-013", name: "Sangat Aktif saat KBM", type: "POSITIF", points: 1, category: "Keaktifan" },
   { id: "trait-014", name: "Tidak Hadir di Kelas saat KBM", type: "NEGATIF", points: 2, category: "Kedisiplinan" },
   { id: "trait-015", name: "Belum Melakukan Scan Presensi", type: "NEGATIF", points: 1, category: "Kedisiplinan" },
-  { id: "trait-016", name: "Belum Melakukan Scan Pulang", type: "NEGATIF", points: 1, category: "Kedisiplinan" }
+  { id: "trait-016", name: "Belum Melakukan Scan Pulang", type: "NEGATIF", points: 1, category: "Kedisiplinan" },
+  { id: "trait-auto-alpa", name: "Tidak Masuk Sekolah Tanpa Keterangan / Alpa", type: "NEGATIF", points: 5, category: "Kedisiplinan" },
+  { id: "trait-auto-unscanned-both", name: "Karakter Belum scan Masuk dan Pulang", type: "NEGATIF", points: 3, category: "Kedisiplinan" },
+  { id: "trait-auto-ontime", name: "Datang Tepat Waktu Presensi", type: "POSITIF", points: 1, category: "Kedisiplinan" },
+  { id: "trait-auto-late", name: "Terlambat Masuk Sekolah", type: "NEGATIF", points: 2, category: "Kedisiplinan" }
 ];
 
 export const INITIAL_STUDENT_CHARACTER_LOGS: any[] = [

@@ -2472,7 +2472,7 @@ export const SchoolSettingsView: React.FC<SchoolSettingsViewProps> = ({
               <div className="flex items-center justify-between">
                 <span className="font-extrabold text-rose-800 flex items-center gap-1.5">
                   <UserX className="w-4 h-4 text-rose-600" />
-                  Alpa Presensi
+                  Tidak Masuk Sekolah Tanpa Keterangan / Alpa
                 </span>
                 <span className="text-[10px] font-black bg-rose-100 text-rose-800 px-2 py-0.5 rounded-full">
                   -NEGATIF
@@ -2499,6 +2499,7 @@ export const SchoolSettingsView: React.FC<SchoolSettingsViewProps> = ({
                           onTimeRequiredDays: 3,
                           unscannedPoints: 1,
                           unreturnedPoints: 1,
+                          unscannedBothPoints: 3,
                         }),
                         alpaPoints: Math.max(1, Math.abs(Number(e.target.value)) || 5)
                       }
@@ -2591,6 +2592,7 @@ export const SchoolSettingsView: React.FC<SchoolSettingsViewProps> = ({
                           onTimeRequiredDays: 3,
                           unscannedPoints: 1,
                           unreturnedPoints: 1,
+                          unscannedBothPoints: 3,
                         }),
                         unreturnedPoints: Math.max(1, Math.abs(Number(e.target.value)) || 1)
                       }
@@ -2598,6 +2600,53 @@ export const SchoolSettingsView: React.FC<SchoolSettingsViewProps> = ({
                     className="w-14 px-2 py-1 bg-white border border-amber-300 rounded-lg text-xs font-black text-center text-amber-900 focus:outline-none focus:ring-1 focus:ring-amber-500"
                   />
                   <span className="text-[11px] font-bold text-amber-700">-Poin</span>
+                </div>
+              </div>
+            </div>
+
+            {/* 9. Karakter Belum scan Masuk dan Pulang (Otomatis 16:00 WITA) */}
+            <div className="p-3.5 bg-rose-50/40 border border-rose-200 rounded-2xl space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="font-extrabold text-rose-950 flex items-center gap-1.5">
+                  <UserX className="w-4 h-4 text-rose-600" />
+                  Karakter Belum scan Masuk dan Pulang
+                </span>
+                <span className="text-[10px] font-black bg-rose-100 text-rose-800 px-2 py-0.5 rounded-full">
+                  -NEGATIF
+                </span>
+              </div>
+              <p className="text-[10px] text-slate-500 leading-tight">
+                Khusus siswa dengan kriteria status masuk Belum Absen hingga batas waktu 16:00 WITA (tidak melakukan scan presensi masuk maupun scan kepulangan).
+              </p>
+              <div className="flex items-center justify-between pt-1">
+                <span className="text-[11px] text-slate-600 font-medium">Nilai Poin:</span>
+                <div className="flex items-center gap-1">
+                  <input
+                    type="number"
+                    min="1"
+                    max="50"
+                    value={formData.autoCharacterPoints?.unscannedBothPoints ?? 3}
+                    onChange={(e) => setFormData({
+                      ...formData,
+                      autoCharacterPoints: {
+                        ...(formData.autoCharacterPoints || {
+                          latePoints: 2,
+                          alpaPoints: 5,
+                          disruptivePoints: 1,
+                          absentKbmPoints: 2,
+                          veryActiveKbmPoints: 1,
+                          onTimePoints: 1,
+                          onTimeRequiredDays: 3,
+                          unscannedPoints: 1,
+                          unreturnedPoints: 1,
+                          unscannedBothPoints: 3,
+                        }),
+                        unscannedBothPoints: Math.max(1, Math.abs(Number(e.target.value)) || 3)
+                      }
+                    })}
+                    className="w-14 px-2 py-1 bg-white border border-rose-300 rounded-lg text-xs font-black text-center text-rose-900 focus:outline-none focus:ring-1 focus:ring-rose-500"
+                  />
+                  <span className="text-[11px] font-bold text-rose-700">-Poin</span>
                 </div>
               </div>
             </div>
@@ -2615,7 +2664,7 @@ export const SchoolSettingsView: React.FC<SchoolSettingsViewProps> = ({
                 </span>
               </div>
               <p className="text-[11px] text-slate-300 max-w-2xl leading-relaxed">
-                Setiap hari pada pukul <strong>16:00 WITA</strong>, sistem secara otomatis memeriksa seluruh data absensi siswa hari ini. Siswa yang <strong>Belum Scan Presensi (-{formData.autoCharacterPoints?.unscannedPoints ?? 1} Poin)</strong> atau <strong>Belum Scan Pulang (-{formData.autoCharacterPoints?.unreturnedPoints ?? 1} Poin)</strong> akan langsung dicatat ke log karakter dan <strong>dikirim serentak dalam 1 kali pengiriman (single write) ke Cloud Firestore</strong>.
+                Setiap hari pada pukul <strong>16:00 WITA</strong>, sistem secara otomatis memeriksa seluruh data absensi siswa hari ini. Siswa yang <strong>Belum Scan Presensi (-{formData.autoCharacterPoints?.unscannedPoints ?? 1} Poin)</strong>, <strong>Belum Scan Pulang (-{formData.autoCharacterPoints?.unreturnedPoints ?? 1} Poin)</strong>, atau <strong>Belum Scan Masuk & Pulang (-{formData.autoCharacterPoints?.unscannedBothPoints ?? 3} Poin)</strong> akan langsung dicatat ke log karakter dan <strong>dikirim serentak dalam 1 batch pengiriman (single write) ke Cloud Firestore</strong>.
               </p>
             </div>
 

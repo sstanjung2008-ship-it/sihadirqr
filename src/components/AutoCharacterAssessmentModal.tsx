@@ -43,6 +43,7 @@ export type AutoRuleType =
   | 'ALPA' 
   | 'UNSCANNED'
   | 'UNRETURNED'
+  | 'UNSCANNED_BOTH'
   | 'DISRUPTIVE_KBM' 
   | 'ABSENT_KBM'
   | 'VERY_ACTIVE_KBM'
@@ -125,6 +126,7 @@ export const AutoCharacterAssessmentModal: React.FC<AutoCharacterAssessmentModal
   const [onTimeRequiredDays, setOnTimeRequiredDays] = useState<number>(() => schoolProfile?.autoCharacterPoints?.onTimeRequiredDays ?? 3);
   const [unscannedPoints, setUnscannedPoints] = useState<number>(() => schoolProfile?.autoCharacterPoints?.unscannedPoints ?? 1); // Default 1 poin negatif
   const [unreturnedPoints, setUnreturnedPoints] = useState<number>(() => schoolProfile?.autoCharacterPoints?.unreturnedPoints ?? 1); // Default 1 poin negatif
+  const [unscannedBothPoints, setUnscannedBothPoints] = useState<number>(() => schoolProfile?.autoCharacterPoints?.unscannedBothPoints ?? 3); // Default 3 poin negatif (Belum Absen Masuk & Pulang)
   const [pointsSavedNotice, setPointsSavedNotice] = useState<{ type: 'success' | 'info'; message: string } | null>(null);
 
   // Sync state when schoolProfile updates from cloud
@@ -140,6 +142,7 @@ export const AutoCharacterAssessmentModal: React.FC<AutoCharacterAssessmentModal
       if (typeof p.onTimeRequiredDays === 'number') setOnTimeRequiredDays(p.onTimeRequiredDays);
       if (typeof p.unscannedPoints === 'number') setUnscannedPoints(p.unscannedPoints);
       if (typeof p.unreturnedPoints === 'number') setUnreturnedPoints(p.unreturnedPoints);
+      if (typeof p.unscannedBothPoints === 'number') setUnscannedBothPoints(p.unscannedBothPoints);
     }
   }, [schoolProfile?.autoCharacterPoints]);
 
@@ -154,6 +157,7 @@ export const AutoCharacterAssessmentModal: React.FC<AutoCharacterAssessmentModal
       onTimeRequiredDays: schoolProfile?.autoCharacterPoints?.onTimeRequiredDays ?? 3,
       unscannedPoints: schoolProfile?.autoCharacterPoints?.unscannedPoints ?? 1,
       unreturnedPoints: schoolProfile?.autoCharacterPoints?.unreturnedPoints ?? 1,
+      unscannedBothPoints: schoolProfile?.autoCharacterPoints?.unscannedBothPoints ?? 3,
     };
   }, [schoolProfile?.autoCharacterPoints]);
 
@@ -167,7 +171,8 @@ export const AutoCharacterAssessmentModal: React.FC<AutoCharacterAssessmentModal
       onTimePoints !== currentSavedConfig.onTimePoints ||
       onTimeRequiredDays !== currentSavedConfig.onTimeRequiredDays ||
       unscannedPoints !== currentSavedConfig.unscannedPoints ||
-      unreturnedPoints !== currentSavedConfig.unreturnedPoints
+      unreturnedPoints !== currentSavedConfig.unreturnedPoints ||
+      unscannedBothPoints !== currentSavedConfig.unscannedBothPoints
     );
   }, [
     latePoints,
@@ -179,6 +184,7 @@ export const AutoCharacterAssessmentModal: React.FC<AutoCharacterAssessmentModal
     onTimeRequiredDays,
     unscannedPoints,
     unreturnedPoints,
+    unscannedBothPoints,
     currentSavedConfig
   ]);
 
@@ -193,6 +199,7 @@ export const AutoCharacterAssessmentModal: React.FC<AutoCharacterAssessmentModal
       onTimeRequiredDays: Math.max(1, Math.abs(Number(onTimeRequiredDays)) || 3),
       unscannedPoints: Math.max(1, Math.abs(Number(unscannedPoints)) || 1),
       unreturnedPoints: Math.max(1, Math.abs(Number(unreturnedPoints)) || 1),
+      unscannedBothPoints: Math.max(1, Math.abs(Number(unscannedBothPoints)) || 3),
     };
 
     if (schoolProfile) {
@@ -223,6 +230,7 @@ export const AutoCharacterAssessmentModal: React.FC<AutoCharacterAssessmentModal
       onTimeRequiredDays: 3,
       unscannedPoints: 1,
       unreturnedPoints: 1,
+      unscannedBothPoints: 3,
     };
     setLatePoints(2);
     setAlpaPoints(5);
@@ -233,6 +241,7 @@ export const AutoCharacterAssessmentModal: React.FC<AutoCharacterAssessmentModal
     setOnTimeRequiredDays(3);
     setUnscannedPoints(1);
     setUnreturnedPoints(1);
+    setUnscannedBothPoints(3);
 
     if (schoolProfile) {
       const updatedProfile: SchoolProfile = {
@@ -295,10 +304,10 @@ export const AutoCharacterAssessmentModal: React.FC<AutoCharacterAssessmentModal
   const alpaTrait = useMemo(() => {
     return traits.find(t => 
       t.type === 'NEGATIF' && 
-      (t.name.toLowerCase().includes('alpa') || t.name.toLowerCase().includes('membolos') || t.name.toLowerCase().includes('tanpa keterangan'))
+      (t.id === 'trait-auto-alpa' || t.id === 'trait-011' || t.name.toLowerCase().includes('alpa') || t.name.toLowerCase().includes('tanpa keterangan') || t.name.toLowerCase().includes('tidak masuk sekolah'))
     ) || traits.find(t => t.type === 'NEGATIF') || {
       id: 'trait-auto-alpa',
-      name: 'Alpa / Tanpa Keterangan',
+      name: 'Tidak Masuk Sekolah Tanpa Keterangan / Alpa',
       type: 'NEGATIF' as const,
       points: alpaPoints,
       category: 'Kedisiplinan'
@@ -373,7 +382,7 @@ export const AutoCharacterAssessmentModal: React.FC<AutoCharacterAssessmentModal
   const unreturnedTrait = useMemo(() => {
     return traits.find(t => 
       t.id === 'trait-016' || 
-      (t.type === 'NEGATIF' && t.name.toLowerCase().includes('belum') && t.name.toLowerCase().includes('pulang'))
+      (t.type === 'NEGATIF' && t.name.toLowerCase().includes('belum') && t.name.toLowerCase().includes('pulang') && !t.name.toLowerCase().includes('masuk dan pulang'))
     ) || traits.find(t => t.type === 'NEGATIF') || {
       id: 'trait-auto-unreturned',
       name: 'Belum Melakukan Scan Pulang',
@@ -382,6 +391,19 @@ export const AutoCharacterAssessmentModal: React.FC<AutoCharacterAssessmentModal
       category: 'Kedisiplinan'
     };
   }, [traits, unreturnedPoints]);
+
+  const unscannedBothTrait = useMemo(() => {
+    return traits.find(t => 
+      t.id === 'trait-auto-unscanned-both' || 
+      (t.type === 'NEGATIF' && t.name.toLowerCase().includes('belum scan masuk dan pulang'))
+    ) || traits.find(t => t.type === 'NEGATIF') || {
+      id: 'trait-auto-unscanned-both',
+      name: 'Karakter Belum scan Masuk dan Pulang',
+      type: 'NEGATIF' as const,
+      points: unscannedBothPoints,
+      category: 'Kedisiplinan'
+    };
+  }, [traits, unscannedBothPoints]);
 
   // Compute all potential candidates from Attendance Records & Jurnal KBM
   const allCandidates = useMemo<AutoCharacterCandidate[]>(() => {
@@ -453,14 +475,14 @@ export const AutoCharacterAssessmentModal: React.FC<AutoCharacterAssessmentModal
             classId: student.classId,
             className: student.className,
             ruleType: 'ALPA',
-            ruleLabel: 'Alpa / Tanpa Keterangan',
+            ruleLabel: 'Tidak Masuk Sekolah Tanpa Keterangan / Alpa',
             traitId: alpaTrait.id,
-            traitName: alpaTrait.name || 'Alpa Tanpa Keterangan',
+            traitName: alpaTrait.name || 'Tidak Masuk Sekolah Tanpa Keterangan / Alpa',
             traitType: 'NEGATIF',
             points: alpaPoints,
             date: rec.date,
             evaluatorName: generalEvaluatorName || 'Sistem Presensi QR',
-            notes: `Penilaian Otomatis Presensi: Terekam Alpa pada tanggal ${rec.date}`,
+            notes: `Penilaian Otomatis Presensi: Terekam status ALPA (Tidak Masuk Sekolah Tanpa Keterangan / Alpa) pada tanggal ${rec.date}`,
             attendanceDates: [rec.date],
             sourceType: 'PRESENSI',
             isSelected: !isAlready,
@@ -546,6 +568,46 @@ export const AutoCharacterAssessmentModal: React.FC<AutoCharacterAssessmentModal
             date: attDate,
             evaluatorName: generalEvaluatorName || 'Sistem Presensi QR',
             notes: `Penilaian Otomatis Presensi: Status Masuk Hadir tetapi pada kolom Jam Masuk belum melakukan scan presensi (${attDate})`,
+            attendanceDates: [attDate],
+            sourceType: 'PRESENSI',
+            isSelected: !isAlready,
+            isAlreadyLogged: isAlready,
+          });
+        }
+      });
+
+      // Rule 5: Karakter Belum scan Masuk dan Pulang -> Nilai Karakter Negatif (-unscannedBothPoints, default 3)
+      // Kriteria: Status Masuk Belum Absen (tidak ada rekaman absensi atau statusnya 'BELUM_ABSEN' pada hari tersebut)
+      distinctDates.forEach((attDate: string) => {
+        const rec = sortedRecords.find(r => r.date === attDate);
+        const isBelumAbsen = !rec || (rec.status as string) === 'BELUM_ABSEN';
+
+        if (isBelumAbsen) {
+          const isAlready = characterLogs.some(l => 
+            l.studentId === student.id && 
+            l.date === attDate && 
+            (
+              l.id === `auto-unscanned-both-${student.id}-${attDate}` || 
+              (l.traitType === 'NEGATIF' && l.traitName.toLowerCase().includes('belum scan masuk dan pulang'))
+            )
+          );
+
+          candidates.push({
+            id: `auto-unscanned-both-${student.id}-${attDate}`,
+            studentId: student.id,
+            studentName: student.name,
+            nisn: student.nisn,
+            classId: student.classId,
+            className: student.className,
+            ruleType: 'UNSCANNED_BOTH',
+            ruleLabel: 'Karakter Belum scan Masuk dan Pulang',
+            traitId: unscannedBothTrait.id,
+            traitName: unscannedBothTrait.name || 'Karakter Belum scan Masuk dan Pulang',
+            traitType: 'NEGATIF',
+            points: unscannedBothPoints,
+            date: attDate,
+            evaluatorName: generalEvaluatorName || 'Sistem Presensi QR',
+            notes: `Penilaian Otomatis Presensi (16:00 WITA): Kriteria status masuk Belum Absen (tidak scan presensi masuk dan pulang) (${attDate})`,
             attendanceDates: [attDate],
             sourceType: 'PRESENSI',
             isSelected: !isAlready,
@@ -745,6 +807,7 @@ export const AutoCharacterAssessmentModal: React.FC<AutoCharacterAssessmentModal
     onTimeRequiredDays, 
     unscannedPoints,
     unreturnedPoints,
+    unscannedBothPoints,
     generalEvaluatorName,
     lateTrait, 
     alpaTrait, 
@@ -753,7 +816,8 @@ export const AutoCharacterAssessmentModal: React.FC<AutoCharacterAssessmentModal
     veryActiveKbmTrait,
     onTimeTrait,
     unscannedTrait,
-    unreturnedTrait
+    unreturnedTrait,
+    unscannedBothTrait
   ]);
 
   // Counts by rule and group
@@ -761,6 +825,7 @@ export const AutoCharacterAssessmentModal: React.FC<AutoCharacterAssessmentModal
   const totalAlpaCount = useMemo(() => allCandidates.filter(c => c.ruleType === 'ALPA').length, [allCandidates]);
   const totalUnscannedCount = useMemo(() => allCandidates.filter(c => c.ruleType === 'UNSCANNED').length, [allCandidates]);
   const totalUnreturnedCount = useMemo(() => allCandidates.filter(c => c.ruleType === 'UNRETURNED').length, [allCandidates]);
+  const totalUnscannedBothCount = useMemo(() => allCandidates.filter(c => c.ruleType === 'UNSCANNED_BOTH').length, [allCandidates]);
   const totalDisruptiveCount = useMemo(() => allCandidates.filter(c => c.ruleType === 'DISRUPTIVE_KBM').length, [allCandidates]);
   const totalAbsentKbmCount = useMemo(() => allCandidates.filter(c => c.ruleType === 'ABSENT_KBM').length, [allCandidates]);
   const totalVeryActiveCount = useMemo(() => allCandidates.filter(c => c.ruleType === 'VERY_ACTIVE_KBM').length, [allCandidates]);
@@ -1346,6 +1411,41 @@ export const AutoCharacterAssessmentModal: React.FC<AutoCharacterAssessmentModal
                   </div>
                 </div>
               </div>
+
+              {/* 9. Rule Negatif: Karakter Belum scan Masuk dan Pulang */}
+              <div className="bg-white p-4 rounded-2xl border border-rose-200/80 shadow-xs space-y-2 flex flex-col justify-between">
+                <div>
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-1.5 text-rose-900 font-black text-xs uppercase tracking-wider">
+                      <UserX className="w-4 h-4 text-rose-600" />
+                      <span>Belum Scan Masuk & Pulang</span>
+                    </div>
+                    <span className="px-2 py-0.5 rounded-full bg-rose-100 text-rose-800 text-[10px] font-black border border-rose-200">
+                      🔴 NEGATIF
+                    </span>
+                  </div>
+                  <div className="text-[11px] text-slate-600 leading-relaxed mt-1">
+                    Khusus siswa dengan kriteria status masuk Belum Absen hingga batas waktu evaluasi 16:00 WITA (tidak scan masuk maupun pulang):
+                  </div>
+                </div>
+                <div className="flex items-center justify-between pt-2 border-t border-slate-100">
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-xs font-semibold text-slate-500">Nilai:</span>
+                    <input
+                      type="number"
+                      min="1"
+                      max="50"
+                      value={unscannedBothPoints}
+                      onChange={(e) => setUnscannedBothPoints(Math.max(1, Math.abs(Number(e.target.value)) || 3))}
+                      className="w-12 px-1.5 py-1 bg-rose-50/70 border border-rose-200 rounded-lg text-xs font-black text-center text-rose-900 focus:outline-none focus:ring-2 focus:ring-rose-500"
+                    />
+                    <span className="text-xs font-bold text-rose-600">-Poin</span>
+                  </div>
+                  <div className="text-xs font-bold text-slate-700 bg-slate-100 px-2 py-1 rounded-lg">
+                    {totalUnscannedBothCount} Kasus
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
 
@@ -1579,6 +1679,21 @@ export const AutoCharacterAssessmentModal: React.FC<AutoCharacterAssessmentModal
                     <span>Belum Pulang ({totalUnreturnedCount})</span>
                   </button>
                 )}
+
+                {/* Negatif: Belum Scan Masuk & Pulang */}
+                {(groupFilter === 'ALL' || groupFilter === 'NEGATIF') && (
+                  <button
+                    onClick={() => setRuleFilter('UNSCANNED_BOTH')}
+                    className={`px-2.5 py-1.5 rounded-xl font-bold transition-all cursor-pointer shrink-0 text-xs flex items-center gap-1 ${
+                      ruleFilter === 'UNSCANNED_BOTH'
+                        ? 'bg-rose-900 text-white'
+                        : 'bg-rose-50 text-rose-900 hover:bg-rose-100 border border-rose-200/60'
+                    }`}
+                  >
+                    <UserX className="w-3 h-3" />
+                    <span>Belum Scan Masuk & Pulang ({totalUnscannedBothCount})</span>
+                  </button>
+                )}
               </div>
 
               {/* Class Filter & Checkbox Only Unrecorded */}
@@ -1697,6 +1812,9 @@ export const AutoCharacterAssessmentModal: React.FC<AutoCharacterAssessmentModal
                               {candidate.ruleType === 'ABSENT_KBM' && <UserX className="w-3.5 h-3.5 text-rose-600 shrink-0" />}
                               {candidate.ruleType === 'LATE' && <Clock className="w-3.5 h-3.5 text-red-500 shrink-0" />}
                               {candidate.ruleType === 'ALPA' && <UserX className="w-3.5 h-3.5 text-rose-500 shrink-0" />}
+                              {candidate.ruleType === 'UNSCANNED' && <UserX className="w-3.5 h-3.5 text-orange-600 shrink-0" />}
+                              {candidate.ruleType === 'UNRETURNED' && <Clock className="w-3.5 h-3.5 text-amber-600 shrink-0" />}
+                              {candidate.ruleType === 'UNSCANNED_BOTH' && <UserX className="w-3.5 h-3.5 text-rose-700 shrink-0" />}
                               {candidate.ruleType === 'DISRUPTIVE_KBM' && <VolumeX className="w-3.5 h-3.5 text-amber-600 shrink-0" />}
                               {candidate.ruleType === 'ON_TIME_3_DAYS' && <CalendarCheck2 className="w-3.5 h-3.5 text-emerald-500 shrink-0" />}
                               

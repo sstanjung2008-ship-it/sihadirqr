@@ -81,7 +81,7 @@ import {
   playTeacherKbmVoiceReminder, 
   isKbmVoiceReminderEnabled 
 } from './lib/kbmVoiceReminder';
-import { run16WitaAutoCharacterAssessment } from './lib/autoCharacterScheduler';
+import { run16WitaAutoCharacterAssessment, reconcileAllAlpaCharacterLogs } from './lib/autoCharacterScheduler';
 
 export default function App() {
   const [userSession, setUserSessionState] = useState<UserSession | null>(() => getUserSession());
@@ -402,25 +402,35 @@ export default function App() {
     };
   }, [currentRole]);
 
-  // Penilaian Karakter Otomatis 16:00 WITA (Belum Scan & Belum Pulang)
+  // Penilaian Karakter Otomatis 16:00 WITA & Rekonsiliasi ALPA Siswa (termasuk Gilang Sabandi)
   useEffect(() => {
-    // PENGHEMAT KUOTA: Khusus Admin & Scanner Pos, jangan pernah dijalankan oleh akun Wali Murid (PARENT)!
-    if (currentRole === 'PARENT') return;
+    // PENGHEMAT KUOTA TERTINGGI:
+    // HANYA dijalankan oleh akun Administrator (Bukan Scanner Pos, Bukan Guru, dan Bukan Wali Murid)!
+    if (currentRole !== 'ADMIN') return;
 
-    // Jalankan pemeriksaan saat aplikasi dimuat
+    // Jalankan pemeriksaan & rekonsiliasi nilai karakter ALPA -5 saat aplikasi dimuat
+    reconcileAllAlpaCharacterLogs();
     run16WitaAutoCharacterAssessment();
 
-    // Periksa secara berkala setiap 20 detik
+    // Periksa jadwal 16:00 WITA setiap 5 menit (hanya jika tab sedang aktif/terbuka)
     const interval = setInterval(() => {
+      if (document.hidden) return;
       run16WitaAutoCharacterAssessment();
-    }, 20000);
+    }, 5 * 60 * 1000);
 
     const handleAutoAssessmentEvent = (e: any) => {
       if (e.detail?.newLogsCount > 0) {
+        const parts = [];
+        if (e.detail.onTimeCount > 0) parts.push(`${e.detail.onTimeCount} Tepat Waktu Presensi (+poin)`);
+        if (e.detail.lateCount > 0) parts.push(`${e.detail.lateCount} Terlambat (-2 poin)`);
+        if (e.detail.alpaCount > 0) parts.push(`${e.detail.alpaCount} Alpa / Tidak Masuk (-5 poin)`);
+        if (e.detail.unscannedCount > 0) parts.push(`${e.detail.unscannedCount} Belum Scan Presensi (-1 poin)`);
+        if (e.detail.unreturnedCount > 0) parts.push(`${e.detail.unreturnedCount} Belum Scan Pulang (-1 poin)`);
+        if (e.detail.unscannedBothCount > 0) parts.push(`${e.detail.unscannedBothCount} Belum Scan Masuk & Pulang (-3 poin)`);
         setNetworkToast({
           type: 'info',
-          title: '⭐ Penilaian Karakter Otomatis (16:00 WITA)',
-          message: `Sistem otomatis mencatat ${e.detail.newLogsCount} penilaian karakter negatif baru (${e.detail.unscannedCount} Belum Scan, ${e.detail.unreturnedCount} Belum Pulang) dan disinkronkan ke Cloud dalam 1 pengiriman.`
+          title: '⭐ Penilaian Karakter Otomatis',
+          message: `Sistem otomatis mencatat ${e.detail.newLogsCount} evaluasi karakter baru (${parts.join(', ')}) dan disinkronkan ke Cloud dalam 1 batch pengiriman.`
         });
         setTimeout(() => setNetworkToast(null), 6000);
       }
@@ -842,9 +852,55 @@ export default function App() {
               logsChanged = true;
               return false;
             }
+            // If status is now recorded (HADIR, TERLAMBAT, SAKIT, IZIN, ALPA), remove auto-unscanned-both (Belum scan masuk & pulang)
+            if (['HADIR', 'TERLAMBAT', 'SAKIT', 'IZIN', 'ALPA'].includes(newStatus) && (l.id.includes('auto-unscanned-both') || (l.traitType === 'NEGATIF' && l.traitName.toLowerCase().includes('belum scan masuk dan pulang')))) {
+              logsChanged = true;
+              return false;
+            }
           }
           return true;
         });
+
+        // Jika status baru adalah ALPA, pastikan siswa mendapatkan nilai karakter ALPA -5
+        if (newStatus === 'ALPA' && schoolProfile.autoCharacterAssessmentEnabled !== false) {
+          const studentObj = students.find(s => s.id === targetStudentId);
+          const alreadyLogged = cleanedLogs.some(l => 
+            (l.studentId === targetStudentId || (studentObj?.nisn && l.nisn === studentObj.nisn)) &&
+            l.date === targetDate &&
+            l.traitType === 'NEGATIF' &&
+            (l.id === `auto-alpa-${targetStudentId}-${targetDate}` || l.traitName.toLowerCase().includes('alpa') || l.notes?.toLowerCase().includes('alpa'))
+          );
+
+          if (!alreadyLogged) {
+            const alpaPoints = schoolProfile.autoCharacterPoints?.alpaPoints ?? 5;
+            const traits = getCharacterTraits();
+            const alpaTrait = traits.find(t => t.type === 'NEGATIF' && (t.id === 'trait-auto-alpa' || t.id === 'trait-011' || t.name.toLowerCase().includes('alpa') || t.name.toLowerCase().includes('tanpa keterangan') || t.name.toLowerCase().includes('tidak masuk sekolah'))) || {
+              id: 'trait-auto-alpa',
+              name: 'Tidak Masuk Sekolah Tanpa Keterangan / Alpa',
+              type: 'NEGATIF' as const,
+              points: alpaPoints,
+              category: 'Kedisiplinan'
+            };
+
+            cleanedLogs.push({
+              id: `auto-alpa-${targetStudentId}-${targetDate}`,
+              studentId: targetStudentId,
+              studentName: studentObj?.name || 'Siswa',
+              nisn: studentObj?.nisn || '-',
+              classId: studentObj?.classId || '',
+              className: studentObj?.className || '',
+              traitId: alpaTrait.id,
+              traitName: alpaTrait.name,
+              traitType: 'NEGATIF',
+              points: alpaPoints,
+              evaluatorName: 'Sistem Presensi Otomatis',
+              timestamp: `${targetDate} ${new Date().toTimeString().substring(0, 8)}`,
+              date: targetDate,
+              notes: `Penilaian Otomatis Presensi: Terekam status ALPA (Tidak Masuk Sekolah Tanpa Keterangan / Alpa) pada tanggal ${targetDate}`,
+            });
+            logsChanged = true;
+          }
+        }
 
         if (logsChanged) {
           saveStudentCharacterLogs(cleanedLogs);
@@ -961,9 +1017,60 @@ export default function App() {
               logsChanged = true;
               return false;
             }
+            // If status is now recorded (HADIR, TERLAMBAT, SAKIT, IZIN, ALPA), remove auto-unscanned-both (Belum scan masuk & pulang)
+            if (['HADIR', 'TERLAMBAT', 'SAKIT', 'IZIN', 'ALPA'].includes(matchUpdate.newStatus) && (l.id.includes('auto-unscanned-both') || (l.traitType === 'NEGATIF' && l.traitName.toLowerCase().includes('belum scan masuk dan pulang')))) {
+              logsChanged = true;
+              return false;
+            }
           }
           return true;
         });
+
+        // Jika terdapat siswa yang diubah menjadi ALPA secara massal, pastikan mendapatkan nilai karakter ALPA -5
+        if (schoolProfile.autoCharacterAssessmentEnabled !== false) {
+          const alpaUpdates = updates.filter(u => u.newStatus === 'ALPA');
+          if (alpaUpdates.length > 0) {
+            const alpaPoints = schoolProfile.autoCharacterPoints?.alpaPoints ?? 5;
+            const traits = getCharacterTraits();
+            const alpaTrait = traits.find(t => t.type === 'NEGATIF' && (t.id === 'trait-auto-alpa' || t.id === 'trait-011' || t.name.toLowerCase().includes('alpa') || t.name.toLowerCase().includes('tanpa keterangan') || t.name.toLowerCase().includes('tidak masuk sekolah'))) || {
+              id: 'trait-auto-alpa',
+              name: 'Tidak Masuk Sekolah Tanpa Keterangan / Alpa',
+              type: 'NEGATIF' as const,
+              points: alpaPoints,
+              category: 'Kedisiplinan'
+            };
+
+            alpaUpdates.forEach(u => {
+              const studentObj = students.find(s => s.id === u.studentId);
+              const alreadyLogged = cleanedLogs.some(l => 
+                (l.studentId === u.studentId || (studentObj?.nisn && l.nisn === studentObj.nisn)) &&
+                l.date === u.date &&
+                l.traitType === 'NEGATIF' &&
+                (l.id === `auto-alpa-${u.studentId}-${u.date}` || l.traitName.toLowerCase().includes('alpa') || l.notes?.toLowerCase().includes('alpa'))
+              );
+
+              if (!alreadyLogged) {
+                cleanedLogs.push({
+                  id: `auto-alpa-${u.studentId}-${u.date}`,
+                  studentId: u.studentId,
+                  studentName: u.studentName || studentObj?.name || 'Siswa',
+                  nisn: u.nisn || studentObj?.nisn || '-',
+                  classId: studentObj?.classId || '',
+                  className: u.className || studentObj?.className || '',
+                  traitId: alpaTrait.id,
+                  traitName: alpaTrait.name,
+                  traitType: 'NEGATIF',
+                  points: alpaPoints,
+                  evaluatorName: 'Sistem Presensi Otomatis',
+                  timestamp: `${u.date} ${new Date().toTimeString().substring(0, 8)}`,
+                  date: u.date,
+                  notes: `Penilaian Otomatis Presensi: Terekam status ALPA (Tidak Masuk Sekolah Tanpa Keterangan / Alpa) pada tanggal ${u.date}`,
+                });
+                logsChanged = true;
+              }
+            });
+          }
+        }
 
         if (logsChanged) {
           saveStudentCharacterLogs(cleanedLogs);

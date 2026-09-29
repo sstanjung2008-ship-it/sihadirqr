@@ -3448,6 +3448,35 @@ export function getPermanentManualCharacterLogs(): StudentCharacterLog[] {
 }
 
 /**
+ * Menghilangkan catatan log karakter yang memiliki ID duplikat sehingga komponen React
+ * tidak pernah menghasilkan peringatan 'two children with the same key'
+ */
+export function deduplicateCharacterLogs(logs: StudentCharacterLog[]): StudentCharacterLog[] {
+  if (!Array.isArray(logs)) return [];
+  const map = new Map<string, StudentCharacterLog>();
+  for (let i = 0; i < logs.length; i++) {
+    const log = logs[i];
+    if (!log) continue;
+    const cleanId = log.id ? String(log.id).trim() : `log-item-${i}-${Date.now()}`;
+    if (!map.has(cleanId)) {
+      map.set(cleanId, { ...log, id: cleanId });
+    }
+  }
+  return Array.from(map.values());
+}
+
+/**
+ * Menghapus catatan karakter manual dari cadangan permanen aman ketika pengguna menghapusnya.
+ */
+export function deletePermanentManualCharacterLog(logId: string): void {
+  if (typeof window === 'undefined' || !logId) return;
+  const targetId = logId.trim();
+  const currentBackup = getPermanentManualCharacterLogs();
+  const filtered = currentBackup.filter(l => l && l.id && l.id.trim() !== targetId);
+  safeSetLocalStorage(SAFE_MANUAL_CHARACTER_LOGS_BACKUP_KEY, JSON.stringify(filtered));
+}
+
+/**
  * Menyimpan dan menggabungkan catatan karakter manual ke cadangan permanen aman.
  */
 export function savePermanentManualCharacterLogs(newManualLogs: StudentCharacterLog[]): void {
@@ -3456,16 +3485,18 @@ export function savePermanentManualCharacterLogs(newManualLogs: StudentCharacter
   const map = new Map<string, StudentCharacterLog>();
 
   // Masukkan data cadangan yang sudah ada
-  currentBackup.forEach(l => map.set(l.id, l));
+  currentBackup.forEach(l => {
+    if (l && l.id) map.set(l.id.trim(), l);
+  });
 
   // Tambahkan/perbarui catatan manual baru dengan flag isManual: true
   newManualLogs.forEach(l => {
-    if (isManualCharacterLog(l)) {
-      map.set(l.id, { ...l, isManual: true });
+    if (isManualCharacterLog(l) && l && l.id) {
+      map.set(l.id.trim(), { ...l, isManual: true });
     }
   });
 
-  const merged = Array.from(map.values());
+  const merged = deduplicateCharacterLogs(Array.from(map.values()));
   safeSetLocalStorage(SAFE_MANUAL_CHARACTER_LOGS_BACKUP_KEY, JSON.stringify(merged));
 }
 
@@ -3489,17 +3520,18 @@ export function getStudentCharacterLogs(): StudentCharacterLog[] {
   // JAMINAN PERMANEN: Selalu pastikan catatan manual dari cadangan permanen terikut
   const permanentManuals = getPermanentManualCharacterLogs();
   if (permanentManuals.length > 0) {
-    const existingIds = new Set(logs.map(l => l.id));
+    const existingIds = new Set(logs.map(l => l.id?.trim()).filter(Boolean));
     let hasNewFromBackup = false;
     permanentManuals.forEach(pLog => {
-      if (!existingIds.has(pLog.id)) {
+      const pId = pLog.id?.trim();
+      if (pId && !existingIds.has(pId)) {
         logs.unshift(pLog);
-        existingIds.add(pLog.id);
+        existingIds.add(pId);
         hasNewFromBackup = true;
       }
     });
     if (hasNewFromBackup) {
-      safeSetLocalStorage(KEYS.CHARACTER_LOGS, JSON.stringify(logs));
+      safeSetLocalStorage(KEYS.CHARACTER_LOGS, JSON.stringify(deduplicateCharacterLogs(logs)));
     }
   }
 
@@ -3510,16 +3542,17 @@ export function getStudentCharacterLogs(): StudentCharacterLog[] {
   const kbmResult = repairKbmActiveLogs(upacaraResult.repairedLogs);
   const totalRepaired = upacaraResult.repairedCount + kbmResult.repairedCount;
 
-  if (totalRepaired > 0) {
-    logs = kbmResult.repairedLogs;
-    safeSetLocalStorage(KEYS.CHARACTER_LOGS, JSON.stringify(logs));
-    const repairedManuals = logs.filter(isManualCharacterLog);
+  let finalLogs = deduplicateCharacterLogs(kbmResult.repairedLogs);
+
+  if (totalRepaired > 0 || finalLogs.length !== logs.length) {
+    safeSetLocalStorage(KEYS.CHARACTER_LOGS, JSON.stringify(finalLogs));
+    const repairedManuals = finalLogs.filter(isManualCharacterLog);
     if (repairedManuals.length > 0) {
       safeSetLocalStorage(SAFE_MANUAL_CHARACTER_LOGS_BACKUP_KEY, JSON.stringify(repairedManuals));
     }
   }
 
-  return logs;
+  return finalLogs;
 }
 
 export function saveStudentCharacterLogs(logs: StudentCharacterLog[]): void {
@@ -3528,13 +3561,11 @@ export function saveStudentCharacterLogs(logs: StudentCharacterLog[]): void {
   // Pastikan seluruh log dinormalkan sebelum disimpan (Upacara +5 poin & Sangat Aktif KBM)
   const upacaraResult = repairUpacaraLogs(logs);
   const kbmResult = repairKbmActiveLogs(upacaraResult.repairedLogs);
-  const cleanLogs = kbmResult.repairedLogs;
+  const cleanLogs = deduplicateCharacterLogs(kbmResult.repairedLogs);
 
-  // Amankan seluruh catatan manual ke brankas permanen
+  // Amankan seluruh catatan manual ke brankas permanen (sinkronisasi langsung agar penghapusan log oleh pengguna tersimpan permanen)
   const manualLogs = cleanLogs.filter(isManualCharacterLog).map(l => ({ ...l, isManual: true }));
-  if (manualLogs.length > 0) {
-    savePermanentManualCharacterLogs(manualLogs);
-  }
+  safeSetLocalStorage(SAFE_MANUAL_CHARACTER_LOGS_BACKUP_KEY, JSON.stringify(manualLogs));
 
   const dataStr = JSON.stringify(cleanLogs);
   safeSetLocalStorage(KEYS.CHARACTER_LOGS, dataStr);
@@ -3549,22 +3580,23 @@ export function saveStudentCharacterLogs(logs: StudentCharacterLog[]): void {
 export function restoreAllManualCharacterLogs(): { restoredCount: number; allLogs: StudentCharacterLog[] } {
   const currentLogs = getStudentCharacterLogs();
   const permanentManuals = getPermanentManualCharacterLogs();
-  const existingIds = new Set(currentLogs.map(l => l.id));
+  const existingIds = new Set(currentLogs.map(l => l.id?.trim()).filter(Boolean));
 
   let restoredCount = 0;
   const merged = [...currentLogs];
 
   permanentManuals.forEach(pLog => {
-    if (!existingIds.has(pLog.id)) {
+    const pId = pLog.id?.trim();
+    if (pId && !existingIds.has(pId)) {
       merged.unshift(pLog);
-      existingIds.add(pLog.id);
+      existingIds.add(pId);
       restoredCount++;
     }
   });
 
   const upacaraResult = repairUpacaraLogs(merged);
   const kbmResult = repairKbmActiveLogs(upacaraResult.repairedLogs);
-  const finalLogs = kbmResult.repairedLogs;
+  const finalLogs = deduplicateCharacterLogs(kbmResult.repairedLogs);
   restoredCount += (upacaraResult.repairedCount + kbmResult.repairedCount);
 
   saveStudentCharacterLogs(finalLogs);

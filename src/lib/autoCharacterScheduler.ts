@@ -5,9 +5,15 @@ import {
   getStudentCharacterLogs, 
   saveStudentCharacterLogs, 
   getCharacterTraits,
-  getUserSession
+  getUserSession,
+  isManualCharacterLog,
+  deduplicateCharacterLogs,
+  KEYS
 } from './storage';
-import { StudentCharacterLog } from '../types';
+import { StudentCharacterLog, AttendanceRecord } from '../types';
+
+// In-memory signature to guarantee 0 Cloud Reads, 0 Cloud Writes, and 0 CPU overhead during 20s interval ticks
+let lastEvaluationSignature = '';
 
 /**
  * Menghitung waktu tanggal dan jam WITA (UTC+8) yang presisi
@@ -35,82 +41,63 @@ export function getWitaDateTime(): { witaDate: Date; witaDateStr: string; witaTi
 }
 
 /**
- * Menjalankan evaluasi penilaian karakter otomatis untuk status "Belum Scan" dan "Belum Pulang"
- * Ditulis serentak oleh sistem dan dikirim dalam 1 pengiriman (single write) ke Cloud Firestore.
+ * Rekonsiliasi Menyeluruh Penilaian Karakter Otomatis:
+ * 1. Belum Scan Presensi (-unscannedPoints, default -1 poin)
+ * 2. Belum Scan Pulang (-unreturnedPoints, default -1 poin)
+ *
+ * Memeriksa seluruh rekaman absensi siswa yang terdapat catatan belum scan presensi dan belum scan pulang,
+ * mencatat poin penalti otomatis tanpa duplikasi, dan membersihkan penalti jika siswa sudah melakukan scan.
  */
-export function run16WitaAutoCharacterAssessment(force: boolean = false): { executed: boolean; count: number; message: string } {
-  // PENGHEMAT KUOTA UTAMA: Dilarang keras dijalankan oleh akun Wali Murid (PARENT)
+export function reconcileAutoCharacterPenalties(forceToday: boolean = false): { 
+  executed: boolean; 
+  count: number; 
+  unscannedCount: number; 
+  unreturnedCount: number; 
+  message: string 
+} {
   const session = getUserSession();
   if (session?.role === 'PARENT') {
-    return { executed: false, count: 0, message: 'Role Orang Tua tidak menjalankan evaluasi otomatis sekolah.' };
+    return { executed: false, count: 0, unscannedCount: 0, unreturnedCount: 0, message: 'Role Orang Tua tidak menjalankan evaluasi otomatis sekolah.' };
   }
 
   const profile = getSchoolProfile();
-
-  // Jika saklar master penilaian karakter dinonaktifkan
   if (profile.autoCharacterAssessmentEnabled === false) {
-    return { executed: false, count: 0, message: 'Sistem Penilaian Karakter Otomatis sedang non-aktif di Pengaturan.' };
+    return { executed: false, count: 0, unscannedCount: 0, unreturnedCount: 0, message: 'Sistem Penilaian Karakter Otomatis sedang non-aktif di Pengaturan.' };
   }
 
-  // Pengaman: Jangan jalankan evaluasi diam-diam di background tanpa izin sadar dari Admin
-  if (!force && profile.auto16WitaBackgroundExecutionEnabled !== true) {
-    return { 
-      executed: false, 
-      count: 0, 
-      message: 'Eksekusi otomatis latar belakang 16:00 WITA non-aktif. Evaluasi karakter dapat dilakukan melalui menu evaluasi karakter atau aktifkan saklar eksekusi otomatis di Pengaturan Sekolah.' 
-    };
-  }
-
-  const { witaDateStr, totalMinutes, dayName } = getWitaDateTime();
-
-  // Waktu target: 16:00 WITA (16 * 60 = 960 menit)
-  const targetMinutes = 16 * 60; // 16:00 WITA
-
-  if (!force && totalMinutes < targetMinutes) {
-    return { 
-      executed: false, 
-      count: 0, 
-      message: `Belum mencapai waktu 16:00 WITA (Sekarang pukul ${Math.floor(totalMinutes / 60)}:${String(totalMinutes % 60).padStart(2, '0')} WITA).` 
-    };
-  }
-
-  // Cek apakah hari ini merupakan hari aktif sekolah
-  const activeDays = profile.activeDays || ['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
-  if (!force && !activeDays.includes(dayName)) {
-    return { executed: false, count: 0, message: `Hari ini (${dayName}) adalah hari libur mingguan belajar.` };
-  }
-
-  // Cek apakah hari ini merupakan hari libur kalender sekolah / nasional
-  const isHoliday = (profile.holidays || []).some(h => h.date === witaDateStr);
-  if (!force && isHoliday) {
-    return { executed: false, count: 0, message: `Hari ini (${witaDateStr}) tercatat sebagai hari libur sekolah.` };
-  }
-
-  // Cek apakah sudah pernah dieksekusi hari ini
-  const lastRunKey = 'sihadir_auto_char_16wita_last_run';
-  const lastRunDate = localStorage.getItem(lastRunKey);
-  if (!force && lastRunDate === witaDateStr) {
-    return { executed: false, count: 0, message: `Penilaian otomatis untuk tanggal ${witaDateStr} sudah pernah dijalankan.` };
-  }
-
-  // Ambil data siswa & absensi hari ini
+  const { witaDateStr, totalMinutes } = getWitaDateTime();
   const students = getStudents();
   if (students.length === 0) {
-    return { executed: false, count: 0, message: 'Tidak ada data siswa aktif yang ditemukan.' };
+    return { executed: false, count: 0, unscannedCount: 0, unreturnedCount: 0, message: 'Tidak ada data siswa aktif yang ditemukan.' };
   }
 
   const attendanceRecords = getAttendanceRecords();
-  const todayRecords = attendanceRecords.filter(r => r.date === witaDateStr);
-  const todayRecordMap = new Map(todayRecords.map(r => [r.studentId, r]));
+  if (attendanceRecords.length === 0) {
+    return { executed: false, count: 0, unscannedCount: 0, unreturnedCount: 0, message: 'Tidak ada rekaman absensi untuk dievaluasi.' };
+  }
 
-  // Ambil log karakter saat ini
+  // JAMINAN HEMAT KUOTA FIRESTORE (0 Cloud Read & 0 Cloud Write):
+  // Cek sidik jari (signature) data lokal: jika rekaman absensi tidak bertambah/berubah dan belum melewati pukul 16:00 WITA,
+  // proses evaluasi dihentikan seketika tanpa perhitungan atau akses jaringan sama sekali.
+  const attendanceUpdatedAt = (typeof window !== 'undefined' ? localStorage.getItem(KEYS.ATTENDANCE + '_updatedAt') : null) || '0';
+  const logsUpdatedAt = (typeof window !== 'undefined' ? localStorage.getItem(KEYS.CHARACTER_LOGS + '_updatedAt') : null) || '0';
+  const isPast16Wita = totalMinutes >= 16 * 60;
+  const currentSignature = `${attendanceRecords.length}_${attendanceUpdatedAt}_${logsUpdatedAt}_${witaDateStr}_${isPast16Wita ? '16wita' : 'pre16'}`;
+
+  if (!forceToday && lastEvaluationSignature === currentSignature) {
+    return {
+      executed: false,
+      count: 0,
+      unscannedCount: 0,
+      unreturnedCount: 0,
+      message: 'Data presensi tidak berubah sejak evaluasi terakhir (Pemeriksaan hemat kuota).'
+    };
+  }
+
   const currentLogs = getStudentCharacterLogs();
-
-  // Pengaturan besaran poin (Default 1 poin negatif)
   const unscannedPoints = profile.autoCharacterPoints?.unscannedPoints ?? 1;
   const unreturnedPoints = profile.autoCharacterPoints?.unreturnedPoints ?? 1;
 
-  // Dapatkan master trait terkait
   const traits = getCharacterTraits();
   const unscannedTrait = traits.find(t => 
     t.id === 'trait-015' || 
@@ -135,122 +122,200 @@ export function run16WitaAutoCharacterAssessment(force: boolean = false): { exec
   };
 
   const newLogs: StudentCharacterLog[] = [];
+  let addedUnscannedCount = 0;
+  let addedUnreturnedCount = 0;
 
-  students.forEach(student => {
-    const rec = todayRecordMap.get(student.id);
+  // Evaluasi setiap rekaman absensi siswa
+  attendanceRecords.forEach(rec => {
+    const student = students.find(s => 
+      s.id === rec.studentId || 
+      (rec.nisn && s.nisn === rec.nisn) || 
+      (rec.studentName && s.name.trim().toLowerCase() === rec.studentName.trim().toLowerCase())
+    );
+    if (!student) return;
 
-    // 1. ATURAN: BELUM SCAN PRESENSI (-unscannedPoints)
-    // Data diambil dari daftar absensi siswa pada kolom Jam Masuk DENGAN KRITERIA STATUS MASUK HADIR.
-    // Hanya berlaku bagi siswa yang memiliki status masuk 'HADIR', namun pada kolom Jam Masuk belum melakukan scan (time kosong atau '-').
-    // Siswa dengan status masuk selain Hadir (Sakit, Izin, Alpa, Terlambat) TIDAK dinilai negatif belum scan presensi!
-    const isStatusHadir = !!(rec && rec.status === 'HADIR');
-    const isUnscannedEntry = isStatusHadir && (
+    const studentId = student.id;
+    const studentName = student.name;
+    const nisn = student.nisn || rec.nisn || '-';
+    const classId = student.classId || '';
+    const className = student.className || rec.className || '';
+    const attDate = rec.date;
+
+    // 1. ATURAN: BELUM SCAN PRESENSI
+    // Terpenuhi jika siswa tidak izin/sakit, dan kolom Jam Masuk kosong/belum scan/'-', atau status BELUM_ABSEN
+    const isLegitPermit = rec.status === 'SAKIT' || rec.status === 'IZIN';
+    const isUnscannedEntry = !isLegitPermit && (
       !rec.time || 
       rec.time === '-' || 
       rec.time.trim() === '' || 
-      rec.time.toLowerCase().includes('belum')
+      rec.time.toLowerCase().includes('belum') || 
+      (rec.status as string) === 'BELUM_ABSEN' ||
+      (rec.notes && rec.notes.toLowerCase().includes('belum scan'))
     );
 
     if (isUnscannedEntry) {
-      const alreadyLoggedUnscanned = currentLogs.some(l => 
-        l.studentId === student.id && 
-        l.date === witaDateStr && 
+      const alreadyHasUnscannedLog = [...currentLogs, ...newLogs].some(l => 
+        (l.studentId === studentId || (nisn !== '-' && l.nisn === nisn) || (studentName && l.studentName && l.studentName.trim().toLowerCase() === studentName.trim().toLowerCase())) &&
+        l.date === attDate &&
+        l.traitType === 'NEGATIF' &&
         (
-          l.id === `auto-unscanned-${student.id}-${witaDateStr}` || 
-          (l.traitType === 'NEGATIF' && l.traitName.toLowerCase().includes('belum') && l.traitName.toLowerCase().includes('scan'))
+          l.id === `auto-unscanned-${studentId}-${attDate}` || 
+          (l.traitName.toLowerCase().includes('belum') && l.traitName.toLowerCase().includes('scan'))
         )
       );
 
-      if (!alreadyLoggedUnscanned) {
+      if (!alreadyHasUnscannedLog) {
         newLogs.push({
-          id: `auto-unscanned-${student.id}-${witaDateStr}`,
-          studentId: student.id,
-          studentName: student.name,
-          nisn: student.nisn || '-',
-          classId: student.classId,
-          className: student.className,
+          id: `auto-unscanned-${studentId}-${attDate}`,
+          studentId: studentId,
+          studentName: studentName,
+          nisn: nisn,
+          classId: classId,
+          className: className,
           traitId: unscannedTrait.id,
           traitName: unscannedTrait.name,
           traitType: 'NEGATIF',
           points: unscannedPoints,
-          evaluatorName: 'Sistem Otomatis (16:00 WITA)',
-          timestamp: `${witaDateStr} 16:00:00`,
-          date: witaDateStr,
-          notes: `Penilaian Otomatis 16:00 WITA: Status Masuk Hadir tetapi pada kolom Jam Masuk belum melakukan scan presensi (${witaDateStr})`,
+          evaluatorName: 'Sistem Presensi Otomatis',
+          timestamp: `${attDate} 16:00:00`,
+          date: attDate,
+          notes: `Penilaian Otomatis Presensi: Kolom Jam Masuk belum melakukan scan presensi (${attDate})`,
         });
+        addedUnscannedCount++;
       }
     }
 
-    // 2. ATURAN: BELUM PULANG SEKOLAH (-unreturnedPoints)
-    // KRITERIA KETAT: Dinilai negatif HANYA jika siswa memiliki status masuk 'HADIR' atau 'TERLAMBAT'.
-    // Jika status masuk selain Hadir dan Terlambat (misalnya SAKIT, IZIN, ALPA, atau belum presensi), aplikasi TIDAK menilai negatif belum pulang!
-    const isPresent = !!(rec && (rec.status === 'HADIR' || rec.status === 'TERLAMBAT'));
-    const hasReturned = !!(rec && (
-      (rec.returnTime && rec.returnTime !== '-') || 
+    // 2. ATURAN: BELUM SCAN PULANG
+    // Terpenuhi jika siswa hadir di sekolah (HADIR atau TERLAMBAT), namun belum melakukan scan kepulangan
+    // Untuk hari yang sudah berlalu (attDate < witaDateStr), atau hari ini jika sudah pukul 16:00 WITA / force
+    const isPresent = rec.status === 'HADIR' || rec.status === 'TERLAMBAT';
+    const hasReturned = !!(
+      (rec.returnTime && rec.returnTime !== '-' && rec.returnTime.trim() !== '' && !rec.returnTime.toLowerCase().includes('belum')) || 
       rec.returnStatus === 'PULANG' || 
       rec.returnStatus === 'PULANG_TEPAT' || 
       rec.returnStatus === 'PULANG_CEPAT'
-    ));
+    );
 
-    if (isPresent && !hasReturned) {
-      const alreadyLoggedUnreturned = currentLogs.some(l => 
-        l.studentId === student.id && 
-        l.date === witaDateStr && 
+    const isEligibleForReturnEvaluation = attDate < witaDateStr || forceToday || totalMinutes >= (16 * 60);
+
+    if (isPresent && !hasReturned && isEligibleForReturnEvaluation) {
+      const alreadyHasUnreturnedLog = [...currentLogs, ...newLogs].some(l => 
+        (l.studentId === studentId || (nisn !== '-' && l.nisn === nisn) || (studentName && l.studentName && l.studentName.trim().toLowerCase() === studentName.trim().toLowerCase())) &&
+        l.date === attDate &&
+        l.traitType === 'NEGATIF' &&
         (
-          l.id === `auto-unreturned-${student.id}-${witaDateStr}` || 
-          (l.traitType === 'NEGATIF' && l.traitName.toLowerCase().includes('belum') && l.traitName.toLowerCase().includes('pulang'))
+          l.id === `auto-unreturned-${studentId}-${attDate}` || 
+          (l.traitName.toLowerCase().includes('belum') && l.traitName.toLowerCase().includes('pulang'))
         )
       );
 
-      if (!alreadyLoggedUnreturned) {
+      if (!alreadyHasUnreturnedLog) {
         newLogs.push({
-          id: `auto-unreturned-${student.id}-${witaDateStr}`,
-          studentId: student.id,
-          studentName: student.name,
-          nisn: student.nisn || '-',
-          classId: student.classId,
-          className: student.className,
+          id: `auto-unreturned-${studentId}-${attDate}`,
+          studentId: studentId,
+          studentName: studentName,
+          nisn: nisn,
+          classId: classId,
+          className: className,
           traitId: unreturnedTrait.id,
           traitName: unreturnedTrait.name,
           traitType: 'NEGATIF',
           points: unreturnedPoints,
-          evaluatorName: 'Sistem Otomatis (16:00 WITA)',
-          timestamp: `${witaDateStr} 16:00:00`,
-          date: witaDateStr,
-          notes: `Penilaian Otomatis 16:00 WITA: Status Masuk (${rec.status === 'HADIR' ? 'Hadir Tepat Waktu' : 'Terlambat'}) pukul ${rec.time || 'Pagi'} tetapi belum melakukan scan pulang hingga batas waktu 16:00 WITA (${witaDateStr})`,
+          evaluatorName: 'Sistem Presensi Otomatis',
+          timestamp: `${attDate} 16:00:00`,
+          date: attDate,
+          notes: `Penilaian Otomatis Presensi: Status Masuk (${rec.status === 'HADIR' ? 'Hadir Tepat Waktu' : 'Terlambat'}) pukul ${rec.time || 'Pagi'} tetapi belum melakukan scan pulang (${attDate})`,
         });
+        addedUnreturnedCount++;
       }
     }
   });
 
-  // Tandai tanggal selesai dievaluasi agar tidak berjalan ganda pada detik/menit berikutnya
-  localStorage.setItem(lastRunKey, witaDateStr);
+  // Pembersihan log penalti otomatis jika data presensi sudah dikoreksi/siswa sudah scan
+  let removedCount = 0;
+  const filteredExisting = currentLogs.filter(l => {
+    if (isManualCharacterLog(l)) return true;
 
-  if (newLogs.length > 0) {
-    // Gabungkan seluruh log dan simpan dalam 1 kali pengiriman tunggal ke Cloud Firestore
-    const updatedLogs = [...currentLogs, ...newLogs];
-    saveStudentCharacterLogs(updatedLogs);
+    // Bersihkan penalti Belum Scan Masuk jika siswa sudah memiliki jam scan valid atau berstatus izin/sakit
+    const isAutoUnscanned = l.id?.startsWith('auto-unscanned-') || (l.traitType === 'NEGATIF' && l.traitName.toLowerCase().includes('belum') && l.traitName.toLowerCase().includes('scan') && l.notes?.includes('Otomatis'));
+    if (isAutoUnscanned) {
+      const matchingRec = attendanceRecords.find(r => 
+        (r.studentId === l.studentId || (l.nisn && l.nisn !== '-' && r.nisn === l.nisn) || (l.studentName && r.studentName?.toLowerCase() === l.studentName.toLowerCase())) &&
+        r.date === l.date
+      );
+      if (matchingRec) {
+        const hasValidTime = matchingRec.time && matchingRec.time !== '-' && !matchingRec.time.toLowerCase().includes('belum');
+        const isExempt = matchingRec.status === 'SAKIT' || matchingRec.status === 'IZIN';
+        if (hasValidTime || isExempt) {
+          removedCount++;
+          return false;
+        }
+      }
+    }
 
-    // Dispatch event notifikasi
+    // Bersihkan penalti Belum Scan Pulang jika siswa sudah scan pulang
+    const isAutoUnreturned = l.id?.startsWith('auto-unreturned-') || (l.traitType === 'NEGATIF' && l.traitName.toLowerCase().includes('belum') && l.traitName.toLowerCase().includes('pulang') && l.notes?.includes('Otomatis'));
+    if (isAutoUnreturned) {
+      const matchingRec = attendanceRecords.find(r => 
+        (r.studentId === l.studentId || (l.nisn && l.nisn !== '-' && r.nisn === l.nisn) || (l.studentName && r.studentName?.toLowerCase() === l.studentName.toLowerCase())) &&
+        r.date === l.date
+      );
+      if (matchingRec) {
+        const hasReturned = !!((matchingRec.returnTime && matchingRec.returnTime !== '-' && !matchingRec.returnTime.toLowerCase().includes('belum')) || matchingRec.returnStatus === 'PULANG' || matchingRec.returnStatus === 'PULANG_TEPAT' || matchingRec.returnStatus === 'PULANG_CEPAT');
+        const isNotPresent = matchingRec.status !== 'HADIR' && matchingRec.status !== 'TERLAMBAT';
+        if (hasReturned || isNotPresent) {
+          removedCount++;
+          return false;
+        }
+      }
+    }
+
+    return true;
+  });
+
+  const totalAdded = newLogs.length;
+  lastEvaluationSignature = currentSignature;
+
+  if (totalAdded > 0 || removedCount > 0) {
+    const merged = deduplicateCharacterLogs([...filteredExisting, ...newLogs]);
+    saveStudentCharacterLogs(merged);
+
     window.dispatchEvent(new CustomEvent('sihadir_auto_assessment_completed', {
       detail: {
         date: witaDateStr,
-        newLogsCount: newLogs.length,
-        unscannedCount: newLogs.filter(l => l.id.includes('unscanned')).length,
-        unreturnedCount: newLogs.filter(l => l.id.includes('unreturned')).length
+        newLogsCount: totalAdded,
+        unscannedCount: addedUnscannedCount,
+        unreturnedCount: addedUnreturnedCount,
+        removedCount
       }
     }));
 
-    return { 
-      executed: true, 
-      count: newLogs.length, 
-      message: `Berhasil mencatat ${newLogs.length} poin pelanggaran karakter (Belum Scan / Belum Pulang) serentak dalam 1 pengiriman ke Cloud!` 
+    return {
+      executed: true,
+      count: totalAdded,
+      unscannedCount: addedUnscannedCount,
+      unreturnedCount: addedUnreturnedCount,
+      message: `Berhasil mencatat ${totalAdded} penilaian karakter otomatis baru (${addedUnscannedCount} Belum Scan Masuk, ${addedUnreturnedCount} Belum Scan Pulang) ke dalam sistem!`
     };
   }
 
-  return { 
-    executed: true, 
-    count: 0, 
-    message: `Pemeriksaan selesai: Seluruh siswa telah tertib presensi atau sudah memiliki catatan log untuk ${witaDateStr}.` 
+  return {
+    executed: true,
+    count: 0,
+    unscannedCount: 0,
+    unreturnedCount: 0,
+    message: 'Seluruh siswa telah memiliki catatan penilaian karakter yang sesuai dengan data presensi.'
+  };
+}
+
+/**
+ * Menjalankan evaluasi terjadwal 16:00 WITA untuk seluruh aspek sekolah
+ */
+export function run16WitaAutoCharacterAssessment(force: boolean = false): { executed: boolean; count: number; message: string } {
+  const result = reconcileAutoCharacterPenalties(force);
+  return {
+    executed: result.executed,
+    count: result.count,
+    message: result.message
   };
 }

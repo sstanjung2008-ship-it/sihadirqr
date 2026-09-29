@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { Student, SchoolClass, CharacterTrait, StudentCharacterLog, Teacher, SchoolProfile, CharacterPredicateSettings, UserSession, AttendanceRecord, LearningJournal } from '../types';
 import { exportCharacterPointsPdf, exportStudentCharacterDetailPdf } from '../lib/exportUtils';
-import { isManualCharacterLog, getPermanentManualCharacterLogs, restoreAllManualCharacterLogs, repairUpacaraLogs, repairKbmActiveLogs } from '../lib/storage';
+import { isManualCharacterLog, getPermanentManualCharacterLogs, restoreAllManualCharacterLogs, repairUpacaraLogs, repairKbmActiveLogs, deduplicateCharacterLogs } from '../lib/storage';
 import { AutoCharacterAssessmentModal } from './AutoCharacterAssessmentModal';
 import { 
   Plus, 
@@ -293,149 +293,26 @@ export const CharacterPointsView: React.FC<CharacterPointsViewProps> = ({
     return () => window.removeEventListener('sihadir_open_character_detail', handleOpenCharacterDetail);
   }, [students, logs]);
 
-  // Auto-verifikasi & pemulihan otomatis catatan manual penting (seperti Menjadi Petugas Upacara Bendera +5 Poin untuk Desi Aola dan seluruh siswa)
+  // Auto-verifikasi & perbaikan otomatis catatan Upacara (+5 Poin) dan Jurnal KBM
   useEffect(() => {
-    // 0. Sinkronisasi & perbaikan otomatis catatan Upacara (+5 Poin) dan Jurnal KBM (Sangat Aktif KBM)
     const upacaraRes = repairUpacaraLogs(logs);
     const kbmRes = repairKbmActiveLogs(upacaraRes.repairedLogs);
-    if ((upacaraRes.repairedCount > 0 || kbmRes.repairedCount > 0) && onApplyMultipleLogs) {
-      onApplyMultipleLogs(kbmRes.repairedLogs);
+    const dedupedLogs = deduplicateCharacterLogs(kbmRes.repairedLogs);
+    if ((upacaraRes.repairedCount > 0 || kbmRes.repairedCount > 0 || dedupedLogs.length !== logs.length) && onApplyMultipleLogs) {
+      onApplyMultipleLogs(dedupedLogs);
       return;
     }
-
-    // 1. Pulihkan catatan manual dari cadangan permanen jika ada yang belum masuk state
-    const permanentManuals = getPermanentManualCharacterLogs();
-    if (permanentManuals.length > 0) {
-      const existingIds = new Set(logs.map(l => l.id));
-      const missing = permanentManuals.filter(p => !existingIds.has(p.id));
-      if (missing.length > 0) {
-        if (onApplyMultipleLogs) {
-          onApplyMultipleLogs([...missing, ...logs]);
-        } else {
-          missing.forEach(m => onAddLog(m));
-        }
-      }
-    }
-
-    // 2. Pemeriksaan khusus untuk siswa Desi Aola / Desi
-    const desiStudent = students.find(s => 
-      s.name.toLowerCase().includes('desi') && s.name.toLowerCase().includes('aola')
-    ) || students.find(s => s.name.toLowerCase().includes('desi'));
-
-    if (desiStudent) {
-      const hasPetugasUpacara = logs.some(l => 
-        (l.studentId === desiStudent.id || (desiStudent.nisn && l.nisn === desiStudent.nisn) || l.studentName.toLowerCase().includes('desi')) &&
-        l.traitType === 'POSITIF' &&
-        (l.traitName.toLowerCase().includes('petugas') || (l.notes && l.notes.toLowerCase().includes('petugas')))
-      );
-
-      if (!hasPetugasUpacara) {
-        const now = new Date();
-        const formattedTimestamp = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')} 07:15:00`;
-        const formattedDate = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-        const upacaraTrait = traits.find(t => 
-          t.type === 'POSITIF' && (
-            t.id === 'trait-017' || 
-            t.name.toLowerCase().includes('petugas') || 
-            t.name.toLowerCase().includes('menjadi petugas')
-          ) && !t.name.toLowerCase().includes('tidak')
-        ) || {
-          id: 'trait-017',
-          name: 'Menjadi Petugas Upacara Bendera',
-          type: 'POSITIF',
-          points: 5,
-          category: 'Kepemimpinan'
-        };
-
-        const desiLog: StudentCharacterLog = {
-          id: 'log-manual-upacara-' + desiStudent.id,
-          studentId: desiStudent.id,
-          studentName: desiStudent.name,
-          nisn: desiStudent.nisn,
-          classId: desiStudent.classId,
-          className: desiStudent.className,
-          traitId: upacaraTrait.id,
-          traitName: 'Menjadi Petugas Upacara Bendera',
-          traitType: 'POSITIF',
-          points: 5,
-          evaluatorName: 'Pembina Upacara / Guru Piket',
-          timestamp: formattedTimestamp,
-          date: formattedDate,
-          photoProofUrl: 'https://images.unsplash.com/photo-1577896851231-70ef18881754?w=400&auto=format&fit=crop&q=80',
-          notes: 'Menjadi Petugas Upacara Bendera (Catatan Karakter Manual - Tersimpan Permanen)',
-          isManual: true
-        };
-
-        onAddLog(desiLog);
-      }
-    }
-  }, [students, logs]);
+  }, [logs]);
 
   const handleRestoreManualLogs = () => {
     const result = restoreAllManualCharacterLogs();
-
-    // Check Desi Aola
-    const desiStudent = students.find(s => 
-      s.name.toLowerCase().includes('desi') && s.name.toLowerCase().includes('aola')
-    ) || students.find(s => s.name.toLowerCase().includes('desi'));
-
-    let addedDesi = false;
-    const currentActiveLogs = result.allLogs || logs;
-    if (desiStudent) {
-      const hasPetugasUpacara = currentActiveLogs.some(l => 
-        (l.studentId === desiStudent.id || (desiStudent.nisn && l.nisn === desiStudent.nisn) || l.studentName.toLowerCase().includes('desi')) &&
-        l.traitType === 'POSITIF' &&
-        (l.traitName.toLowerCase().includes('petugas') || (l.notes && l.notes.toLowerCase().includes('petugas')))
-      );
-
-      if (!hasPetugasUpacara) {
-        const now = new Date();
-        const formattedTimestamp = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')} 07:15:00`;
-        const formattedDate = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-        const upacaraTrait = traits.find(t => 
-          t.type === 'POSITIF' && (
-            t.id === 'trait-017' || 
-            t.name.toLowerCase().includes('petugas') || 
-            t.name.toLowerCase().includes('menjadi petugas')
-          ) && !t.name.toLowerCase().includes('tidak')
-        ) || {
-          id: 'trait-017',
-          name: 'Menjadi Petugas Upacara Bendera',
-          type: 'POSITIF',
-          points: 5,
-          category: 'Kepemimpinan'
-        };
-
-        const desiLog: StudentCharacterLog = {
-          id: 'log-manual-upacara-' + desiStudent.id,
-          studentId: desiStudent.id,
-          studentName: desiStudent.name,
-          nisn: desiStudent.nisn,
-          classId: desiStudent.classId,
-          className: desiStudent.className,
-          traitId: upacaraTrait.id,
-          traitName: 'Menjadi Petugas Upacara Bendera',
-          traitType: 'POSITIF',
-          points: 5,
-          evaluatorName: 'Pembina Upacara / Guru Piket',
-          timestamp: formattedTimestamp,
-          date: formattedDate,
-          photoProofUrl: 'https://images.unsplash.com/photo-1577896851231-70ef18881754?w=400&auto=format&fit=crop&q=80',
-          notes: 'Menjadi Petugas Upacara Bendera (Catatan Karakter Manual - Tersimpan Permanen)',
-          isManual: true
-        };
-
-        onAddLog(desiLog);
-        addedDesi = true;
-      }
-    }
 
     if (result.restoredCount > 0 && onApplyMultipleLogs) {
       onApplyMultipleLogs(result.allLogs);
     }
 
     const manualCount = (result.allLogs || logs).filter(isManualCharacterLog).length;
-    const msg = `Berhasil memulihkan & menormalkan nilai karakter (Menjadi Petugas Upacara Bendera +5 Poin & Sangat Aktif KBM) untuk seluruh siswa (${manualCount} catatan manual aktif tersimpan permanen)!`;
+    const msg = `Berhasil memulihkan & menormalkan nilai karakter manual (${manualCount} catatan manual aktif tersimpan permanen)!`;
     setCleanupSuccessToast(msg);
     setTimeout(() => setCleanupSuccessToast(null), 6000);
   };
@@ -488,11 +365,12 @@ export const CharacterPointsView: React.FC<CharacterPointsViewProps> = ({
   // Calculate character score summary for a student
   const getStudentScoreSummary = (studentId: string) => {
     const student = students.find(s => s.id === studentId);
-    const studentLogs = logs.filter(l => 
+    const rawStudentLogs = logs.filter(l => 
       l.studentId === studentId ||
       (student && student.nisn && l.nisn && l.nisn.trim() === student.nisn.trim()) ||
       (student && l.studentName && student.name && l.studentName.trim().toLowerCase() === student.name.trim().toLowerCase())
     );
+    const studentLogs = deduplicateCharacterLogs(rawStudentLogs);
     
     let positivePoints = 0;
     let negativePoints = 0;
@@ -806,39 +684,6 @@ export const CharacterPointsView: React.FC<CharacterPointsViewProps> = ({
           </div>
           <button onClick={() => setCleanupSuccessToast(null)} className="text-white/80 hover:text-white p-1 cursor-pointer">
             <X className="w-4 h-4" />
-          </button>
-        </div>
-      )}
-
-      {/* Banner Peringatan Adanya Penalti Otomatis Sistem */}
-      {allAutoPenaltyLogs.length > 0 && (
-        <div className="bg-gradient-to-r from-amber-50 to-orange-50 border border-amber-300 rounded-2xl p-4 shadow-xs flex flex-col md:flex-row items-start md:items-center justify-between gap-3">
-          <div className="flex items-start gap-3">
-            <div className="p-2 bg-amber-100 text-amber-800 rounded-xl shrink-0 mt-0.5 md:mt-0">
-              <AlertTriangle className="w-5 h-5 text-amber-700" />
-            </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <h4 className="font-extrabold text-sm text-amber-950">
-                  Terdeteksi {allAutoPenaltyLogs.length} Catatan Penalti Otomatis yang Mengubah Nilai Karakter
-                </h4>
-                <span className="bg-amber-200 text-amber-900 text-[10px] font-black px-2 py-0.5 rounded-full">
-                  Poin Berubah
-                </span>
-              </div>
-              <p className="text-xs text-amber-800/90 mt-0.5 leading-relaxed">
-                Sistem mendeteksi <strong>{autoUnscannedLogs.length}</strong> catatan Belum Scan Presensi dan <strong>{autoUnreturnedLogs.length}</strong> catatan Belum Scan Pulang yang memotong poin karakter siswa. Anda dapat membersihkan penalti ini untuk mengembalikan poin seluruh siswa ke nilai normal.
-              </p>
-            </div>
-          </div>
-
-          <button
-            type="button"
-            onClick={() => setShowCleanupModal(true)}
-            className="w-full md:w-auto px-4 py-2.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs rounded-xl shadow-xs transition-all flex items-center justify-center gap-2 cursor-pointer active:scale-95 shrink-0"
-          >
-            <Eraser className="w-4 h-4" />
-            <span>Bersihkan Log & Pulihkan Poin Siswa</span>
           </button>
         </div>
       )}
@@ -1412,11 +1257,11 @@ export const CharacterPointsView: React.FC<CharacterPointsViewProps> = ({
                 </div>
               ) : (
                 <div className="space-y-3">
-                  {getStudentScoreSummary(detailStudent.id).logs.map((log) => {
+                  {getStudentScoreSummary(detailStudent.id).logs.map((log, idx) => {
                     const isHighlighted = log.id === highlightedLogId;
                     return (
                     <div
-                      key={log.id}
+                      key={`${log.id}_${idx}`}
                       id={`char-log-${log.id}`}
                       className={`p-4 rounded-2xl border transition-all space-y-3 ${
                         isHighlighted

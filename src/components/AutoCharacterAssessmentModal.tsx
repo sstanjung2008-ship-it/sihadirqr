@@ -515,22 +515,23 @@ export const AutoCharacterAssessmentModal: React.FC<AutoCharacterAssessmentModal
       });
 
       // Rule 4: Belum Melakukan Scan Presensi -> Nilai Karakter Negatif (-unscannedPoints)
-      // Data diambil dari daftar absensi siswa pada kolom Jam Masuk DENGAN KRITERIA STATUS MASUK HADIR.
-      // Hanya dinilai jika status masuk siswa adalah 'HADIR', tetapi pada kolom Jam Masuk belum scan presensi (time kosong / '-').
-      const distinctDates = Array.from(new Set<string>(attendanceRecords.map(r => r.date))).sort().slice(-7);
+      // Terdeteksi jika siswa belum melakukan scan pada jam masuk (kosong/belum/'-'/status BELUM_ABSEN), dan bukan Sakit/Izin
+      const distinctDates = Array.from(new Set<string>(attendanceRecords.map(r => r.date))).sort();
       distinctDates.forEach((attDate: string) => {
         const rec = sortedRecords.find(r => r.date === attDate);
-        const isStatusHadir = !!(rec && rec.status === 'HADIR');
-        const isUnscanned = isStatusHadir && (
+        const isLegitPermit = rec && (rec.status === 'SAKIT' || rec.status === 'IZIN');
+        const isUnscanned = !isLegitPermit && (
+          !rec ||
           !rec.time || 
           rec.time === '-' || 
           rec.time.trim() === '' || 
-          rec.time.toLowerCase().includes('belum')
+          rec.time.toLowerCase().includes('belum') ||
+          (rec.status as string) === 'BELUM_ABSEN'
         );
 
         if (isUnscanned) {
           const isAlready = characterLogs.some(l => 
-            l.studentId === student.id && 
+            (l.studentId === student.id || (student.nisn && l.nisn === student.nisn) || (l.studentName && student.name && l.studentName.trim().toLowerCase() === student.name.trim().toLowerCase())) && 
             l.date === attDate && 
             (
               l.id === `auto-unscanned-${student.id}-${attDate}` || 
@@ -553,7 +554,7 @@ export const AutoCharacterAssessmentModal: React.FC<AutoCharacterAssessmentModal
             points: unscannedPoints,
             date: attDate,
             evaluatorName: generalEvaluatorName || 'Sistem Presensi QR',
-            notes: `Penilaian Otomatis Presensi: Status Masuk Hadir tetapi pada kolom Jam Masuk belum melakukan scan presensi (${attDate})`,
+            notes: `Penilaian Otomatis Presensi: Kolom Jam Masuk belum melakukan scan presensi (${attDate})`,
             attendanceDates: [attDate],
             sourceType: 'PRESENSI',
             isSelected: !isAlready,
@@ -1665,11 +1666,11 @@ export const AutoCharacterAssessmentModal: React.FC<AutoCharacterAssessmentModal
                       </td>
                     </tr>
                   ) : (
-                    filteredCandidates.map((candidate) => {
+                    filteredCandidates.map((candidate, idx) => {
                       const isSelected = selectedCandidateIds.has(candidate.id);
                       return (
                         <tr 
-                          key={candidate.id} 
+                          key={`${candidate.id}-${candidate.date}-${idx}`} 
                           className={`hover:bg-indigo-50/40 transition-colors ${
                             candidate.isAlreadyLogged ? 'opacity-60 bg-slate-50/60' : ''
                           }`}
@@ -1705,6 +1706,8 @@ export const AutoCharacterAssessmentModal: React.FC<AutoCharacterAssessmentModal
                               {candidate.ruleType === 'ABSENT_KBM' && <UserX className="w-3.5 h-3.5 text-rose-600 shrink-0" />}
                               {candidate.ruleType === 'LATE' && <Clock className="w-3.5 h-3.5 text-red-500 shrink-0" />}
                               {candidate.ruleType === 'ALPA' && <UserX className="w-3.5 h-3.5 text-rose-500 shrink-0" />}
+                              {candidate.ruleType === 'UNSCANNED' && <UserX className="w-3.5 h-3.5 text-orange-600 shrink-0" />}
+                              {candidate.ruleType === 'UNRETURNED' && <Clock className="w-3.5 h-3.5 text-amber-600 shrink-0" />}
                               {candidate.ruleType === 'DISRUPTIVE_KBM' && <VolumeX className="w-3.5 h-3.5 text-amber-600 shrink-0" />}
                               {candidate.ruleType === 'ON_TIME_3_DAYS' && <CalendarCheck2 className="w-3.5 h-3.5 text-emerald-500 shrink-0" />}
                               

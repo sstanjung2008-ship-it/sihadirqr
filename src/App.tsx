@@ -37,6 +37,7 @@ import {
   saveCharacterTraits,
   getStudentCharacterLogs,
   saveStudentCharacterLogs,
+  deletePermanentManualCharacterLog,
   isManualCharacterLog,
   restoreAllManualCharacterLogs,
   getCharacterPredicateSettings,
@@ -83,7 +84,7 @@ import {
   playTeacherKbmVoiceReminder, 
   isKbmVoiceReminderEnabled 
 } from './lib/kbmVoiceReminder';
-import { run16WitaAutoCharacterAssessment } from './lib/autoCharacterScheduler';
+import { run16WitaAutoCharacterAssessment, reconcileAutoCharacterPenalties } from './lib/autoCharacterScheduler';
 
 export default function App() {
   const [userSession, setUserSessionState] = useState<UserSession | null>(() => getUserSession());
@@ -404,35 +405,21 @@ export default function App() {
     };
   }, [currentRole]);
 
-  // Penilaian Karakter Otomatis 16:00 WITA (Belum Scan & Belum Pulang)
+  // Penilaian Karakter Otomatis (Belum Scan & Belum Pulang) - Dilengkapi timer interval 20 detik ultra-hemat kuota
   useEffect(() => {
     // PENGHEMAT KUOTA: Khusus Admin & Scanner Pos, jangan pernah dijalankan oleh akun Wali Murid (PARENT)!
     if (currentRole === 'PARENT') return;
 
-    // Jalankan pemeriksaan saat aplikasi dimuat
-    run16WitaAutoCharacterAssessment();
+    // 1. Jalankan pemeriksaan saat aplikasi dimuat
+    reconcileAutoCharacterPenalties();
 
-    // Periksa secara berkala setiap 20 detik
+    // 2. Timer interval 20 detik ultra-hemat kuota (0 Cloud Read & 0 Cloud Write bila data tidak berubah)
     const interval = setInterval(() => {
-      run16WitaAutoCharacterAssessment();
+      reconcileAutoCharacterPenalties();
     }, 20000);
-
-    const handleAutoAssessmentEvent = (e: any) => {
-      if (e.detail?.newLogsCount > 0) {
-        setNetworkToast({
-          type: 'info',
-          title: '⭐ Penilaian Karakter Otomatis (16:00 WITA)',
-          message: `Sistem otomatis mencatat ${e.detail.newLogsCount} penilaian karakter negatif baru (${e.detail.unscannedCount} Belum Scan, ${e.detail.unreturnedCount} Belum Pulang) dan disinkronkan ke Cloud dalam 1 pengiriman.`
-        });
-        setTimeout(() => setNetworkToast(null), 6000);
-      }
-    };
-
-    window.addEventListener('sihadir_auto_assessment_completed', handleAutoAssessmentEvent);
 
     return () => {
       clearInterval(interval);
-      window.removeEventListener('sihadir_auto_assessment_completed', handleAutoAssessmentEvent);
     };
   }, [currentRole]);
 
@@ -891,13 +878,13 @@ export default function App() {
               logsChanged = true;
               return false;
             }
-            // If status is not HADIR or entry scan is valid, remove auto-unscanned penalty logs
-            if ((newStatus !== 'HADIR' || hasValidTime) && (l.id.includes('auto-unscanned') || (l.traitType === 'NEGATIF' && l.traitName.toLowerCase().includes('belum') && l.traitName.toLowerCase().includes('scan')))) {
+            // If entry scan is now valid or status is SAKIT/IZIN, remove auto-unscanned penalty logs
+            if ((hasValidTime || newStatus === 'SAKIT' || newStatus === 'IZIN') && (l.id.includes('auto-unscanned') || (l.traitType === 'NEGATIF' && l.traitName.toLowerCase().includes('belum') && l.traitName.toLowerCase().includes('scan')))) {
               logsChanged = true;
               return false;
             }
-            // If student returned or status is not HADIR/TERLAMBAT, remove auto-unreturned penalty logs
-            if ((hasReturned || (newStatus !== 'HADIR' && newStatus !== 'TERLAMBAT')) && (l.id.includes('auto-unreturned') || (l.traitType === 'NEGATIF' && l.traitName.toLowerCase().includes('belum') && l.traitName.toLowerCase().includes('pulang')))) {
+            // If student returned or status is SAKIT/IZIN, remove auto-unreturned penalty logs
+            if ((hasReturned || newStatus === 'SAKIT' || newStatus === 'IZIN') && (l.id.includes('auto-unreturned') || (l.traitType === 'NEGATIF' && l.traitName.toLowerCase().includes('belum') && l.traitName.toLowerCase().includes('pulang')))) {
               logsChanged = true;
               return false;
             }
@@ -1022,8 +1009,8 @@ export default function App() {
               logsChanged = true;
               return false;
             }
-            // If updated to HADIR (which sets nowTime) or away from HADIR, remove auto-unscanned
-            if (l.id.includes('auto-unscanned') || (l.traitType === 'NEGATIF' && l.traitName.toLowerCase().includes('belum') && l.traitName.toLowerCase().includes('scan'))) {
+            // If updated to HADIR (which sets nowTime) or exempt (SAKIT/IZIN), remove auto-unscanned
+            if ((matchUpdate.newStatus === 'HADIR' || matchUpdate.newStatus === 'SAKIT' || matchUpdate.newStatus === 'IZIN') && (l.id.includes('auto-unscanned') || (l.traitType === 'NEGATIF' && l.traitName.toLowerCase().includes('belum') && l.traitName.toLowerCase().includes('scan')))) {
               logsChanged = true;
               return false;
             }
@@ -1452,15 +1439,17 @@ export default function App() {
   };
 
   const handleDeleteCharacterLog = (logId: string) => {
-    const updated = characterLogs.filter(l => l.id !== logId);
+    deletePermanentManualCharacterLog(logId);
+    const updated = characterLogs.filter(l => l.id !== logId && l.id !== logId.trim());
     setCharacterLogsState(updated);
     saveStudentCharacterLogs(updated);
   };
 
   const handleDeleteMultipleCharacterLogs = (logIds: string[]) => {
     if (!logIds || logIds.length === 0) return;
-    const idSet = new Set(logIds);
-    const updated = characterLogs.filter(l => !idSet.has(l.id));
+    const idSet = new Set(logIds.map(id => id.trim()));
+    logIds.forEach(id => deletePermanentManualCharacterLog(id));
+    const updated = characterLogs.filter(l => !idSet.has(l.id?.trim()));
     setCharacterLogsState(updated);
     saveStudentCharacterLogs(updated);
   };

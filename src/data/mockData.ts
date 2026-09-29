@@ -27,6 +27,7 @@ export const INITIAL_SCHOOL_PROFILE: SchoolProfile = {
   autoAlpaTime: "08:30",
   autoAlpaEnabled: true,
   autoCharacterAssessmentEnabled: true,
+  auto16WitaBackgroundExecutionEnabled: true,
   autoCharacterPoints: {
     latePoints: 2,
     alpaPoints: 5,

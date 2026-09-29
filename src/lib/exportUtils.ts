@@ -1838,7 +1838,11 @@ export async function exportCharacterPointsPdf(
 
   // Table Data
   const tableData = filteredStudents.map((std, idx) => {
-    const studentLogs = logs.filter(l => l.studentId === std.id);
+    const studentLogs = logs.filter(l => 
+      l.studentId === std.id || 
+      (std.nisn && l.nisn && l.nisn.trim() === std.nisn.trim()) ||
+      (l.studentName && std.name && l.studentName.trim().toLowerCase() === std.name.trim().toLowerCase())
+    );
     const posLogs = studentLogs.filter(l => l.traitType === 'POSITIF');
     const negLogs = studentLogs.filter(l => l.traitType === 'NEGATIF');
 
@@ -2012,7 +2016,11 @@ export async function exportStudentCharacterDetailPdf(
   doc.text(periodText, 105, 41, { align: 'center' });
 
   // Student Logs Calculation
-  const studentLogs = logs.filter(l => l.studentId === student.id || (student.nisn && l.nisn === student.nisn));
+  const studentLogs = logs.filter(l => 
+    l.studentId === student.id || 
+    (student.nisn && l.nisn && l.nisn.trim() === student.nisn.trim()) ||
+    (l.studentName && student.name && l.studentName.trim().toLowerCase() === student.name.trim().toLowerCase())
+  );
   const sortedLogs = [...studentLogs].sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
 
   const posLogs = studentLogs.filter(l => l.traitType === 'POSITIF');

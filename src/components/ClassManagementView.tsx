@@ -367,8 +367,8 @@ export const ClassManagementView: React.FC<ClassManagementViewProps> = ({
       const posLogs = stdLogs.filter(l => l.traitType === 'POSITIF');
       const negLogs = stdLogs.filter(l => l.traitType === 'NEGATIF');
 
-      const posPoints = posLogs.reduce((sum, item) => sum + (item.points || 0), 0);
-      const negPoints = negLogs.reduce((sum, item) => sum + (item.points || 0), 0);
+      const posPoints = posLogs.reduce((sum, item) => sum + Math.abs(item.points || 0), 0);
+      const negPoints = negLogs.reduce((sum, item) => sum + Math.abs(item.points || 0), 0);
       const netPoints = posPoints - negPoints;
 
       const pred = getCharacterPredicate(netPoints);
@@ -461,15 +461,25 @@ export const ClassManagementView: React.FC<ClassManagementViewProps> = ({
     if (classStd.length === 0) return { avgScore: 0, countA: 0, countB: 0, countC: 0, countD: 0, countE: 0, countF: 0, totalLogs: 0 };
 
     const classStdIds = new Set(classStd.map(s => s.id));
-    const logs = characterLogs.filter(l => classStdIds.has(l.studentId));
+    const classStdNisns = new Set(classStd.map(s => s.nisn).filter(Boolean));
+    const classStdNames = new Set(classStd.map(s => s.name.trim().toLowerCase()));
+    const logs = characterLogs.filter(l => 
+      classStdIds.has(l.studentId) || 
+      (l.nisn && classStdNisns.has(l.nisn)) || 
+      (l.studentName && classStdNames.has(l.studentName.trim().toLowerCase()))
+    );
 
     let sumNet = 0;
     let countA = 0, countB = 0, countC = 0, countD = 0, countE = 0, countF = 0;
 
     classStd.forEach(std => {
-      const stdLogs = logs.filter(l => l.studentId === std.id);
-      const posPoints = stdLogs.filter(l => l.traitType === 'POSITIF').reduce((s, i) => s + (i.points || 0), 0);
-      const negPoints = stdLogs.filter(l => l.traitType === 'NEGATIF').reduce((s, i) => s + (i.points || 0), 0);
+      const stdLogs = logs.filter(l => 
+        l.studentId === std.id ||
+        (std.nisn && l.nisn && l.nisn.trim() === std.nisn.trim()) ||
+        (l.studentName && std.name && l.studentName.trim().toLowerCase() === std.name.trim().toLowerCase())
+      );
+      const posPoints = stdLogs.filter(l => l.traitType === 'POSITIF').reduce((s, i) => s + Math.abs(i.points || 0), 0);
+      const negPoints = stdLogs.filter(l => l.traitType === 'NEGATIF').reduce((s, i) => s + Math.abs(i.points || 0), 0);
       const net = posPoints - negPoints;
       sumNet += net;
 

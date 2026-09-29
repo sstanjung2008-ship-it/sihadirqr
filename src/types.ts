@@ -121,7 +121,6 @@ export interface AutoCharacterPointSettings {
   onTimeRequiredDays: number; // default 3
   unscannedPoints?: number; // default 1 (Belum Scan Presensi)
   unreturnedPoints?: number; // default 1 (Belum Scan Pulang)
-  unscannedBothPoints?: number; // default 3 (Karakter Belum scan Masuk dan Pulang)
 }
 
 export interface SchoolProfile {
@@ -146,6 +145,7 @@ export interface SchoolProfile {
   autoAlpaTime?: string; // e.g. "08:30" Waktu Batas Otomatis Alpa
   autoAlpaEnabled?: boolean; // Saklar aktif/non-aktif penentuan otomatis status ALPA
   autoCharacterAssessmentEnabled?: boolean; // Saklar aktif/non-aktif Penilaian Karakter Otomatis
+  auto16WitaBackgroundExecutionEnabled?: boolean; // Saklar eksekusi background otomatis 16:00 WITA tanpa konfirmasi (default: false)
   autoCharacterPoints?: AutoCharacterPointSettings; // Konfigurasi besaran nilai poin untuk aturan karakter otomatis
   lateToleranceMinutes: number; // e.g. 15 -> after 07:15 is TERLAMBAT
   educationLevel: string; // e.g. "SMP / MTs"
@@ -283,6 +283,7 @@ export interface StudentCharacterLog {
   followUpPhotoUrl?: string; // Upload bukti foto tindak lanjut
   followUpDate?: string; // Waktu/tanggal tindak lanjut
   followUpBy?: string; // Petugas / Penindak Lanjut
+  isManual?: boolean; // Penanda log diisi manual oleh guru/admin, permanen & terlindungi dari penghapusan sistem
 }
 
 export interface StudentGradeItem {

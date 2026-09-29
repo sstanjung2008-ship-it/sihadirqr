@@ -143,11 +143,11 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
         let latestTrait = '';
         stdLogs.forEach(l => {
           if (l.traitType === 'POSITIF') {
-            pts += l.points;
+            pts += Math.abs(l.points || 0);
             posCount++;
             if (!latestTrait) latestTrait = l.traitName;
           } else {
-            pts -= l.points;
+            pts -= Math.abs(l.points || 0);
           }
         });
         if (pts > 0) {
@@ -198,9 +198,9 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
       let latestViolation = '';
       stdLogs.forEach(l => {
         if (l.traitType === 'POSITIF') {
-          pts += l.points;
+          pts += Math.abs(l.points || 0);
         } else {
-          pts -= l.points;
+          pts -= Math.abs(l.points || 0);
           negCount++;
           if (!latestViolation) latestViolation = l.traitName;
         }

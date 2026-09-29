@@ -2535,9 +2535,9 @@ export const RecapExportView: React.FC<RecapExportViewProps> = ({
             {/* Modal Score Overview Bar */}
             {(() => {
               const studentLogs = (characterLogs || []).filter(l => 
-                l.studentId === selectedCharacterStudentDetail.id || 
-                (selectedCharacterStudentDetail.nisn && selectedCharacterStudentDetail.nisn !== '-' && l.nisn === selectedCharacterStudentDetail.nisn) || 
-                (selectedCharacterStudentDetail.name && l.studentName && l.studentName.toLowerCase() === selectedCharacterStudentDetail.name.toLowerCase())
+                l.studentId === selectedCharacterStudentDetail.id ||
+                (selectedCharacterStudentDetail.nisn && l.nisn && l.nisn.trim() === selectedCharacterStudentDetail.nisn.trim()) ||
+                (l.studentName && selectedCharacterStudentDetail.name && l.studentName.trim().toLowerCase() === selectedCharacterStudentDetail.name.trim().toLowerCase())
               );
               const posLogs = studentLogs.filter(l => l.traitType === 'POSITIF');
               const negLogs = studentLogs.filter(l => l.traitType === 'NEGATIF');
@@ -2604,9 +2604,9 @@ export const RecapExportView: React.FC<RecapExportViewProps> = ({
               {(() => {
                 const logs = (characterLogs || [])
                   .filter(l => 
-                    l.studentId === selectedCharacterStudentDetail.id || 
-                    (selectedCharacterStudentDetail.nisn && selectedCharacterStudentDetail.nisn !== '-' && l.nisn === selectedCharacterStudentDetail.nisn) || 
-                    (selectedCharacterStudentDetail.name && l.studentName && l.studentName.toLowerCase() === selectedCharacterStudentDetail.name.toLowerCase())
+                    l.studentId === selectedCharacterStudentDetail.id ||
+                    (selectedCharacterStudentDetail.nisn && l.nisn && l.nisn.trim() === selectedCharacterStudentDetail.nisn.trim()) ||
+                    (l.studentName && selectedCharacterStudentDetail.name && l.studentName.trim().toLowerCase() === selectedCharacterStudentDetail.name.trim().toLowerCase())
                   )
                   .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
 
@@ -2679,7 +2679,11 @@ export const RecapExportView: React.FC<RecapExportViewProps> = ({
                   if (!selectedCharacterStudentDetail) return;
                   setIsExportingCharacterDetail(true);
                   try {
-                    const studentLogs = (characterLogs || []).filter(l => l.studentId === selectedCharacterStudentDetail.id);
+                    const studentLogs = (characterLogs || []).filter(l => 
+                      l.studentId === selectedCharacterStudentDetail.id ||
+                      (selectedCharacterStudentDetail.nisn && l.nisn && l.nisn.trim() === selectedCharacterStudentDetail.nisn.trim()) ||
+                      (l.studentName && selectedCharacterStudentDetail.name && l.studentName.trim().toLowerCase() === selectedCharacterStudentDetail.name.trim().toLowerCase())
+                    );
                     await exportStudentCharacterDetailPdf(
                       schoolProfile,
                       selectedCharacterStudentDetail,

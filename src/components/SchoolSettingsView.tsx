@@ -2472,7 +2472,7 @@ export const SchoolSettingsView: React.FC<SchoolSettingsViewProps> = ({
               <div className="flex items-center justify-between">
                 <span className="font-extrabold text-rose-800 flex items-center gap-1.5">
                   <UserX className="w-4 h-4 text-rose-600" />
-                  Tidak Masuk Sekolah Tanpa Keterangan / Alpa
+                  Alpa Presensi
                 </span>
                 <span className="text-[10px] font-black bg-rose-100 text-rose-800 px-2 py-0.5 rounded-full">
                   -NEGATIF
@@ -2499,7 +2499,6 @@ export const SchoolSettingsView: React.FC<SchoolSettingsViewProps> = ({
                           onTimeRequiredDays: 3,
                           unscannedPoints: 1,
                           unreturnedPoints: 1,
-                          unscannedBothPoints: 3,
                         }),
                         alpaPoints: Math.max(1, Math.abs(Number(e.target.value)) || 5)
                       }
@@ -2592,7 +2591,6 @@ export const SchoolSettingsView: React.FC<SchoolSettingsViewProps> = ({
                           onTimeRequiredDays: 3,
                           unscannedPoints: 1,
                           unreturnedPoints: 1,
-                          unscannedBothPoints: 3,
                         }),
                         unreturnedPoints: Math.max(1, Math.abs(Number(e.target.value)) || 1)
                       }
@@ -2603,97 +2601,82 @@ export const SchoolSettingsView: React.FC<SchoolSettingsViewProps> = ({
                 </div>
               </div>
             </div>
-
-            {/* 9. Karakter Belum scan Masuk dan Pulang (Otomatis 16:00 WITA) */}
-            <div className="p-3.5 bg-rose-50/40 border border-rose-200 rounded-2xl space-y-2">
-              <div className="flex items-center justify-between">
-                <span className="font-extrabold text-rose-950 flex items-center gap-1.5">
-                  <UserX className="w-4 h-4 text-rose-600" />
-                  Karakter Belum scan Masuk dan Pulang
-                </span>
-                <span className="text-[10px] font-black bg-rose-100 text-rose-800 px-2 py-0.5 rounded-full">
-                  -NEGATIF
-                </span>
-              </div>
-              <p className="text-[10px] text-slate-500 leading-tight">
-                Khusus siswa dengan kriteria status masuk Belum Absen hingga batas waktu 16:00 WITA (tidak melakukan scan presensi masuk maupun scan kepulangan).
-              </p>
-              <div className="flex items-center justify-between pt-1">
-                <span className="text-[11px] text-slate-600 font-medium">Nilai Poin:</span>
-                <div className="flex items-center gap-1">
-                  <input
-                    type="number"
-                    min="1"
-                    max="50"
-                    value={formData.autoCharacterPoints?.unscannedBothPoints ?? 3}
-                    onChange={(e) => setFormData({
-                      ...formData,
-                      autoCharacterPoints: {
-                        ...(formData.autoCharacterPoints || {
-                          latePoints: 2,
-                          alpaPoints: 5,
-                          disruptivePoints: 1,
-                          absentKbmPoints: 2,
-                          veryActiveKbmPoints: 1,
-                          onTimePoints: 1,
-                          onTimeRequiredDays: 3,
-                          unscannedPoints: 1,
-                          unreturnedPoints: 1,
-                          unscannedBothPoints: 3,
-                        }),
-                        unscannedBothPoints: Math.max(1, Math.abs(Number(e.target.value)) || 3)
-                      }
-                    })}
-                    className="w-14 px-2 py-1 bg-white border border-rose-300 rounded-lg text-xs font-black text-center text-rose-900 focus:outline-none focus:ring-1 focus:ring-rose-500"
-                  />
-                  <span className="text-[11px] font-bold text-rose-700">-Poin</span>
-                </div>
-              </div>
-            </div>
           </div>
 
           {/* Banner Penjadwalan Eksekusi Otomatis 16:00 WITA */}
-          <div className="mt-4 p-4 rounded-2xl bg-gradient-to-r from-indigo-900/90 to-slate-900 text-white flex flex-col md:flex-row items-start md:items-center justify-between gap-4 border border-indigo-700/60 shadow-md">
-            <div className="space-y-1">
-              <div className="flex items-center gap-2">
-                <span className="bg-amber-400 text-slate-950 text-[10px] font-black px-2 py-0.5 rounded-full">
-                  ⏰ Eksekusi 16:00 WITA
-                </span>
-                <span className="text-xs font-extrabold text-amber-200">
-                  Sinkronisasi Otomatis Terjadwal & Hemat Kuota Cloud
-                </span>
+          <div className="mt-4 p-4 rounded-2xl bg-gradient-to-r from-indigo-900/90 to-slate-900 text-white flex flex-col gap-4 border border-indigo-700/60 shadow-md">
+            <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+              <div className="space-y-1">
+                <div className="flex items-center gap-2">
+                  <span className="bg-amber-400 text-slate-950 text-[10px] font-black px-2 py-0.5 rounded-full">
+                    ⏰ Eksekusi 16:00 WITA
+                  </span>
+                  <span className="text-xs font-extrabold text-amber-200">
+                    Sinkronisasi Terjadwal & Kontrol Evaluasi Karakter
+                  </span>
+                </div>
+                <p className="text-[11px] text-slate-300 max-w-2xl leading-relaxed">
+                  Pemeriksaan siswa yang <strong>Belum Scan Presensi (-{formData.autoCharacterPoints?.unscannedPoints ?? 1} Poin)</strong> atau <strong>Belum Scan Pulang (-{formData.autoCharacterPoints?.unreturnedPoints ?? 1} Poin)</strong>. Gunakan tombol uji coba untuk mengevaluasi manual atau atur saklar di bawah.
+                </p>
               </div>
-              <p className="text-[11px] text-slate-300 max-w-2xl leading-relaxed">
-                Setiap hari pada pukul <strong>16:00 WITA</strong>, sistem secara otomatis memeriksa seluruh data absensi siswa hari ini. Siswa yang <strong>Belum Scan Presensi (-{formData.autoCharacterPoints?.unscannedPoints ?? 1} Poin)</strong>, <strong>Belum Scan Pulang (-{formData.autoCharacterPoints?.unreturnedPoints ?? 1} Poin)</strong>, atau <strong>Belum Scan Masuk & Pulang (-{formData.autoCharacterPoints?.unscannedBothPoints ?? 3} Poin)</strong> akan langsung dicatat ke log karakter dan <strong>dikirim serentak dalam 1 batch pengiriman (single write) ke Cloud Firestore</strong>.
-              </p>
+
+              <div className="shrink-0 flex flex-col items-end gap-1.5 w-full md:w-auto">
+                <button
+                  type="button"
+                  onClick={handleRunManual16WitaAssessment}
+                  disabled={isRunningAutoAssessment}
+                  className="w-full md:w-auto px-4 py-2 bg-amber-400 hover:bg-amber-300 text-slate-950 font-black text-xs rounded-xl transition-all shadow-xs flex items-center justify-center gap-2 cursor-pointer active:scale-95 disabled:opacity-50"
+                >
+                  {isRunningAutoAssessment ? (
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                  ) : (
+                    <Sparkles className="w-3.5 h-3.5 text-slate-950" />
+                  )}
+                  <span>Jalankan Evaluasi 16:00 WITA Sekarang</span>
+                </button>
+
+                {manualAssessmentResult && (
+                  <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md ${
+                    manualAssessmentResult.type === 'success' 
+                      ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30' 
+                      : manualAssessmentResult.type === 'error'
+                      ? 'bg-rose-500/20 text-rose-300 border border-rose-500/30'
+                      : 'bg-sky-500/20 text-sky-300 border border-sky-500/30'
+                  }`}>
+                    {manualAssessmentResult.message}
+                  </span>
+                )}
+              </div>
             </div>
 
-            <div className="shrink-0 flex flex-col items-end gap-1.5 w-full md:w-auto">
-              <button
-                type="button"
-                onClick={handleRunManual16WitaAssessment}
-                disabled={isRunningAutoAssessment}
-                className="w-full md:w-auto px-4 py-2 bg-amber-400 hover:bg-amber-300 text-slate-950 font-black text-xs rounded-xl transition-all shadow-xs flex items-center justify-center gap-2 cursor-pointer active:scale-95 disabled:opacity-50"
-              >
-                {isRunningAutoAssessment ? (
-                  <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                ) : (
-                  <Sparkles className="w-3.5 h-3.5 text-slate-950" />
-                )}
-                <span>Jalankan Evaluasi 16:00 WITA Sekarang</span>
-              </button>
-
-              {manualAssessmentResult && (
-                <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md ${
-                  manualAssessmentResult.type === 'success' 
-                    ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30' 
-                    : manualAssessmentResult.type === 'error'
-                    ? 'bg-rose-500/20 text-rose-300 border border-rose-500/30'
-                    : 'bg-sky-500/20 text-sky-300 border border-sky-500/30'
-                }`}>
-                  {manualAssessmentResult.message}
+            {/* Saklar Eksekusi Otomatis Latar Belakang */}
+            <div className="pt-3 border-t border-indigo-700/60 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="space-y-0.5">
+                <span className="text-xs font-bold text-white flex items-center gap-1.5">
+                  Eksekusi Otomatis Latar Belakang (Background Auto-Run)
                 </span>
-              )}
+                <p className="text-[10px] text-slate-300 max-w-xl">
+                  {formData.auto16WitaBackgroundExecutionEnabled === true 
+                    ? '🟢 Aktif: Sistem otomatis menambahkan penalti setiap pukul 16:00 WITA di background.' 
+                    : '🛡️ Non-Aktif (Disarankan): Poin karakter siswa aman dan tidak akan berkurang sendiri di latar belakang tanpa persetujuan Admin/Guru.'}
+                </p>
+              </div>
+
+              <label className="relative inline-flex items-center cursor-pointer select-none shrink-0 self-start sm:self-auto">
+                <input
+                  type="checkbox"
+                  checked={formData.auto16WitaBackgroundExecutionEnabled === true}
+                  onChange={(e) => setFormData({
+                    ...formData,
+                    auto16WitaBackgroundExecutionEnabled: e.target.checked
+                  })}
+                  className="sr-only peer"
+                />
+                <div className="w-10 h-5 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-amber-400"></div>
+                <span className="ml-2 text-xs font-bold text-amber-200">
+                  {formData.auto16WitaBackgroundExecutionEnabled === true ? 'Aktif' : 'Non-Aktif'}
+                </span>
+              </label>
             </div>
           </div>
         </div>
@@ -3734,7 +3717,7 @@ export const SchoolSettingsView: React.FC<SchoolSettingsViewProps> = ({
             <div className="bg-white/5 border border-white/10 p-3 rounded-2xl space-y-1">
               <span className="font-bold text-emerald-300">Perbaikan Sistem Baru (Smart On-Demand):</span>
               <p className="text-slate-300 leading-relaxed text-[10.5px]">
-                Akun orang tua kini menggunakan cache pintar 30 menit (0 read dari Firestore). Dengan ditambahkannya fitur jadwal operasional dan tombol nonaktif ini, kuota gratis Firebase Spark (50.000 read/hari) tidak akan pernah terlampaui.
+                Akun orang tua kini menggunakan cache pintar 5 menit (0 read dari Firestore). Dengan ditambahkannya fitur jadwal operasional dan tombol nonaktif ini, kuota gratis Firebase Spark (50.000 read/hari) tidak akan pernah terlampaui.
               </p>
             </div>
           </div>

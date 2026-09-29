@@ -35,6 +35,9 @@ export const KEYS = {
 // Cadangan aman lokal terpisah agar scan kehadiran siswa tidak pernah hilang
 export const SAFE_ATTENDANCE_BACKUP_KEY = 'sihadir_attendance_backup_safe';
 
+// Cadangan permanen lokal terpisah khusus catatan karakter manual siswa agar tidak pernah hilang
+export const SAFE_MANUAL_CHARACTER_LOGS_BACKUP_KEY = 'sihadir_manual_character_logs_permanent_v2';
+
 export type CloudSyncStatus = 'connected' | 'syncing' | 'offline' | 'quota_exceeded';
 let currentSyncStatus: CloudSyncStatus = 'syncing';
 let isFirestoreInitialized = false;
@@ -234,102 +237,38 @@ export function isValidAttendanceRecord(rec: any): boolean {
  */
 export function validateAndSanitizeAttendanceRecords(records: any[]): AttendanceRecord[] {
   if (!Array.isArray(records)) return [];
-
-  // Group and intelligently merge by student and date so a student can NEVER have duplicate conflicting records on the same day!
-  const recordMap = new Map<string, AttendanceRecord>();
+  const cleanList: AttendanceRecord[] = [];
+  const seenKeys = new Set<string>();
 
   for (let i = 0; i < records.length; i++) {
     const r = records[i];
     if (!isValidAttendanceRecord(r)) continue;
 
-    const studentId = String(r.studentId).trim();
-    const date = String(r.date).trim();
-    const nisn = String(r.nisn || '').trim();
-    const primaryKey = `${date}__${studentId}`;
+    const dedupeKey = r.id ? `id_${r.id}` : `${r.date}__${r.studentId}`;
+    if (seenKeys.has(dedupeKey)) continue;
+    seenKeys.add(dedupeKey);
 
-    const rawTime = (r.time && r.time !== '-' && !String(r.time).toLowerCase().includes('belum')) ? String(r.time).trim() : '-';
-    const rawReturnTime = (r.returnTime && r.returnTime !== '-' && !String(r.returnTime).toLowerCase().includes('belum')) ? String(r.returnTime).trim() : undefined;
-    const rawReturnStatus = (r.returnStatus && r.returnStatus !== 'BELUM_PULANG') ? r.returnStatus : undefined;
+    const cleanRecord: AttendanceRecord = {
+      id: r.id || `att-${Date.now()}-${r.studentId}`,
+      studentId: String(r.studentId).trim(),
+      studentName: String(r.studentName || 'Siswa').trim(),
+      nisn: String(r.nisn || '').trim(),
+      className: String(r.className || '').trim(),
+      date: String(r.date).trim(),
+      time: (r.time && r.time !== '-') ? String(r.time).trim() : '-',
+      status: r.status || 'HADIR',
+      method: r.method || 'QR_SCAN',
+      scannedBy: r.scannedBy || 'Pos Scanner Utama',
+      parentNotified: Boolean(r.parentNotified),
+    };
 
-    const existing = recordMap.get(primaryKey) || (nisn ? recordMap.get(`${date}__nisn_${nisn}`) : undefined);
+    if (r.returnTime && r.returnTime !== '-') cleanRecord.returnTime = String(r.returnTime).trim();
+    if (r.returnStatus) cleanRecord.returnStatus = r.returnStatus;
+    if (r.returnScannedBy) cleanRecord.returnScannedBy = String(r.returnScannedBy).trim();
+    if (r.notes) cleanRecord.notes = String(r.notes).trim();
 
-    if (!existing) {
-      const cleanRecord: AttendanceRecord = {
-        id: r.id || `att-${date}-${studentId}`,
-        studentId,
-        studentName: String(r.studentName || 'Siswa').trim(),
-        nisn,
-        className: String(r.className || '').trim(),
-        date,
-        time: rawTime,
-        status: r.status || 'HADIR',
-        method: r.method || 'QR_SCAN',
-        scannedBy: r.scannedBy || 'Pos Scanner Utama',
-        parentNotified: Boolean(r.parentNotified),
-      };
-
-      if (rawReturnTime) cleanRecord.returnTime = rawReturnTime;
-      if (rawReturnStatus) cleanRecord.returnStatus = rawReturnStatus;
-      if (r.returnScannedBy) cleanRecord.returnScannedBy = String(r.returnScannedBy).trim();
-      if (r.notes) cleanRecord.notes = String(r.notes).trim();
-
-      recordMap.set(primaryKey, cleanRecord);
-      if (nisn) recordMap.set(`${date}__nisn_${nisn}`, cleanRecord);
-    } else {
-      // MERGE existing with incoming record: NEVER overwrite a real scan with empty/unscanned data!
-      // 1. Time (Jam Masuk): prefer real scan time
-      if (rawTime !== '-' && existing.time === '-') {
-        existing.time = rawTime;
-      }
-
-      // 2. Return Time (Jam Pulang): prefer real return time
-      if (rawReturnTime && !existing.returnTime) {
-        existing.returnTime = rawReturnTime;
-      }
-
-      // 3. Return Status: prefer completed return status
-      const isCompleted = (s?: string) => s === 'PULANG' || s === 'PULANG_CEPAT' || s === 'PULANG_TEPAT';
-      if (isCompleted(rawReturnStatus)) {
-        existing.returnStatus = rawReturnStatus;
-      } else if (!existing.returnStatus && rawReturnStatus) {
-        existing.returnStatus = rawReturnStatus;
-      }
-
-      // 4. Status Masuk: prefer non-ALPA
-      if (existing.status === 'ALPA' && r.status && r.status !== 'ALPA') {
-        existing.status = r.status;
-      }
-
-      // 5. Method: prefer QR_SCAN
-      if (r.method === 'QR_SCAN') {
-        existing.method = 'QR_SCAN';
-      }
-
-      // 6. Scanners
-      if (r.scannedBy && !r.scannedBy.includes('Sistem Otomatis')) {
-        existing.scannedBy = r.scannedBy;
-      }
-      if (r.returnScannedBy && !r.returnScannedBy.includes('Sistem Otomatis')) {
-        existing.returnScannedBy = r.returnScannedBy;
-      }
-
-      // 7. Notes
-      if (r.notes && !existing.notes) {
-        existing.notes = r.notes;
-      }
-
-      // 8. NISN / studentName / className
-      if (!existing.nisn && nisn) existing.nisn = nisn;
-      if ((!existing.studentName || existing.studentName === 'Siswa') && r.studentName) {
-        existing.studentName = String(r.studentName).trim();
-      }
-      if (!existing.className && r.className) {
-        existing.className = String(r.className).trim();
-      }
-    }
+    cleanList.push(cleanRecord);
   }
-
-  const cleanList = Array.from(new Set(recordMap.values()));
 
   // Urutkan berdasarkan tanggal terbaru (descending), lalu jam (descending)
   return cleanList.sort((a, b) => {
@@ -995,19 +934,7 @@ export function mergeStudentLists(local: Student[], cloud: Student[]): Student[]
     }
   });
 
-  // Ensure strictly unique student IDs in the final merged array to prevent React duplicate key warnings
-  const finalStudentMap = new Map<string, Student>();
-  for (const s of map.values()) {
-    if (!s || !s.id) continue;
-    const cleanId = s.id.trim();
-    if (!finalStudentMap.has(cleanId)) {
-      finalStudentMap.set(cleanId, s);
-    } else {
-      finalStudentMap.set(cleanId, { ...finalStudentMap.get(cleanId)!, ...s });
-    }
-  }
-
-  return Array.from(finalStudentMap.values());
+  return Array.from(map.values());
 }
 
 export function mergeClassLists(local: SchoolClass[], cloud: SchoolClass[]): SchoolClass[] {
@@ -1148,19 +1075,7 @@ export function mergeTeacherLists(local: Teacher[], cloud: Teacher[]): Teacher[]
     }
   });
 
-  // Ensure strictly unique teacher IDs in the final merged array to prevent React duplicate key warnings
-  const finalTeacherMap = new Map<string, Teacher>();
-  for (const t of map.values()) {
-    if (!t || !t.id) continue;
-    const cleanId = t.id.trim();
-    if (!finalTeacherMap.has(cleanId)) {
-      finalTeacherMap.set(cleanId, t);
-    } else {
-      finalTeacherMap.set(cleanId, { ...finalTeacherMap.get(cleanId)!, ...t });
-    }
-  }
-
-  return Array.from(finalTeacherMap.values());
+  return Array.from(map.values());
 }
 
 /**
@@ -1995,14 +1910,14 @@ export function stopFirestoreRealtimeSync(): void {
   isFirestoreInitialized = false;
 }
 
-const PARENT_SYNC_COOLDOWN_MS = 30 * 60 * 1000; // 30 menit cache cooldown
+const PARENT_SYNC_COOLDOWN_MS = 5 * 60 * 1000; // 5 menit cache cooldown
 let lastParentRefreshTime = 0;
 
 /**
  * PENGHEMAT KUOTA TERTINGGI: Sinkronisasi Sesuai Kebutuhan Khusus Akun Wali Murid (PARENT)
  * 1. Tidak memasang listener onSnapshot real-time (mencegah ledakan 60.000 read saat ratusan siswa di-scan di gerbang).
  * 2. Menggunakan LocalStorage instan (0 read).
- * 3. Jika cache lokal kadaluarsa (> 30 menit) atau ditekan tombol segarkan, hanya membaca dokumen terkait (KEYS.ATTENDANCE & KEYS.LEAVES).
+ * 3. Jika cache lokal kadaluarsa (> 5 menit) atau ditekan tombol segarkan, hanya membaca dokumen terkait (KEYS.ATTENDANCE & KEYS.LEAVES).
  * 4. 100% GRATIS dan menjamin kuota Firebase Spark (50.000 read/hari) tidak akan pernah tersentuh habis.
  */
 export async function syncParentDataOnDemand(force: boolean = false): Promise<{ success: boolean; message: string }> {
@@ -2022,11 +1937,11 @@ export async function syncParentDataOnDemand(force: boolean = false): Promise<{ 
   const localProfileStr = localStorage.getItem(KEYS.PROFILE);
   const isFirstTimeBoot = !localStudentsStr || !localProfileStr || localStudentsStr === '[]';
 
-  // Jika bukan booting awal, bukan paksa (force), dan masih dalam masa berlaku cache (30 menit):
+  // Jika bukan booting awal, bukan paksa (force), dan masih dalam masa berlaku cache (5 menit):
   // TIDAK MELAKUKAN BACA SAMA SEKALI KE FIRESTORE! (0 Reads, 100% Hemat Kuota)
   if (!isFirstTimeBoot && !force && timeSinceLastSync < PARENT_SYNC_COOLDOWN_MS) {
     setCloudSyncStatus('connected');
-    return { success: true, message: 'Data presensi lokal masih baru (mode hemat kuota 30 menit aktif).' };
+    return { success: true, message: 'Data presensi lokal masih baru (mode hemat kuota aktif).' };
   }
 
   // Rate limit agar tombol segarkan tidak bisa dispam (minimal 10 detik jeda)
@@ -2174,7 +2089,7 @@ export function initFirestoreRealtimeSync(role?: UserRole) {
   // Sebagai gantinya, akun Orang Tua menggunakan sistem "Smart On-Demand Cached Read" untuk data presensi:
   // 1. Kunjungan pertama: Ambil dokumen via getDoc (hanya 1-2 read), lalu simpan ke LocalStorage.
   // 2. Kunjungan berikutnya: Langsung baca LocalStorage (0 read).
-  // 3. Jika cache sudah lewat 30 menit atau orang tua klik "Segarkan Status", lakukan 1 read getDoc.
+  // 3. Jika cache sudah lewat 5 menit atau orang tua klik "Segarkan Status", lakukan 1 read getDoc.
   // SATU-SATUNYA listener real-time untuk HP Orang Tua adalah KEYS.PROFILE (hanya 1 dokumen tunggal):
   // Menjamin jika Admin menonaktifkan portal orang tua atau menekan tombol paksa log off,
   // HP seluruh orang tua seketika menerima pembaruan secara real-time dan ter-log off otomatis!
@@ -2315,7 +2230,7 @@ export function initFirestoreRealtimeSync(role?: UserRole) {
                   if (currentLocalStr !== mergedStr) {
                     lastSavedStringCache[key] = mergedStr;
                     safeSetLocalStorage(key, mergedStr);
-                    safeSetLocalStorage(key + '_updatedAt', String(cloudUpdatedAt || Date.now()));
+                    safeSetLocalStorage(key + '_updatedAt', String(Math.max(cloudUpdatedAt, localUpdatedAt, Date.now())));
                     notifyStorageUpdated();
                   }
                   setCloudSyncStatus('connected');
@@ -2345,7 +2260,7 @@ export function initFirestoreRealtimeSync(role?: UserRole) {
                   if (currentLocalStr !== mergedStr) {
                     lastSavedStringCache[key] = mergedStr;
                     safeSetLocalStorage(key, mergedStr);
-                    safeSetLocalStorage(key + '_updatedAt', String(cloudUpdatedAt || Date.now()));
+                    safeSetLocalStorage(key + '_updatedAt', String(Math.max(cloudUpdatedAt, localUpdatedAt, Date.now())));
                     notifyStorageUpdated();
                   }
                   setCloudSyncStatus('connected');
@@ -2378,18 +2293,25 @@ export function initFirestoreRealtimeSync(role?: UserRole) {
                   const mergedAtt = mergeAttendanceLists(currentLocalAtt, cleanCloudAtt);
                   const cleanMergedAtt = validateAndSanitizeAttendanceRecords(mergedAtt);
                   const mergedStr = JSON.stringify(cleanMergedAtt);
-
-                  // PENGHEMAT KUOTA TERTINGGI & ANTI-PING-PONG WRITE LOOP:
-                  // onSnapshot adalah saluran BACA (incoming stream).
-                  // JANGAN PERNAH memanggil writeCloudDocument dari dalam onSnapshot callback!
-                  // Setiap perangkat hanya menyinkronkan data masuk ke LocalStorage dan memperbarui UI.
-                  // Penulisan ke Cloud HANYA dilakukan saat ada aksi pemindaian aktif (flushAttendanceScanQueue)
-                  // atau aksi input pengguna (saveAttendanceRecords).
+                  
                   if (currentLocalStr !== mergedStr) {
                     lastSavedStringCache[key] = mergedStr;
                     safeSetLocalStorage(key, mergedStr);
-                    safeSetLocalStorage(key + '_updatedAt', String(cloudUpdatedAt || Date.now()));
+                    safeSetLocalStorage(key + '_updatedAt', String(Math.max(cloudUpdatedAt, localUpdatedAt, Date.now())));
                     notifyStorageUpdated();
+                  }
+
+                  // PERLINDUNGAN MULTI-DEVICE ANTI-TIMPA (CONCURRENT SCANNING SAFETY):
+                  // HANYA sinkronkan balik ke Cloud jika perangkat ini memiliki antrean scan lokal yang sedang aktif (scanQueuePendingCount > 0)!
+                  // JANGAN sinkronkan balik jika scanQueuePendingCount === 0 untuk mencegah loop ping-pong yang memboroskan kuota!
+                  if (scanQueuePendingCount > 0) {
+                    const hasLocalScansMissingInCloud = cleanMergedAtt.some(m =>
+                      isRealAttendance(m) && !cleanCloudAtt.some(c => c.id === m.id || (c.studentId === m.studentId && c.date === m.date && isRealAttendance(c)))
+                    );
+
+                    if (hasLocalScansMissingInCloud) {
+                      writeCloudDocument(key, mergedStr, Date.now());
+                    }
                   }
 
                   setCloudSyncStatus('connected');
@@ -2417,7 +2339,7 @@ export function initFirestoreRealtimeSync(role?: UserRole) {
                   if (currentLocalStr !== mergedStr) {
                     lastSavedStringCache[key] = mergedStr;
                     safeSetLocalStorage(key, mergedStr);
-                    safeSetLocalStorage(key + '_updatedAt', String(cloudUpdatedAt || Date.now()));
+                    safeSetLocalStorage(key + '_updatedAt', String(Math.max(cloudUpdatedAt, localUpdatedAt, Date.now())));
                     notifyStorageUpdated();
                   }
                   setCloudSyncStatus('connected');
@@ -2446,7 +2368,7 @@ export function initFirestoreRealtimeSync(role?: UserRole) {
                   if (currentLocalStr !== mergedStr) {
                     lastSavedStringCache[key] = mergedStr;
                     safeSetLocalStorage(key, mergedStr);
-                    safeSetLocalStorage(key + '_updatedAt', String(cloudUpdatedAt || Date.now()));
+                    safeSetLocalStorage(key + '_updatedAt', String(Math.max(cloudUpdatedAt, localUpdatedAt, Date.now())));
                     notifyStorageUpdated();
                   }
                   setCloudSyncStatus('connected');
@@ -2475,7 +2397,7 @@ export function initFirestoreRealtimeSync(role?: UserRole) {
                   if (currentLocalStr !== mergedStr) {
                     lastSavedStringCache[key] = mergedStr;
                     safeSetLocalStorage(key, mergedStr);
-                    safeSetLocalStorage(key + '_updatedAt', String(cloudUpdatedAt || Date.now()));
+                    safeSetLocalStorage(key + '_updatedAt', String(Math.max(cloudUpdatedAt, localUpdatedAt, Date.now())));
                     notifyStorageUpdated();
                   }
                   setCloudSyncStatus('connected');
@@ -3138,28 +3060,12 @@ export function getTeachers(): Teacher[] {
     const parsed = JSON.parse(data);
     if (!Array.isArray(parsed)) return [];
     const isDemoTeacher = (t: Teacher) => DEMO_TEACHER_IDS.has(t.id) || (!!t.nip && DEMO_TEACHER_NIPS.has(t.nip.trim()));
-    let list = parsed;
-    if (list.some(t => !isDemoTeacher(t)) && list.some(isDemoTeacher)) {
-      list = list.filter(t => !isDemoTeacher(t));
+    if (parsed.some(t => !isDemoTeacher(t)) && parsed.some(isDemoTeacher)) {
+      const cleaned = parsed.filter(t => !isDemoTeacher(t));
+      safeSetLocalStorage(KEYS.TEACHERS, JSON.stringify(cleaned));
+      return cleaned;
     }
-    // Deduplicate teachers by ID and NIP so duplicate keys never occur in React renders
-    const teacherMap = new Map<string, Teacher>();
-    for (let i = 0; i < list.length; i++) {
-      const t = list[i];
-      if (!t || !t.id) continue;
-      const key = t.id.trim();
-      if (!teacherMap.has(key)) {
-        teacherMap.set(key, t);
-      } else {
-        // Merge attributes if duplicate id is encountered
-        teacherMap.set(key, { ...teacherMap.get(key)!, ...t });
-      }
-    }
-    const deduplicated = Array.from(teacherMap.values());
-    if (deduplicated.length !== parsed.length) {
-      safeSetLocalStorage(KEYS.TEACHERS, JSON.stringify(deduplicated));
-    }
-    return deduplicated;
+    return parsed;
   } catch {
     return [];
   }
@@ -3255,49 +3161,9 @@ export function getCharacterTraits(): CharacterTrait[] {
     const parsed = JSON.parse(data);
     if (!Array.isArray(parsed)) return INITIAL_CHARACTER_TRAITS;
 
-    // Pastikan trait penilaian otomatis selalu ada
+    // Pastikan trait penilaian otomatis "Belum Scan" dan "Belum Pulang" selalu ada
     let updated = false;
-    if (!parsed.some(t => t.id === 'trait-auto-ontime' || (t.type === 'POSITIF' && t.name.toLowerCase().includes('tepat') && t.name.toLowerCase().includes('waktu')))) {
-      parsed.push({
-        id: 'trait-auto-ontime',
-        name: 'Datang Tepat Waktu Presensi',
-        type: 'POSITIF',
-        points: 1,
-        category: 'Kedisiplinan'
-      });
-      updated = true;
-    }
-    if (!parsed.some(t => t.id === 'trait-auto-late' || (t.type === 'NEGATIF' && t.name.toLowerCase().includes('terlambat') && t.name.toLowerCase().includes('sekolah')))) {
-      parsed.push({
-        id: 'trait-auto-late',
-        name: 'Terlambat Masuk Sekolah',
-        type: 'NEGATIF',
-        points: 2,
-        category: 'Kedisiplinan'
-      });
-      updated = true;
-    }
-    if (!parsed.some(t => t.id === 'trait-auto-alpa' || (t.type === 'NEGATIF' && (t.name.toLowerCase().includes('alpa') || t.name.toLowerCase().includes('tanpa keterangan') || t.name.toLowerCase().includes('tidak masuk sekolah'))))) {
-      parsed.push({
-        id: 'trait-auto-alpa',
-        name: 'Tidak Masuk Sekolah Tanpa Keterangan / Alpa',
-        type: 'NEGATIF',
-        points: 5,
-        category: 'Kedisiplinan'
-      });
-      updated = true;
-    } else {
-      // Pastikan nama trait ALPA diperbarui ke format resmi "Tidak Masuk Sekolah Tanpa Keterangan / Alpa"
-      parsed.forEach(t => {
-        if (t.id === 'trait-auto-alpa' || t.id === 'trait-011' || (t.type === 'NEGATIF' && (t.name.toLowerCase() === 'alpa / tanpa keterangan' || t.name.toLowerCase().includes('membolos jam')))) {
-          if (t.name !== 'Tidak Masuk Sekolah Tanpa Keterangan / Alpa') {
-            t.name = 'Tidak Masuk Sekolah Tanpa Keterangan / Alpa';
-            updated = true;
-          }
-        }
-      });
-    }
-    if (!parsed.some(t => t.id === 'trait-015' || (t.name.toLowerCase().includes('belum') && t.name.toLowerCase().includes('scan') && !t.name.toLowerCase().includes('masuk dan pulang')))) {
+    if (!parsed.some(t => t.id === 'trait-015' || (t.name.toLowerCase().includes('belum') && t.name.toLowerCase().includes('scan')))) {
       parsed.push({
         id: 'trait-015',
         name: 'Belum Melakukan Scan Presensi',
@@ -3307,7 +3173,7 @@ export function getCharacterTraits(): CharacterTrait[] {
       });
       updated = true;
     }
-    if (!parsed.some(t => t.id === 'trait-016' || (t.name.toLowerCase().includes('belum') && t.name.toLowerCase().includes('pulang') && !t.name.toLowerCase().includes('masuk dan pulang')))) {
+    if (!parsed.some(t => t.id === 'trait-016' || (t.name.toLowerCase().includes('belum') && t.name.toLowerCase().includes('pulang')))) {
       parsed.push({
         id: 'trait-016',
         name: 'Belum Melakukan Scan Pulang',
@@ -3317,16 +3183,121 @@ export function getCharacterTraits(): CharacterTrait[] {
       });
       updated = true;
     }
-    if (!parsed.some(t => t.id === 'trait-auto-unscanned-both' || (t.type === 'NEGATIF' && t.name.toLowerCase().includes('belum scan masuk dan pulang')))) {
+
+    // Pastikan trait penilaian positif petugas upacara (+5 Poin)
+    const petugasIdx = parsed.findIndex(t => 
+      t.id === 'trait-017' || 
+      (t.type === 'POSITIF' && t.name.toLowerCase().includes('petugas') && t.name.toLowerCase().includes('upacara')) ||
+      t.name.toLowerCase() === 'petugas upacara bendera / apel' ||
+      t.name.toLowerCase() === 'menjadi petugas upacara bendera'
+    );
+
+    if (petugasIdx >= 0) {
+      if (parsed[petugasIdx].points !== 5 || parsed[petugasIdx].name !== 'Menjadi Petugas Upacara Bendera' || parsed[petugasIdx].type !== 'POSITIF') {
+        parsed[petugasIdx] = {
+          ...parsed[petugasIdx],
+          name: 'Menjadi Petugas Upacara Bendera',
+          type: 'POSITIF',
+          points: 5,
+          category: 'Kepemimpinan'
+        };
+        updated = true;
+      }
+    } else {
       parsed.push({
-        id: 'trait-auto-unscanned-both',
-        name: 'Karakter Belum scan Masuk dan Pulang',
+        id: 'trait-017',
+        name: 'Menjadi Petugas Upacara Bendera',
+        type: 'POSITIF',
+        points: 5,
+        category: 'Kepemimpinan'
+      });
+      updated = true;
+    }
+
+    // Pastikan trait pelanggaran "Tidak Mengikuti Upacara Bendera" (-5 Poin, NEGATIF)
+    const tidakUpacaraIdx = parsed.findIndex(t => 
+      t.id === 'trait-018' || 
+      (t.name.toLowerCase().includes('tidak') && t.name.toLowerCase().includes('upacara'))
+    );
+
+    if (tidakUpacaraIdx >= 0) {
+      if (parsed[tidakUpacaraIdx].type !== 'NEGATIF' || parsed[tidakUpacaraIdx].points !== 5) {
+        parsed[tidakUpacaraIdx] = {
+          ...parsed[tidakUpacaraIdx],
+          name: 'Tidak Mengikuti Upacara Bendera',
+          type: 'NEGATIF',
+          points: 5,
+          category: 'Kedisiplinan'
+        };
+        updated = true;
+      }
+    } else {
+      parsed.push({
+        id: 'trait-018',
+        name: 'Tidak Mengikuti Upacara Bendera',
         type: 'NEGATIF',
-        points: 3,
+        points: 5,
         category: 'Kedisiplinan'
       });
       updated = true;
     }
+
+    // Pastikan trait penilaian positif "Sangat Aktif KBM" (+1 Poin, POSITIF) selalu ada & namanya tepat
+    const activeKbmIdx = parsed.findIndex(t => 
+      t.id === 'trait-013' || 
+      t.name.toLowerCase() === 'sangat aktif kbm' || 
+      t.name.toLowerCase() === 'sangat aktif saat kbm' ||
+      (t.type === 'POSITIF' && t.name.toLowerCase().includes('sangat aktif') && t.name.toLowerCase().includes('kbm'))
+    );
+
+    if (activeKbmIdx >= 0) {
+      if (parsed[activeKbmIdx].name !== 'Sangat Aktif KBM' || parsed[activeKbmIdx].type !== 'POSITIF') {
+        parsed[activeKbmIdx] = {
+          ...parsed[activeKbmIdx],
+          name: 'Sangat Aktif KBM',
+          type: 'POSITIF',
+          category: 'Keaktifan'
+        };
+        updated = true;
+      }
+    } else {
+      parsed.push({
+        id: 'trait-013',
+        name: 'Sangat Aktif KBM',
+        type: 'POSITIF',
+        points: 1,
+        category: 'Keaktifan'
+      });
+      updated = true;
+    }
+
+    // Pastikan trait pelanggaran KBM "Tidak Hadir di Kelas saat KBM" (-2 Poin, NEGATIF)
+    const absentKbmIdx = parsed.findIndex(t => 
+      t.id === 'trait-014' || 
+      (t.type === 'NEGATIF' && t.name.toLowerCase().includes('tidak hadir di kelas saat kbm'))
+    );
+
+    if (absentKbmIdx >= 0) {
+      if (parsed[absentKbmIdx].name !== 'Tidak Hadir di Kelas saat KBM' || parsed[absentKbmIdx].type !== 'NEGATIF') {
+        parsed[absentKbmIdx] = {
+          ...parsed[absentKbmIdx],
+          name: 'Tidak Hadir di Kelas saat KBM',
+          type: 'NEGATIF',
+          category: 'Kedisiplinan'
+        };
+        updated = true;
+      }
+    } else {
+      parsed.push({
+        id: 'trait-014',
+        name: 'Tidak Hadir di Kelas saat KBM',
+        type: 'NEGATIF',
+        points: 2,
+        category: 'Kedisiplinan'
+      });
+      updated = true;
+    }
+
     if (updated) {
       safeSetLocalStorage(KEYS.CHARACTER_TRAITS, JSON.stringify(parsed));
     }
@@ -3334,6 +3305,92 @@ export function getCharacterTraits(): CharacterTrait[] {
   } catch {
     return INITIAL_CHARACTER_TRAITS;
   }
+}
+
+/**
+ * Memperbaiki dan menormalkan log catatan karakter terkait Penilaian Otomatis Jurnal KBM (Sangat aktif):
+ * - Mengoreksi nama "Membantu menggalang dana saat Temannya mengalami Musibah" atau varian lain yang keliru
+ *   diambil dari catalog menjadi "Sangat Aktif KBM" (+1 Poin / poin aktif KBM).
+ */
+export function repairKbmActiveLogs(logs: StudentCharacterLog[]): { repairedLogs: StudentCharacterLog[]; repairedCount: number } {
+  let repairedCount = 0;
+  const repairedLogs = logs.map(log => {
+    if (!log) return log;
+    const nameLower = (log.traitName || '').toLowerCase();
+    const notesLower = (log.notes || '').toLowerCase();
+
+    // Deteksi apakah catatan ini berasal dari penilaian Jurnal KBM "Sangat aktif"
+    const isFromKbmActive = 
+      notesLower.includes('penilaian otomatis jurnal kbm: sangat aktif') ||
+      notesLower.includes('sangat aktif dalam kbm') ||
+      (log.id && log.id.startsWith('auto-active-kbm-')) ||
+      (nameLower.includes('membantu menggalang dana') && (notesLower.includes('kbm') || notesLower.includes('pjok') || notesLower.includes('mapel') || notesLower.includes('guru:')));
+
+    const isOldVariantName = nameLower === 'sangat aktif saat kbm';
+
+    if (isFromKbmActive && (log.traitName !== 'Sangat Aktif KBM' || isOldVariantName)) {
+      repairedCount++;
+      return {
+        ...log,
+        traitId: 'trait-013',
+        traitName: 'Sangat Aktif KBM',
+        traitType: 'POSITIF' as const,
+        points: Math.abs(log.points) || 1
+      };
+    }
+
+    return log;
+  });
+
+  return { repairedLogs, repairedCount };
+}
+
+/**
+ * Memperbaiki dan menormalkan log catatan karakter terkait Upacara Bendera untuk semua siswa:
+ * - Mengoreksi nama "Tidak Mengikuti Upacara Bendera" yang bernilai positif menjadi "Menjadi Petugas Upacara Bendera" (+5 Poin).
+ * - Menyesuaikan bobot nilai Menjadi Petugas Upacara Bendera menjadi +5 Poin.
+ */
+export function repairUpacaraLogs(logs: StudentCharacterLog[]): { repairedLogs: StudentCharacterLog[]; repairedCount: number } {
+  let repairedCount = 0;
+  const repairedLogs = logs.map(log => {
+    if (!log) return log;
+    const nameLower = (log.traitName || '').toLowerCase();
+    const notesLower = (log.notes || '').toLowerCase();
+    
+    // Log yang salah nama: tercatat "Tidak mengikuti Upacara" tapi berjenis POSITIF, bernilai positif, atau catatan manual petugas
+    const isMislabeledNegativeName = nameLower.includes('tidak') && nameLower.includes('upacara') && (
+      log.traitType === 'POSITIF' ||
+      log.isManual === true ||
+      notesLower.includes('petugas') ||
+      (log.points === 5 || log.points === 10)
+    );
+
+    // Log petugas upacara yang poinnya masih 10 (standar disesuaikan ke +5 Poin)
+    const isPetugasWith10Points = (nameLower.includes('petugas') && nameLower.includes('upacara')) && log.points === 10;
+
+    // Log otomatis/manual upacara yang belum bernama "Menjadi Petugas Upacara Bendera" atau belum 5 poin
+    const isManualUpacaraId = log.id && log.id.startsWith('log-manual-upacara-') && (log.traitName !== 'Menjadi Petugas Upacara Bendera' || log.points !== 5);
+
+    if (isMislabeledNegativeName || isPetugasWith10Points || isManualUpacaraId) {
+      repairedCount++;
+      return {
+        ...log,
+        traitId: 'trait-017',
+        traitName: 'Menjadi Petugas Upacara Bendera',
+        traitType: 'POSITIF' as const,
+        points: 5,
+        notes: log.notes && !log.notes.toLowerCase().includes('tidak') 
+          ? log.notes 
+          : 'Menjadi Petugas Upacara Bendera (Catatan Karakter Manual - Tersimpan Permanen)',
+        evaluatorName: log.evaluatorName || 'Pembina Upacara / Guru Piket',
+        isManual: true
+      };
+    }
+
+    return log;
+  });
+
+  return { repairedLogs, repairedCount };
 }
 
 export function saveCharacterTraits(traits: CharacterTrait[]): void {
@@ -3345,33 +3402,174 @@ export function saveCharacterTraits(traits: CharacterTrait[]): void {
   syncToCloud(KEYS.CHARACTER_TRAITS, traits, false, now);
 }
 
-export function getStudentCharacterLogs(): StudentCharacterLog[] {
-  const data = localStorage.getItem(KEYS.CHARACTER_LOGS);
-  if (data === null) {
-    safeSetLocalStorage(KEYS.CHARACTER_LOGS, JSON.stringify(INITIAL_STUDENT_CHARACTER_LOGS));
-    safeSetLocalStorage(KEYS.CHARACTER_LOGS + '_updatedAt', '1');
-    return INITIAL_STUDENT_CHARACTER_LOGS;
+/**
+ * Menentukan apakah sebuah log penilaian karakter diinput secara manual oleh guru/admin,
+ * sehingga terlindungi dan tidak boleh dihapus oleh mekanisme pembersihan otomatis.
+ */
+export function isManualCharacterLog(log: StudentCharacterLog): boolean {
+  if (!log) return false;
+  if (log.isManual === true) return true;
+  if (log.id && log.id.startsWith('log-manual-')) return true;
+
+  // Catatan penalti otomatis yang dibuat sistem
+  if (
+    log.id && (
+      log.id.startsWith('auto-unscanned-') ||
+      log.id.startsWith('auto-unreturned-') ||
+      log.id.startsWith('auto-alpa-') ||
+      log.id.startsWith('auto-late-') ||
+      log.id.startsWith('auto-ontime-') ||
+      log.id.startsWith('log-auto-')
+    )
+  ) {
+    return false;
   }
+
+  if (log.evaluatorName && log.evaluatorName.includes('16:00 WITA')) return false;
+  if (log.notes && (log.notes.includes('Penilaian Otomatis Presensi') || log.notes.includes('Sistem Otomatis (16:00 WITA)'))) return false;
+
+  // Semua log positif atau log non-otomatis lainnya diklasifikasikan sebagai manual/penting
+  return true;
+}
+
+/**
+ * Mengambil seluruh catatan karakter manual dari cadangan permanen aman.
+ */
+export function getPermanentManualCharacterLogs(): StudentCharacterLog[] {
+  if (typeof window === 'undefined') return [];
+  const raw = localStorage.getItem(SAFE_MANUAL_CHARACTER_LOGS_BACKUP_KEY);
+  if (!raw) return [];
   try {
-    const parsed = JSON.parse(data);
+    const parsed = JSON.parse(raw);
     return Array.isArray(parsed) ? parsed : [];
   } catch {
     return [];
   }
 }
 
+/**
+ * Menyimpan dan menggabungkan catatan karakter manual ke cadangan permanen aman.
+ */
+export function savePermanentManualCharacterLogs(newManualLogs: StudentCharacterLog[]): void {
+  if (typeof window === 'undefined' || !newManualLogs || newManualLogs.length === 0) return;
+  const currentBackup = getPermanentManualCharacterLogs();
+  const map = new Map<string, StudentCharacterLog>();
+
+  // Masukkan data cadangan yang sudah ada
+  currentBackup.forEach(l => map.set(l.id, l));
+
+  // Tambahkan/perbarui catatan manual baru dengan flag isManual: true
+  newManualLogs.forEach(l => {
+    if (isManualCharacterLog(l)) {
+      map.set(l.id, { ...l, isManual: true });
+    }
+  });
+
+  const merged = Array.from(map.values());
+  safeSetLocalStorage(SAFE_MANUAL_CHARACTER_LOGS_BACKUP_KEY, JSON.stringify(merged));
+}
+
+export function getStudentCharacterLogs(): StudentCharacterLog[] {
+  const data = localStorage.getItem(KEYS.CHARACTER_LOGS);
+  let logs: StudentCharacterLog[] = [];
+
+  if (data === null) {
+    safeSetLocalStorage(KEYS.CHARACTER_LOGS, JSON.stringify(INITIAL_STUDENT_CHARACTER_LOGS));
+    safeSetLocalStorage(KEYS.CHARACTER_LOGS + '_updatedAt', '1');
+    logs = [...INITIAL_STUDENT_CHARACTER_LOGS];
+  } else {
+    try {
+      const parsed = JSON.parse(data);
+      logs = Array.isArray(parsed) ? parsed : [];
+    } catch {
+      logs = [];
+    }
+  }
+
+  // JAMINAN PERMANEN: Selalu pastikan catatan manual dari cadangan permanen terikut
+  const permanentManuals = getPermanentManualCharacterLogs();
+  if (permanentManuals.length > 0) {
+    const existingIds = new Set(logs.map(l => l.id));
+    let hasNewFromBackup = false;
+    permanentManuals.forEach(pLog => {
+      if (!existingIds.has(pLog.id)) {
+        logs.unshift(pLog);
+        existingIds.add(pLog.id);
+        hasNewFromBackup = true;
+      }
+    });
+    if (hasNewFromBackup) {
+      safeSetLocalStorage(KEYS.CHARACTER_LOGS, JSON.stringify(logs));
+    }
+  }
+
+  // SINKRONISASI & PERBAIKAN OTOMATIS:
+  // 1. Pastikan seluruh catatan "Tidak mengikuti Upacara" yang bernilai positif atau catatan petugas dinormalkan menjadi "Menjadi Petugas Upacara Bendera" (+5 Poin)
+  // 2. Pastikan seluruh catatan "Sangat aktif dalam KBM" yang keliru tertulis "Membantu menggalang dana" dinormalkan menjadi "Sangat Aktif KBM"
+  const upacaraResult = repairUpacaraLogs(logs);
+  const kbmResult = repairKbmActiveLogs(upacaraResult.repairedLogs);
+  const totalRepaired = upacaraResult.repairedCount + kbmResult.repairedCount;
+
+  if (totalRepaired > 0) {
+    logs = kbmResult.repairedLogs;
+    safeSetLocalStorage(KEYS.CHARACTER_LOGS, JSON.stringify(logs));
+    const repairedManuals = logs.filter(isManualCharacterLog);
+    if (repairedManuals.length > 0) {
+      safeSetLocalStorage(SAFE_MANUAL_CHARACTER_LOGS_BACKUP_KEY, JSON.stringify(repairedManuals));
+    }
+  }
+
+  return logs;
+}
+
 export function saveStudentCharacterLogs(logs: StudentCharacterLog[]): void {
   const now = Date.now();
-  // PENGHEMAT KUOTA & BILLING FIRESTORE:
-  // Batasi total log karakter agar tidak membengkak tanpa batas menjadi dokumen raksasa (>700KB)
-  // yang memicu multi-chunk sharding dan meledakkan tagihan Firestore.
-  // Ambil maksimal 1200 log terbaru (mencakup 3-6 bulan riwayat aktif sekolah).
-  const boundedLogs = Array.isArray(logs) ? logs.slice(-1200) : [];
-  const dataStr = JSON.stringify(boundedLogs);
+
+  // Pastikan seluruh log dinormalkan sebelum disimpan (Upacara +5 poin & Sangat Aktif KBM)
+  const upacaraResult = repairUpacaraLogs(logs);
+  const kbmResult = repairKbmActiveLogs(upacaraResult.repairedLogs);
+  const cleanLogs = kbmResult.repairedLogs;
+
+  // Amankan seluruh catatan manual ke brankas permanen
+  const manualLogs = cleanLogs.filter(isManualCharacterLog).map(l => ({ ...l, isManual: true }));
+  if (manualLogs.length > 0) {
+    savePermanentManualCharacterLogs(manualLogs);
+  }
+
+  const dataStr = JSON.stringify(cleanLogs);
   safeSetLocalStorage(KEYS.CHARACTER_LOGS, dataStr);
   safeSetLocalStorage(KEYS.CHARACTER_LOGS + '_updatedAt', String(now));
   notifyStorageUpdated();
-  syncToCloud(KEYS.CHARACTER_LOGS, boundedLogs, false, now);
+  syncToCloud(KEYS.CHARACTER_LOGS, cleanLogs, false, now);
+}
+
+/**
+ * Memulihkan seluruh catatan karakter manual yang pernah diinput dan menyinkronkannya kembali.
+ */
+export function restoreAllManualCharacterLogs(): { restoredCount: number; allLogs: StudentCharacterLog[] } {
+  const currentLogs = getStudentCharacterLogs();
+  const permanentManuals = getPermanentManualCharacterLogs();
+  const existingIds = new Set(currentLogs.map(l => l.id));
+
+  let restoredCount = 0;
+  const merged = [...currentLogs];
+
+  permanentManuals.forEach(pLog => {
+    if (!existingIds.has(pLog.id)) {
+      merged.unshift(pLog);
+      existingIds.add(pLog.id);
+      restoredCount++;
+    }
+  });
+
+  const upacaraResult = repairUpacaraLogs(merged);
+  const kbmResult = repairKbmActiveLogs(upacaraResult.repairedLogs);
+  const finalLogs = kbmResult.repairedLogs;
+  restoredCount += (upacaraResult.repairedCount + kbmResult.repairedCount);
+
+  saveStudentCharacterLogs(finalLogs);
+
+  return { restoredCount, allLogs: finalLogs };
 }
 
 export function getCharacterPredicateSettings(): CharacterPredicateSettings {

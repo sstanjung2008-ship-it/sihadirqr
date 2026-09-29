@@ -177,30 +177,8 @@ export const AttendanceDashboard: React.FC<AttendanceDashboardProps> = ({
 
   const studentDateStatusMap = new Map<string, AttendanceRecord>();
   dateRecords.forEach(r => {
-    const key = r.studentId || r.nisn;
-    if (!key) return;
-    const existing = studentDateStatusMap.get(r.studentId) || (r.nisn ? studentDateStatusMap.get(r.nisn) : undefined);
-    if (!existing) {
-      if (r.studentId) studentDateStatusMap.set(r.studentId, r);
-      if (r.nisn) studentDateStatusMap.set(r.nisn, r);
-    } else {
-      // Intelligently merge so valid scan time or return status is NEVER overwritten by an empty record!
-      const isRealTime = (t?: string) => t && t !== '-' && !t.toLowerCase().includes('belum');
-      const isRealReturn = (s?: string) => s === 'PULANG' || s === 'PULANG_CEPAT' || s === 'PULANG_TEPAT';
-      const merged: AttendanceRecord = {
-        ...existing,
-        ...r,
-        status: (r.status && r.status !== 'ALPA') ? r.status : existing.status,
-        time: isRealTime(r.time) ? r.time : existing.time,
-        returnTime: isRealTime(r.returnTime) ? r.returnTime : existing.returnTime,
-        returnStatus: isRealReturn(r.returnStatus) ? r.returnStatus : (existing.returnStatus || r.returnStatus),
-        method: (r.method === 'QR_SCAN' || existing.method === 'QR_SCAN') ? 'QR_SCAN' : (r.method || existing.method),
-        scannedBy: (r.scannedBy && !r.scannedBy.includes('Sistem Otomatis')) ? r.scannedBy : existing.scannedBy,
-        returnScannedBy: (r.returnScannedBy && !r.returnScannedBy.includes('Sistem Otomatis')) ? r.returnScannedBy : existing.returnScannedBy,
-      };
-      if (merged.studentId) studentDateStatusMap.set(merged.studentId, merged);
-      if (merged.nisn) studentDateStatusMap.set(merged.nisn, merged);
-    }
+    if (r.studentId) studentDateStatusMap.set(r.studentId, r);
+    if (r.nisn) studentDateStatusMap.set(r.nisn, r);
   });
 
   // Base student list based on role/class filter
@@ -359,7 +337,11 @@ export const AttendanceDashboard: React.FC<AttendanceDashboardProps> = ({
 
   // Compute Character Points data for target child
   const childCharacterLogs = characterLogs.filter(l => 
-    targetStudent && (l.studentId === targetStudent.id || l.nisn === targetStudent.nisn)
+    targetStudent && (
+      l.studentId === targetStudent.id || 
+      (targetStudent.nisn && l.nisn && l.nisn.trim() === targetStudent.nisn.trim()) ||
+      (l.studentName && targetStudent.name && l.studentName.trim().toLowerCase() === targetStudent.name.trim().toLowerCase())
+    )
   );
 
   const posLogs = childCharacterLogs.filter(l => l.traitType === 'POSITIF');

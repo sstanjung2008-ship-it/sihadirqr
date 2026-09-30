@@ -2408,6 +2408,52 @@ export function initFirestoreRealtimeSync(role?: UserRole) {
               }
             }
 
+            // SPECIAL CHARACTER LOGS SYNC:
+            // Gabungkan catatan karakter lokal dan Cloud secara cerdas:
+            // Mencegah log otomatis (Belum Scan Pulang & Belum Scan Masuk) tertimpa/berkedip hilang-muncul
+            if (key === KEYS.CHARACTER_LOGS) {
+              try {
+                const cloudLogs = typeof finalDataToSave === 'string' ? JSON.parse(finalDataToSave) : finalDataToSave;
+                if (Array.isArray(cloudLogs)) {
+                  const currentLocalLogs = getStudentCharacterLogs();
+                  if (cloudLogs.length === 0 && currentLocalLogs.length > 0) {
+                    writeCloudDocument(key, JSON.stringify(currentLocalLogs), Date.now());
+                    lastSavedStringCache[key] = JSON.stringify(currentLocalLogs);
+                    setCloudSyncStatus('connected');
+                    return;
+                  }
+
+                  const map = new Map<string, StudentCharacterLog>();
+                  // Masukkan data Cloud terlebih dahulu
+                  cloudLogs.forEach(l => {
+                    if (l && l.id) map.set(l.id.trim(), l);
+                  });
+                  // Pertahankan data lokal (agar log otomatis yang baru dihitung lokal tidak terhapus)
+                  currentLocalLogs.forEach(l => {
+                    if (l && l.id) {
+                      const cleanId = l.id.trim();
+                      if (!map.has(cleanId)) {
+                        map.set(cleanId, l);
+                      }
+                    }
+                  });
+
+                  const mergedLogs = deduplicateCharacterLogs(Array.from(map.values()));
+                  const mergedStr = JSON.stringify(mergedLogs);
+                  if (currentLocalStr !== mergedStr) {
+                    lastSavedStringCache[key] = mergedStr;
+                    safeSetLocalStorage(key, mergedStr);
+                    safeSetLocalStorage(key + '_updatedAt', String(Math.max(cloudUpdatedAt, localUpdatedAt, Date.now())));
+                    notifyStorageUpdated();
+                  }
+                  setCloudSyncStatus('connected');
+                  return;
+                }
+              } catch (e) {
+                console.warn('[Firestore Sync] Error updating character logs data:', e);
+              }
+            }
+
             // CRITICAL TIMESTAMP CHECK:
             if (currentLocalStr !== null && localUpdatedAt > 0) {
               if (cloudUpdatedAt > 0 && cloudUpdatedAt < localUpdatedAt) {

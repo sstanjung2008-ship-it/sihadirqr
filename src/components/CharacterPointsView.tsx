@@ -644,27 +644,6 @@ export const CharacterPointsView: React.FC<CharacterPointsViewProps> = ({
 
         <div className="flex flex-wrap items-center gap-2.5 shrink-0">
           <button
-            type="button"
-            onClick={handleRestoreManualLogs}
-            className="inline-flex items-center justify-center gap-2 px-4 py-3 bg-white/10 hover:bg-white/20 border border-white/20 text-white font-extrabold text-xs rounded-2xl shadow-lg transition-all transform active:scale-95 cursor-pointer shrink-0"
-            title="Pulihkan dan pastikan seluruh catatan karakter manual tetap tersimpan permanen serta normalkan nilai Upacara (+5 Poin) & Sangat Aktif KBM"
-          >
-            <ShieldCheck className="w-4 h-4 text-emerald-400" />
-            <span>Pulihkan & Simpan Manual (+5 Upacara & KBM)</span>
-          </button>
-
-          {allAutoPenaltyLogs.length > 0 && (
-            <button
-              type="button"
-              onClick={() => setShowCleanupModal(true)}
-              className="inline-flex items-center justify-center gap-2 px-4 py-3 bg-amber-400 hover:bg-amber-300 text-slate-950 font-black text-xs rounded-2xl shadow-lg transition-all transform active:scale-95 cursor-pointer shrink-0"
-            >
-              <RotateCcw className="w-4 h-4 text-slate-950" />
-              <span>Pulihkan Poin ({allAutoPenaltyLogs.length})</span>
-            </button>
-          )}
-
-          <button
             onClick={handleDownloadPdf}
             disabled={isExporting}
             className="inline-flex items-center justify-center gap-2 px-5 py-3 bg-emerald-500 hover:bg-emerald-400 disabled:bg-slate-500 text-white font-extrabold rounded-2xl shadow-lg transition-all transform active:scale-95 cursor-pointer shrink-0"

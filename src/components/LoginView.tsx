@@ -388,13 +388,17 @@ export const LoginView: React.FC<LoginViewProps> = ({
               <div className="p-1.5 bg-amber-500 text-white rounded-lg shrink-0 mt-0.5">
                 <Lock className="w-3.5 h-3.5" />
               </div>
-              <div className="space-y-0.5">
-                <p className="font-extrabold text-[11px] text-amber-950 flex items-center gap-1.5">
-                  <span>Portal Wali Murid Ditutup Sementara</span>
-                  <span className="bg-amber-200/80 text-amber-900 px-1.5 py-0.5 rounded text-[9px] font-mono">Tutup</span>
-                </p>
+              <div className="space-y-1">
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <span className="font-extrabold text-[11px] text-amber-950">Portal Wali Murid Ditutup Sementara</span>
+                  <span className="bg-amber-200/80 text-amber-900 px-1.5 py-0.5 rounded text-[9px] font-mono font-bold">Khusus Orang Tua</span>
+                </div>
                 <p className="text-[11px] text-amber-800 leading-snug font-medium">
                   {checkParentLoginAccess(schoolProfile).reason}
+                </p>
+                <p className="text-[10px] text-emerald-800 font-semibold pt-1 border-t border-amber-200/60 flex items-center gap-1">
+                  <CheckCircle2 className="w-3 h-3 text-emerald-600 shrink-0" />
+                  <span>Login Administrator (admin), Guru, dan Petugas Pos tetap dapat masuk seperti biasa.</span>
                 </p>
               </div>
             </div>

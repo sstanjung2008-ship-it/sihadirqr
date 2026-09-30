@@ -38,6 +38,8 @@ import {
   getStudentCharacterLogs,
   saveStudentCharacterLogs,
   deletePermanentManualCharacterLog,
+  markCharacterLogDeleted,
+  unmarkCharacterLogDeleted,
   isManualCharacterLog,
   restoreAllManualCharacterLogs,
   getCharacterPredicateSettings,
@@ -405,18 +407,18 @@ export default function App() {
     };
   }, [currentRole]);
 
-  // Penilaian Karakter Otomatis (Belum Scan & Belum Pulang) - Dilengkapi timer interval 20 detik ultra-hemat kuota
+  // Penilaian Karakter Otomatis (Belum Scan, Belum Pulang, & Hadir Tepat Waktu Tiap 3 Hari)
   useEffect(() => {
     // PENGHEMAT KUOTA: Khusus Admin & Scanner Pos, jangan pernah dijalankan oleh akun Wali Murid (PARENT)!
     if (currentRole === 'PARENT') return;
 
-    // 1. Jalankan pemeriksaan saat aplikasi dimuat
-    reconcileAutoCharacterPenalties();
+    // 1. Jalankan pemeriksaan saat aplikasi dimuat (memproses kelipatan 3 hari hadir tepat waktu secara langsung)
+    reconcileAutoCharacterPenalties(true);
 
-    // 2. Timer interval 20 detik ultra-hemat kuota (0 Cloud Read & 0 Cloud Write bila data tidak berubah)
+    // 2. Timer interval ultra-hemat kuota (0 Cloud Read & 0 Cloud Write bila data tidak berubah)
     const interval = setInterval(() => {
       reconcileAutoCharacterPenalties();
-    }, 20000);
+    }, 30000);
 
     return () => {
       clearInterval(interval);
@@ -782,10 +784,12 @@ export default function App() {
             if (l.studentId === sid && l.date === sdate) {
               if (hasValidTime && (l.id.includes('auto-unscanned') || (l.traitType === 'NEGATIF' && l.traitName.toLowerCase().includes('belum') && l.traitName.toLowerCase().includes('scan')))) {
                 logsChanged = true;
+                if (l.id) markCharacterLogDeleted(l.id);
                 return false;
               }
               if (hasReturned && (l.id.includes('auto-unreturned') || (l.traitType === 'NEGATIF' && l.traitName.toLowerCase().includes('belum') && l.traitName.toLowerCase().includes('pulang')))) {
                 logsChanged = true;
+                if (l.id) markCharacterLogDeleted(l.id);
                 return false;
               }
             }
@@ -881,11 +885,13 @@ export default function App() {
             // If entry scan is now valid or status is SAKIT/IZIN, remove auto-unscanned penalty logs
             if ((hasValidTime || newStatus === 'SAKIT' || newStatus === 'IZIN') && (l.id.includes('auto-unscanned') || (l.traitType === 'NEGATIF' && l.traitName.toLowerCase().includes('belum') && l.traitName.toLowerCase().includes('scan')))) {
               logsChanged = true;
+              if (l.id) markCharacterLogDeleted(l.id);
               return false;
             }
             // If student returned or status is SAKIT/IZIN, remove auto-unreturned penalty logs
             if ((hasReturned || newStatus === 'SAKIT' || newStatus === 'IZIN') && (l.id.includes('auto-unreturned') || (l.traitType === 'NEGATIF' && l.traitName.toLowerCase().includes('belum') && l.traitName.toLowerCase().includes('pulang')))) {
               logsChanged = true;
+              if (l.id) markCharacterLogDeleted(l.id);
               return false;
             }
           }
@@ -1012,12 +1018,14 @@ export default function App() {
             // If updated to HADIR (which sets nowTime) or exempt (SAKIT/IZIN), remove auto-unscanned
             if ((matchUpdate.newStatus === 'HADIR' || matchUpdate.newStatus === 'SAKIT' || matchUpdate.newStatus === 'IZIN') && (l.id.includes('auto-unscanned') || (l.traitType === 'NEGATIF' && l.traitName.toLowerCase().includes('belum') && l.traitName.toLowerCase().includes('scan')))) {
               logsChanged = true;
+              if (l.id) markCharacterLogDeleted(l.id);
               return false;
             }
             // If new status is not HADIR or TERLAMBAT, remove auto-unreturned
             if (matchUpdate.newStatus !== 'HADIR' && matchUpdate.newStatus !== 'TERLAMBAT') {
               if (l.id.includes('auto-unreturned') || (l.traitType === 'NEGATIF' && l.traitName.toLowerCase().includes('belum') && l.traitName.toLowerCase().includes('pulang'))) {
                 logsChanged = true;
+                if (l.id) markCharacterLogDeleted(l.id);
                 return false;
               }
             }
@@ -1106,6 +1114,7 @@ export default function App() {
           const isMatch = returnedStudentDates.some(r => r.studentId === l.studentId && r.date === l.date);
           if (isMatch && (l.id.includes('auto-unreturned') || (l.traitType === 'NEGATIF' && l.traitName.toLowerCase().includes('belum') && l.traitName.toLowerCase().includes('pulang')))) {
             logsChanged = true;
+            if (l.id) markCharacterLogDeleted(l.id);
             return false;
           }
           return true;
@@ -1427,9 +1436,19 @@ export default function App() {
 
   const handleAddMultipleCharacterLogs = (newLogs: StudentCharacterLog[]) => {
     if (!newLogs || newLogs.length === 0) return;
-    const updated = [...newLogs, ...characterLogs];
-    setCharacterLogsState(updated);
-    saveStudentCharacterLogs(updated);
+    setCharacterLogsState(prevLogs => {
+      const logMap = new Map<string, StudentCharacterLog>();
+      prevLogs.forEach(l => { if (l?.id) logMap.set(l.id.trim(), l); });
+      newLogs.forEach(l => {
+        if (l?.id) {
+          unmarkCharacterLogDeleted(l.id);
+          logMap.set(l.id.trim(), l);
+        }
+      });
+      const merged = Array.from(logMap.values());
+      saveStudentCharacterLogs(merged);
+      return merged;
+    });
   };
 
   const handleUpdateCharacterLog = (updatedLog: StudentCharacterLog) => {
@@ -1440,6 +1459,7 @@ export default function App() {
 
   const handleDeleteCharacterLog = (logId: string) => {
     deletePermanentManualCharacterLog(logId);
+    markCharacterLogDeleted(logId);
     const updated = characterLogs.filter(l => l.id !== logId && l.id !== logId.trim());
     setCharacterLogsState(updated);
     saveStudentCharacterLogs(updated);
@@ -1448,7 +1468,10 @@ export default function App() {
   const handleDeleteMultipleCharacterLogs = (logIds: string[]) => {
     if (!logIds || logIds.length === 0) return;
     const idSet = new Set(logIds.map(id => id.trim()));
-    logIds.forEach(id => deletePermanentManualCharacterLog(id));
+    logIds.forEach(id => {
+      deletePermanentManualCharacterLog(id);
+      markCharacterLogDeleted(id);
+    });
     const updated = characterLogs.filter(l => !idSet.has(l.id?.trim()));
     setCharacterLogsState(updated);
     saveStudentCharacterLogs(updated);

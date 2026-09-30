@@ -38,6 +38,9 @@ export const SAFE_ATTENDANCE_BACKUP_KEY = 'sihadir_attendance_backup_safe';
 // Cadangan permanen lokal terpisah khusus catatan karakter manual siswa agar tidak pernah hilang
 export const SAFE_MANUAL_CHARACTER_LOGS_BACKUP_KEY = 'sihadir_manual_character_logs_permanent_v2';
 
+// Daftar ID catatan karakter yang telah dihapus agar tidak dibangkitkan kembali oleh sinkronisasi Cloud
+export const DELETED_CHARACTER_LOGS_KEY = 'sihadir_deleted_character_log_ids_v2';
+
 export type CloudSyncStatus = 'connected' | 'syncing' | 'offline' | 'quota_exceeded';
 let currentSyncStatus: CloudSyncStatus = 'syncing';
 let isFirestoreInitialized = false;
@@ -2423,29 +2426,78 @@ export function initFirestoreRealtimeSync(role?: UserRole) {
                     return;
                   }
 
+                  const deletedIds = getDeletedCharacterLogIds();
+                  const attendanceRecords = getAttendanceRecords();
                   const map = new Map<string, StudentCharacterLog>();
-                  // Masukkan data Cloud terlebih dahulu
+
+                  // Masukkan data Cloud terlebih dahulu, tapi abaikan log yang sudah dihapus atau penalti yang sudah tidak valid
                   cloudLogs.forEach(l => {
-                    if (l && l.id) map.set(l.id.trim(), l);
+                    if (!l || !l.id) return;
+                    const cleanId = l.id.trim();
+
+                    // Jangan bangkitkan log yang sudah dihapus oleh pengguna atau dibersihkan sistem
+                    if (deletedIds.has(cleanId)) return;
+
+                    // Validasi log penalti Belum Scan Pulang terhadap rekaman presensi lokal:
+                    // Jika siswa sudah ada jam pulang / status pulang, jangan bangkitkan log penalti dari cloud!
+                    if (cleanId.startsWith('auto-unreturned-') || (l.traitType === 'NEGATIF' && l.traitName?.toLowerCase().includes('belum') && l.traitName?.toLowerCase().includes('pulang'))) {
+                      const matchingRec = attendanceRecords.find(r => 
+                        (r.studentId === l.studentId || (l.nisn && l.nisn !== '-' && r.nisn === l.nisn) || (l.studentName && r.studentName?.toLowerCase() === l.studentName.toLowerCase())) &&
+                        r.date === l.date
+                      );
+                      if (matchingRec) {
+                        const hasReturned = !!((matchingRec.returnTime && matchingRec.returnTime !== '-' && !matchingRec.returnTime.toLowerCase().includes('belum')) || matchingRec.returnStatus === 'PULANG' || matchingRec.returnStatus === 'PULANG_TEPAT' || matchingRec.returnStatus === 'PULANG_CEPAT');
+                        const isNotPresent = matchingRec.status !== 'HADIR' && matchingRec.status !== 'TERLAMBAT';
+                        if (hasReturned || isNotPresent) return;
+                      }
+                    }
+
+                    // Validasi log penalti Belum Scan Presensi terhadap rekaman presensi lokal:
+                    // Jika siswa sudah memiliki jam masuk valid atau berstatus izin/sakit, jangan bangkitkan!
+                    if (cleanId.startsWith('auto-unscanned-') || (l.traitType === 'NEGATIF' && l.traitName?.toLowerCase().includes('belum') && l.traitName?.toLowerCase().includes('scan'))) {
+                      const matchingRec = attendanceRecords.find(r => 
+                        (r.studentId === l.studentId || (l.nisn && l.nisn !== '-' && r.nisn === l.nisn) || (l.studentName && r.studentName?.toLowerCase() === l.studentName.toLowerCase())) &&
+                        r.date === l.date
+                      );
+                      if (matchingRec) {
+                        const hasValidTime = matchingRec.time && matchingRec.time !== '-' && !matchingRec.time.toLowerCase().includes('belum');
+                        const isExempt = matchingRec.status === 'SAKIT' || matchingRec.status === 'IZIN';
+                        if (hasValidTime || isExempt) return;
+                      }
+                    }
+
+                    map.set(cleanId, l);
                   });
+
                   // Pertahankan data lokal (agar log otomatis yang baru dihitung lokal tidak terhapus)
                   currentLocalLogs.forEach(l => {
                     if (l && l.id) {
                       const cleanId = l.id.trim();
-                      if (!map.has(cleanId)) {
+                      if (!map.has(cleanId) && !deletedIds.has(cleanId)) {
                         map.set(cleanId, l);
                       }
                     }
                   });
 
-                  const mergedLogs = deduplicateCharacterLogs(Array.from(map.values()));
+                  const upacaraRes = repairUpacaraLogs(Array.from(map.values()));
+                  const kbmRes = repairKbmActiveLogs(upacaraRes.repairedLogs);
+                  const mergedLogs = deduplicateCharacterLogs(kbmRes.repairedLogs);
                   const mergedStr = JSON.stringify(mergedLogs);
+
                   if (currentLocalStr !== mergedStr) {
                     lastSavedStringCache[key] = mergedStr;
                     safeSetLocalStorage(key, mergedStr);
                     safeSetLocalStorage(key + '_updatedAt', String(Math.max(cloudUpdatedAt, localUpdatedAt, Date.now())));
                     notifyStorageUpdated();
                   }
+
+                  // Jika cloud memiliki log stale yang telah dibersihkan oleh filter lokal,
+                  // perbarui Cloud secara asynchronous agar server tidak terus mengirim log stale
+                  if (mergedLogs.length !== cloudLogs.length && !isFirestoreQuotaExceeded()) {
+                    writeCloudDocument(key, mergedStr, Date.now()).catch(() => {});
+                    lastSavedStringCache[key] = mergedStr;
+                  }
+
                   setCloudSyncStatus('connected');
                   return;
                 }
@@ -3512,11 +3564,51 @@ export function deduplicateCharacterLogs(logs: StudentCharacterLog[]): StudentCh
 }
 
 /**
+ * Mengambil daftar ID catatan karakter yang telah dihapus oleh pengguna/sistem
+ * sehingga tidak dibangkitkan kembali oleh sinkronisasi Cloud Firestore.
+ */
+export function getDeletedCharacterLogIds(): Set<string> {
+  if (typeof window === 'undefined') return new Set();
+  try {
+    const raw = localStorage.getItem(DELETED_CHARACTER_LOGS_KEY);
+    if (!raw) return new Set();
+    const arr = JSON.parse(raw);
+    return new Set(Array.isArray(arr) ? arr : []);
+  } catch {
+    return new Set();
+  }
+}
+
+/**
+ * Menandai ID catatan karakter sebagai dihapus (permanen hingga diinput ulang).
+ */
+export function markCharacterLogDeleted(logId: string): void {
+  if (!logId || typeof window === 'undefined') return;
+  const current = getDeletedCharacterLogIds();
+  current.add(logId.trim());
+  const arr = Array.from(current).slice(-500);
+  safeSetLocalStorage(DELETED_CHARACTER_LOGS_KEY, JSON.stringify(arr));
+}
+
+/**
+ * Menghapus tanda dihapus jika catatan tersebut sengaja dibuat/disimpan kembali.
+ */
+export function unmarkCharacterLogDeleted(logId: string): void {
+  if (!logId || typeof window === 'undefined') return;
+  const current = getDeletedCharacterLogIds();
+  if (current.has(logId.trim())) {
+    current.delete(logId.trim());
+    safeSetLocalStorage(DELETED_CHARACTER_LOGS_KEY, JSON.stringify(Array.from(current)));
+  }
+}
+
+/**
  * Menghapus catatan karakter manual dari cadangan permanen aman ketika pengguna menghapusnya.
  */
 export function deletePermanentManualCharacterLog(logId: string): void {
   if (typeof window === 'undefined' || !logId) return;
   const targetId = logId.trim();
+  markCharacterLogDeleted(targetId);
   const currentBackup = getPermanentManualCharacterLogs();
   const filtered = currentBackup.filter(l => l && l.id && l.id.trim() !== targetId);
   safeSetLocalStorage(SAFE_MANUAL_CHARACTER_LOGS_BACKUP_KEY, JSON.stringify(filtered));
@@ -3608,6 +3700,19 @@ export function saveStudentCharacterLogs(logs: StudentCharacterLog[]): void {
   const upacaraResult = repairUpacaraLogs(logs);
   const kbmResult = repairKbmActiveLogs(upacaraResult.repairedLogs);
   const cleanLogs = deduplicateCharacterLogs(kbmResult.repairedLogs);
+
+  // Jika log aktif ada di cleanLogs, pastikan dihapus dari daftar ID terhapus
+  const deletedSet = getDeletedCharacterLogIds();
+  let deletedSetChanged = false;
+  cleanLogs.forEach(l => {
+    if (l && l.id && deletedSet.has(l.id.trim())) {
+      deletedSet.delete(l.id.trim());
+      deletedSetChanged = true;
+    }
+  });
+  if (deletedSetChanged) {
+    safeSetLocalStorage(DELETED_CHARACTER_LOGS_KEY, JSON.stringify(Array.from(deletedSet)));
+  }
 
   // Amankan seluruh catatan manual ke brankas permanen (sinkronisasi langsung agar penghapusan log oleh pengguna tersimpan permanen)
   const manualLogs = cleanLogs.filter(isManualCharacterLog).map(l => ({ ...l, isManual: true }));

@@ -2616,7 +2616,7 @@ export const SchoolSettingsView: React.FC<SchoolSettingsViewProps> = ({
                   </span>
                 </div>
                 <p className="text-[11px] text-slate-300 max-w-2xl leading-relaxed">
-                  Pemeriksaan siswa yang <strong>Belum Scan Presensi (-{formData.autoCharacterPoints?.unscannedPoints ?? 1} Poin)</strong> atau <strong>Belum Scan Pulang (-{formData.autoCharacterPoints?.unreturnedPoints ?? 1} Poin)</strong>. Gunakan tombol uji coba untuk mengevaluasi manual atau atur saklar di bawah.
+                  Pemeriksaan siswa yang <strong>Belum Scan Presensi (-{formData.autoCharacterPoints?.unscannedPoints ?? 1} Poin)</strong> dan <strong>Belum Scan Pulang (-{formData.autoCharacterPoints?.unreturnedPoints ?? 1} Poin)</strong> dilakukan mulai pukul 16:00 WITA secara <strong>batching 1 kali write</strong> agar tidak berulang melakukan penilaian dan menghemat kuota cloud.
                 </p>
               </div>
 

@@ -2,6 +2,7 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { Student, SchoolClass, CharacterTrait, StudentCharacterLog, Teacher, SchoolProfile, CharacterPredicateSettings, UserSession, AttendanceRecord, LearningJournal } from '../types';
 import { exportCharacterPointsPdf, exportStudentCharacterDetailPdf } from '../lib/exportUtils';
 import { isManualCharacterLog, getPermanentManualCharacterLogs, restoreAllManualCharacterLogs, repairUpacaraLogs, repairKbmActiveLogs, deduplicateCharacterLogs } from '../lib/storage';
+import { getWitaDateTime, setAutoAssessmentBatchDone, runOnTimeAttendanceAssessment } from '../lib/autoCharacterScheduler';
 import { AutoCharacterAssessmentModal } from './AutoCharacterAssessmentModal';
 import { 
   Plus, 
@@ -75,6 +76,8 @@ export const CharacterPointsView: React.FC<CharacterPointsViewProps> = ({
   const [showAutoAssessmentModal, setShowAutoAssessmentModal] = useState<boolean>(false);
   const [showCleanupModal, setShowCleanupModal] = useState<boolean>(false);
   const [cleanupSuccessToast, setCleanupSuccessToast] = useState<string | null>(null);
+  const [onTimeResultToast, setOnTimeResultToast] = useState<string | null>(null);
+  const [isRunningOnTimeAssessment, setIsRunningOnTimeAssessment] = useState(false);
 
   // Deteksi Log Penalti Otomatis Sistem (Belum Scan, Belum Pulang, Alpa, Terlambat Otomatis)
   const autoUnscannedLogs = useMemo(() => {
@@ -120,11 +123,31 @@ export const CharacterPointsView: React.FC<CharacterPointsViewProps> = ({
     }
 
     setShowCleanupModal(false);
+    const { witaDateStr } = getWitaDateTime();
+    setAutoAssessmentBatchDone(witaDateStr, false);
+
     const msg = mode === 'UNSCANNED_UNRETURNED_ONLY'
       ? `Berhasil menghapus ${targetLogs.length} catatan penalti "Belum Scan Presensi & Belum Scan Pulang". Poin karakter siswa berhasil dipulihkan!`
       : `Berhasil menghapus ${targetLogs.length} seluruh catatan penalti otomatis sistem. Poin seluruh siswa berhasil dipulihkan ke nilai normal!`;
     setCleanupSuccessToast(msg);
     setTimeout(() => setCleanupSuccessToast(null), 6000);
+  };
+
+  const handleRunOnTimeAssessment = () => {
+    setIsRunningOnTimeAssessment(true);
+    try {
+      const res = runOnTimeAttendanceAssessment();
+      const msg = res.addedOnTimeCount > 0
+        ? `Berhasil mencatat ${res.addedOnTimeCount} penilaian positif hadir tepat waktu (setiap 3 hari = 1 poin, 6 hari = 2 poin, dst.)!`
+        : `Pemeriksaan selesai: ${res.message}`;
+      setOnTimeResultToast(msg);
+      setTimeout(() => setOnTimeResultToast(null), 6000);
+    } catch (e: any) {
+      setOnTimeResultToast(`Gagal mengevaluasi kehadiran tepat waktu: ${e?.message || 'Terjadi kendala'}`);
+      setTimeout(() => setOnTimeResultToast(null), 6000);
+    } finally {
+      setIsRunningOnTimeAssessment(false);
+    }
   };
 
   // Auto detect initial evaluator name from logged in user session
@@ -292,17 +315,6 @@ export const CharacterPointsView: React.FC<CharacterPointsViewProps> = ({
     window.addEventListener('sihadir_open_character_detail', handleOpenCharacterDetail);
     return () => window.removeEventListener('sihadir_open_character_detail', handleOpenCharacterDetail);
   }, [students, logs]);
-
-  // Auto-verifikasi & perbaikan otomatis catatan Upacara (+5 Poin) dan Jurnal KBM
-  useEffect(() => {
-    const upacaraRes = repairUpacaraLogs(logs);
-    const kbmRes = repairKbmActiveLogs(upacaraRes.repairedLogs);
-    const dedupedLogs = deduplicateCharacterLogs(kbmRes.repairedLogs);
-    if ((upacaraRes.repairedCount > 0 || kbmRes.repairedCount > 0 || dedupedLogs.length !== logs.length) && onApplyMultipleLogs) {
-      onApplyMultipleLogs(dedupedLogs);
-      return;
-    }
-  }, [logs]);
 
   const handleRestoreManualLogs = () => {
     const result = restoreAllManualCharacterLogs();
@@ -644,15 +656,71 @@ export const CharacterPointsView: React.FC<CharacterPointsViewProps> = ({
 
         <div className="flex flex-wrap items-center gap-2.5 shrink-0">
           <button
+            type="button"
+            onClick={() => setShowAutoAssessmentModal(true)}
+            className="inline-flex items-center justify-center gap-2 px-4 py-3 bg-indigo-600 hover:bg-indigo-500 text-white font-extrabold rounded-2xl shadow-md transition-all active:scale-95 cursor-pointer text-xs sm:text-sm"
+            title="Buka Penilaian Karakter Otomatis berdasarkan Presensi & Jurnal KBM"
+          >
+            <Sparkles className="w-4 h-4 text-amber-300" />
+            <span>Penilaian Otomatis Presensi & KBM</span>
+          </button>
+
+          {allAutoPenaltyLogs.length > 0 && (
+            <button
+              type="button"
+              onClick={() => setShowCleanupModal(true)}
+              className="inline-flex items-center justify-center gap-2 px-4 py-3 bg-amber-500 hover:bg-amber-400 text-slate-950 font-extrabold rounded-2xl shadow-md transition-all active:scale-95 cursor-pointer text-xs sm:text-sm"
+              title="Bersihkan catatan penalti otomatis (Belum Scan / Belum Pulang) dan pulihkan poin siswa"
+            >
+              <RotateCcw className="w-4 h-4" />
+              <span>Pulihkan Poin Otomatis ({allAutoPenaltyLogs.length})</span>
+            </button>
+          )}
+
+          <button
+            type="button"
+            onClick={handleRestoreManualLogs}
+            className="inline-flex items-center justify-center gap-2 px-4 py-3 bg-white/10 hover:bg-white/20 border border-white/20 text-white font-extrabold text-xs sm:text-sm rounded-2xl shadow-md transition-all active:scale-95 cursor-pointer"
+            title="Pulihkan & Simpan Seluruh Catatan Manual (termasuk Petugas Upacara +5 Poin) ke Brankas Permanen"
+          >
+            <ShieldCheck className="w-4 h-4 text-emerald-400" />
+            <span>Pulihkan & Simpan Manual (+5 Upacara)</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={handleRunOnTimeAssessment}
+            disabled={isRunningOnTimeAssessment}
+            className="inline-flex items-center justify-center gap-2 px-4 py-3 bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold rounded-2xl shadow-md transition-all active:scale-95 cursor-pointer text-xs sm:text-sm disabled:opacity-50"
+            title="Hitung & catat poin positif hadir tepat waktu (setiap 3 hari = 1 poin, 6 hari = 2 poin, dan kelipatannya)"
+          >
+            <Clock className="w-4 h-4 text-emerald-200" />
+            <span>{isRunningOnTimeAssessment ? 'Menilai...' : 'Nilai Tepat Waktu (3 Hari = +1)'}</span>
+          </button>
+
+          <button
             onClick={handleDownloadPdf}
             disabled={isExporting}
-            className="inline-flex items-center justify-center gap-2 px-5 py-3 bg-emerald-500 hover:bg-emerald-400 disabled:bg-slate-500 text-white font-extrabold rounded-2xl shadow-lg transition-all transform active:scale-95 cursor-pointer shrink-0"
+            className="inline-flex items-center justify-center gap-2 px-5 py-3 bg-emerald-500 hover:bg-emerald-400 disabled:bg-slate-500 text-white font-extrabold rounded-2xl shadow-lg transition-all transform active:scale-95 cursor-pointer shrink-0 text-xs sm:text-sm"
           >
             <Download className="w-5 h-5" />
             <span>{isExporting ? 'Mencetak PDF...' : 'Download PDF'}</span>
           </button>
         </div>
       </div>
+
+      {/* Toast Notifikasi Penilaian Hadir Tepat Waktu */}
+      {onTimeResultToast && (
+        <div className="p-4 bg-gradient-to-r from-emerald-600 to-teal-700 text-white rounded-2xl font-bold text-xs flex items-center justify-between shadow-lg animate-in fade-in slide-in-from-top-2">
+          <div className="flex items-center gap-2.5">
+            <CheckCircle2 className="w-5 h-5 text-emerald-200 shrink-0" />
+            <span>{onTimeResultToast}</span>
+          </div>
+          <button onClick={() => setOnTimeResultToast(null)} className="text-white/80 hover:text-white p-1 cursor-pointer">
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
 
       {/* Toast Notifikasi Sukses Pembersihan */}
       {cleanupSuccessToast && (

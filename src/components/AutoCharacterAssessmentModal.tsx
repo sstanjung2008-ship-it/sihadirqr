@@ -37,6 +37,7 @@ import {
   Check
 } from 'lucide-react';
 import { saveSchoolProfile } from '../lib/storage';
+import { getWitaDateTime } from '../lib/autoCharacterScheduler';
 
 export type AutoRuleType = 
   | 'LATE' 
@@ -126,6 +127,10 @@ export const AutoCharacterAssessmentModal: React.FC<AutoCharacterAssessmentModal
   const [unscannedPoints, setUnscannedPoints] = useState<number>(() => schoolProfile?.autoCharacterPoints?.unscannedPoints ?? 1); // Default 1 poin negatif
   const [unreturnedPoints, setUnreturnedPoints] = useState<number>(() => schoolProfile?.autoCharacterPoints?.unreturnedPoints ?? 1); // Default 1 poin negatif
   const [pointsSavedNotice, setPointsSavedNotice] = useState<{ type: 'success' | 'info'; message: string } | null>(null);
+
+  // Waktu WITA untuk sinkronisasi evaluasi 16:00 WITA
+  const { witaDateStr, witaTimeStr, totalMinutes } = useMemo(() => getWitaDateTime(), [isOpen]);
+  const isPast16Wita = totalMinutes >= 16 * 60;
 
   // Sync state when schoolProfile updates from cloud
   useEffect(() => {
@@ -395,6 +400,9 @@ export const AutoCharacterAssessmentModal: React.FC<AutoCharacterAssessmentModal
   const allCandidates = useMemo<AutoCharacterCandidate[]>(() => {
     if (!isOpen) return [];
 
+    const { witaDateStr, totalMinutes } = getWitaDateTime();
+    const isPast16Wita = totalMinutes >= 16 * 60;
+
     const candidates: AutoCharacterCandidate[] = [];
     const studentMap = new Map<string, Student>();
     students.forEach(s => studentMap.set(s.id, s));
@@ -477,10 +485,17 @@ export const AutoCharacterAssessmentModal: React.FC<AutoCharacterAssessmentModal
         }
 
         // Rule 3: Belum Scan Pulang Sekolah -> Nilai Karakter Negatif (-unreturnedPoints)
+        // REGULASI KETAT: Penilaian belum scan pulang HANYA dilakukan mulai pukul 16:00 WITA untuk hari berjalan (atau tanggal lampau)
+        const isEligibleReturnTime = rec.date < witaDateStr || (rec.date === witaDateStr && isPast16Wita);
         const isPresent = rec.status === 'HADIR' || rec.status === 'TERLAMBAT';
-        const hasReturned = !!((rec.returnTime && rec.returnTime !== '-') || rec.returnStatus === 'PULANG' || rec.returnStatus === 'PULANG_TEPAT' || rec.returnStatus === 'PULANG_CEPAT');
+        const hasReturned = !!(
+          (rec.returnTime && rec.returnTime !== '-' && rec.returnTime.trim() !== '' && !rec.returnTime.toLowerCase().includes('belum')) || 
+          rec.returnStatus === 'PULANG' || 
+          rec.returnStatus === 'PULANG_TEPAT' || 
+          rec.returnStatus === 'PULANG_CEPAT'
+        );
 
-        if (isPresent && !hasReturned) {
+        if (isEligibleReturnTime && isPresent && !hasReturned) {
           const isAlready = characterLogs.some(l => 
             l.studentId === student.id && 
             l.date === rec.date && 
@@ -498,14 +513,14 @@ export const AutoCharacterAssessmentModal: React.FC<AutoCharacterAssessmentModal
             classId: student.classId,
             className: student.className,
             ruleType: 'UNRETURNED',
-            ruleLabel: 'Belum Scan Pulang',
+            ruleLabel: 'Belum Scan Pulang (Mulai 16:00 WITA)',
             traitId: unreturnedTrait.id,
             traitName: unreturnedTrait.name || 'Belum Melakukan Scan Pulang',
             traitType: 'NEGATIF',
             points: unreturnedPoints,
             date: rec.date,
-            evaluatorName: generalEvaluatorName || 'Sistem Presensi QR',
-            notes: `Penilaian Otomatis Presensi: Status Masuk (${rec.status === 'HADIR' ? 'Hadir Tepat Waktu' : 'Terlambat'}) pukul ${rec.time || 'Pagi'} tetapi belum scan kepulangan (${rec.date})`,
+            evaluatorName: generalEvaluatorName || 'Sistem Presensi Otomatis (16:00 WITA)',
+            notes: `Penilaian Otomatis Presensi (16:00 WITA): Status Masuk (${rec.status === 'HADIR' ? 'Hadir Tepat Waktu' : 'Terlambat'}) pukul ${rec.time || 'Pagi'} tetapi belum scan kepulangan (${rec.date})`,
             attendanceDates: [rec.date],
             sourceType: 'PRESENSI',
             isSelected: !isAlready,
@@ -515,9 +530,13 @@ export const AutoCharacterAssessmentModal: React.FC<AutoCharacterAssessmentModal
       });
 
       // Rule 4: Belum Melakukan Scan Presensi -> Nilai Karakter Negatif (-unscannedPoints)
-      // Terdeteksi jika siswa belum melakukan scan pada jam masuk (kosong/belum/'-'/status BELUM_ABSEN), dan bukan Sakit/Izin
+      // REGULASI KETAT: Penilaian belum scan presensi HANYA dilakukan mulai pukul 16:00 WITA untuk hari berjalan (atau tanggal lampau)
       const distinctDates = Array.from(new Set<string>(attendanceRecords.map(r => r.date))).sort();
       distinctDates.forEach((attDate: string) => {
+        if (attDate > witaDateStr) return; // Tanggal masa depan tidak dievaluasi
+        const isEligibleUnscannedTime = attDate < witaDateStr || (attDate === witaDateStr && isPast16Wita);
+        if (!isEligibleUnscannedTime) return;
+
         const rec = sortedRecords.find(r => r.date === attDate);
         const isLegitPermit = rec && (rec.status === 'SAKIT' || rec.status === 'IZIN');
         const isUnscanned = !isLegitPermit && (
@@ -547,14 +566,14 @@ export const AutoCharacterAssessmentModal: React.FC<AutoCharacterAssessmentModal
             classId: student.classId,
             className: student.className,
             ruleType: 'UNSCANNED',
-            ruleLabel: 'Belum Scan Presensi',
+            ruleLabel: 'Belum Scan Presensi (Mulai 16:00 WITA)',
             traitId: unscannedTrait.id,
             traitName: unscannedTrait.name || 'Belum Melakukan Scan Presensi',
             traitType: 'NEGATIF',
             points: unscannedPoints,
             date: attDate,
-            evaluatorName: generalEvaluatorName || 'Sistem Presensi QR',
-            notes: `Penilaian Otomatis Presensi: Kolom Jam Masuk belum melakukan scan presensi (${attDate})`,
+            evaluatorName: generalEvaluatorName || 'Sistem Presensi Otomatis (16:00 WITA)',
+            notes: `Penilaian Otomatis Presensi (16:00 WITA): Kolom Jam Masuk belum melakukan scan presensi (${attDate})`,
             attendanceDates: [attDate],
             sourceType: 'PRESENSI',
             isSelected: !isAlready,
@@ -563,38 +582,46 @@ export const AutoCharacterAssessmentModal: React.FC<AutoCharacterAssessmentModal
         }
       });
 
-      // Rule: Datang Tepat Waktu (HADIR) selama 3 hari -> Nilai Karakter Positif (+onTimePoints)
+      // Rule: Datang Tepat Waktu (HADIR) setiap kelipatan 3 hari -> Nilai Karakter Positif (+onTimePoints per kelipatan)
       const onTimeRecords = sortedRecords.filter(r => r.status === 'HADIR');
-      if (onTimeRecords.length >= onTimeRequiredDays) {
-        const totalGroups = Math.floor(onTimeRecords.length / onTimeRequiredDays);
+      const distinctOnTimeDates = Array.from(new Set(onTimeRecords.map(r => r.date))).sort();
+      if (distinctOnTimeDates.length >= onTimeRequiredDays) {
+        const totalGroups = Math.floor(distinctOnTimeDates.length / onTimeRequiredDays);
         for (let g = 0; g < totalGroups; g++) {
-          const groupRecords = onTimeRecords.slice(g * onTimeRequiredDays, (g + 1) * onTimeRequiredDays);
-          const lastRecord = groupRecords[groupRecords.length - 1];
-          const datesFormatted = groupRecords.map(r => r.date).join(', ');
-          const targetDate = lastRecord.date;
+          const groupDates = distinctOnTimeDates.slice(g * onTimeRequiredDays, (g + 1) * onTimeRequiredDays);
+          const milestoneCount = (g + 1) * onTimeRequiredDays;
+          const lastRecordDate = groupDates[groupDates.length - 1];
+          const datesFormatted = groupDates.join(', ');
+          const targetDate = lastRecordDate;
+          const logId = `auto-ontime-${student.id}-milestone-${milestoneCount}`;
 
           const isAlready = characterLogs.some(l => 
             l.studentId === student.id && 
-            (l.notes?.includes(datesFormatted) || (l.date === targetDate && l.traitType === 'POSITIF' && l.traitName.toLowerCase().includes('tepat waktu')))
+            (
+              l.id === logId || 
+              l.id === `auto-ontime-${student.id}-group-${g}-${targetDate}` ||
+              (l.traitType === 'POSITIF' && l.notes?.includes(`kelipatan ${onTimeRequiredDays} hari ke-${g + 1}`)) ||
+              (l.traitType === 'POSITIF' && l.notes?.includes(`${milestoneCount} hari hadir`))
+            )
           );
 
           candidates.push({
-            id: `auto-ontime-${student.id}-group-${g}-${targetDate}`,
+            id: logId,
             studentId: student.id,
             studentName: student.name,
             nisn: student.nisn,
             classId: student.classId,
             className: student.className,
             ruleType: 'ON_TIME_3_DAYS',
-            ruleLabel: `Datang Tepat Waktu (${onTimeRequiredDays} Hari)`,
+            ruleLabel: `Datang Tepat Waktu (${milestoneCount} Hari - Poin ke-${g + 1})`,
             traitId: onTimeTrait.id,
-            traitName: onTimeTrait.name || 'Datang Tepat Waktu',
+            traitName: onTimeTrait.name || 'Datang Tepat Waktu & Disiplin',
             traitType: 'POSITIF',
             points: onTimePoints,
             date: targetDate,
-            evaluatorName: generalEvaluatorName || 'Sistem Presensi QR',
-            notes: `Penilaian Otomatis Presensi: Datang Tepat Waktu ${onTimeRequiredDays} hari (${datesFormatted})`,
-            attendanceDates: groupRecords.map(r => r.date),
+            evaluatorName: generalEvaluatorName || 'Sistem Presensi Otomatis (Tepat Waktu)',
+            notes: `Penilaian Karakter Positif Presensi: Datang tepat waktu kelipatan ${onTimeRequiredDays} hari ke-${g + 1} (${milestoneCount} hari hadir tepat waktu: ${datesFormatted})`,
+            attendanceDates: groupDates,
             sourceType: 'PRESENSI',
             isSelected: !isAlready,
             isAlreadyLogged: isAlready,
@@ -863,24 +890,37 @@ export const AutoCharacterAssessmentModal: React.FC<AutoCharacterAssessmentModal
 
     const now = new Date();
 
-    const newLogs: StudentCharacterLog[] = toApply.map(c => ({
-      id: 'log-auto-' + Date.now() + '-' + Math.random().toString(36).substr(2, 7),
-      studentId: c.studentId,
-      studentName: c.studentName,
-      nisn: c.nisn,
-      classId: c.classId,
-      className: c.className,
-      traitId: c.traitId,
-      traitName: c.traitName,
-      traitType: c.traitType,
-      points: c.points,
-      // For JURNAL_KBM rules, evaluator is the teacher who inputted the KBM Journal
-      evaluatorName: c.evaluatorName || generalEvaluatorName.trim() || 'Sistem Otomatis',
-      timestamp: `${c.date} ${now.toTimeString().substring(0, 8)}`,
-      date: c.date,
-      notes: c.notes,
-      photoProofUrl: undefined,
-    }));
+    const newLogs: StudentCharacterLog[] = toApply.map(c => {
+      let logId = 'log-auto-' + Date.now() + '-' + Math.random().toString(36).substr(2, 7);
+      if (c.ruleType === 'UNSCANNED') {
+        logId = `auto-unscanned-${c.studentId}-${c.date}`;
+      } else if (c.ruleType === 'UNRETURNED') {
+        logId = `auto-unreturned-${c.studentId}-${c.date}`;
+      } else if (c.ruleType === 'ALPA') {
+        logId = `auto-alpa-${c.studentId}-${c.date}`;
+      } else if (c.ruleType === 'LATE') {
+        logId = `auto-late-${c.studentId}-${c.date}`;
+      }
+
+      return {
+        id: logId,
+        studentId: c.studentId,
+        studentName: c.studentName,
+        nisn: c.nisn,
+        classId: c.classId,
+        className: c.className,
+        traitId: c.traitId,
+        traitName: c.traitName,
+        traitType: c.traitType,
+        points: c.points,
+        // For JURNAL_KBM rules, evaluator is the teacher who inputted the KBM Journal
+        evaluatorName: c.evaluatorName || generalEvaluatorName.trim() || 'Sistem Presensi Otomatis (16:00 WITA)',
+        timestamp: `${c.date} ${now.toTimeString().substring(0, 8)}`,
+        date: c.date,
+        notes: c.notes,
+        photoProofUrl: undefined,
+      };
+    });
 
     onApplyLogs(newLogs);
     alert(`Berhasil menambahkan ${newLogs.length} catatan penilaian karakter otomatis dari data Presensi & Jurnal KBM!`);
@@ -1000,6 +1040,29 @@ export const AutoCharacterAssessmentModal: React.FC<AutoCharacterAssessmentModal
               </div>
             )}
           </div>
+
+          {/* Banner Kebijakan 16:00 WITA: Penilaian Belum Scan Presensi & Belum Scan Pulang */}
+          <div className="p-3.5 sm:p-4 rounded-2xl bg-amber-500/10 border border-amber-400/40 text-slate-800 text-xs flex items-start gap-3">
+            <Clock className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+            <div className="space-y-1">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="font-extrabold text-amber-950 text-xs">
+                  Kebijakan Penilaian Presensi & Kepulangan (Mulai 16:00 WITA)
+                </span>
+                <span className={`px-2 py-0.5 rounded-full text-[10px] font-black ${
+                  isPast16Wita 
+                    ? 'bg-emerald-100 text-emerald-800 border border-emerald-300' 
+                    : 'bg-amber-100 text-amber-800 border border-amber-300'
+                }`}>
+                  {isPast16Wita ? '🟢 Waktu Aktif: Sudah Pukul 16:00 WITA' : '⏳ Menunggu Pukul 16:00 WITA'}
+                </span>
+              </div>
+              <p className="text-[11px] text-slate-600 leading-relaxed">
+                Penilaian karakter <strong>Belum Scan Presensi</strong> dan <strong>Belum Scan Pulang</strong> untuk hari berjalan ({witaDateStr}) dilakukan mulai pukul <strong>16:00 WITA</strong> secara <strong>batching 1 kali write</strong> agar tidak berulang melakukan penilaian dan menghemat kuota Firestore. Waktu WITA saat ini: <strong>{witaTimeStr} WITA</strong>.
+              </p>
+            </div>
+          </div>
+
           <div className="bg-slate-50/70 p-4 rounded-3xl border border-slate-200/90 space-y-3.5">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
               <div>

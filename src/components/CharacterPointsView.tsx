@@ -24,8 +24,6 @@ import {
   Download,
   FileText,
   Zap,
-  RotateCcw,
-  Eraser,
   AlertTriangle,
   RefreshCw
 } from 'lucide-react';
@@ -74,64 +72,8 @@ export const CharacterPointsView: React.FC<CharacterPointsViewProps> = ({
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [isExporting, setIsExporting] = useState<boolean>(false);
   const [showAutoAssessmentModal, setShowAutoAssessmentModal] = useState<boolean>(false);
-  const [showCleanupModal, setShowCleanupModal] = useState<boolean>(false);
-  const [cleanupSuccessToast, setCleanupSuccessToast] = useState<string | null>(null);
   const [onTimeResultToast, setOnTimeResultToast] = useState<string | null>(null);
   const [isRunningOnTimeAssessment, setIsRunningOnTimeAssessment] = useState(false);
-
-  // Deteksi Log Penalti Otomatis Sistem (Belum Scan, Belum Pulang, Alpa, Terlambat Otomatis)
-  const autoUnscannedLogs = useMemo(() => {
-    return logs.filter(l => 
-      l.id.startsWith('auto-unscanned-') || 
-      (l.traitType === 'NEGATIF' && l.traitName.toLowerCase().includes('belum') && l.traitName.toLowerCase().includes('scan'))
-    );
-  }, [logs]);
-
-  const autoUnreturnedLogs = useMemo(() => {
-    return logs.filter(l => 
-      l.id.startsWith('auto-unreturned-') || 
-      (l.traitType === 'NEGATIF' && l.traitName.toLowerCase().includes('belum') && l.traitName.toLowerCase().includes('pulang'))
-    );
-  }, [logs]);
-
-  const allAutoPenaltyLogs = useMemo(() => {
-    return logs.filter(l => 
-      !isManualCharacterLog(l) && (
-        l.id.startsWith('auto-unscanned-') ||
-        l.id.startsWith('auto-unreturned-') ||
-        l.id.startsWith('auto-alpa-') ||
-        l.id.startsWith('auto-late-') ||
-        (l.id.startsWith('log-auto-') && l.traitType === 'NEGATIF') ||
-        (l.evaluatorName && l.evaluatorName.includes('16:00 WITA')) ||
-        (l.traitType === 'NEGATIF' && l.traitName.toLowerCase().includes('belum') && (l.traitName.toLowerCase().includes('scan') || l.traitName.toLowerCase().includes('pulang')))
-      )
-    );
-  }, [logs]);
-
-  const handleClearAutoLogs = (mode: 'UNSCANNED_UNRETURNED_ONLY' | 'ALL_AUTO') => {
-    const targetLogs = mode === 'UNSCANNED_UNRETURNED_ONLY'
-      ? [...autoUnscannedLogs, ...autoUnreturnedLogs]
-      : allAutoPenaltyLogs;
-
-    if (targetLogs.length === 0) return;
-
-    const idsToDelete = targetLogs.map(l => l.id);
-    if (onDeleteMultipleLogs) {
-      onDeleteMultipleLogs(idsToDelete);
-    } else {
-      idsToDelete.forEach(id => onDeleteLog(id));
-    }
-
-    setShowCleanupModal(false);
-    const { witaDateStr } = getWitaDateTime();
-    setAutoAssessmentBatchDone(witaDateStr, false);
-
-    const msg = mode === 'UNSCANNED_UNRETURNED_ONLY'
-      ? `Berhasil menghapus ${targetLogs.length} catatan penalti "Belum Scan Presensi & Belum Scan Pulang". Poin karakter siswa berhasil dipulihkan!`
-      : `Berhasil menghapus ${targetLogs.length} seluruh catatan penalti otomatis sistem. Poin seluruh siswa berhasil dipulihkan ke nilai normal!`;
-    setCleanupSuccessToast(msg);
-    setTimeout(() => setCleanupSuccessToast(null), 6000);
-  };
 
   const handleRunOnTimeAssessment = () => {
     setIsRunningOnTimeAssessment(true);
@@ -315,19 +257,6 @@ export const CharacterPointsView: React.FC<CharacterPointsViewProps> = ({
     window.addEventListener('sihadir_open_character_detail', handleOpenCharacterDetail);
     return () => window.removeEventListener('sihadir_open_character_detail', handleOpenCharacterDetail);
   }, [students, logs]);
-
-  const handleRestoreManualLogs = () => {
-    const result = restoreAllManualCharacterLogs();
-
-    if (result.restoredCount > 0 && onApplyMultipleLogs) {
-      onApplyMultipleLogs(result.allLogs);
-    }
-
-    const manualCount = (result.allLogs || logs).filter(isManualCharacterLog).length;
-    const msg = `Berhasil memulihkan & menormalkan nilai karakter manual (${manualCount} catatan manual aktif tersimpan permanen)!`;
-    setCleanupSuccessToast(msg);
-    setTimeout(() => setCleanupSuccessToast(null), 6000);
-  };
 
   // Handle Export Detail Nilai Karakter Siswa to PDF
   const handleExportDetailPdf = async () => {
@@ -665,28 +594,6 @@ export const CharacterPointsView: React.FC<CharacterPointsViewProps> = ({
             <span>Penilaian Otomatis Presensi & KBM</span>
           </button>
 
-          {allAutoPenaltyLogs.length > 0 && (
-            <button
-              type="button"
-              onClick={() => setShowCleanupModal(true)}
-              className="inline-flex items-center justify-center gap-2 px-4 py-3 bg-amber-500 hover:bg-amber-400 text-slate-950 font-extrabold rounded-2xl shadow-md transition-all active:scale-95 cursor-pointer text-xs sm:text-sm"
-              title="Bersihkan catatan penalti otomatis (Belum Scan / Belum Pulang) dan pulihkan poin siswa"
-            >
-              <RotateCcw className="w-4 h-4" />
-              <span>Pulihkan Poin Otomatis ({allAutoPenaltyLogs.length})</span>
-            </button>
-          )}
-
-          <button
-            type="button"
-            onClick={handleRestoreManualLogs}
-            className="inline-flex items-center justify-center gap-2 px-4 py-3 bg-white/10 hover:bg-white/20 border border-white/20 text-white font-extrabold text-xs sm:text-sm rounded-2xl shadow-md transition-all active:scale-95 cursor-pointer"
-            title="Pulihkan & Simpan Seluruh Catatan Manual (termasuk Petugas Upacara +5 Poin) ke Brankas Permanen"
-          >
-            <ShieldCheck className="w-4 h-4 text-emerald-400" />
-            <span>Pulihkan & Simpan Manual (+5 Upacara)</span>
-          </button>
-
           <button
             type="button"
             onClick={handleRunOnTimeAssessment}
@@ -717,19 +624,6 @@ export const CharacterPointsView: React.FC<CharacterPointsViewProps> = ({
             <span>{onTimeResultToast}</span>
           </div>
           <button onClick={() => setOnTimeResultToast(null)} className="text-white/80 hover:text-white p-1 cursor-pointer">
-            <X className="w-4 h-4" />
-          </button>
-        </div>
-      )}
-
-      {/* Toast Notifikasi Sukses Pembersihan */}
-      {cleanupSuccessToast && (
-        <div className="p-4 bg-emerald-600 text-white rounded-2xl font-bold text-xs flex items-center justify-between shadow-lg animate-in fade-in slide-in-from-top-2">
-          <div className="flex items-center gap-2">
-            <CheckCircle2 className="w-5 h-5 shrink-0" />
-            <span>{cleanupSuccessToast}</span>
-          </div>
-          <button onClick={() => setCleanupSuccessToast(null)} className="text-white/80 hover:text-white p-1 cursor-pointer">
             <X className="w-4 h-4" />
           </button>
         </div>
@@ -1746,95 +1640,6 @@ export const CharacterPointsView: React.FC<CharacterPointsViewProps> = ({
             }
           }}
         />
-      )}
-
-      {/* MODAL: Pemulihan Poin Karakter Siswa (Bersihkan Log Penalti Otomatis) */}
-      {showCleanupModal && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-[85] flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl shadow-2xl max-w-lg w-full overflow-hidden border border-slate-100 animate-in fade-in zoom-in-95 duration-200">
-            {/* Modal Header */}
-            <div className="bg-gradient-to-r from-amber-600 via-amber-700 to-slate-900 text-white p-5 flex items-center justify-between">
-              <div className="flex items-center gap-2.5">
-                <div className="p-2 bg-white/20 rounded-xl">
-                  <RotateCcw className="w-5 h-5 text-amber-200" />
-                </div>
-                <div>
-                  <h3 className="font-extrabold text-base">Pulihkan Poin Karakter Siswa</h3>
-                  <p className="text-[11px] text-amber-100">Bersihkan Catatan Penalti Otomatis Sistem</p>
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={() => setShowCleanupModal(false)}
-                className="text-white/70 hover:text-white p-1 rounded-lg hover:bg-white/10 cursor-pointer"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            {/* Modal Content */}
-            <div className="p-6 space-y-4">
-              <div className="p-4 bg-amber-50 rounded-2xl border border-amber-200 space-y-2">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-bold text-amber-950">Total Log Penalti Terdeteksi:</span>
-                  <span className="px-2.5 py-0.5 bg-amber-200 text-amber-900 rounded-full font-black text-xs">
-                    {allAutoPenaltyLogs.length} Catatan
-                  </span>
-                </div>
-                <div className="text-xs text-amber-900/90 space-y-1 pt-1 border-t border-amber-200/80">
-                  <div className="flex justify-between">
-                    <span>• Penalti Belum Scan Presensi:</span>
-                    <span className="font-bold">{autoUnscannedLogs.length} log</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span>• Penalti Belum Scan Pulang:</span>
-                    <span className="font-bold">{autoUnreturnedLogs.length} log</span>
-                  </div>
-                  {allAutoPenaltyLogs.length - (autoUnscannedLogs.length + autoUnreturnedLogs.length) > 0 && (
-                    <div className="flex justify-between">
-                      <span>• Penalti Otomatis Lainnya (Alpa/Terlambat):</span>
-                      <span className="font-bold">{allAutoPenaltyLogs.length - (autoUnscannedLogs.length + autoUnreturnedLogs.length)} log</span>
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              <p className="text-xs text-slate-600 leading-relaxed">
-                Log penalti di atas secara otomatis memotong poin karakter siswa. Memilih pemulihan akan menghapus catatan otomatis tersebut dan seketika <strong>mengembalikan nilai poin karakter siswa ke nilai normal</strong>.
-              </p>
-
-              <div className="space-y-2.5 pt-2">
-                {(autoUnscannedLogs.length > 0 || autoUnreturnedLogs.length > 0) && (
-                  <button
-                    type="button"
-                    onClick={() => handleClearAutoLogs('UNSCANNED_UNRETURNED_ONLY')}
-                    className="w-full p-3.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs rounded-xl shadow-xs transition-all flex items-center justify-center gap-2 cursor-pointer active:scale-98"
-                  >
-                    <Eraser className="w-4 h-4" />
-                    <span>Hapus Khusus Belum Scan & Belum Pulang ({autoUnscannedLogs.length + autoUnreturnedLogs.length} Log)</span>
-                  </button>
-                )}
-
-                <button
-                  type="button"
-                  onClick={() => handleClearAutoLogs('ALL_AUTO')}
-                  className="w-full p-3.5 bg-rose-600 hover:bg-rose-500 text-white font-black text-xs rounded-xl shadow-xs transition-all flex items-center justify-center gap-2 cursor-pointer active:scale-98"
-                >
-                  <RotateCcw className="w-4 h-4" />
-                  <span>Hapus Seluruh Penalti Otomatis ({allAutoPenaltyLogs.length} Log)</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => setShowCleanupModal(false)}
-                  className="w-full py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-xl transition-all cursor-pointer text-center"
-                >
-                  Batal
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
       )}
     </div>
   );

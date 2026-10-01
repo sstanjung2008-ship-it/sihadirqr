@@ -147,15 +147,57 @@ if (typeof window !== 'undefined') {
   }
 }
 
+// Cadangan proteksi biaya Google Cloud Firestore
+const DAILY_WRITES_KEY = 'sihadir_daily_cloud_writes_v1';
+const MAX_SAFE_DAILY_WRITES_PER_DEVICE = 3500;
+
+export function getDailyWritesInfo(): { date: string; count: number } {
+  if (typeof window === 'undefined') return { date: '', count: 0 };
+  try {
+    const raw = localStorage.getItem(DAILY_WRITES_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (parsed && parsed.date === getLocalDateString()) return parsed;
+    }
+  } catch {}
+  return { date: getLocalDateString(), count: 0 };
+}
+
+export function incrementDailyWrites(): number {
+  if (typeof window === 'undefined') return 0;
+  try {
+    const today = getLocalDateString();
+    const info = getDailyWritesInfo();
+    const newCount = (info.date === today ? info.count : 0) + 1;
+    localStorage.setItem(DAILY_WRITES_KEY, JSON.stringify({ date: today, count: newCount }));
+    return newCount;
+  } catch {
+    return 0;
+  }
+}
+
 export function isFirestoreQuotaExceeded(): boolean {
   if (typeof window === 'undefined') return false;
-  // Database berbayar Blaze / custom database tidak terikat batas kuota harian gratis 20.000 write
-  if (firebaseConfigData.firestoreDatabaseId && firebaseConfigData.firestoreDatabaseId !== '(default)') {
-    return false;
-  }
   try {
+    // 1. Cek jeda cooldown jika pernah kena QuotaExceeded
     const stored = Number(localStorage.getItem(QUOTA_COOLDOWN_KEY) || '0');
-    return Date.now() < stored;
+    if (Date.now() < stored) return true;
+
+    // 2. Client-side Daily Safety Cap (Menjamin tidak ada tagihan tak terduga pada Google Cloud Blaze)
+    // Jika sebuah perangkat melakukan penulisan melebihi ambang wajar harian (3.500 writes/hari),
+    // aktifkan pembatas aman agar total proyek tidak pernah melompati kuota gratis 20.000 write Google Cloud!
+    const dailyInfo = getDailyWritesInfo();
+    if (dailyInfo.count >= MAX_SAFE_DAILY_WRITES_PER_DEVICE) {
+      console.warn(`[Firestore Safety Cap] Ambang aman harian (${MAX_SAFE_DAILY_WRITES_PER_DEVICE} writes) tercapai pada browser ini untuk mencegah tagihan Google Cloud.`);
+      return true;
+    }
+
+    // Database berbayar Blaze / custom database tidak diblokir cooldown Spark
+    if (firebaseConfigData.firestoreDatabaseId && firebaseConfigData.firestoreDatabaseId !== '(default)') {
+      return false;
+    }
+
+    return false;
   } catch {
     return false;
   }
@@ -418,6 +460,9 @@ async function performSingleDocWrite(key: string, dataStr: string, timestamp: nu
       totalChunks: numChunks,
     });
   }
+
+  // Hitung penulisan harian untuk perlindungan tagihan Google Cloud Blaze
+  incrementDailyWrites();
 }
 
 export async function writeCloudDocument(key: string, dataStr: string, timestamp: number): Promise<void> {
@@ -2491,12 +2536,11 @@ export function initFirestoreRealtimeSync(role?: UserRole) {
                     notifyStorageUpdated();
                   }
 
-                  // Jika cloud memiliki log stale yang telah dibersihkan oleh filter lokal,
-                  // perbarui Cloud secara asynchronous agar server tidak terus mengirim log stale
-                  if (mergedLogs.length !== cloudLogs.length && !isFirestoreQuotaExceeded()) {
-                    writeCloudDocument(key, mergedStr, Date.now()).catch(() => {});
-                    lastSavedStringCache[key] = mergedStr;
-                  }
+                  // PENGHEMAT KUOTA FIRESTORE:
+                  // Dilarang keras memicu writeCloudDocument otomatis dari dalam onSnapshot listener!
+                  // Penulisan ke Cloud Firestore hanya boleh dilakukan saat pengguna atau batch scheduler 16:00 WITA
+                  // secara eksplisit memanggil saveStudentCharacterLogs untuk mencegah loop ping-pong antar-perangkat.
+                  lastSavedStringCache[key] = mergedStr;
 
                   setCloudSyncStatus('connected');
                   return;

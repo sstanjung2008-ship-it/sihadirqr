@@ -100,18 +100,9 @@ export function reconcileAutoCharacterPenalties(forceToday: boolean = false): {
   const isBatchDoneToday = isAutoAssessmentBatchDone(witaDateStr);
 
   // 1. JAMINAN BATCHING 1 KALI WRITE (AGAR TIDAK BERULANG MELAKUKAN PENILAIAN):
-  // Jika waktu sudah >= 16:00 WITA dan batch untuk hari ini sudah selesai dieksekusi 1 kali write,
-  // hentikan proses evaluasi seketika agar tidak berulang menulis ke database/storage.
-  if (!forceToday && isPast16Wita && isBatchDoneToday) {
-    return {
-      executed: false,
-      count: 0,
-      unscannedCount: 0,
-      unreturnedCount: 0,
-      onTimeCount: 0,
-      message: `Penilaian karakter 16:00 WITA hari ini (${witaDateStr}) sudah berhasil diproses dalam 1 kali batching.`
-    };
-  }
+  // Jika waktu sudah >= 16:00 WITA dan batch penalti untuk hari ini sudah selesai diproses (isBatchDoneToday),
+  // maka penalti belum scan presensi & belum scan pulang hari ini tidak akan ditambahkan ulang.
+  // Namun, evaluasi Hadir Tepat Waktu (kelipatan 3 hari = 1, 6 hari = 2, dst) dan pembersihan data tetap aktif dipantau.
 
   const students = getStudents();
   if (students.length === 0) {
@@ -207,8 +198,10 @@ export function reconcileAutoCharacterPenalties(forceToday: boolean = false): {
 
     // ATURAN WAKTU EVALUASI PENALTI (MULAI PUKUL 16:00 WITA):
     // Penilaian karakter belum scan presensi dan belum scan pulang untuk hari ini HANYA dimulai pukul 16:00 WITA.
+    // Jika batch 16:00 WITA hari ini sudah selesai diproses (isBatchDoneToday) dan tidak dipaksa (forceToday=false),
+    // jangan tambahkan lagi penalti untuk hari berjalan.
     // Untuk tanggal lampau (attDate < witaDateStr), sudah melewati pukul 16:00 hari tersebut sehingga otomatis eligible.
-    const isEligibleFor16WitaEvaluation = attDate < witaDateStr || (attDate === witaDateStr && (isPast16Wita || forceToday));
+    const isEligibleFor16WitaEvaluation = attDate < witaDateStr || (attDate === witaDateStr && (isPast16Wita || forceToday) && (!isBatchDoneToday || forceToday));
     if (!isEligibleFor16WitaEvaluation) return;
 
     // 1. ATURAN: BELUM SCAN PRESENSI
@@ -354,11 +347,11 @@ export function reconcileAutoCharacterPenalties(forceToday: boolean = false): {
             traitId: onTimeTrait.id,
             traitName: onTimeTrait.name,
             traitType: 'POSITIF',
-            points: onTimePoints, // dinilai 1 untuk setiap kelipatan 3 hari (akumulasi: 3 hari = 1, 6 hari = 2 poin, dst)
+            points: onTimePoints, // dinilai 1 untuk setiap kelipatan 3 hari (akumulasi: 3 hari = 1 poin, 6 hari = 2 poin, 9 hari = 3 poin, dst)
             evaluatorName: 'Sistem Presensi Otomatis (Tepat Waktu)',
             timestamp: `${targetDate} 16:00:00`,
             date: targetDate,
-            notes: `Penilaian Karakter Positif Presensi: Datang tepat waktu kelipatan ${onTimeRequiredDays} hari ke-${g + 1} (Total ${milestoneCount} kali hadir tepat waktu: ${groupDates.join(', ')})`,
+            notes: `Penilaian Karakter Positif Presensi: Datang tepat waktu kelipatan ${onTimeRequiredDays} hari ke-${g + 1} (Total ${milestoneCount} kali hadir tepat waktu dinilai akumulasi ${g + 1} poin: ${groupDates.join(', ')})`,
           });
           addedOnTimeCount++;
         }

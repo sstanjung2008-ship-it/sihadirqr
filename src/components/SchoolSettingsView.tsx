@@ -2423,6 +2423,9 @@ export const SchoolSettingsView: React.FC<SchoolSettingsViewProps> = ({
                     <span className="text-[11px] font-bold text-emerald-700">+Poin</span>
                   </div>
                 </div>
+                <p className="text-[10px] text-emerald-700 font-semibold leading-tight pt-1 border-t border-emerald-100">
+                  💡 Setiap {formData.autoCharacterPoints?.onTimeRequiredDays ?? 3} hari hadir tepat waktu dinilai {formData.autoCharacterPoints?.onTimePoints ?? 1} poin (3 hari = 1, 6 hari = 2, 9 hari = 3, dst.)
+                </p>
               </div>
             </div>
 
@@ -3356,7 +3359,7 @@ export const SchoolSettingsView: React.FC<SchoolSettingsViewProps> = ({
                   </span>
                 </h2>
                 <p className="text-xs text-slate-500 mt-0.5">
-                  Atur tombol izin login orang tua, jadwal jam operasional akses, dan paksa log off seluruh akun wali murid. (Khusus role Orang Tua — Administrator, Guru, dan Petugas Pos tetap dapat login 24/7).
+                  Atur tombol izin login orang tua, jadwal jam operasional akses, dan paksa log off seluruh akun wali murid.
                 </p>
               </div>
             </div>
@@ -3398,7 +3401,7 @@ export const SchoolSettingsView: React.FC<SchoolSettingsViewProps> = ({
               : 'bg-rose-50/70 border-rose-300'
           }`}>
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-              <div className="space-y-1.5">
+              <div className="space-y-1">
                 <div className="flex items-center gap-2">
                   <span className="text-sm font-black text-slate-800">
                     Status Izin Login Portal Wali Murid
@@ -3416,10 +3419,6 @@ export const SchoolSettingsView: React.FC<SchoolSettingsViewProps> = ({
                     ? 'Saat ini tombol dalam posisi AKTIF. Wali murid dapat melakukan login dengan NISN anak untuk melihat riwayat kehadiran, rekap nilai karakter, jadwal pelajaran, dan mengajukan surat izin/sakit.'
                     : 'Saat ini tombol dalam posisi NON-AKTIF. Seluruh akun wali murid yang sedang membuka aplikasi telah di-log off secara otomatis. Setiap upaya login dari wali murid akan ditolak oleh sistem sampai Administrator mengaktifkannya kembali.'}
                 </p>
-                <div className="pt-1 flex items-center gap-1.5 text-[11px] font-bold text-indigo-700">
-                  <CheckCircle2 className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
-                  <span>Jaminan Hak Akses: Pengaturan ini HANYA berlaku untuk akun Wali Murid (Orang Tua). Administrator (admin), Guru, dan Petugas Pos Satpam TETAP DAPAT LOGIN 24/7 tanpa terpengaruh oleh saklar atau jadwal ini.</span>
-                </div>
               </div>
 
               <div className="flex items-center gap-2 shrink-0">

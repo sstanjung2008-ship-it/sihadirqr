@@ -692,10 +692,10 @@ export const CharacterPointsView: React.FC<CharacterPointsViewProps> = ({
             onClick={handleRunOnTimeAssessment}
             disabled={isRunningOnTimeAssessment}
             className="inline-flex items-center justify-center gap-2 px-4 py-3 bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold rounded-2xl shadow-md transition-all active:scale-95 cursor-pointer text-xs sm:text-sm disabled:opacity-50"
-            title="Hitung & catat poin positif hadir tepat waktu (setiap 3 hari = 1 poin, 6 hari = 2 poin, dan kelipatannya)"
+            title="Hitung & catat poin positif hadir tepat waktu (setiap 3 hari hadir tepat waktu dinilai 1, 6 kali dinilai 2, dan kelipatannya)"
           >
             <Clock className="w-4 h-4 text-emerald-200" />
-            <span>{isRunningOnTimeAssessment ? 'Menilai...' : 'Nilai Tepat Waktu (3 Hari = +1)'}</span>
+            <span>{isRunningOnTimeAssessment ? 'Menilai...' : 'Nilai Tepat Waktu (3 Hari = 1, 6 Hari = 2 Poin)'}</span>
           </button>
 
           <button

@@ -1,9 +1,8 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { Student, SchoolClass, CharacterTrait, StudentCharacterLog, Teacher, SchoolProfile, CharacterPredicateSettings, UserSession, AttendanceRecord, LearningJournal } from '../types';
 import { exportCharacterPointsPdf, exportStudentCharacterDetailPdf } from '../lib/exportUtils';
-import { isManualCharacterLog, getPermanentManualCharacterLogs, restoreAllManualCharacterLogs, repairUpacaraLogs, repairKbmActiveLogs, deduplicateCharacterLogs } from '../lib/storage';
+import { isManualCharacterLog, deduplicateCharacterLogs } from '../lib/storage';
 import { getWitaDateTime, setAutoAssessmentBatchDone, runOnTimeAttendanceAssessment } from '../lib/autoCharacterScheduler';
-import { AutoCharacterAssessmentModal } from './AutoCharacterAssessmentModal';
 import { 
   Plus, 
   Search, 
@@ -18,7 +17,6 @@ import {
   Clock, 
   FileImage, 
   X, 
-  Sparkles,
   Filter,
   ShieldCheck,
   Download,
@@ -71,7 +69,6 @@ export const CharacterPointsView: React.FC<CharacterPointsViewProps> = ({
   const [selectedClassId, setSelectedClassId] = useState<string>('ALL');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [isExporting, setIsExporting] = useState<boolean>(false);
-  const [showAutoAssessmentModal, setShowAutoAssessmentModal] = useState<boolean>(false);
   const [onTimeResultToast, setOnTimeResultToast] = useState<string | null>(null);
   const [isRunningOnTimeAssessment, setIsRunningOnTimeAssessment] = useState(false);
 
@@ -584,16 +581,6 @@ export const CharacterPointsView: React.FC<CharacterPointsViewProps> = ({
         </div>
 
         <div className="flex flex-wrap items-center gap-2.5 shrink-0">
-          <button
-            type="button"
-            onClick={() => setShowAutoAssessmentModal(true)}
-            className="inline-flex items-center justify-center gap-2 px-4 py-3 bg-indigo-600 hover:bg-indigo-500 text-white font-extrabold rounded-2xl shadow-md transition-all active:scale-95 cursor-pointer text-xs sm:text-sm"
-            title="Buka Penilaian Karakter Otomatis berdasarkan Presensi & Jurnal KBM"
-          >
-            <Sparkles className="w-4 h-4 text-amber-300" />
-            <span>Penilaian Otomatis Presensi & KBM</span>
-          </button>
-
           <button
             type="button"
             onClick={handleRunOnTimeAssessment}
@@ -1615,31 +1602,6 @@ export const CharacterPointsView: React.FC<CharacterPointsViewProps> = ({
             </div>
           </div>
         </div>
-      )}
-
-      {/* Modal Penilaian Otomatis Presensi & Jurnal KBM */}
-      {showAutoAssessmentModal && (
-        <AutoCharacterAssessmentModal
-          isOpen={showAutoAssessmentModal}
-          onClose={() => setShowAutoAssessmentModal(false)}
-          students={students}
-          classes={classes}
-          traits={traits}
-          characterLogs={logs}
-          attendanceRecords={attendanceRecords}
-          learningJournals={learningJournals}
-          teachers={teachers}
-          userSession={userSession}
-          schoolProfile={schoolProfile}
-          onUpdateSchoolProfile={onUpdateSchoolProfile}
-          onApplyLogs={(newLogs) => {
-            if (onApplyMultipleLogs) {
-              onApplyMultipleLogs(newLogs);
-            } else {
-              newLogs.forEach(log => onAddLog(log));
-            }
-          }}
-        />
       )}
     </div>
   );

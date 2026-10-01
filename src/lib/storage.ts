@@ -2520,10 +2520,12 @@ export function initFirestoreRealtimeSync(role?: UserRole) {
                     map.set(cleanId, l);
                   });
 
-                  // Pertahankan data lokal (agar log otomatis yang baru dihitung lokal tidak terhapus)
+                  // Pertahankan data lokal HANYA untuk log otomatis lokal yang baru dihitung dan belum tersinkronisasi
+                  // Log manual TIDAK PERNAH dipertahankan dari lokal jika tidak ada di Cloud (karena artinya telah dihapus di perangkat lain)
                   currentLocalLogs.forEach(l => {
                     if (l && l.id) {
                       const cleanId = l.id.trim();
+                      if (isManualCharacterLog(l)) return;
                       if (!map.has(cleanId) && !deletedIds.has(cleanId)) {
                         map.set(cleanId, l);
                       }
@@ -3650,6 +3652,7 @@ export function markCharacterLogDeleted(logId: string): void {
   current.add(logId.trim());
   const arr = Array.from(current).slice(-1000);
   safeSetLocalStorage(DELETED_CHARACTER_LOGS_KEY, JSON.stringify(arr));
+  syncToCloud(DELETED_CHARACTER_LOGS_KEY, arr, true);
 }
 
 /**
@@ -3826,6 +3829,7 @@ export function saveStudentCharacterLogs(logs: StudentCharacterLog[], instantClo
 export function restoreAllManualCharacterLogs(): { restoredCount: number; allLogs: StudentCharacterLog[] } {
   const currentLogs = getStudentCharacterLogs();
   const permanentManuals = getPermanentManualCharacterLogs();
+  const deletedIds = getDeletedCharacterLogIds();
   const existingIds = new Set(currentLogs.map(l => l.id?.trim()).filter(Boolean));
 
   let restoredCount = 0;
@@ -3833,7 +3837,7 @@ export function restoreAllManualCharacterLogs(): { restoredCount: number; allLog
 
   permanentManuals.forEach(pLog => {
     const pId = pLog.id?.trim();
-    if (pId && !existingIds.has(pId)) {
+    if (pId && !existingIds.has(pId) && !deletedIds.has(pId)) {
       merged.unshift(pLog);
       existingIds.add(pId);
       restoredCount++;

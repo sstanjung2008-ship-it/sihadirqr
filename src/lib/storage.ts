@@ -1585,7 +1585,13 @@ export async function smartSyncAndMergeAllWithCloud(): Promise<{ success: boolea
         } catch {}
       }
       const localItems = getLocal();
-      const merged = mergeGenericListsById(localItems, cloudItems);
+      let merged = mergeGenericListsById(localItems, cloudItems);
+      if (key === KEYS.CHARACTER_LOGS) {
+        const deletedIds = getDeletedCharacterLogIds();
+        if (deletedIds.size > 0) {
+          merged = merged.filter((l: any) => l && l.id && !deletedIds.has(String(l.id).trim()));
+        }
+      }
       const jsonStr = JSON.stringify(merged);
       safeSetLocalStorage(key, jsonStr);
       safeSetLocalStorage(key + '_updatedAt', String(now));
@@ -3590,21 +3596,33 @@ export function getPermanentManualCharacterLogs(): StudentCharacterLog[] {
 }
 
 /**
- * Menghilangkan catatan log karakter yang memiliki ID duplikat sehingga komponen React
- * tidak pernah menghasilkan peringatan 'two children with the same key'
+ * Menghilangkan catatan log karakter yang memiliki ID duplikat atau data kembar identik
+ * sehingga komponen React bebas dari duplikasi dan tidak memunculkan log ganda.
  */
 export function deduplicateCharacterLogs(logs: StudentCharacterLog[]): StudentCharacterLog[] {
   if (!Array.isArray(logs)) return [];
-  const map = new Map<string, StudentCharacterLog>();
+  const deletedIds = getDeletedCharacterLogIds();
+  const idMap = new Map<string, StudentCharacterLog>();
+  const semanticSet = new Set<string>();
+
   for (let i = 0; i < logs.length; i++) {
     const log = logs[i];
     if (!log) continue;
-    const cleanId = log.id ? String(log.id).trim() : `log-item-${i}-${Date.now()}`;
-    if (!map.has(cleanId)) {
-      map.set(cleanId, { ...log, id: cleanId });
+    const cleanId = log.id ? String(log.id).trim() : `log-item-${log.studentId || i}-${log.date || ''}-${i}`;
+
+    // Saring log yang ada di daftar ID terhapus
+    if (deletedIds.has(cleanId)) continue;
+
+    // Kunci semantik unik: nama/id siswa + tanggal + trait + timestamp + catatan
+    const semanticKey = `${log.studentId || ''}_${log.date || ''}_${log.traitId || log.traitName || ''}_${log.timestamp || ''}_${(log.notes || '').trim()}`;
+    if (semanticSet.has(semanticKey)) continue;
+
+    if (!idMap.has(cleanId)) {
+      semanticSet.add(semanticKey);
+      idMap.set(cleanId, { ...log, id: cleanId });
     }
   }
-  return Array.from(map.values());
+  return Array.from(idMap.values());
 }
 
 /**
@@ -3630,7 +3648,7 @@ export function markCharacterLogDeleted(logId: string): void {
   if (!logId || typeof window === 'undefined') return;
   const current = getDeletedCharacterLogIds();
   current.add(logId.trim());
-  const arr = Array.from(current).slice(-500);
+  const arr = Array.from(current).slice(-1000);
   safeSetLocalStorage(DELETED_CHARACTER_LOGS_KEY, JSON.stringify(arr));
 }
 
@@ -3648,13 +3666,33 @@ export function unmarkCharacterLogDeleted(logId: string): void {
 
 /**
  * Menghapus catatan karakter manual dari cadangan permanen aman ketika pengguna menghapusnya.
+ * Membersihkan ID target beserta seluruh duplikat kembarannya jika ada.
  */
 export function deletePermanentManualCharacterLog(logId: string): void {
   if (typeof window === 'undefined' || !logId) return;
   const targetId = logId.trim();
   markCharacterLogDeleted(targetId);
   const currentBackup = getPermanentManualCharacterLogs();
-  const filtered = currentBackup.filter(l => l && l.id && l.id.trim() !== targetId);
+  const targetInBackup = currentBackup.find(l => l && l.id && l.id.trim() === targetId);
+
+  const filtered = currentBackup.filter(l => {
+    if (!l) return false;
+    const cleanId = l.id ? l.id.trim() : '';
+    if (cleanId === targetId) return false;
+    // Bersihkan juga catatan kembar identik yang memiliki siswa, tanggal, dan trait yang sama
+    if (
+      targetInBackup &&
+      l.studentId === targetInBackup.studentId &&
+      l.date === targetInBackup.date &&
+      (l.traitId === targetInBackup.traitId || l.traitName === targetInBackup.traitName) &&
+      l.timestamp === targetInBackup.timestamp
+    ) {
+      if (cleanId) markCharacterLogDeleted(cleanId);
+      return false;
+    }
+    return true;
+  });
+
   safeSetLocalStorage(SAFE_MANUAL_CHARACTER_LOGS_BACKUP_KEY, JSON.stringify(filtered));
 }
 
@@ -3663,18 +3701,27 @@ export function deletePermanentManualCharacterLog(logId: string): void {
  */
 export function savePermanentManualCharacterLogs(newManualLogs: StudentCharacterLog[]): void {
   if (typeof window === 'undefined' || !newManualLogs || newManualLogs.length === 0) return;
+  const deletedIds = getDeletedCharacterLogIds();
   const currentBackup = getPermanentManualCharacterLogs();
   const map = new Map<string, StudentCharacterLog>();
 
-  // Masukkan data cadangan yang sudah ada
+  // Masukkan data cadangan yang sudah ada (abaikan yang terhapus)
   currentBackup.forEach(l => {
-    if (l && l.id) map.set(l.id.trim(), l);
+    if (l && l.id) {
+      const cleanId = l.id.trim();
+      if (!deletedIds.has(cleanId)) {
+        map.set(cleanId, l);
+      }
+    }
   });
 
   // Tambahkan/perbarui catatan manual baru dengan flag isManual: true
   newManualLogs.forEach(l => {
     if (isManualCharacterLog(l) && l && l.id) {
-      map.set(l.id.trim(), { ...l, isManual: true });
+      const cleanId = l.id.trim();
+      if (!deletedIds.has(cleanId)) {
+        map.set(cleanId, { ...l, isManual: true });
+      }
     }
   });
 
@@ -3699,14 +3746,21 @@ export function getStudentCharacterLogs(): StudentCharacterLog[] {
     }
   }
 
-  // JAMINAN PERMANEN: Selalu pastikan catatan manual dari cadangan permanen terikut
+  // 1. Dapatkan daftar ID catatan karakter yang dihapus secara manual/sistem
+  const deletedIds = getDeletedCharacterLogIds();
+  if (deletedIds.size > 0) {
+    logs = logs.filter(l => l && l.id && !deletedIds.has(l.id.trim()));
+  }
+
+  // 2. JAMINAN PERMANEN: Selalu pastikan catatan manual dari cadangan permanen terikut
+  // HANYA JIKA belum pernah dihapus oleh pengguna!
   const permanentManuals = getPermanentManualCharacterLogs();
   if (permanentManuals.length > 0) {
     const existingIds = new Set(logs.map(l => l.id?.trim()).filter(Boolean));
     let hasNewFromBackup = false;
     permanentManuals.forEach(pLog => {
       const pId = pLog.id?.trim();
-      if (pId && !existingIds.has(pId)) {
+      if (pId && !existingIds.has(pId) && !deletedIds.has(pId)) {
         logs.unshift(pLog);
         existingIds.add(pId);
         hasNewFromBackup = true;
@@ -3717,48 +3771,45 @@ export function getStudentCharacterLogs(): StudentCharacterLog[] {
     }
   }
 
-  // SINKRONISASI & PERBAIKAN OTOMATIS:
-  // 1. Pastikan seluruh catatan "Tidak mengikuti Upacara" yang bernilai positif atau catatan petugas dinormalkan menjadi "Menjadi Petugas Upacara Bendera" (+5 Poin)
-  // 2. Pastikan seluruh catatan "Sangat aktif dalam KBM" yang keliru tertulis "Membantu menggalang dana" dinormalkan menjadi "Sangat Aktif KBM"
+  // 3. SINKRONISASI & PERBAIKAN OTOMATIS:
+  // Normalisasi log Upacara & KBM
   const upacaraResult = repairUpacaraLogs(logs);
   const kbmResult = repairKbmActiveLogs(upacaraResult.repairedLogs);
   const totalRepaired = upacaraResult.repairedCount + kbmResult.repairedCount;
 
   let finalLogs = deduplicateCharacterLogs(kbmResult.repairedLogs);
 
+  // Filter ulang jika ada id terhapus yang muncul dari proses normalisasi
+  if (deletedIds.size > 0) {
+    finalLogs = finalLogs.filter(l => l && l.id && !deletedIds.has(l.id.trim()));
+  }
+
   if (totalRepaired > 0 || finalLogs.length !== logs.length) {
     safeSetLocalStorage(KEYS.CHARACTER_LOGS, JSON.stringify(finalLogs));
-    const repairedManuals = finalLogs.filter(isManualCharacterLog);
-    if (repairedManuals.length > 0) {
-      safeSetLocalStorage(SAFE_MANUAL_CHARACTER_LOGS_BACKUP_KEY, JSON.stringify(repairedManuals));
-    }
+    const repairedManuals = finalLogs
+      .filter(isManualCharacterLog)
+      .filter(l => l && l.id && !deletedIds.has(l.id.trim()));
+    safeSetLocalStorage(SAFE_MANUAL_CHARACTER_LOGS_BACKUP_KEY, JSON.stringify(repairedManuals));
   }
 
   return finalLogs;
 }
 
-export function saveStudentCharacterLogs(logs: StudentCharacterLog[]): void {
+export function saveStudentCharacterLogs(logs: StudentCharacterLog[], instantCloudSync: boolean = true): void {
   const now = Date.now();
+  const deletedSet = getDeletedCharacterLogIds();
 
   // Pastikan seluruh log dinormalkan sebelum disimpan (Upacara +5 poin & Sangat Aktif KBM)
   const upacaraResult = repairUpacaraLogs(logs);
   const kbmResult = repairKbmActiveLogs(upacaraResult.repairedLogs);
-  const cleanLogs = deduplicateCharacterLogs(kbmResult.repairedLogs);
+  let cleanLogs = deduplicateCharacterLogs(kbmResult.repairedLogs);
 
-  // Jika log aktif ada di cleanLogs, pastikan dihapus dari daftar ID terhapus
-  const deletedSet = getDeletedCharacterLogIds();
-  let deletedSetChanged = false;
-  cleanLogs.forEach(l => {
-    if (l && l.id && deletedSet.has(l.id.trim())) {
-      deletedSet.delete(l.id.trim());
-      deletedSetChanged = true;
-    }
-  });
-  if (deletedSetChanged) {
-    safeSetLocalStorage(DELETED_CHARACTER_LOGS_KEY, JSON.stringify(Array.from(deletedSet)));
+  // Pastikan tidak ada log terhapus yang ikut tersimpan
+  if (deletedSet.size > 0) {
+    cleanLogs = cleanLogs.filter(l => l && l.id && !deletedSet.has(l.id.trim()));
   }
 
-  // Amankan seluruh catatan manual ke brankas permanen (sinkronisasi langsung agar penghapusan log oleh pengguna tersimpan permanen)
+  // Amankan seluruh catatan manual aktif ke brankas permanen
   const manualLogs = cleanLogs.filter(isManualCharacterLog).map(l => ({ ...l, isManual: true }));
   safeSetLocalStorage(SAFE_MANUAL_CHARACTER_LOGS_BACKUP_KEY, JSON.stringify(manualLogs));
 
@@ -3766,7 +3817,7 @@ export function saveStudentCharacterLogs(logs: StudentCharacterLog[]): void {
   safeSetLocalStorage(KEYS.CHARACTER_LOGS, dataStr);
   safeSetLocalStorage(KEYS.CHARACTER_LOGS + '_updatedAt', String(now));
   notifyStorageUpdated();
-  syncToCloud(KEYS.CHARACTER_LOGS, cleanLogs, false, now);
+  syncToCloud(KEYS.CHARACTER_LOGS, cleanLogs, instantCloudSync, now);
 }
 
 /**

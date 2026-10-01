@@ -412,12 +412,12 @@ export default function App() {
     // PENGHEMAT KUOTA: Khusus Admin & Scanner Pos, jangan pernah dijalankan oleh akun Wali Murid (PARENT)!
     if (currentRole === 'PARENT') return;
 
-    // 1. Jalankan pemeriksaan saat aplikasi dimuat (memproses kelipatan 3 hari hadir tepat waktu secara langsung)
-    reconcileAutoCharacterPenalties(true);
+    // 1. Jalankan pemeriksaan saat aplikasi dimuat (HANYA evaluasi reward 3 hari hadir tepat waktu & rekaman lampau, tidak memaksa 16:00 WITA hari berjalan secara prematur)
+    reconcileAutoCharacterPenalties(false);
 
     // 2. Timer interval ultra-hemat kuota (0 Cloud Read & 0 Cloud Write bila data tidak berubah)
     const interval = setInterval(() => {
-      reconcileAutoCharacterPenalties();
+      reconcileAutoCharacterPenalties(false);
     }, 30000);
 
     return () => {
@@ -1458,11 +1458,36 @@ export default function App() {
   };
 
   const handleDeleteCharacterLog = (logId: string) => {
-    deletePermanentManualCharacterLog(logId);
-    markCharacterLogDeleted(logId);
-    const updated = characterLogs.filter(l => l.id !== logId && l.id !== logId.trim());
+    if (!logId) return;
+    const targetId = logId.trim();
+    const targetLog = characterLogs.find(l => l?.id?.trim() === targetId);
+
+    deletePermanentManualCharacterLog(targetId);
+    markCharacterLogDeleted(targetId);
+
+    const updated = characterLogs.filter(l => {
+      if (!l) return false;
+      const cleanId = l.id?.trim();
+      if (cleanId === targetId) return false;
+      // Bersihkan juga jika ada duplikat kembar identik
+      if (
+        targetLog &&
+        l.studentId === targetLog.studentId &&
+        l.date === targetLog.date &&
+        (l.traitId === targetLog.traitId || l.traitName === targetLog.traitName) &&
+        l.timestamp === targetLog.timestamp
+      ) {
+        if (cleanId) {
+          markCharacterLogDeleted(cleanId);
+          deletePermanentManualCharacterLog(cleanId);
+        }
+        return false;
+      }
+      return true;
+    });
+
     setCharacterLogsState(updated);
-    saveStudentCharacterLogs(updated);
+    saveStudentCharacterLogs(updated, true);
   };
 
   const handleDeleteMultipleCharacterLogs = (logIds: string[]) => {
@@ -1474,7 +1499,7 @@ export default function App() {
     });
     const updated = characterLogs.filter(l => !idSet.has(l.id?.trim()));
     setCharacterLogsState(updated);
-    saveStudentCharacterLogs(updated);
+    saveStudentCharacterLogs(updated, true);
   };
 
   const handleSavePredicateSettings = (settings: CharacterPredicateSettings) => {

@@ -430,8 +430,6 @@ export function reconcileAutoCharacterPenalties(forceToday: boolean = false): {
   });
 
   const totalAdded = newLogs.length;
-  lastEvaluationSignature = currentSignature;
-
   // BATCHING 1 KALI WRITE:
   // Seluruh penilaian (Hadir Tepat Waktu + Belum Scan + Belum Pulang) dikumpulkan dan ditulis sekaligus dalam 1 kali pemanggilan saveStudentCharacterLogs
   if (totalAdded > 0 || removedCount > 0) {
@@ -442,6 +440,11 @@ export function reconcileAutoCharacterPenalties(forceToday: boolean = false): {
     if (isPast16Wita) {
       setAutoAssessmentBatchDone(witaDateStr, true);
     }
+
+    // Perbarui signature dengan timestamp LocalStorage terbaru agar interval berikutnya langsung mengenali bahwa data sudah up-to-date
+    const finalAttendanceUpdatedAt = (typeof window !== 'undefined' ? localStorage.getItem(KEYS.ATTENDANCE + '_updatedAt') : null) || '0';
+    const finalLogsUpdatedAt = (typeof window !== 'undefined' ? localStorage.getItem(KEYS.CHARACTER_LOGS + '_updatedAt') : null) || '0';
+    lastEvaluationSignature = `${attendanceRecords.length}_${finalAttendanceUpdatedAt}_${finalLogsUpdatedAt}_${witaDateStr}_${isPast16Wita ? '16wita' : 'pre16'}_${isAutoAssessmentBatchDone(witaDateStr) ? 'done' : 'pending'}`;
 
     window.dispatchEvent(new CustomEvent('sihadir_auto_assessment_completed', {
       detail: {
@@ -463,6 +466,8 @@ export function reconcileAutoCharacterPenalties(forceToday: boolean = false): {
       message: `Batching 1 kali write berhasil mencatat ${totalAdded} penilaian karakter otomatis (${addedOnTimeCount} Tepat Waktu, ${addedUnscannedCount} Belum Scan Masuk, ${addedUnreturnedCount} Belum Scan Pulang).`
     };
   }
+
+  lastEvaluationSignature = currentSignature;
 
   // Jika waktu >= 16:00 WITA dan seluruh data sudah konsisten, tandai batch hari ini selesai
   if (isPast16Wita) {

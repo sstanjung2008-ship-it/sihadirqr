@@ -50,7 +50,7 @@ import {
 } from 'lucide-react';
 import { BulkAlpaManagementModal } from './BulkAlpaManagementModal';
 import { BulkReturnManagementModal, BulkReturnUpdatePayload } from './BulkReturnManagementModal';
-import { getLocalDateString, refreshParentChildAttendance } from '../lib/storage';
+import { getLocalDateString, refreshParentChildAttendance, calculateStudentCharacterSummary } from '../lib/storage';
 
 interface AttendanceDashboardProps {
   students: Student[];
@@ -247,11 +247,12 @@ export const AttendanceDashboard: React.FC<AttendanceDashboardProps> = ({
   let countIzin = 0;
   let countAlpa = 0;
   let countPulang = 0;
+  let countBelumAbsen = 0;
 
   baseStudentsForStats.forEach(std => {
-    const rec = studentDateStatusMap.get(std.id);
+    const rec = studentDateStatusMap.get(std.id) || (std.nisn ? studentDateStatusMap.get(std.nisn) : undefined);
     if (!rec) {
-      countAlpa++;
+      countBelumAbsen++;
     } else if (rec.status === 'HADIR') countHadir++;
     else if (rec.status === 'TERLAMBAT') countTerlambat++;
     else if (rec.status === 'SAKIT') countSakit++;
@@ -336,20 +337,15 @@ export const AttendanceDashboard: React.FC<AttendanceDashboardProps> = ({
   }
 
   // Compute Character Points data for target child
-  const childCharacterLogs = characterLogs.filter(l => 
-    targetStudent && (
-      l.studentId === targetStudent.id || 
-      (targetStudent.nisn && l.nisn && l.nisn.trim() === targetStudent.nisn.trim()) ||
-      (l.studentName && targetStudent.name && l.studentName.trim().toLowerCase() === targetStudent.name.trim().toLowerCase())
-    )
-  );
-
+  const charSummary = targetStudent 
+    ? calculateStudentCharacterSummary(targetStudent, characterLogs)
+    : { positivePoints: 0, negativePoints: 0, netScore: 0, totalEntries: 0, logs: [] };
+  const childCharacterLogs = charSummary.logs;
   const posLogs = childCharacterLogs.filter(l => l.traitType === 'POSITIF');
   const negLogs = childCharacterLogs.filter(l => l.traitType === 'NEGATIF');
-
-  const posPoints = posLogs.reduce((sum, item) => sum + (item.points || 0), 0);
-  const negPoints = negLogs.reduce((sum, item) => sum + (item.points || 0), 0);
-  const netPoints = posPoints - negPoints;
+  const posPoints = charSummary.positivePoints;
+  const negPoints = charSummary.negativePoints;
+  const netPoints = charSummary.netScore;
 
   const minA = predicateSettings?.minA ?? 30;
   const minB = predicateSettings?.minB ?? 10;
@@ -1133,6 +1129,19 @@ export const AttendanceDashboard: React.FC<AttendanceDashboardProps> = ({
                   className="bg-transparent text-slate-800 font-bold focus:outline-none cursor-pointer text-xs font-mono"
                 />
               </div>
+
+              {/* Tombol Cepat Kembali ke Hari Ini (jika tanggal yang dipilih bukan hari ini) */}
+              {selectedDate !== todayStr && (
+                <button
+                  type="button"
+                  onClick={() => setSelectedDate(todayStr)}
+                  className="bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-extrabold px-3 py-1.5 rounded-xl text-xs flex items-center gap-1.5 transition-all cursor-pointer border border-indigo-200/80 shadow-2xs shrink-0"
+                  title="Klik untuk kembali ke Dasbor Hari Ini"
+                >
+                  <Calendar className="w-3.5 h-3.5 text-indigo-600" />
+                  <span>Hari Ini</span>
+                </button>
+              )}
 
               {/* Class Filter */}
               <div className="flex items-center gap-1.5 bg-white border border-slate-200 rounded-xl px-3 py-1.5 text-xs shadow-sm">

@@ -8,7 +8,8 @@ import {
   getUserSession,
   isManualCharacterLog,
   deduplicateCharacterLogs,
-  markCharacterLogDeleted,
+  getDeletedCharacterLogIds,
+  isLogForStudent,
   safeSetLocalStorage,
   KEYS
 } from './storage';
@@ -24,7 +25,10 @@ export const AUTO_BATCH_DONE_KEY_PREFIX = 'sihadir_auto_char_batch_done_';
  */
 export function isAutoAssessmentBatchDone(dateStr: string): boolean {
   if (typeof window === 'undefined') return false;
-  return localStorage.getItem(AUTO_BATCH_DONE_KEY_PREFIX + dateStr) === 'true';
+  if (localStorage.getItem(AUTO_BATCH_DONE_KEY_PREFIX + dateStr) === 'true') return true;
+  // Periksa apakah di catatan karakter sudah ada penalti otomatis untuk tanggal ini (sinkron antar-perangkat)
+  const logs = getStudentCharacterLogs();
+  return logs.some(l => l.date === dateStr && (l.id.startsWith('auto-unscanned-') || l.id.startsWith('auto-unreturned-')));
 }
 
 /**
@@ -98,6 +102,14 @@ export function reconcileAutoCharacterPenalties(forceToday: boolean = false): {
   const { witaDateStr, witaTimeStr, totalMinutes } = getWitaDateTime();
   const isPast16Wita = totalMinutes >= 16 * 60;
   const isBatchDoneToday = isAutoAssessmentBatchDone(witaDateStr);
+
+  const endParts = (profile.endTime || '15:00').split(':');
+  const endMinutes = (parseInt(endParts[0], 10) || 15) * 60 + (parseInt(endParts[1], 10) || 0);
+  const isPastSchoolEndTime = totalMinutes >= endMinutes;
+
+  const startParts = (profile.startTime || '07:00').split(':');
+  const startMinutes = (parseInt(startParts[0], 10) || 7) * 60 + (parseInt(startParts[1], 10) || 0);
+  const isPastSchoolStartTime = totalMinutes >= (startMinutes + (profile.lateToleranceMinutes || 15));
 
   // 1. JAMINAN BATCHING 1 KALI WRITE (AGAR TIDAK BERULANG MELAKUKAN PENILAIAN):
   // Jika waktu sudah >= 16:00 WITA dan batch penalti untuk hari ini sudah selesai diproses (isBatchDoneToday),
@@ -204,8 +216,9 @@ export function reconcileAutoCharacterPenalties(forceToday: boolean = false): {
     const isEligibleFor16WitaEvaluation = attDate < witaDateStr || (attDate === witaDateStr && (isPast16Wita || forceToday) && (!isBatchDoneToday || forceToday));
     if (!isEligibleFor16WitaEvaluation) return;
 
+    const deletedIds = getDeletedCharacterLogIds();
+
     // 1. ATURAN: BELUM SCAN PRESENSI
-    // Terpenuhi jika siswa tidak izin/sakit, dan kolom Jam Masuk kosong/belum scan/'-', atau status BELUM_ABSEN
     const isLegitPermit = rec.status === 'SAKIT' || rec.status === 'IZIN';
     const isUnscannedEntry = !isLegitPermit && (
       !rec.time || 
@@ -217,34 +230,38 @@ export function reconcileAutoCharacterPenalties(forceToday: boolean = false): {
     );
 
     if (isUnscannedEntry) {
-      const alreadyHasUnscannedLog = [...currentLogs, ...newLogs].some(l => 
-        (l.studentId === studentId || (nisn !== '-' && l.nisn === nisn) || (studentName && l.studentName && l.studentName.trim().toLowerCase() === studentName.trim().toLowerCase())) &&
-        l.date === attDate &&
-        l.traitType === 'NEGATIF' &&
-        (
-          l.id === `auto-unscanned-${studentId}-${attDate}` || 
-          (l.traitName.toLowerCase().includes('belum') && l.traitName.toLowerCase().includes('scan'))
-        )
-      );
+      const logId = `auto-unscanned-${studentId}-${attDate}`;
+      // Jika pernah dihapus oleh pengguna/sistem, JANGAN PERNAH dibuat ulang!
+      if (!deletedIds.has(logId)) {
+        const alreadyHasUnscannedLog = [...currentLogs, ...newLogs].some(l => 
+          (l.studentId === studentId || (nisn !== '-' && l.nisn === nisn) || (studentName && l.studentName && l.studentName.trim().toLowerCase() === studentName.trim().toLowerCase())) &&
+          l.date === attDate &&
+          l.traitType === 'NEGATIF' &&
+          (
+            l.id === logId || 
+            (l.traitName.toLowerCase().includes('belum') && l.traitName.toLowerCase().includes('scan'))
+          )
+        );
 
-      if (!alreadyHasUnscannedLog) {
-        newLogs.push({
-          id: `auto-unscanned-${studentId}-${attDate}`,
-          studentId: studentId,
-          studentName: studentName,
-          nisn: nisn,
-          classId: classId,
-          className: className,
-          traitId: unscannedTrait.id,
-          traitName: unscannedTrait.name,
-          traitType: 'NEGATIF',
-          points: unscannedPoints,
-          evaluatorName: 'Sistem Presensi Otomatis (16:00 WITA)',
-          timestamp: `${attDate} 16:00:00`,
-          date: attDate,
-          notes: `Penilaian Otomatis Presensi (16:00 WITA): Kolom Jam Masuk belum melakukan scan presensi (${attDate})`,
-        });
-        addedUnscannedCount++;
+        if (!alreadyHasUnscannedLog) {
+          newLogs.push({
+            id: logId,
+            studentId: studentId,
+            studentName: studentName,
+            nisn: nisn,
+            classId: classId,
+            className: className,
+            traitId: unscannedTrait.id,
+            traitName: unscannedTrait.name,
+            traitType: 'NEGATIF',
+            points: unscannedPoints,
+            evaluatorName: 'Sistem Presensi Otomatis',
+            timestamp: `${attDate} 16:00:00`,
+            date: attDate,
+            notes: `Penilaian Otomatis Presensi: Kolom Jam Masuk belum melakukan scan presensi (${attDate})`,
+          });
+          addedUnscannedCount++;
+        }
       }
     }
 
@@ -259,34 +276,38 @@ export function reconcileAutoCharacterPenalties(forceToday: boolean = false): {
     );
 
     if (isPresent && !hasReturned) {
-      const alreadyHasUnreturnedLog = [...currentLogs, ...newLogs].some(l => 
-        (l.studentId === studentId || (nisn !== '-' && l.nisn === nisn) || (studentName && l.studentName && l.studentName.trim().toLowerCase() === studentName.trim().toLowerCase())) &&
-        l.date === attDate &&
-        l.traitType === 'NEGATIF' &&
-        (
-          l.id === `auto-unreturned-${studentId}-${attDate}` || 
-          (l.traitName.toLowerCase().includes('belum') && l.traitName.toLowerCase().includes('pulang'))
-        )
-      );
+      const logId = `auto-unreturned-${studentId}-${attDate}`;
+      // Jika pernah dihapus oleh pengguna/sistem, JANGAN PERNAH dibuat ulang!
+      if (!deletedIds.has(logId)) {
+        const alreadyHasUnreturnedLog = [...currentLogs, ...newLogs].some(l => 
+          (l.studentId === studentId || (nisn !== '-' && l.nisn === nisn) || (studentName && l.studentName && l.studentName.trim().toLowerCase() === studentName.trim().toLowerCase())) &&
+          l.date === attDate &&
+          l.traitType === 'NEGATIF' &&
+          (
+            l.id === logId || 
+            (l.traitName.toLowerCase().includes('belum') && l.traitName.toLowerCase().includes('pulang'))
+          )
+        );
 
-      if (!alreadyHasUnreturnedLog) {
-        newLogs.push({
-          id: `auto-unreturned-${studentId}-${attDate}`,
-          studentId: studentId,
-          studentName: studentName,
-          nisn: nisn,
-          classId: classId,
-          className: className,
-          traitId: unreturnedTrait.id,
-          traitName: unreturnedTrait.name,
-          traitType: 'NEGATIF',
-          points: unreturnedPoints,
-          evaluatorName: 'Sistem Presensi Otomatis (16:00 WITA)',
-          timestamp: `${attDate} 16:00:00`,
-          date: attDate,
-          notes: `Penilaian Otomatis Presensi (16:00 WITA): Status Masuk (${rec.status === 'HADIR' ? 'Hadir Tepat Waktu' : 'Terlambat'}) pukul ${rec.time || 'Pagi'} tetapi belum melakukan scan pulang (${attDate})`,
-        });
-        addedUnreturnedCount++;
+        if (!alreadyHasUnreturnedLog) {
+          newLogs.push({
+            id: logId,
+            studentId: studentId,
+            studentName: studentName,
+            nisn: nisn,
+            classId: classId,
+            className: className,
+            traitId: unreturnedTrait.id,
+            traitName: unreturnedTrait.name,
+            traitType: 'NEGATIF',
+            points: unreturnedPoints,
+            evaluatorName: 'Sistem Presensi Otomatis',
+            timestamp: `${attDate} 16:00:00`,
+            date: attDate,
+            notes: `Penilaian Otomatis Presensi: Status Masuk (${rec.status === 'HADIR' ? 'Hadir Tepat Waktu' : 'Terlambat'}) pukul ${rec.time || 'Pagi'} tetapi belum melakukan scan pulang (${attDate})`,
+          });
+          addedUnreturnedCount++;
+        }
       }
     }
   });
@@ -325,6 +346,10 @@ export function reconcileAutoCharacterPenalties(forceToday: boolean = false): {
         const milestoneCount = (g + 1) * onTimeRequiredDays;
         const targetDate = groupDates[groupDates.length - 1];
         const logId = `auto-ontime-${studentId}-milestone-${milestoneCount}`;
+
+        // Jika log ini sudah pernah dihapus oleh pengguna, jangan dibuat ulang
+        const deletedIds = getDeletedCharacterLogIds();
+        if (deletedIds.has(logId)) continue;
 
         const alreadyHasLog = [...currentLogs, ...newLogs].some(l => 
           (l.studentId === studentId || (nisn !== '-' && l.nisn === nisn) || (studentName && l.studentName && l.studentName.trim().toLowerCase() === studentName.trim().toLowerCase())) &&
@@ -377,17 +402,16 @@ export function reconcileAutoCharacterPenalties(forceToday: boolean = false): {
         const studentOnTimeCount = distinctOnTimeDatesMap.get(l.studentId) || 0;
         if (studentOnTimeCount < requiredCount) {
           removedCount++;
-          if (l.id) markCharacterLogDeleted(l.id);
           return false;
         }
       }
     }
 
-    // Pencegahan log prematur: jika hari ini belum pukul 16:00 WITA dan evaluasi tidak dipaksa, bersihkan penalti hari ini
+    // Pencegahan log prematur hari berjalan:
+    // Jika HARI INI dan belum mencapai pukul 16:00 WITA dan tidak forceToday, bersihkan log penalti hari ini
     if (!isPast16Wita && !forceToday && l.date === witaDateStr) {
       if (isAutoUnscanned || isAutoUnreturned) {
         removedCount++;
-        if (l.id) markCharacterLogDeleted(l.id);
         return false;
       }
     }
@@ -403,7 +427,6 @@ export function reconcileAutoCharacterPenalties(forceToday: boolean = false): {
         const isExempt = matchingRec.status === 'SAKIT' || matchingRec.status === 'IZIN';
         if (hasValidTime || isExempt) {
           removedCount++;
-          if (l.id) markCharacterLogDeleted(l.id);
           return false;
         }
       }
@@ -420,7 +443,6 @@ export function reconcileAutoCharacterPenalties(forceToday: boolean = false): {
         const isNotPresent = matchingRec.status !== 'HADIR' && matchingRec.status !== 'TERLAMBAT';
         if (hasReturned || isNotPresent) {
           removedCount++;
-          if (l.id) markCharacterLogDeleted(l.id);
           return false;
         }
       }
@@ -434,7 +456,13 @@ export function reconcileAutoCharacterPenalties(forceToday: boolean = false): {
   // Seluruh penilaian (Hadir Tepat Waktu + Belum Scan + Belum Pulang) dikumpulkan dan ditulis sekaligus dalam 1 kali pemanggilan saveStudentCharacterLogs
   if (totalAdded > 0 || removedCount > 0) {
     const merged = deduplicateCharacterLogs([...filteredExisting, ...newLogs]);
-    saveStudentCharacterLogs(merged);
+    const currentStr = JSON.stringify(currentLogs);
+    const mergedStr = JSON.stringify(merged);
+
+    // HANYA simpan ke LocalStorage & Cloud jika memang ada perubahan data nyata (mencegah loop write berulang)
+    if (currentStr !== mergedStr) {
+      saveStudentCharacterLogs(merged);
+    }
 
     // Kunci status batch selesai untuk hari ini agar tidak berulang menulis ke database
     if (isPast16Wita) {

@@ -90,10 +90,13 @@ export const BulkAlpaManagementModal: React.FC<BulkAlpaManagementModalProps> = (
     const dateRecordsMap = new Map<string, AttendanceRecord>();
     attendanceRecords
       .filter(r => r.date === selectedDate)
-      .forEach(r => dateRecordsMap.set(r.studentId, r));
+      .forEach(r => {
+        if (r.studentId) dateRecordsMap.set(r.studentId, r);
+        if (r.nisn) dateRecordsMap.set(r.nisn, r);
+      });
 
     return students.map(student => {
-      const rec = dateRecordsMap.get(student.id);
+      const rec = dateRecordsMap.get(student.id) || (student.nisn ? dateRecordsMap.get(student.nisn) : undefined);
       return {
         studentId: student.id,
         studentName: student.name,

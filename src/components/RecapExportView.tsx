@@ -26,7 +26,7 @@ import {
   exportStudentGradesExcel,
   exportStudentCharacterDetailPdf
 } from '../lib/exportUtils';
-import { getStudentGradeAssessments, getTeachers, getLocalDateString } from '../lib/storage';
+import { getStudentGradeAssessments, getTeachers, getLocalDateString, calculateStudentCharacterSummary } from '../lib/storage';
 import { 
   FileText, 
   Download, 
@@ -1614,13 +1614,10 @@ export const RecapExportView: React.FC<RecapExportViewProps> = ({
                   </tr>
                 ) : (
                   filteredStudents.map((std, idx) => {
-                    const studentLogs = filteredCharacterLogs.filter(l => l.studentId === std.id);
-                    const posLogs = studentLogs.filter(l => l.traitType === 'POSITIF');
-                    const negLogs = studentLogs.filter(l => l.traitType === 'NEGATIF');
-
-                    const posPoints = posLogs.reduce((sum, item) => sum + (item.points || 0), 0);
-                    const negPoints = negLogs.reduce((sum, item) => sum + (item.points || 0), 0);
-                    const netPoints = posPoints - negPoints;
+                    const charSummary = calculateStudentCharacterSummary(std, filteredCharacterLogs);
+                    const posPoints = charSummary.positivePoints;
+                    const negPoints = charSummary.negativePoints;
+                    const netPoints = charSummary.netScore;
 
                     const minA = predicateSettings.minA ?? 30;
                     const minB = predicateSettings.minB ?? 10;

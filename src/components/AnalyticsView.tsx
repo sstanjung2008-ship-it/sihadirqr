@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { AttendanceRecord, Student, SchoolProfile, StudentCharacterLog, LearningJournal } from '../types';
-import { getLocalDateString } from '../lib/storage';
+import { getLocalDateString, calculateStudentCharacterSummary } from '../lib/storage';
 import { 
   BarChart, 
   Bar, 
@@ -136,22 +136,17 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
     const map = new Map<string, { student: Student; totalPoints: number; positiveCount: number; latestTrait: string }>();
     
     students.forEach(std => {
-      const stdLogs = characterLogs.filter(l => l.studentId === std.id);
-      if (stdLogs.length > 0) {
-        let pts = 0;
-        let posCount = 0;
-        let latestTrait = '';
-        stdLogs.forEach(l => {
-          if (l.traitType === 'POSITIF') {
-            pts += Math.abs(l.points || 0);
-            posCount++;
-            if (!latestTrait) latestTrait = l.traitName;
-          } else {
-            pts -= Math.abs(l.points || 0);
-          }
-        });
-        if (pts > 0) {
-          map.set(std.id, { student: std, totalPoints: pts, positiveCount: posCount, latestTrait: latestTrait || 'Perilaku Positif' });
+      const summary = calculateStudentCharacterSummary(std, characterLogs);
+      if (summary.totalEntries > 0) {
+        const posLogs = summary.logs.filter(l => l.traitType === 'POSITIF');
+        const latestTrait = posLogs.length > 0 ? posLogs[0].traitName : '';
+        if (summary.netScore > 0) {
+          map.set(std.id, { 
+            student: std, 
+            totalPoints: summary.netScore, 
+            positiveCount: posLogs.length, 
+            latestTrait: latestTrait || 'Perilaku Positif' 
+          });
         }
       }
     });
@@ -192,24 +187,14 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
     const map = new Map<string, { student: Student; totalPoints: number; negativeCount: number; latestViolation?: string }>();
     
     students.forEach(std => {
-      const stdLogs = characterLogs.filter(l => l.studentId === std.id);
-      let pts = 0;
-      let negCount = 0;
-      let latestViolation = '';
-      stdLogs.forEach(l => {
-        if (l.traitType === 'POSITIF') {
-          pts += Math.abs(l.points || 0);
-        } else {
-          pts -= Math.abs(l.points || 0);
-          negCount++;
-          if (!latestViolation) latestViolation = l.traitName;
-        }
-      });
-      if (negCount > 0 || pts < 10) {
+      const summary = calculateStudentCharacterSummary(std, characterLogs);
+      const negLogs = summary.logs.filter(l => l.traitType === 'NEGATIF');
+      const latestViolation = negLogs.length > 0 ? negLogs[0].traitName : '';
+      if (negLogs.length > 0 || summary.netScore < 10) {
         map.set(std.id, { 
           student: std, 
-          totalPoints: pts, 
-          negativeCount: negCount, 
+          totalPoints: summary.netScore, 
+          negativeCount: negLogs.length, 
           latestViolation: latestViolation || 'Catatan Pelanggaran' 
         });
       }

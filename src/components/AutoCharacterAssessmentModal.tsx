@@ -403,6 +403,14 @@ export const AutoCharacterAssessmentModal: React.FC<AutoCharacterAssessmentModal
     const { witaDateStr, totalMinutes } = getWitaDateTime();
     const isPast16Wita = totalMinutes >= 16 * 60;
 
+    const endParts = (schoolProfile?.endTime || '15:00').split(':');
+    const endMinutes = (parseInt(endParts[0], 10) || 15) * 60 + (parseInt(endParts[1], 10) || 0);
+    const isPastSchoolEndTime = totalMinutes >= endMinutes;
+
+    const startParts = (schoolProfile?.startTime || '07:00').split(':');
+    const startMinutes = (parseInt(startParts[0], 10) || 7) * 60 + (parseInt(startParts[1], 10) || 0);
+    const isPastSchoolStartTime = totalMinutes >= (startMinutes + (schoolProfile?.lateToleranceMinutes || 15));
+
     const candidates: AutoCharacterCandidate[] = [];
     const studentMap = new Map<string, Student>();
     students.forEach(s => studentMap.set(s.id, s));
@@ -485,8 +493,9 @@ export const AutoCharacterAssessmentModal: React.FC<AutoCharacterAssessmentModal
         }
 
         // Rule 3: Belum Scan Pulang Sekolah -> Nilai Karakter Negatif (-unreturnedPoints)
-        // REGULASI KETAT: Penilaian belum scan pulang HANYA dilakukan mulai pukul 16:00 WITA untuk hari berjalan (atau tanggal lampau)
-        const isEligibleReturnTime = rec.date < witaDateStr || (rec.date === witaDateStr && isPast16Wita);
+        // Terpenuhi jika siswa hadir di sekolah (HADIR atau TERLAMBAT), namun belum melakukan scan kepulangan
+        // Berlaku jika tanggal lampau, atau hari ini jika sudah melewati jam pulang sekolah atau 16:00 WITA
+        const isEligibleReturnTime = rec.date < witaDateStr || (rec.date === witaDateStr && (isPast16Wita || isPastSchoolEndTime));
         const isPresent = rec.status === 'HADIR' || rec.status === 'TERLAMBAT';
         const hasReturned = !!(
           (rec.returnTime && rec.returnTime !== '-' && rec.returnTime.trim() !== '' && !rec.returnTime.toLowerCase().includes('belum')) || 
@@ -497,7 +506,7 @@ export const AutoCharacterAssessmentModal: React.FC<AutoCharacterAssessmentModal
 
         if (isEligibleReturnTime && isPresent && !hasReturned) {
           const isAlready = characterLogs.some(l => 
-            l.studentId === student.id && 
+            (l.studentId === student.id || (student.nisn && l.nisn === student.nisn) || (l.studentName && student.name && l.studentName.trim().toLowerCase() === student.name.trim().toLowerCase())) && 
             l.date === rec.date && 
             (
               l.id === `auto-unreturned-${student.id}-${rec.date}` || 
@@ -513,14 +522,14 @@ export const AutoCharacterAssessmentModal: React.FC<AutoCharacterAssessmentModal
             classId: student.classId,
             className: student.className,
             ruleType: 'UNRETURNED',
-            ruleLabel: 'Belum Scan Pulang (Mulai 16:00 WITA)',
+            ruleLabel: 'Belum Scan Pulang',
             traitId: unreturnedTrait.id,
             traitName: unreturnedTrait.name || 'Belum Melakukan Scan Pulang',
             traitType: 'NEGATIF',
             points: unreturnedPoints,
             date: rec.date,
-            evaluatorName: generalEvaluatorName || 'Sistem Presensi Otomatis (16:00 WITA)',
-            notes: `Penilaian Otomatis Presensi (16:00 WITA): Status Masuk (${rec.status === 'HADIR' ? 'Hadir Tepat Waktu' : 'Terlambat'}) pukul ${rec.time || 'Pagi'} tetapi belum scan kepulangan (${rec.date})`,
+            evaluatorName: generalEvaluatorName || 'Sistem Presensi Otomatis',
+            notes: `Penilaian Otomatis Presensi: Status Masuk (${rec.status === 'HADIR' ? 'Hadir Tepat Waktu' : 'Terlambat'}) pukul ${rec.time || 'Pagi'} tetapi belum scan kepulangan (${rec.date})`,
             attendanceDates: [rec.date],
             sourceType: 'PRESENSI',
             isSelected: !isAlready,
@@ -530,11 +539,11 @@ export const AutoCharacterAssessmentModal: React.FC<AutoCharacterAssessmentModal
       });
 
       // Rule 4: Belum Melakukan Scan Presensi -> Nilai Karakter Negatif (-unscannedPoints)
-      // REGULASI KETAT: Penilaian belum scan presensi HANYA dilakukan mulai pukul 16:00 WITA untuk hari berjalan (atau tanggal lampau)
+      // Berlaku jika tanggal lampau, atau hari ini jika sudah melewati jam masuk sekolah atau 16:00 WITA
       const distinctDates = Array.from(new Set<string>(attendanceRecords.map(r => r.date))).sort();
       distinctDates.forEach((attDate: string) => {
         if (attDate > witaDateStr) return; // Tanggal masa depan tidak dievaluasi
-        const isEligibleUnscannedTime = attDate < witaDateStr || (attDate === witaDateStr && isPast16Wita);
+        const isEligibleUnscannedTime = attDate < witaDateStr || (attDate === witaDateStr && (isPast16Wita || isPastSchoolStartTime));
         if (!isEligibleUnscannedTime) return;
 
         const rec = sortedRecords.find(r => r.date === attDate);

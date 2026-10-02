@@ -784,12 +784,10 @@ export default function App() {
             if (l.studentId === sid && l.date === sdate) {
               if (hasValidTime && (l.id.includes('auto-unscanned') || (l.traitType === 'NEGATIF' && l.traitName.toLowerCase().includes('belum') && l.traitName.toLowerCase().includes('scan')))) {
                 logsChanged = true;
-                if (l.id) markCharacterLogDeleted(l.id);
                 return false;
               }
               if (hasReturned && (l.id.includes('auto-unreturned') || (l.traitType === 'NEGATIF' && l.traitName.toLowerCase().includes('belum') && l.traitName.toLowerCase().includes('pulang')))) {
                 logsChanged = true;
-                if (l.id) markCharacterLogDeleted(l.id);
                 return false;
               }
             }
@@ -885,13 +883,11 @@ export default function App() {
             // If entry scan is now valid or status is SAKIT/IZIN, remove auto-unscanned penalty logs
             if ((hasValidTime || newStatus === 'SAKIT' || newStatus === 'IZIN') && (l.id.includes('auto-unscanned') || (l.traitType === 'NEGATIF' && l.traitName.toLowerCase().includes('belum') && l.traitName.toLowerCase().includes('scan')))) {
               logsChanged = true;
-              if (l.id) markCharacterLogDeleted(l.id);
               return false;
             }
             // If student returned or status is SAKIT/IZIN, remove auto-unreturned penalty logs
             if ((hasReturned || newStatus === 'SAKIT' || newStatus === 'IZIN') && (l.id.includes('auto-unreturned') || (l.traitType === 'NEGATIF' && l.traitName.toLowerCase().includes('belum') && l.traitName.toLowerCase().includes('pulang')))) {
               logsChanged = true;
-              if (l.id) markCharacterLogDeleted(l.id);
               return false;
             }
           }

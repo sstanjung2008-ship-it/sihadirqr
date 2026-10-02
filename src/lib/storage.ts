@@ -697,8 +697,15 @@ export function exportAllDatabaseToJson(): string {
 
 /**
  * Safely formats a Date or timestamp or date string into local YYYY-MM-DD (avoiding UTC offset bugs)
+ * Mengonversi waktu ke Zona Waktu Sekolah Standar Indonesia (WITA UTC+8)
+ * sehingga seluruh perangkat (walaupun setting zona waktu HP/laptop berbeda atau UTC)
+ * selalu menghasilkan tanggal hari ini yang identik sama persis!
  */
 export function getLocalDateString(dateInput: Date | number | string = new Date()): string {
+  if (typeof dateInput === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(dateInput)) {
+    return dateInput;
+  }
+
   let d: Date;
   if (dateInput instanceof Date) {
     d = dateInput;
@@ -707,8 +714,6 @@ export function getLocalDateString(dateInput: Date | number | string = new Date(
   } else if (typeof dateInput === 'string') {
     if (dateInput.includes('T')) {
       d = new Date(dateInput);
-    } else if (/^\d{4}-\d{2}-\d{2}$/.test(dateInput)) {
-      return dateInput;
     } else {
       d = new Date(dateInput);
     }
@@ -720,9 +725,14 @@ export function getLocalDateString(dateInput: Date | number | string = new Date(
     d = new Date();
   }
 
-  const year = d.getFullYear();
-  const month = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
+  // Standar Waktu Sekolah Indonesia (WITA UTC+8):
+  // Menghilangkan bug perbedaan tanggal antara perangkat di pagi hari (06:00 - 08:00)
+  const utc = d.getTime() + (d.getTimezoneOffset() * 60000);
+  const schoolTime = new Date(utc + (3600000 * 8));
+
+  const year = schoolTime.getFullYear();
+  const month = String(schoolTime.getMonth() + 1).padStart(2, '0');
+  const day = String(schoolTime.getDate()).padStart(2, '0');
   return `${year}-${month}-${day}`;
 }
 
@@ -1261,35 +1271,24 @@ export function mergeAttendanceLists(local: AttendanceRecord[], cloud: Attendanc
   };
 
   const mergeSingleRecord = (localRec: AttendanceRecord, cloudRec: AttendanceRecord): AttendanceRecord => {
-    const isLocalReal = isRealAttendance(localRec);
-    const isCloudReal = isRealAttendance(cloudRec);
+    // CLOUD AUTHORITATIVE: Saat menggabungkan record yang sama, Cloud selalu diutamakan
+    // agar update manual guru/admin (termasuk status ALPA, SAKIT, IZIN) tidak ditolak oleh perangkat lain.
+    const bestStatus = cloudRec.status || localRec.status || 'HADIR';
+    const bestMethod = (cloudRec.method === 'QR_SCAN' || localRec.method === 'QR_SCAN') 
+      ? 'QR_SCAN' 
+      : (cloudRec.method || localRec.method || 'QR_SCAN');
+    const bestScannedBy = (cloudRec.scannedBy && !cloudRec.scannedBy.includes('Sistem Otomatis')) 
+      ? cloudRec.scannedBy 
+      : (localRec.scannedBy || cloudRec.scannedBy);
 
-    let base: AttendanceRecord;
-    if (isCloudReal && !isLocalReal) {
-      base = { ...cloudRec };
-    } else if (!isCloudReal && isLocalReal) {
-      base = { ...localRec };
-    } else {
-      // Both are real, or both are auto-alpa
-      const bestStatus = (cloudRec.status && cloudRec.status !== 'ALPA') 
-        ? cloudRec.status 
-        : (localRec.status && localRec.status !== 'ALPA' ? localRec.status : (cloudRec.status || localRec.status || 'HADIR'));
-      const bestMethod = (cloudRec.method === 'QR_SCAN' || localRec.method === 'QR_SCAN') 
-        ? 'QR_SCAN' 
-        : (cloudRec.method || localRec.method || 'QR_SCAN');
-      const bestScannedBy = (cloudRec.scannedBy && !cloudRec.scannedBy.includes('Sistem Otomatis')) 
-        ? cloudRec.scannedBy 
-        : (localRec.scannedBy || cloudRec.scannedBy);
-
-      base = {
-        ...localRec,
-        ...cloudRec,
-        status: bestStatus,
-        method: bestMethod,
-        scannedBy: bestScannedBy,
-        notes: cloudRec.notes || localRec.notes || undefined,
-      };
-    }
+    const base: AttendanceRecord = {
+      ...localRec,
+      ...cloudRec,
+      status: bestStatus,
+      method: bestMethod,
+      scannedBy: bestScannedBy,
+      notes: cloudRec.notes !== undefined ? cloudRec.notes : localRec.notes,
+    };
 
     // Always merge entry time: if either has a non-'-' time, keep it!
     base.time = getValidEntryTime(cloudRec.time, localRec.time);
@@ -1557,11 +1556,11 @@ export async function smartSyncAndMergeAllWithCloud(): Promise<{ success: boolea
     safeSetLocalStorage(KEYS.TEACHERS, teachersJsonStr);
     safeSetLocalStorage(KEYS.TEACHERS + '_updatedAt', String(now));
 
-    // Step D: Attendance Records
+    // Step D: Attendance Records (Cloud Authoritative)
     let cloudAtt: AttendanceRecord[] = [];
     if (attCloud && attCloud.data) {
       try {
-        const parsed = JSON.parse(attCloud.data);
+        const parsed = typeof attCloud.data === 'string' ? JSON.parse(attCloud.data) : attCloud.data;
         if (Array.isArray(parsed)) {
           cloudAtt = validateAndSanitizeAttendanceRecords(parsed);
         }
@@ -1569,21 +1568,52 @@ export async function smartSyncAndMergeAllWithCloud(): Promise<{ success: boolea
         console.warn('[Sync] Attendance cloud parse error:', e);
       }
     }
-    const currentLocalAtt = getAttendanceRecords();
-    const mergedAtt = mergeAttendanceLists(currentLocalAtt, cloudAtt);
-    const cleanMergedAtt = validateAndSanitizeAttendanceRecords(mergedAtt);
-    const attJsonStr = JSON.stringify(cleanMergedAtt);
-    safeSetLocalStorage(KEYS.ATTENDANCE, attJsonStr);
-    safeSetLocalStorage(KEYS.ATTENDANCE + '_updatedAt', String(now));
+
+    let attJsonStr = '';
+    if (cloudAtt.length > 0 || attCloud?.updatedAt) {
+      let finalAtt = cloudAtt;
+      if (scanQueuePendingCount > 0) {
+        const currentLocalAtt = getAttendanceRecords();
+        finalAtt = validateAndSanitizeAttendanceRecords(mergeAttendanceLists(currentLocalAtt, cloudAtt));
+        writeCloudDocument(KEYS.ATTENDANCE, JSON.stringify(finalAtt), Date.now());
+      }
+      attJsonStr = JSON.stringify(finalAtt);
+      safeSetLocalStorage(KEYS.ATTENDANCE, attJsonStr);
+      safeSetLocalStorage(KEYS.ATTENDANCE + '_updatedAt', String(attCloud?.updatedAt || now));
+    } else {
+      const currentLocalAtt = getAttendanceRecords();
+      attJsonStr = JSON.stringify(currentLocalAtt);
+      if (currentLocalAtt.length > 0) {
+        writeCloudDocument(KEYS.ATTENDANCE, attJsonStr, now);
+      }
+    }
 
     // Step E: Generic Entity Merging
     const mergeAndStoreGeneric = (key: string, cloudDoc: any, getLocal: () => any[]) => {
       let cloudItems: any[] = [];
       if (cloudDoc && cloudDoc.data) {
         try {
-          cloudItems = JSON.parse(cloudDoc.data);
+          cloudItems = typeof cloudDoc.data === 'string' ? JSON.parse(cloudDoc.data) : cloudDoc.data;
         } catch {}
       }
+
+      // CLOUD AUTHORITATIVE UNTUK CATATAN KARAKTER:
+      // Seluruh perangkat membaca dan menampilkan nilai karakter langsung dari Cloud.
+      // Dilarang keras menggabungkan data lokal lama yang menyebabkan log terhapus muncul kembali.
+      if (key === KEYS.CHARACTER_LOGS) {
+        const deletedIds = getDeletedCharacterLogIds();
+        if (Array.isArray(cloudItems) && (cloudItems.length > 0 || cloudDoc?.updatedAt)) {
+          const cleanCloud = deduplicateCharacterLogs(
+            repairKbmActiveLogs(repairUpacaraLogs(cloudItems).repairedLogs).repairedLogs
+          ).filter((l: any) => l && l.id && !deletedIds.has(String(l.id).trim()));
+
+          const jsonStr = JSON.stringify(cleanCloud);
+          safeSetLocalStorage(key, jsonStr);
+          safeSetLocalStorage(key + '_updatedAt', String(cloudDoc.updatedAt || now));
+          return jsonStr;
+        }
+      }
+
       const localItems = getLocal();
       let merged = mergeGenericListsById(localItems, cloudItems);
       if (key === KEYS.CHARACTER_LOGS) {
@@ -1896,20 +1926,26 @@ export async function forceDownloadAllFromCloud(): Promise<{ success: boolean; e
           }
         } else if (key === KEYS.ATTENDANCE) {
           try {
-            const parsed = JSON.parse(cloudDoc.data);
+            const parsed = typeof cloudDoc.data === 'string' ? JSON.parse(cloudDoc.data) : cloudDoc.data;
             if (Array.isArray(parsed)) {
               const cleanCloud = validateAndSanitizeAttendanceRecords(parsed);
-              const localAtt = getAttendanceRecords();
-              if (cleanCloud.length === 0 && localAtt.length > 0) {
-                writeCloudDocument(key, JSON.stringify(localAtt), Date.now());
-                lastSavedStringCache[key] = JSON.stringify(localAtt);
+              if (cleanCloud.length === 0 && !cloudDoc.updatedAt) {
+                const localAtt = getAttendanceRecords();
+                if (localAtt.length > 0) {
+                  writeCloudDocument(key, JSON.stringify(localAtt), Date.now());
+                  lastSavedStringCache[key] = JSON.stringify(localAtt);
+                }
               } else {
-                const mergedAtt = mergeAttendanceLists(localAtt, cleanCloud);
-                const cleanMerged = validateAndSanitizeAttendanceRecords(mergedAtt);
-                const mergedStr = JSON.stringify(cleanMerged);
-                safeSetLocalStorage(key, mergedStr);
+                let finalAtt = cleanCloud;
+                if (scanQueuePendingCount > 0) {
+                  const localAtt = getAttendanceRecords();
+                  finalAtt = validateAndSanitizeAttendanceRecords(mergeAttendanceLists(localAtt, cleanCloud));
+                  writeCloudDocument(key, JSON.stringify(finalAtt), Date.now());
+                }
+                const cleanStr = JSON.stringify(finalAtt);
+                safeSetLocalStorage(key, cleanStr);
                 safeSetLocalStorage(key + '_updatedAt', String(cloudDoc.updatedAt || Date.now()));
-                lastSavedStringCache[key] = mergedStr;
+                lastSavedStringCache[key] = cleanStr;
               }
             }
           } catch (e) {
@@ -2032,10 +2068,12 @@ export async function syncParentDataOnDemand(force: boolean = false): Promise<{ 
     }
 
     // Untuk pengecekan reguler orang tua:
-    // HANYA BACA DUA DOKUMEN: ATTENDANCE & LEAVES (Hanya 2 Read!)
-    const [attDoc, leavesDoc] = await Promise.all([
+    // BACA ATTENDANCE, LEAVES, dan CHARACTER_LOGS (menjamin nilai karakter anak selalu up-to-date dan sama di semua perangkat)
+    const [attDoc, leavesDoc, logsDoc, studentsDoc] = await Promise.all([
       readCloudDocument(KEYS.ATTENDANCE),
       readCloudDocument(KEYS.LEAVES),
+      readCloudDocument(KEYS.CHARACTER_LOGS),
+      readCloudDocument(KEYS.STUDENTS),
     ]);
 
     if (attDoc?.data) {
@@ -2046,11 +2084,24 @@ export async function syncParentDataOnDemand(force: boolean = false): Promise<{ 
       safeSetLocalStorage(KEYS.LEAVES, leavesDoc.data);
       safeSetLocalStorage(KEYS.LEAVES + '_updatedAt', String(leavesDoc.updatedAt || now));
     }
+    if (logsDoc?.data) {
+      safeSetLocalStorage(KEYS.CHARACTER_LOGS, logsDoc.data);
+      safeSetLocalStorage(KEYS.CHARACTER_LOGS + '_updatedAt', String(logsDoc.updatedAt || now));
+    }
+    if (studentsDoc?.data) {
+      try {
+        const cloudStudents = JSON.parse(studentsDoc.data);
+        if (Array.isArray(cloudStudents) && cloudStudents.length > 0) {
+          safeSetLocalStorage(KEYS.STUDENTS, studentsDoc.data);
+          safeSetLocalStorage(KEYS.STUDENTS + '_updatedAt', String(studentsDoc.updatedAt || now));
+        }
+      } catch {}
+    }
 
     safeSetLocalStorage('sihadir_parent_last_sync', String(now));
     notifyStorageUpdated();
     setCloudSyncStatus('connected');
-    return { success: true, message: 'Status presensi anak berhasil diperbarui dari Cloud!' };
+    return { success: true, message: 'Status presensi dan nilai karakter anak berhasil diperbarui dari Cloud!' };
   } catch (err: any) {
     console.warn('[Parent Sync] Gagal memperbarui status presensi:', err);
     setCloudSyncStatus('offline');
@@ -2173,6 +2224,115 @@ export function initFirestoreRealtimeSync(role?: UserRole) {
         console.warn('[Realtime Sync Parent Profile Error]', error);
       });
       activeUnsubscribes.push(unsubProfile);
+
+      // REAL-TIME SYNC NILAI KARAKTER & ID TERHAPUS UNTUK ORANG TUA:
+      // Memastikan nilai karakter anak selalu identik seketika di HP orang tua tanpa refresh manual
+      const deletedDocRef = doc(db, 'sihadir_app_data', DELETED_CHARACTER_LOGS_KEY);
+      const unsubDeleted = onSnapshot(deletedDocRef, (docSnap) => {
+        if (docSnap.exists()) {
+          const payload = docSnap.data();
+          if (payload && payload.data !== undefined) {
+            try {
+              const cloudDeleted = typeof payload.data === 'string' ? JSON.parse(payload.data) : payload.data;
+              if (Array.isArray(cloudDeleted)) {
+                const current = getDeletedCharacterLogIds();
+                let changed = false;
+                cloudDeleted.forEach(id => {
+                  if (id && typeof id === 'string' && !current.has(id.trim())) {
+                    current.add(id.trim());
+                    changed = true;
+                  }
+                });
+                if (changed) {
+                  const arr = Array.from(current).slice(-2000);
+                  safeSetLocalStorage(DELETED_CHARACTER_LOGS_KEY, JSON.stringify(arr));
+                  const currentLogs = getStudentCharacterLogs();
+                  const filtered = currentLogs.filter(l => l && l.id && !current.has(l.id.trim()));
+                  if (filtered.length !== currentLogs.length) {
+                    safeSetLocalStorage(KEYS.CHARACTER_LOGS, JSON.stringify(filtered));
+                    notifyStorageUpdated();
+                  }
+                }
+              }
+            } catch (err) {
+              console.warn('[Realtime Sync Parent Deleted Logs Error]', err);
+            }
+          }
+        }
+      });
+      activeUnsubscribes.push(unsubDeleted);
+
+      // REAL-TIME SYNC PRESENSI SISWA UNTUK ORANG TUA:
+      // Memastikan status scan masuk/pulang anak langsung tampil di HP orang tua secara real-time
+      const attDocRef = doc(db, 'sihadir_app_data', KEYS.ATTENDANCE);
+      const unsubAtt = onSnapshot(attDocRef, (docSnap) => {
+        if (docSnap.exists()) {
+          const payload = docSnap.data();
+          if (payload && payload.data !== undefined) {
+            try {
+              const cloudAtt = typeof payload.data === 'string' ? JSON.parse(payload.data) : payload.data;
+              if (Array.isArray(cloudAtt)) {
+                const cleanAtt = validateAndSanitizeAttendanceRecords(cloudAtt);
+                const attStr = JSON.stringify(cleanAtt);
+                safeSetLocalStorage(KEYS.ATTENDANCE, attStr);
+                safeSetLocalStorage(KEYS.ATTENDANCE + '_updatedAt', String(payload.updatedAt || Date.now()));
+                notifyStorageUpdated();
+              }
+            } catch (err) {
+              console.warn('[Realtime Sync Parent Attendance Error]', err);
+            }
+          }
+        }
+      });
+      activeUnsubscribes.push(unsubAtt);
+
+      // REAL-TIME SYNC IZIN / SAKIT UNTUK ORANG TUA:
+      const leavesDocRef = doc(db, 'sihadir_app_data', KEYS.LEAVES);
+      const unsubLeaves = onSnapshot(leavesDocRef, (docSnap) => {
+        if (docSnap.exists()) {
+          const payload = docSnap.data();
+          if (payload && payload.data !== undefined) {
+            try {
+              const cloudLeaves = typeof payload.data === 'string' ? JSON.parse(payload.data) : payload.data;
+              if (Array.isArray(cloudLeaves)) {
+                const leavesStr = JSON.stringify(cloudLeaves);
+                safeSetLocalStorage(KEYS.LEAVES, leavesStr);
+                safeSetLocalStorage(KEYS.LEAVES + '_updatedAt', String(payload.updatedAt || Date.now()));
+                notifyStorageUpdated();
+              }
+            } catch (err) {
+              console.warn('[Realtime Sync Parent Leaves Error]', err);
+            }
+          }
+        }
+      });
+      activeUnsubscribes.push(unsubLeaves);
+
+      const logsDocRef = doc(db, 'sihadir_app_data', KEYS.CHARACTER_LOGS);
+      const unsubLogs = onSnapshot(logsDocRef, (docSnap) => {
+        if (docSnap.exists()) {
+          const payload = docSnap.data();
+          if (payload && payload.data !== undefined) {
+            try {
+              const cloudLogs = typeof payload.data === 'string' ? JSON.parse(payload.data) : payload.data;
+              if (Array.isArray(cloudLogs)) {
+                const deletedIds = getDeletedCharacterLogIds();
+                const filtered = cloudLogs.filter((l: any) => l && l.id && !deletedIds.has(String(l.id).trim()));
+                const cleanLogs = deduplicateCharacterLogs(repairKbmActiveLogs(repairUpacaraLogs(filtered).repairedLogs).repairedLogs);
+                const cloudLogsStr = JSON.stringify(cleanLogs);
+                safeSetLocalStorage(KEYS.CHARACTER_LOGS, cloudLogsStr);
+                safeSetLocalStorage(KEYS.CHARACTER_LOGS + '_updatedAt', String(payload.updatedAt || Date.now()));
+                notifyStorageUpdated();
+              }
+            } catch (err) {
+              console.warn('[Realtime Sync Parent Character Logs Error]', err);
+            }
+          }
+        }
+      }, (error) => {
+        console.warn('[Realtime Sync Parent Character Logs Listener Error]', error);
+      });
+      activeUnsubscribes.push(unsubLogs);
     } catch (e) {
       console.warn('[Realtime Sync Parent Profile Listener Error]', e);
     }
@@ -2198,18 +2358,21 @@ export function initFirestoreRealtimeSync(role?: UserRole) {
     { key: KEYS.GRADES, getDefault: () => [] },
     { key: KEYS.PERIODS, getDefault: () => INITIAL_LESSON_PERIODS },
     { key: KEYS.SCHEDULES, getDefault: () => INITIAL_CLASS_SCHEDULES },
+    { key: DELETED_CHARACTER_LOGS_KEY, getDefault: () => [] },
   ];
 
   // Saring dokumen yang perlu didengarkan secara real-time berdasarkan role
   let SYNC_KEYS = ALL_KEYS;
 
   if (currentRole === 'SCANNER_POS') {
-    // Role Scanner Pos Gerbang HANYA butuh Profil, Siswa, Kelas, dan Presensi
+    // Role Scanner Pos Gerbang HANYA butuh Profil, Siswa, Kelas, Presensi, dan Karakter
     const scannerAllowed = new Set([
       KEYS.PROFILE,
       KEYS.STUDENTS,
       KEYS.CLASSES,
       KEYS.ATTENDANCE,
+      KEYS.CHARACTER_LOGS,
+      DELETED_CHARACTER_LOGS_KEY,
     ]);
     SYNC_KEYS = ALL_KEYS.filter(k => scannerAllowed.has(k.key));
   }
@@ -2326,7 +2489,9 @@ export function initFirestoreRealtimeSync(role?: UserRole) {
             }
 
             // SPECIAL ATTENDANCE SYNC:
-            // Ensure real-time attendance scans from scanner devices merge smoothly onto all other devices
+            // CLOUD AUTHORITATIVE PRESENSI SISWA:
+            // Seluruh perangkat (Admin, Guru, Pos Scanner, Orang Tua) membaca dan menampilkan
+            // data presensi langsung dari Cloud. Menjamin Dasbor Kehadiran identik 100% di semua layar!
             if (key === KEYS.ATTENDANCE) {
               try {
                 const cloudAtt = typeof finalDataToSave === 'string' ? JSON.parse(finalDataToSave) : finalDataToSave;
@@ -2334,38 +2499,33 @@ export function initFirestoreRealtimeSync(role?: UserRole) {
                   const currentLocalAtt = getAttendanceRecords();
                   const cleanCloudAtt = validateAndSanitizeAttendanceRecords(cloudAtt);
                   
-                  // PERLINDUNGAN KRUSIAL: Jika Cloud kosong tapi lokal memiliki data riwayat presensi/scan,
-                  // JANGAN PERNAH menimpa data lokal dengan array kosong! Sebaliknya unggah ke Cloud Firestore!
-                  if (cleanCloudAtt.length === 0 && currentLocalAtt.length > 0) {
-                    console.log('[Firestore Sync] Cloud attendance kosong tapi lokal ada data. Menyimpan data lokal dan mengunggah ke Cloud Blaze.');
+                  // PERLINDUNGAN: Jika Cloud kosong tapi lokal memiliki data riwayat presensi/scan,
+                  // unggah data lokal ke Cloud Firestore untuk seeding awal
+                  if (cleanCloudAtt.length === 0 && currentLocalAtt.length > 0 && !payload.updatedAt) {
+                    console.log('[Firestore Sync] Cloud attendance kosong. Mengunggah data lokal ke Cloud.');
                     writeCloudDocument(key, JSON.stringify(currentLocalAtt), Date.now());
                     lastSavedStringCache[key] = JSON.stringify(currentLocalAtt);
                     setCloudSyncStatus('connected');
                     return;
                   }
                   
-                  const mergedAtt = mergeAttendanceLists(currentLocalAtt, cleanCloudAtt);
-                  const cleanMergedAtt = validateAndSanitizeAttendanceRecords(mergedAtt);
-                  const mergedStr = JSON.stringify(cleanMergedAtt);
-                  
-                  if (currentLocalStr !== mergedStr) {
-                    lastSavedStringCache[key] = mergedStr;
-                    safeSetLocalStorage(key, mergedStr);
-                    safeSetLocalStorage(key + '_updatedAt', String(Math.max(cloudUpdatedAt, localUpdatedAt, Date.now())));
-                    notifyStorageUpdated();
+                  // Jika perangkat ini memiliki scan lokal yang sedang mengantre (offline scanner),
+                  // gabungkan scan baru tersebut dan push ke Cloud.
+                  // Selain itu (guru, admin, parent, atau scanner idle), Cloud adalah SUMBER KEBENARAN TUNGGAL!
+                  let finalAttendanceToSave = cleanCloudAtt;
+                  if (scanQueuePendingCount > 0) {
+                    const mergedAtt = mergeAttendanceLists(currentLocalAtt, cleanCloudAtt);
+                    finalAttendanceToSave = validateAndSanitizeAttendanceRecords(mergedAtt);
+                    const mergedStr = JSON.stringify(finalAttendanceToSave);
+                    writeCloudDocument(key, mergedStr, Date.now());
                   }
 
-                  // PERLINDUNGAN MULTI-DEVICE ANTI-TIMPA (CONCURRENT SCANNING SAFETY):
-                  // HANYA sinkronkan balik ke Cloud jika perangkat ini memiliki antrean scan lokal yang sedang aktif (scanQueuePendingCount > 0)!
-                  // JANGAN sinkronkan balik jika scanQueuePendingCount === 0 untuk mencegah loop ping-pong yang memboroskan kuota!
-                  if (scanQueuePendingCount > 0) {
-                    const hasLocalScansMissingInCloud = cleanMergedAtt.some(m =>
-                      isRealAttendance(m) && !cleanCloudAtt.some(c => c.id === m.id || (c.studentId === m.studentId && c.date === m.date && isRealAttendance(c)))
-                    );
-
-                    if (hasLocalScansMissingInCloud) {
-                      writeCloudDocument(key, mergedStr, Date.now());
-                    }
+                  const finalStr = JSON.stringify(finalAttendanceToSave);
+                  if (currentLocalStr !== finalStr) {
+                    lastSavedStringCache[key] = finalStr;
+                    safeSetLocalStorage(key, finalStr);
+                    safeSetLocalStorage(key + '_updatedAt', String(Math.max(cloudUpdatedAt, localUpdatedAt, Date.now())));
+                    notifyStorageUpdated();
                   }
 
                   setCloudSyncStatus('connected');
@@ -2411,7 +2571,7 @@ export function initFirestoreRealtimeSync(role?: UserRole) {
                 const cloudJournals = typeof finalDataToSave === 'string' ? JSON.parse(finalDataToSave) : finalDataToSave;
                 if (Array.isArray(cloudJournals)) {
                   const currentLocalJournals = getLearningJournals();
-                  if (cloudJournals.length === 0 && currentLocalJournals.length > 0) {
+                  if (cloudJournals.length === 0 && currentLocalJournals.length > 0 && !payload.updatedAt) {
                     writeCloudDocument(key, JSON.stringify(currentLocalJournals), Date.now());
                     lastSavedStringCache[key] = JSON.stringify(currentLocalJournals);
                     setCloudSyncStatus('connected');
@@ -2440,7 +2600,7 @@ export function initFirestoreRealtimeSync(role?: UserRole) {
                 const cloudGrades = typeof finalDataToSave === 'string' ? JSON.parse(finalDataToSave) : finalDataToSave;
                 if (Array.isArray(cloudGrades)) {
                   const currentLocalGrades = getStudentGradeAssessments();
-                  if (cloudGrades.length === 0 && currentLocalGrades.length > 0) {
+                  if (cloudGrades.length === 0 && currentLocalGrades.length > 0 && !payload.updatedAt) {
                     writeCloudDocument(key, JSON.stringify(currentLocalGrades), Date.now());
                     lastSavedStringCache[key] = JSON.stringify(currentLocalGrades);
                     setCloudSyncStatus('connected');
@@ -2462,99 +2622,68 @@ export function initFirestoreRealtimeSync(role?: UserRole) {
               }
             }
 
+            // SPECIAL DELETED CHARACTER LOGS SYNC:
+            // Pastikan ID log yang dihapus di satu perangkat langsung disinkronkan ke seluruh perangkat lain
+            if (key === DELETED_CHARACTER_LOGS_KEY) {
+              try {
+                const cloudDeleted = typeof finalDataToSave === 'string' ? JSON.parse(finalDataToSave) : finalDataToSave;
+                if (Array.isArray(cloudDeleted)) {
+                  const current = getDeletedCharacterLogIds();
+                  let changed = false;
+                  cloudDeleted.forEach(id => {
+                    if (id && typeof id === 'string' && !current.has(id.trim())) {
+                      current.add(id.trim());
+                      changed = true;
+                    }
+                  });
+                  if (changed) {
+                    const arr = Array.from(current).slice(-2000);
+                    safeSetLocalStorage(DELETED_CHARACTER_LOGS_KEY, JSON.stringify(arr));
+                    const currentLogs = getStudentCharacterLogs();
+                    const filtered = currentLogs.filter(l => l && l.id && !current.has(l.id.trim()));
+                    if (filtered.length !== currentLogs.length) {
+                      safeSetLocalStorage(KEYS.CHARACTER_LOGS, JSON.stringify(filtered));
+                      notifyStorageUpdated();
+                    }
+                  }
+                  setCloudSyncStatus('connected');
+                  return;
+                }
+              } catch (e) {
+                console.warn('[Firestore Sync] Error updating deleted character logs:', e);
+              }
+            }
+
             // SPECIAL CHARACTER LOGS SYNC:
-            // Gabungkan catatan karakter lokal dan Cloud secara cerdas:
-            // Mencegah log otomatis (Belum Scan Pulang & Belum Scan Masuk) tertimpa/berkedip hilang-muncul
+            // NILAI KARAKTER DIBACA LANGSUNG DARI CLOUD FIRESTORE KE SELURUH PERANGKAT:
+            // Seluruh perangkat (Admin, Guru, Orang Tua, Pos Satpam) menampilkan data yang sama persis dari Cloud.
             if (key === KEYS.CHARACTER_LOGS) {
               try {
                 const cloudLogs = typeof finalDataToSave === 'string' ? JSON.parse(finalDataToSave) : finalDataToSave;
                 if (Array.isArray(cloudLogs)) {
-                  const currentLocalLogs = getStudentCharacterLogs();
-                  if (cloudLogs.length === 0 && currentLocalLogs.length > 0) {
-                    writeCloudDocument(key, JSON.stringify(currentLocalLogs), Date.now());
-                    lastSavedStringCache[key] = JSON.stringify(currentLocalLogs);
-                    setCloudSyncStatus('connected');
-                    return;
-                  }
-
                   const deletedIds = getDeletedCharacterLogIds();
-                  const attendanceRecords = getAttendanceRecords();
-                  const map = new Map<string, StudentCharacterLog>();
-
-                  // Masukkan data Cloud terlebih dahulu, tapi abaikan log yang sudah dihapus atau penalti yang sudah tidak valid
-                  cloudLogs.forEach(l => {
-                    if (!l || !l.id) return;
-                    const cleanId = l.id.trim();
-
-                    // Jangan bangkitkan log yang sudah dihapus oleh pengguna atau dibersihkan sistem
-                    if (deletedIds.has(cleanId)) return;
-
-                    // Validasi log penalti Belum Scan Pulang terhadap rekaman presensi lokal:
-                    // Jika siswa sudah ada jam pulang / status pulang, jangan bangkitkan log penalti dari cloud!
-                    if (cleanId.startsWith('auto-unreturned-') || (l.traitType === 'NEGATIF' && l.traitName?.toLowerCase().includes('belum') && l.traitName?.toLowerCase().includes('pulang'))) {
-                      const matchingRec = attendanceRecords.find(r => 
-                        (r.studentId === l.studentId || (l.nisn && l.nisn !== '-' && r.nisn === l.nisn) || (l.studentName && r.studentName?.toLowerCase() === l.studentName.toLowerCase())) &&
-                        r.date === l.date
-                      );
-                      if (matchingRec) {
-                        const hasReturned = !!((matchingRec.returnTime && matchingRec.returnTime !== '-' && !matchingRec.returnTime.toLowerCase().includes('belum')) || matchingRec.returnStatus === 'PULANG' || matchingRec.returnStatus === 'PULANG_TEPAT' || matchingRec.returnStatus === 'PULANG_CEPAT');
-                        const isNotPresent = matchingRec.status !== 'HADIR' && matchingRec.status !== 'TERLAMBAT';
-                        if (hasReturned || isNotPresent) return;
-                      }
-                    }
-
-                    // Validasi log penalti Belum Scan Presensi terhadap rekaman presensi lokal:
-                    // Jika siswa sudah memiliki jam masuk valid atau berstatus izin/sakit, jangan bangkitkan!
-                    if (cleanId.startsWith('auto-unscanned-') || (l.traitType === 'NEGATIF' && l.traitName?.toLowerCase().includes('belum') && l.traitName?.toLowerCase().includes('scan'))) {
-                      const matchingRec = attendanceRecords.find(r => 
-                        (r.studentId === l.studentId || (l.nisn && l.nisn !== '-' && r.nisn === l.nisn) || (l.studentName && r.studentName?.toLowerCase() === l.studentName.toLowerCase())) &&
-                        r.date === l.date
-                      );
-                      if (matchingRec) {
-                        const hasValidTime = matchingRec.time && matchingRec.time !== '-' && !matchingRec.time.toLowerCase().includes('belum');
-                        const isExempt = matchingRec.status === 'SAKIT' || matchingRec.status === 'IZIN';
-                        if (hasValidTime || isExempt) return;
-                      }
-                    }
-
-                    map.set(cleanId, l);
-                  });
-
-                  // Pertahankan data lokal HANYA untuk log otomatis lokal yang baru dihitung dan belum tersinkronisasi
-                  // Log manual TIDAK PERNAH dipertahankan dari lokal jika tidak ada di Cloud (karena artinya telah dihapus di perangkat lain)
-                  currentLocalLogs.forEach(l => {
-                    if (l && l.id) {
-                      const cleanId = l.id.trim();
-                      if (isManualCharacterLog(l)) return;
-                      if (!map.has(cleanId) && !deletedIds.has(cleanId)) {
-                        map.set(cleanId, l);
-                      }
-                    }
-                  });
-
-                  const upacaraRes = repairUpacaraLogs(Array.from(map.values()));
+                  const filteredCloudLogs = cloudLogs.filter(l => l && l.id && !deletedIds.has(String(l.id).trim()));
+                  const upacaraRes = repairUpacaraLogs(filteredCloudLogs);
                   const kbmRes = repairKbmActiveLogs(upacaraRes.repairedLogs);
-                  const mergedLogs = deduplicateCharacterLogs(kbmRes.repairedLogs);
-                  const mergedStr = JSON.stringify(mergedLogs);
+                  const cleanLogs = deduplicateCharacterLogs(kbmRes.repairedLogs);
+                  const mergedStr = JSON.stringify(cleanLogs);
 
                   if (currentLocalStr !== mergedStr) {
                     lastSavedStringCache[key] = mergedStr;
                     safeSetLocalStorage(key, mergedStr);
                     safeSetLocalStorage(key + '_updatedAt', String(Math.max(cloudUpdatedAt, localUpdatedAt, Date.now())));
                     notifyStorageUpdated();
+                  } else {
+                    lastSavedStringCache[key] = mergedStr;
                   }
 
                   // PENGHEMAT KUOTA FIRESTORE:
-                  // Dilarang keras memicu writeCloudDocument otomatis dari dalam onSnapshot listener!
-                  // Penulisan ke Cloud Firestore hanya boleh dilakukan saat pengguna atau batch scheduler 16:00 WITA
-                  // secara eksplisit memanggil saveStudentCharacterLogs untuk mencegah loop ping-pong antar-perangkat.
-                  lastSavedStringCache[key] = mergedStr;
-
+                  // Dilarang keras memicu writeCloudDocument dari dalam listener onSnapshot!
                   setCloudSyncStatus('connected');
                   return;
                 }
               } catch (e) {
-                console.warn('[Firestore Sync] Error updating character logs data:', e);
+                console.warn('[Firestore Sync] Error updating character logs data from cloud:', e);
               }
             }
 
@@ -3615,8 +3744,9 @@ export function deduplicateCharacterLogs(logs: StudentCharacterLog[]): StudentCh
     // Saring log yang ada di daftar ID terhapus
     if (deletedIds.has(cleanId)) continue;
 
-    // Kunci semantik unik: nama/id siswa + tanggal + trait + timestamp + catatan
-    const semanticKey = `${log.studentId || ''}_${log.date || ''}_${log.traitId || log.traitName || ''}_${log.timestamp || ''}_${(log.notes || '').trim()}`;
+    // Kunci semantik unik: nama/id/nisn siswa + tanggal + trait + timestamp + points + catatan
+    const studentIdentifier = log.studentId || log.nisn || (log.studentName || '').trim().toLowerCase();
+    const semanticKey = `${studentIdentifier}_${log.date || ''}_${log.traitId || log.traitName || ''}_${log.points || 0}_${log.traitType || ''}_${log.timestamp || ''}_${(log.notes || '').trim()}`;
     if (semanticSet.has(semanticKey)) continue;
 
     if (!idMap.has(cleanId)) {
@@ -3625,6 +3755,73 @@ export function deduplicateCharacterLogs(logs: StudentCharacterLog[]): StudentCh
     }
   }
   return Array.from(idMap.values());
+}
+
+/**
+ * Memeriksa apakah suatu catatan karakter milik seorang siswa tertentu
+ * dengan pencocokan multi-field yang tangguh (ID, NISN, NIS, atau Nama Lengkap).
+ * Menjamin nilai karakter konsisten di seluruh perangkat, role, dan tabel laporan.
+ */
+export function isLogForStudent(
+  log: StudentCharacterLog, 
+  student: { id?: string; nisn?: string; nis?: string; name?: string }
+): boolean {
+  if (!log || !student) return false;
+  const sId = (student.id || '').trim();
+  const lId = (log.studentId || '').trim();
+  if (sId && lId && sId === lId) return true;
+
+  const sNisn = (student.nisn || '').trim();
+  const lNisn = (log.nisn || '').trim();
+  if (sNisn && lNisn && sNisn !== '-' && lNisn !== '-' && sNisn === lNisn) return true;
+
+  const sNis = ((student as any).nis || '').trim();
+  const lNis = ((log as any).nis || '').trim();
+  if (sNis && lNis && sNis !== '-' && lNis !== '-' && sNis === lNis) return true;
+
+  const sName = (student.name || '').trim().toLowerCase();
+  const lName = (log.studentName || '').trim().toLowerCase();
+  if (sName && lName && sName === lName) return true;
+
+  return false;
+}
+
+/**
+ * Menghitung rekapitulasi poin karakter positif, negatif, skor bersih, dan daftar log siswa
+ * secara seragam dan konsisten untuk seluruh komponen (Admin, Guru, Wali Murid, Laporan PDF).
+ */
+export function calculateStudentCharacterSummary(
+  student: { id?: string; nisn?: string; nis?: string; name?: string },
+  logs: StudentCharacterLog[]
+): {
+  positivePoints: number;
+  negativePoints: number;
+  netScore: number;
+  totalEntries: number;
+  logs: StudentCharacterLog[];
+} {
+  const rawLogs = (logs || []).filter(l => isLogForStudent(l, student));
+  const studentLogs = deduplicateCharacterLogs(rawLogs);
+
+  let positivePoints = 0;
+  let negativePoints = 0;
+
+  studentLogs.forEach(l => {
+    const pts = Math.abs(l.points || 0);
+    if (l.traitType === 'POSITIF') {
+      positivePoints += pts;
+    } else {
+      negativePoints += pts;
+    }
+  });
+
+  return {
+    positivePoints,
+    negativePoints,
+    netScore: positivePoints - negativePoints,
+    totalEntries: studentLogs.length,
+    logs: studentLogs
+  };
 }
 
 /**
@@ -3663,7 +3860,9 @@ export function unmarkCharacterLogDeleted(logId: string): void {
   const current = getDeletedCharacterLogIds();
   if (current.has(logId.trim())) {
     current.delete(logId.trim());
-    safeSetLocalStorage(DELETED_CHARACTER_LOGS_KEY, JSON.stringify(Array.from(current)));
+    const arr = Array.from(current);
+    safeSetLocalStorage(DELETED_CHARACTER_LOGS_KEY, JSON.stringify(arr));
+    syncToCloud(DELETED_CHARACTER_LOGS_KEY, arr, true);
   }
 }
 
@@ -3755,44 +3954,27 @@ export function getStudentCharacterLogs(): StudentCharacterLog[] {
     logs = logs.filter(l => l && l.id && !deletedIds.has(l.id.trim()));
   }
 
-  // 2. JAMINAN PERMANEN: Selalu pastikan catatan manual dari cadangan permanen terikut
-  // HANYA JIKA belum pernah dihapus oleh pengguna!
-  const permanentManuals = getPermanentManualCharacterLogs();
-  if (permanentManuals.length > 0) {
-    const existingIds = new Set(logs.map(l => l.id?.trim()).filter(Boolean));
-    let hasNewFromBackup = false;
-    permanentManuals.forEach(pLog => {
-      const pId = pLog.id?.trim();
-      if (pId && !existingIds.has(pId) && !deletedIds.has(pId)) {
-        logs.unshift(pLog);
-        existingIds.add(pId);
-        hasNewFromBackup = true;
+  // 2. Cadangan darurat offline: HANYA jika logs benar-benar kosong, gunakan cadangan lokal manual yang belum dihapus
+  if (logs.length === 0) {
+    const permanentManuals = getPermanentManualCharacterLogs();
+    if (permanentManuals.length > 0) {
+      const validManuals = permanentManuals.filter(pLog => {
+        const pId = pLog.id?.trim();
+        return pId && !deletedIds.has(pId);
+      });
+      if (validManuals.length > 0) {
+        logs = [...validManuals];
       }
-    });
-    if (hasNewFromBackup) {
-      safeSetLocalStorage(KEYS.CHARACTER_LOGS, JSON.stringify(deduplicateCharacterLogs(logs)));
     }
   }
 
-  // 3. SINKRONISASI & PERBAIKAN OTOMATIS:
-  // Normalisasi log Upacara & KBM
+  // 3. Normalisasi log Upacara & KBM
   const upacaraResult = repairUpacaraLogs(logs);
   const kbmResult = repairKbmActiveLogs(upacaraResult.repairedLogs);
-  const totalRepaired = upacaraResult.repairedCount + kbmResult.repairedCount;
-
   let finalLogs = deduplicateCharacterLogs(kbmResult.repairedLogs);
 
-  // Filter ulang jika ada id terhapus yang muncul dari proses normalisasi
   if (deletedIds.size > 0) {
     finalLogs = finalLogs.filter(l => l && l.id && !deletedIds.has(l.id.trim()));
-  }
-
-  if (totalRepaired > 0 || finalLogs.length !== logs.length) {
-    safeSetLocalStorage(KEYS.CHARACTER_LOGS, JSON.stringify(finalLogs));
-    const repairedManuals = finalLogs
-      .filter(isManualCharacterLog)
-      .filter(l => l && l.id && !deletedIds.has(l.id.trim()));
-    safeSetLocalStorage(SAFE_MANUAL_CHARACTER_LOGS_BACKUP_KEY, JSON.stringify(repairedManuals));
   }
 
   return finalLogs;

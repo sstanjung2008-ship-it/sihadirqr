@@ -17,7 +17,7 @@ import {
   exportMonthlyAttendanceMatrixPdf,
   exportMonthlyAttendanceMatrixExcel
 } from '../lib/exportUtils';
-import { getLocalDateString } from '../lib/storage';
+import { getLocalDateString, calculateStudentCharacterSummary } from '../lib/storage';
 
 const INDONESIAN_MONTH_OPTIONS = [
   { value: 1, name: 'Januari' },
@@ -363,16 +363,14 @@ export const ClassManagementView: React.FC<ClassManagementViewProps> = ({
     if (!selectedClassForRecap) return [];
 
     return selectedClassStudents.map(std => {
-      const stdLogs = characterLogs.filter(l => l.studentId === std.id);
-      const posLogs = stdLogs.filter(l => l.traitType === 'POSITIF');
-      const negLogs = stdLogs.filter(l => l.traitType === 'NEGATIF');
-
-      const posPoints = posLogs.reduce((sum, item) => sum + Math.abs(item.points || 0), 0);
-      const negPoints = negLogs.reduce((sum, item) => sum + Math.abs(item.points || 0), 0);
-      const netPoints = posPoints - negPoints;
-
+      const summary = calculateStudentCharacterSummary(std, characterLogs);
+      const posLogs = summary.logs.filter(l => l.traitType === 'POSITIF');
+      const negLogs = summary.logs.filter(l => l.traitType === 'NEGATIF');
+      const posPoints = summary.positivePoints;
+      const negPoints = summary.negativePoints;
+      const netPoints = summary.netScore;
       const pred = getCharacterPredicate(netPoints);
-      const lastLog = stdLogs.length > 0 ? stdLogs[stdLogs.length - 1] : null;
+      const lastLog = summary.logs.length > 0 ? summary.logs[summary.logs.length - 1] : null;
 
       return {
         student: std,
@@ -382,9 +380,9 @@ export const ClassManagementView: React.FC<ClassManagementViewProps> = ({
         negPoints,
         netPoints,
         pred,
-        totalLogs: stdLogs.length,
+        totalLogs: summary.totalEntries,
         lastLog,
-        allLogs: stdLogs
+        allLogs: summary.logs
       };
     });
   }, [selectedClassStudents, characterLogs, selectedClassForRecap, predicateSettings]);
@@ -473,17 +471,10 @@ export const ClassManagementView: React.FC<ClassManagementViewProps> = ({
     let countA = 0, countB = 0, countC = 0, countD = 0, countE = 0, countF = 0;
 
     classStd.forEach(std => {
-      const stdLogs = logs.filter(l => 
-        l.studentId === std.id ||
-        (std.nisn && l.nisn && l.nisn.trim() === std.nisn.trim()) ||
-        (l.studentName && std.name && l.studentName.trim().toLowerCase() === std.name.trim().toLowerCase())
-      );
-      const posPoints = stdLogs.filter(l => l.traitType === 'POSITIF').reduce((s, i) => s + Math.abs(i.points || 0), 0);
-      const negPoints = stdLogs.filter(l => l.traitType === 'NEGATIF').reduce((s, i) => s + Math.abs(i.points || 0), 0);
-      const net = posPoints - negPoints;
-      sumNet += net;
+      const summary = calculateStudentCharacterSummary(std, characterLogs);
+      sumNet += summary.netScore;
 
-      const pred = getCharacterPredicate(net);
+      const pred = getCharacterPredicate(summary.netScore);
       if (pred.code === 'A') countA++;
       else if (pred.code === 'B') countB++;
       else if (pred.code === 'C') countC++;

@@ -3,7 +3,7 @@ import autoTable from 'jspdf-autotable';
 import * as XLSX from 'xlsx';
 import QRCode from 'qrcode';
 import { SchoolProfile, Student, AttendanceRecord, LearningJournal, SchoolClass, CharacterTrait, StudentCharacterLog, CharacterPredicateSettings, StudentGradeAssessment, LessonPeriod, ClassScheduleSlot, Teacher } from '../types';
-import { getSchoolClasses, getTeachers } from './storage';
+import { getSchoolClasses, getTeachers, calculateStudentCharacterSummary } from './storage';
 
 /**
  * Resolves Homeroom Teacher (Wali Kelas) details automatically from Class Management data (classes)
@@ -1838,17 +1838,10 @@ export async function exportCharacterPointsPdf(
 
   // Table Data
   const tableData = filteredStudents.map((std, idx) => {
-    const studentLogs = logs.filter(l => 
-      l.studentId === std.id || 
-      (std.nisn && l.nisn && l.nisn.trim() === std.nisn.trim()) ||
-      (l.studentName && std.name && l.studentName.trim().toLowerCase() === std.name.trim().toLowerCase())
-    );
-    const posLogs = studentLogs.filter(l => l.traitType === 'POSITIF');
-    const negLogs = studentLogs.filter(l => l.traitType === 'NEGATIF');
-
-    const posPoints = posLogs.reduce((sum, item) => sum + (item.points || 0), 0);
-    const negPoints = negLogs.reduce((sum, item) => sum + (item.points || 0), 0);
-    const netPoints = posPoints - negPoints;
+    const summary = calculateStudentCharacterSummary(std, logs);
+    const posPoints = summary.positivePoints;
+    const negPoints = summary.negativePoints;
+    const netPoints = summary.netScore;
 
     const minA = predicateSettings.minA ?? 30;
     const minB = predicateSettings.minB ?? 10;
@@ -2016,18 +2009,15 @@ export async function exportStudentCharacterDetailPdf(
   doc.text(periodText, 105, 41, { align: 'center' });
 
   // Student Logs Calculation
-  const studentLogs = logs.filter(l => 
-    l.studentId === student.id || 
-    (student.nisn && l.nisn && l.nisn.trim() === student.nisn.trim()) ||
-    (l.studentName && student.name && l.studentName.trim().toLowerCase() === student.name.trim().toLowerCase())
-  );
-  const sortedLogs = [...studentLogs].sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
-
+  const summary = calculateStudentCharacterSummary(student, logs);
+  const studentLogs = summary.logs;
   const posLogs = studentLogs.filter(l => l.traitType === 'POSITIF');
   const negLogs = studentLogs.filter(l => l.traitType === 'NEGATIF');
-  const posPoints = posLogs.reduce((sum, item) => sum + (item.points || 0), 0);
-  const negPoints = negLogs.reduce((sum, item) => sum + (item.points || 0), 0);
-  const netPoints = posPoints - negPoints;
+  const sortedLogs = [...studentLogs].sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+
+  const posPoints = summary.positivePoints;
+  const negPoints = summary.negativePoints;
+  const netPoints = summary.netScore;
 
   const minA = predicateSettings.minA ?? 30;
   const minB = predicateSettings.minB ?? 10;
@@ -2226,13 +2216,10 @@ export function exportCharacterPointsExcel(
   predicateSettings: CharacterPredicateSettings = { minA: 30, minB: 10, minC: 0, minD: -20, minE: -50 }
 ) {
   const dataForExcel = students.map((std, idx) => {
-    const studentLogs = logs.filter(l => l.studentId === std.id);
-    const posLogs = studentLogs.filter(l => l.traitType === 'POSITIF');
-    const negLogs = studentLogs.filter(l => l.traitType === 'NEGATIF');
-
-    const posPoints = posLogs.reduce((sum, item) => sum + (item.points || 0), 0);
-    const negPoints = negLogs.reduce((sum, item) => sum + (item.points || 0), 0);
-    const netPoints = posPoints - negPoints;
+    const summary = calculateStudentCharacterSummary(std, logs);
+    const posPoints = summary.positivePoints;
+    const negPoints = summary.negativePoints;
+    const netPoints = summary.netScore;
 
     const minA = predicateSettings.minA ?? 30;
     const minB = predicateSettings.minB ?? 10;

@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { Student, SchoolClass, CharacterTrait, StudentCharacterLog, Teacher, SchoolProfile, CharacterPredicateSettings, UserSession, AttendanceRecord, LearningJournal } from '../types';
 import { exportCharacterPointsPdf, exportStudentCharacterDetailPdf } from '../lib/exportUtils';
-import { isManualCharacterLog, deduplicateCharacterLogs } from '../lib/storage';
+import { isManualCharacterLog, deduplicateCharacterLogs, calculateStudentCharacterSummary } from '../lib/storage';
 import { getWitaDateTime, setAutoAssessmentBatchDone, runOnTimeAttendanceAssessment } from '../lib/autoCharacterScheduler';
 import { 
   Plus, 
@@ -303,33 +303,16 @@ export const CharacterPointsView: React.FC<CharacterPointsViewProps> = ({
   // Calculate character score summary for a student
   const getStudentScoreSummary = (studentId: string) => {
     const student = students.find(s => s.id === studentId);
-    const rawStudentLogs = logs.filter(l => 
-      l.studentId === studentId ||
-      (student && student.nisn && l.nisn && l.nisn.trim() === student.nisn.trim()) ||
-      (student && l.studentName && student.name && l.studentName.trim().toLowerCase() === student.name.trim().toLowerCase())
-    );
-    const studentLogs = deduplicateCharacterLogs(rawStudentLogs);
-    
-    let positivePoints = 0;
-    let negativePoints = 0;
-
-    studentLogs.forEach(l => {
-      if (l.traitType === 'POSITIF') {
-        positivePoints += Math.abs(l.points);
-      } else {
-        negativePoints += Math.abs(l.points);
-      }
-    });
-
-    const netScore = positivePoints - negativePoints;
-
-    return {
-      positivePoints,
-      negativePoints,
-      netScore,
-      totalEntries: studentLogs.length,
-      logs: studentLogs
-    };
+    if (!student) {
+      return {
+        positivePoints: 0,
+        negativePoints: 0,
+        netScore: 0,
+        totalEntries: 0,
+        logs: []
+      };
+    }
+    return calculateStudentCharacterSummary(student, logs);
   };
 
   // Handle Photo File Upload

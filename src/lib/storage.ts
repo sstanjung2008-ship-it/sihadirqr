@@ -12,8 +12,21 @@ import {
   INITIAL_LESSON_PERIODS,
   INITIAL_CLASS_SCHEDULES
 } from '../data/mockData';
-import { db, doc, setDoc, getDoc, deleteDoc, onSnapshot } from './firebase';
+import { db, doc, setDoc, getDoc, deleteDoc, onSnapshot, serverTimestamp, Timestamp } from './firebase';
 import firebaseConfigData from '../../firebase-applet-config.json';
+
+// Firebase Server Time Offset Tracker (menjamin pengecekan 16:00 WITA akurat dengan jam server Google Cloud)
+let firebaseServerTimeOffsetMs = 0;
+
+export function updateFirebaseServerTimeFromTimestamp(serverTimestampMs: number): void {
+  if (typeof serverTimestampMs === 'number' && serverTimestampMs > 1700000000000) {
+    firebaseServerTimeOffsetMs = serverTimestampMs - Date.now();
+  }
+}
+
+export function getFirebaseServerTime(): number {
+  return Date.now() + firebaseServerTimeOffsetMs;
+}
 
 export const KEYS = {
   PROFILE: 'sihadir_school_profile_v2',
@@ -420,6 +433,7 @@ async function performSingleDocWrite(key: string, dataStr: string, timestamp: nu
     await setDoc(docRef, {
       data: dataStr,
       updatedAt: timestamp,
+      serverTime: serverTimestamp(),
       isChunked: false,
       totalChunks: 1,
     });
@@ -456,6 +470,7 @@ async function performSingleDocWrite(key: string, dataStr: string, timestamp: nu
     await setDoc(rootDocRef, {
       data: chunks[0],
       updatedAt: timestamp,
+      serverTime: serverTimestamp(),
       isChunked: true,
       totalChunks: numChunks,
     });
@@ -1437,8 +1452,8 @@ export function mergeSchoolProfile(local: SchoolProfile, cloud: SchoolProfile): 
         veryActiveKbmPoints: 1,
         onTimePoints: 1,
         onTimeRequiredDays: 3,
-        unscannedPoints: 1,
-        unreturnedPoints: 1,
+        unscannedPoints: 2,
+        unreturnedPoints: 2,
       }),
       ...(local.autoCharacterPoints || {}),
       ...(cloud.autoCharacterPoints || {}),

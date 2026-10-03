@@ -119,8 +119,8 @@ export interface AutoCharacterPointSettings {
   veryActiveKbmPoints: number; // default 1
   onTimePoints: number; // default 1
   onTimeRequiredDays: number; // default 3
-  unscannedPoints?: number; // default 1 (Belum Scan Presensi)
-  unreturnedPoints?: number; // default 1 (Belum Scan Pulang)
+  unscannedPoints?: number; // default 2 (Belum Scan Presensi)
+  unreturnedPoints?: number; // default 2 (Belum Scan Pulang)
 }
 
 export interface SchoolProfile {

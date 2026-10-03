@@ -2534,7 +2534,7 @@ export const SchoolSettingsView: React.FC<SchoolSettingsViewProps> = ({
                     type="number"
                     min="1"
                     max="50"
-                    value={formData.autoCharacterPoints?.unscannedPoints ?? 1}
+                    value={formData.autoCharacterPoints?.unscannedPoints ?? 2}
                     onChange={(e) => setFormData({
                       ...formData,
                       autoCharacterPoints: {
@@ -2546,10 +2546,10 @@ export const SchoolSettingsView: React.FC<SchoolSettingsViewProps> = ({
                           veryActiveKbmPoints: 1,
                           onTimePoints: 1,
                           onTimeRequiredDays: 3,
-                          unscannedPoints: 1,
-                          unreturnedPoints: 1,
+                          unscannedPoints: 2,
+                          unreturnedPoints: 2,
                         }),
-                        unscannedPoints: Math.max(1, Math.abs(Number(e.target.value)) || 1)
+                        unscannedPoints: Math.max(1, Math.abs(Number(e.target.value)) || 2)
                       }
                     })}
                     className="w-14 px-2 py-1 bg-white border border-orange-300 rounded-lg text-xs font-black text-center text-orange-900 focus:outline-none focus:ring-1 focus:ring-orange-500"
@@ -2580,7 +2580,7 @@ export const SchoolSettingsView: React.FC<SchoolSettingsViewProps> = ({
                     type="number"
                     min="1"
                     max="50"
-                    value={formData.autoCharacterPoints?.unreturnedPoints ?? 1}
+                    value={formData.autoCharacterPoints?.unreturnedPoints ?? 2}
                     onChange={(e) => setFormData({
                       ...formData,
                       autoCharacterPoints: {
@@ -2592,10 +2592,10 @@ export const SchoolSettingsView: React.FC<SchoolSettingsViewProps> = ({
                           veryActiveKbmPoints: 1,
                           onTimePoints: 1,
                           onTimeRequiredDays: 3,
-                          unscannedPoints: 1,
-                          unreturnedPoints: 1,
+                          unscannedPoints: 2,
+                          unreturnedPoints: 2,
                         }),
-                        unreturnedPoints: Math.max(1, Math.abs(Number(e.target.value)) || 1)
+                        unreturnedPoints: Math.max(1, Math.abs(Number(e.target.value)) || 2)
                       }
                     })}
                     className="w-14 px-2 py-1 bg-white border border-amber-300 rounded-lg text-xs font-black text-center text-amber-900 focus:outline-none focus:ring-1 focus:ring-amber-500"

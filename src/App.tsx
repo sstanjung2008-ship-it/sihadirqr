@@ -42,6 +42,7 @@ import {
   unmarkCharacterLogDeleted,
   isManualCharacterLog,
   restoreAllManualCharacterLogs,
+  deduplicateCharacterLogs,
   getCharacterPredicateSettings,
   saveCharacterPredicateSettings,
   getLessonPeriods,
@@ -1326,6 +1327,109 @@ export default function App() {
     const updated = [journal, ...journals.filter(j => j.id !== journal.id)];
     setJournalsState(updated);
     saveLearningJournals(updated);
+
+    // EKSEKUSI PENILAIAN KARAKTER KBM LANGSUNG TERSIMPAN DI CLOUD (BISA SEBELUM 16:00 WITA):
+    // Ketika guru mengisi evaluasi keaktifan siswa di Jurnal KBM (Sangat aktif / Tidak ada saat KBM),
+    // langsung catat dan simpan ke Cloud Firestore saat itu juga.
+    if (journal.studentAttendances && journal.studentAttendances.length > 0) {
+      const veryActiveTrait = traits.find(t => t.id === 'trait-013' || (t.type === 'POSITIF' && t.name.toLowerCase().includes('sangat aktif'))) || {
+        id: 'trait-013',
+        name: 'Sangat Aktif KBM',
+        type: 'POSITIF' as const,
+        points: 1,
+        category: 'Keaktifan'
+      };
+
+      const absentKbmTrait = traits.find(t => t.id === 'trait-014' || (t.type === 'NEGATIF' && t.name.toLowerCase().includes('tidak hadir di kelas'))) || {
+        id: 'trait-014',
+        name: 'Tidak Hadir di Kelas saat KBM',
+        type: 'NEGATIF' as const,
+        points: 2,
+        category: 'Kedisiplinan'
+      };
+
+      const newKbmLogs: StudentCharacterLog[] = [];
+      journal.studentAttendances.forEach(att => {
+        const student = students.find(s => s.id === att.studentId);
+        if (!student) return;
+
+        if (att.status === 'Sangat aktif') {
+          const logId = `auto-kbm-active-${journal.id}-${student.id}`;
+          newKbmLogs.push({
+            id: logId,
+            studentId: student.id,
+            studentName: student.name,
+            nisn: student.nisn || '-',
+            classId: student.classId,
+            className: student.className,
+            traitId: veryActiveTrait.id,
+            traitName: veryActiveTrait.name,
+            traitType: 'POSITIF',
+            points: 1,
+            evaluatorName: journal.teacherName || 'Guru Mapel',
+            timestamp: `${journal.date} ${new Date().toTimeString().slice(0, 8)}`,
+            date: journal.date,
+            notes: `Penilaian Jurnal KBM: Sangat aktif dalam KBM (${journal.subject} - ${journal.material})`,
+            isManual: true
+          });
+        } else if (att.status === 'Tidak hadir di kelas') {
+          const logId = `auto-kbm-absent-${journal.id}-${student.id}`;
+          newKbmLogs.push({
+            id: logId,
+            studentId: student.id,
+            studentName: student.name,
+            nisn: student.nisn || '-',
+            classId: student.classId,
+            className: student.className,
+            traitId: absentKbmTrait.id,
+            traitName: absentKbmTrait.name,
+            traitType: 'NEGATIF',
+            points: 2,
+            evaluatorName: journal.teacherName || 'Guru Mapel',
+            timestamp: `${journal.date} ${new Date().toTimeString().slice(0, 8)}`,
+            date: journal.date,
+            notes: `Penilaian Jurnal KBM: Tidak hadir di kelas saat KBM (${journal.subject})`,
+            isManual: true
+          });
+        } else if (att.status === 'Mengganggu') {
+          const disruptiveTrait = traits.find(t => t.id === 'trait-009' || (t.type === 'NEGATIF' && t.name.toLowerCase().includes('tidur'))) || {
+            id: 'trait-009',
+            name: 'Bermain HP / Tidur Saat KBM',
+            type: 'NEGATIF' as const,
+            points: 1,
+            category: 'Pelanggaran'
+          };
+          const logId = `auto-kbm-disruptive-${journal.id}-${student.id}`;
+          newKbmLogs.push({
+            id: logId,
+            studentId: student.id,
+            studentName: student.name,
+            nisn: student.nisn || '-',
+            classId: student.classId,
+            className: student.className,
+            traitId: disruptiveTrait.id,
+            traitName: disruptiveTrait.name,
+            traitType: 'NEGATIF',
+            points: 1,
+            evaluatorName: journal.teacherName || 'Guru Mapel',
+            timestamp: `${journal.date} ${new Date().toTimeString().slice(0, 8)}`,
+            date: journal.date,
+            notes: `Penilaian Jurnal KBM: Perilaku mengganggu / tidak fokus saat KBM (${journal.subject})`,
+            isManual: true
+          });
+        }
+      });
+
+      if (newKbmLogs.length > 0) {
+        setCharacterLogsState(prevLogs => {
+          const newIds = new Set(newKbmLogs.map(l => l.id));
+          const filtered = prevLogs.filter(l => !newIds.has(l.id));
+          const merged = deduplicateCharacterLogs([...newKbmLogs, ...filtered]);
+          saveStudentCharacterLogs(merged);
+          return merged;
+        });
+      }
+    }
   };
 
   const handleDeleteJournal = (journalId: string) => {

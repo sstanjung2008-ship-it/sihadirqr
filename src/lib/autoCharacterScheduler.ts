@@ -11,6 +11,7 @@ import {
   getDeletedCharacterLogIds,
   isLogForStudent,
   safeSetLocalStorage,
+  getFirebaseServerTime,
   KEYS
 } from './storage';
 import { StudentCharacterLog, AttendanceRecord } from '../types';
@@ -48,45 +49,59 @@ export function setAutoAssessmentBatchDone(dateStr: string, done: boolean = true
 }
 
 /**
- * Menghitung waktu tanggal dan jam WITA (UTC+8) yang presisi
+ * Menghitung waktu tanggal dan jam WITA (UTC+8) yang presisi berbasis Firebase Server Timestamp
  */
-export function getWitaDateTime(): { witaDate: Date; witaDateStr: string; witaTimeStr: string; totalMinutes: number; dayName: string } {
-  const now = new Date();
-  const utc = now.getTime() + (now.getTimezoneOffset() * 60000);
-  const witaDate = new Date(utc + (3600000 * 8));
+export function getWitaDateTime(customTimestampMs?: number): { 
+  witaDate: Date; 
+  witaDateStr: string; 
+  witaTimeStr: string; 
+  totalMinutes: number; 
+  hours: number;
+  minutes: number;
+  dayName: string;
+  isPast16Wita: boolean;
+  serverTimestampMs: number;
+} {
+  const timeMs = customTimestampMs ?? getFirebaseServerTime();
+  // WITA is UTC + 8 hours
+  const witaEpoch = timeMs + (8 * 3600 * 1000);
+  const witaDate = new Date(witaEpoch);
 
-  const yyyy = witaDate.getFullYear();
-  const mm = String(witaDate.getMonth() + 1).padStart(2, '0');
-  const dd = String(witaDate.getDate()).padStart(2, '0');
+  const yyyy = witaDate.getUTCFullYear();
+  const mm = String(witaDate.getUTCMonth() + 1).padStart(2, '0');
+  const dd = String(witaDate.getUTCDate()).padStart(2, '0');
   const witaDateStr = `${yyyy}-${mm}-${dd}`;
 
-  const hours = witaDate.getHours();
-  const minutes = witaDate.getMinutes();
-  const seconds = witaDate.getSeconds();
+  const hours = witaDate.getUTCHours();
+  const minutes = witaDate.getUTCMinutes();
+  const seconds = witaDate.getUTCSeconds();
   const witaTimeStr = `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
   const totalMinutes = hours * 60 + minutes;
+  const isPast16Wita = totalMinutes >= 16 * 60; // Jam 16:00 WITA or later
 
   const dayNames = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
-  const dayName = dayNames[witaDate.getDay()];
+  const dayName = dayNames[witaDate.getUTCDay()];
 
-  return { witaDate, witaDateStr, witaTimeStr, totalMinutes, dayName };
+  return { witaDate, witaDateStr, witaTimeStr, totalMinutes, hours, minutes, dayName, isPast16Wita, serverTimestampMs: timeMs };
 }
 
 /**
  * Rekonsiliasi Menyeluruh Penilaian Karakter Otomatis:
- * 1. Belum Scan Presensi (-unscannedPoints, default -1 poin)
- * 2. Belum Scan Pulang (-unreturnedPoints, default -1 poin)
+ * 1. Belum Scan Presensi Masuk (pinalti -2 poin)
+ * 2. Belum Scan Pulang (pinalti -2 poin)
+ * 3. Hadir Tepat Waktu (kelipatan 3 hari = +1 poin, 6 hari = +2 poin, dst.)
  *
- * REGULASI KETAT:
- * - Penilaian belum scan presensi dan scan pulang HANYA dilakukan mulai pukul 16:00 WITA untuk hari berjalan (atau tanggal lampau).
- * - Dilakukan secara BATCHING 1 KALI WRITE agar tidak berulang melakukan penilaian dan hemat kuota database.
+ * REGULASI KETAT & CEGAH PENULISAN BERULANG:
+ * - Penilaian otomatis presensi hari ini HANYA boleh dieksekusi mulai jam 16:00 WITA (berbasis Firebase Server Timestamp).
+ * - Sebelum jam 16:00 WITA, fungsi ini langsung berhenti tanpa memproses penalti hari ini dan tanpa penulisan ke database.
+ * - Dilakukan secara BATCHING 1 KALI WRITE agar tidak berulang melakukan penilaian dan menjamin seluruh perangkat sinkron.
  */
 export function reconcileAutoCharacterPenalties(forceToday: boolean = false): { 
   executed: boolean; 
   count: number; 
   unscannedCount: number; 
   unreturnedCount: number; 
-  onTimeCount: number;
+  onTimeCount: number; 
   message: string 
 } {
   const session = getUserSession();
@@ -99,22 +114,35 @@ export function reconcileAutoCharacterPenalties(forceToday: boolean = false): {
     return { executed: false, count: 0, unscannedCount: 0, unreturnedCount: 0, onTimeCount: 0, message: 'Sistem Penilaian Karakter Otomatis sedang non-aktif di Pengaturan.' };
   }
 
-  const { witaDateStr, witaTimeStr, totalMinutes } = getWitaDateTime();
-  const isPast16Wita = totalMinutes >= 16 * 60;
+  const { witaDateStr, witaTimeStr, isPast16Wita } = getWitaDateTime();
+
+  // ATURAN MUTLAK & CEGAH PENULISAN ULANG SEBELUM 16:00 WITA:
+  // Evaluasi presensi hari ini HANYA dieksekusi setelah jam 16:00 WITA berdasarkan Firebase Server Timestamp.
+  // Sebelum jam 16:00 WITA, fungsi ini langsung berhenti tanpa memproses penalti hari ini
+  // dan tanpa penulisan ulang yang tidak diperlukan ke database.
+  if (!isPast16Wita && !forceToday) {
+    return {
+      executed: false,
+      count: 0,
+      unscannedCount: 0,
+      unreturnedCount: 0,
+      onTimeCount: 0,
+      message: `Waktu Firebase Server saat ini (${witaTimeStr} WITA) belum mencapai 16:00 WITA. Penilaian presensi otomatis hari ini ditunda hingga 16:00 WITA untuk mencegah penulisan berulang.`
+    };
+  }
+
   const isBatchDoneToday = isAutoAssessmentBatchDone(witaDateStr);
-
-  const endParts = (profile.endTime || '15:00').split(':');
-  const endMinutes = (parseInt(endParts[0], 10) || 15) * 60 + (parseInt(endParts[1], 10) || 0);
-  const isPastSchoolEndTime = totalMinutes >= endMinutes;
-
-  const startParts = (profile.startTime || '07:00').split(':');
-  const startMinutes = (parseInt(startParts[0], 10) || 7) * 60 + (parseInt(startParts[1], 10) || 0);
-  const isPastSchoolStartTime = totalMinutes >= (startMinutes + (profile.lateToleranceMinutes || 15));
-
-  // 1. JAMINAN BATCHING 1 KALI WRITE (AGAR TIDAK BERULANG MELAKUKAN PENILAIAN):
-  // Jika waktu sudah >= 16:00 WITA dan batch penalti untuk hari ini sudah selesai diproses (isBatchDoneToday),
-  // maka penalti belum scan presensi & belum scan pulang hari ini tidak akan ditambahkan ulang.
-  // Namun, evaluasi Hadir Tepat Waktu (kelipatan 3 hari = 1, 6 hari = 2, dst) dan pembersihan data tetap aktif dipantau.
+  // JAMINAN 1 KALI WRITE: Jika batch 16:00 WITA hari ini sudah selesai, jangan ulangi penulisan
+  if (isBatchDoneToday && !forceToday) {
+    return {
+      executed: false,
+      count: 0,
+      unscannedCount: 0,
+      unreturnedCount: 0,
+      onTimeCount: 0,
+      message: `Batch penilaian karakter otomatis 16:00 WITA untuk tanggal ${witaDateStr} sudah selesai dieksekusi. Tidak ada penulisan ulang.`
+    };
+  }
 
   const students = getStudents();
   if (students.length === 0) {
@@ -127,8 +155,6 @@ export function reconcileAutoCharacterPenalties(forceToday: boolean = false): {
   }
 
   // JAMINAN HEMAT KUOTA FIRESTORE (0 Cloud Read & 0 Cloud Write):
-  // Cek sidik jari (signature) data lokal: jika rekaman absensi tidak bertambah/berubah,
-  // proses evaluasi dihentikan seketika tanpa perhitungan atau akses jaringan sama sekali.
   const attendanceUpdatedAt = (typeof window !== 'undefined' ? localStorage.getItem(KEYS.ATTENDANCE + '_updatedAt') : null) || '0';
   const logsUpdatedAt = (typeof window !== 'undefined' ? localStorage.getItem(KEYS.CHARACTER_LOGS + '_updatedAt') : null) || '0';
   const currentSignature = `${attendanceRecords.length}_${attendanceUpdatedAt}_${logsUpdatedAt}_${witaDateStr}_${isPast16Wita ? '16wita' : 'pre16'}_${isBatchDoneToday ? 'done' : 'pending'}`;
@@ -145,8 +171,9 @@ export function reconcileAutoCharacterPenalties(forceToday: boolean = false): {
   }
 
   const currentLogs = getStudentCharacterLogs();
-  const unscannedPoints = profile.autoCharacterPoints?.unscannedPoints ?? 1;
-  const unreturnedPoints = profile.autoCharacterPoints?.unreturnedPoints ?? 1;
+  // REGULASI POIN: Belum scan masuk pinalti -2, Belum scan pulang pinalti -2, Hadir tepat waktu +1 per 3 hari
+  const unscannedPoints = profile.autoCharacterPoints?.unscannedPoints ?? 2;
+  const unreturnedPoints = profile.autoCharacterPoints?.unreturnedPoints ?? 2;
   const onTimeRequiredDays = profile.autoCharacterPoints?.onTimeRequiredDays ?? 3;
   const onTimePoints = profile.autoCharacterPoints?.onTimePoints ?? 1;
 

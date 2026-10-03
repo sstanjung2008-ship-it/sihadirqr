@@ -124,8 +124,8 @@ export const AutoCharacterAssessmentModal: React.FC<AutoCharacterAssessmentModal
   const [veryActiveKbmPoints, setVeryActiveKbmPoints] = useState<number>(() => schoolProfile?.autoCharacterPoints?.veryActiveKbmPoints ?? 1); // Default 1 poin positif
   const [onTimePoints, setOnTimePoints] = useState<number>(() => schoolProfile?.autoCharacterPoints?.onTimePoints ?? 1);
   const [onTimeRequiredDays, setOnTimeRequiredDays] = useState<number>(() => schoolProfile?.autoCharacterPoints?.onTimeRequiredDays ?? 3);
-  const [unscannedPoints, setUnscannedPoints] = useState<number>(() => schoolProfile?.autoCharacterPoints?.unscannedPoints ?? 1); // Default 1 poin negatif
-  const [unreturnedPoints, setUnreturnedPoints] = useState<number>(() => schoolProfile?.autoCharacterPoints?.unreturnedPoints ?? 1); // Default 1 poin negatif
+  const [unscannedPoints, setUnscannedPoints] = useState<number>(() => schoolProfile?.autoCharacterPoints?.unscannedPoints ?? 2); // Default 2 poin negatif
+  const [unreturnedPoints, setUnreturnedPoints] = useState<number>(() => schoolProfile?.autoCharacterPoints?.unreturnedPoints ?? 2); // Default 2 poin negatif
   const [pointsSavedNotice, setPointsSavedNotice] = useState<{ type: 'success' | 'info'; message: string } | null>(null);
 
   // Waktu WITA untuk sinkronisasi evaluasi 16:00 WITA

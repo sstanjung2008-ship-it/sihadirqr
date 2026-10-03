@@ -2,7 +2,7 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { Student, SchoolClass, CharacterTrait, StudentCharacterLog, Teacher, SchoolProfile, CharacterPredicateSettings, UserSession, AttendanceRecord, LearningJournal } from '../types';
 import { exportCharacterPointsPdf, exportStudentCharacterDetailPdf } from '../lib/exportUtils';
 import { isManualCharacterLog, deduplicateCharacterLogs, calculateStudentCharacterSummary } from '../lib/storage';
-import { getWitaDateTime, setAutoAssessmentBatchDone, runOnTimeAttendanceAssessment } from '../lib/autoCharacterScheduler';
+import { getWitaDateTime, setAutoAssessmentBatchDone } from '../lib/autoCharacterScheduler';
 import { 
   Plus, 
   Search, 
@@ -69,25 +69,6 @@ export const CharacterPointsView: React.FC<CharacterPointsViewProps> = ({
   const [selectedClassId, setSelectedClassId] = useState<string>('ALL');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [isExporting, setIsExporting] = useState<boolean>(false);
-  const [onTimeResultToast, setOnTimeResultToast] = useState<string | null>(null);
-  const [isRunningOnTimeAssessment, setIsRunningOnTimeAssessment] = useState(false);
-
-  const handleRunOnTimeAssessment = () => {
-    setIsRunningOnTimeAssessment(true);
-    try {
-      const res = runOnTimeAttendanceAssessment();
-      const msg = res.addedOnTimeCount > 0
-        ? `Berhasil mencatat ${res.addedOnTimeCount} penilaian positif hadir tepat waktu (setiap 3 hari = 1 poin, 6 hari = 2 poin, dst.)!`
-        : `Pemeriksaan selesai: ${res.message}`;
-      setOnTimeResultToast(msg);
-      setTimeout(() => setOnTimeResultToast(null), 6000);
-    } catch (e: any) {
-      setOnTimeResultToast(`Gagal mengevaluasi kehadiran tepat waktu: ${e?.message || 'Terjadi kendala'}`);
-      setTimeout(() => setOnTimeResultToast(null), 6000);
-    } finally {
-      setIsRunningOnTimeAssessment(false);
-    }
-  };
 
   // Auto detect initial evaluator name from logged in user session
   const initialEvaluatorName = useMemo(() => {
@@ -565,17 +546,6 @@ export const CharacterPointsView: React.FC<CharacterPointsViewProps> = ({
 
         <div className="flex flex-wrap items-center gap-2.5 shrink-0">
           <button
-            type="button"
-            onClick={handleRunOnTimeAssessment}
-            disabled={isRunningOnTimeAssessment}
-            className="inline-flex items-center justify-center gap-2 px-4 py-3 bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold rounded-2xl shadow-md transition-all active:scale-95 cursor-pointer text-xs sm:text-sm disabled:opacity-50"
-            title="Hitung & catat poin positif hadir tepat waktu (setiap 3 hari hadir tepat waktu dinilai 1, 6 kali dinilai 2, dan kelipatannya)"
-          >
-            <Clock className="w-4 h-4 text-emerald-200" />
-            <span>{isRunningOnTimeAssessment ? 'Menilai...' : 'Nilai Tepat Waktu (3 Hari = 1, 6 Hari = 2 Poin)'}</span>
-          </button>
-
-          <button
             onClick={handleDownloadPdf}
             disabled={isExporting}
             className="inline-flex items-center justify-center gap-2 px-5 py-3 bg-emerald-500 hover:bg-emerald-400 disabled:bg-slate-500 text-white font-extrabold rounded-2xl shadow-lg transition-all transform active:scale-95 cursor-pointer shrink-0 text-xs sm:text-sm"
@@ -585,19 +555,6 @@ export const CharacterPointsView: React.FC<CharacterPointsViewProps> = ({
           </button>
         </div>
       </div>
-
-      {/* Toast Notifikasi Penilaian Hadir Tepat Waktu */}
-      {onTimeResultToast && (
-        <div className="p-4 bg-gradient-to-r from-emerald-600 to-teal-700 text-white rounded-2xl font-bold text-xs flex items-center justify-between shadow-lg animate-in fade-in slide-in-from-top-2">
-          <div className="flex items-center gap-2.5">
-            <CheckCircle2 className="w-5 h-5 text-emerald-200 shrink-0" />
-            <span>{onTimeResultToast}</span>
-          </div>
-          <button onClick={() => setOnTimeResultToast(null)} className="text-white/80 hover:text-white p-1 cursor-pointer">
-            <X className="w-4 h-4" />
-          </button>
-        </div>
-      )}
 
       {/* Filters and Search Bar */}
       <div className="bg-white rounded-2xl p-4 border border-slate-200 shadow-xs flex flex-col sm:flex-row items-center justify-between gap-4">

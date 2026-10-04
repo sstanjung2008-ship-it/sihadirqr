@@ -197,8 +197,8 @@ export interface Teacher {
   id: string;
   nip: string;
   name: string;
-  birthPlace: string;
-  birthDate: string; // YYYY-MM-DD
+  birthPlace?: string;
+  birthDate?: string; // YYYY-MM-DD
   subject1: string;
   subject2?: string;
   additionalDuty: 'WAKIL_KEPALA_SEKOLAH' | 'HUMAS' | 'BK' | 'WALI_KELAS' | 'ADMIN' | 'TU' | 'PERPUSTAKAAN' | 'TIDAK_ADA' | string;

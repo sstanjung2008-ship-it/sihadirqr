@@ -50,7 +50,7 @@ import {
 } from 'lucide-react';
 import { BulkAlpaManagementModal } from './BulkAlpaManagementModal';
 import { BulkReturnManagementModal, BulkReturnUpdatePayload } from './BulkReturnManagementModal';
-import { getLocalDateString, refreshParentChildAttendance, calculateStudentCharacterSummary } from '../lib/storage';
+import { getLocalDateString, refreshParentChildAttendance, calculateStudentCharacterSummary, isRealPhotoProof } from '../lib/storage';
 
 interface AttendanceDashboardProps {
   students: Student[];
@@ -178,8 +178,17 @@ export const AttendanceDashboard: React.FC<AttendanceDashboardProps> = ({
   const studentDateStatusMap = new Map<string, AttendanceRecord>();
   dateRecords.forEach(r => {
     if (r.studentId) studentDateStatusMap.set(r.studentId, r);
-    if (r.nisn) studentDateStatusMap.set(r.nisn, r);
+    if (r.nisn && r.nisn !== '-') studentDateStatusMap.set(r.nisn.trim(), r);
+    if (r.studentName && r.studentName.trim() !== '') studentDateStatusMap.set(r.studentName.trim().toLowerCase(), r);
   });
+
+  const getRecordForStudent = (std: { id?: string; nisn?: string; name?: string }): AttendanceRecord | undefined => {
+    if (!std) return undefined;
+    if (std.id && studentDateStatusMap.has(std.id)) return studentDateStatusMap.get(std.id);
+    if (std.nisn && std.nisn !== '-' && studentDateStatusMap.has(std.nisn.trim())) return studentDateStatusMap.get(std.nisn.trim());
+    if (std.name && std.name.trim() !== '' && studentDateStatusMap.has(std.name.trim().toLowerCase())) return studentDateStatusMap.get(std.name.trim().toLowerCase());
+    return undefined;
+  };
 
   // Base student list based on role/class filter
   let filteredStudents = students;
@@ -201,7 +210,7 @@ export const AttendanceDashboard: React.FC<AttendanceDashboardProps> = ({
   // Filter by Entry Status (Status Masuk)
   if (selectedEntryStatusFilter !== 'ALL') {
     filteredStudents = filteredStudents.filter(std => {
-      const rec = studentDateStatusMap.get(std.id) || (std.nisn ? studentDateStatusMap.get(std.nisn) : undefined);
+      const rec = getRecordForStudent(std);
       if (selectedEntryStatusFilter === 'BELUM_ABSEN') {
         return !rec;
       }
@@ -215,7 +224,7 @@ export const AttendanceDashboard: React.FC<AttendanceDashboardProps> = ({
   // Filter by Return Status (Status Pulang)
   if (selectedReturnStatusFilter !== 'ALL') {
     filteredStudents = filteredStudents.filter(std => {
-      const rec = studentDateStatusMap.get(std.id) || (std.nisn ? studentDateStatusMap.get(std.nisn) : undefined);
+      const rec = getRecordForStudent(std);
       const isPulang = !!(rec && (rec.returnTime || rec.returnStatus === 'PULANG' || rec.returnStatus === 'PULANG_TEPAT' || rec.returnStatus === 'PULANG_CEPAT'));
       if (selectedReturnStatusFilter === 'PULANG') {
         return isPulang;
@@ -250,7 +259,7 @@ export const AttendanceDashboard: React.FC<AttendanceDashboardProps> = ({
   let countBelumAbsen = 0;
 
   baseStudentsForStats.forEach(std => {
-    const rec = studentDateStatusMap.get(std.id) || (std.nisn ? studentDateStatusMap.get(std.nisn) : undefined);
+    const rec = getRecordForStudent(std);
     if (!rec) {
       countBelumAbsen++;
     } else if (rec.status === 'HADIR') countHadir++;
@@ -1047,7 +1056,7 @@ export const AttendanceDashboard: React.FC<AttendanceDashboardProps> = ({
                               <span className="text-slate-600 italic">
                                 {log.notes && log.notes.trim() !== '' ? log.notes : '-'}
                               </span>
-                              {log.photoProofUrl && (
+                              {log.photoProofUrl && isRealPhotoProof(log.photoProofUrl) && (
                                 <button
                                   onClick={() => setSelectedImage(log.photoProofUrl || null)}
                                   className="p-1 rounded-lg bg-indigo-50 text-indigo-700 hover:bg-indigo-100 border border-indigo-200 cursor-pointer text-[10px] font-bold flex items-center gap-1 shrink-0"
@@ -1360,7 +1369,7 @@ export const AttendanceDashboard: React.FC<AttendanceDashboardProps> = ({
                   </tr>
                 ) : (
                   filteredStudents.map((student) => {
-                    const rec = studentDateStatusMap.get(student.id) || (student.nisn ? studentDateStatusMap.get(student.nisn) : undefined);
+                    const rec = getRecordForStudent(student);
                     const status = rec ? rec.status : 'BELUM_ABSEN';
 
                     return (

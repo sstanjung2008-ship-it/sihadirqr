@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { Student, SchoolClass, CharacterTrait, StudentCharacterLog, Teacher, SchoolProfile, CharacterPredicateSettings, UserSession, AttendanceRecord, LearningJournal } from '../types';
 import { exportCharacterPointsPdf, exportStudentCharacterDetailPdf } from '../lib/exportUtils';
-import { isManualCharacterLog, deduplicateCharacterLogs, calculateStudentCharacterSummary } from '../lib/storage';
+import { isManualCharacterLog, deduplicateCharacterLogs, calculateStudentCharacterSummary, getLocalDateString, isRealPhotoProof } from '../lib/storage';
 import { getWitaDateTime, setAutoAssessmentBatchDone } from '../lib/autoCharacterScheduler';
 import { 
   Plus, 
@@ -23,7 +23,8 @@ import {
   FileText,
   Zap,
   AlertTriangle,
-  RefreshCw
+  RefreshCw,
+  Calendar
 } from 'lucide-react';
 
 interface CharacterPointsViewProps {
@@ -93,6 +94,7 @@ export const CharacterPointsView: React.FC<CharacterPointsViewProps> = ({
 
   // Modal Input Nilai Karakter State
   const [showAddModal, setShowAddModal] = useState<boolean>(false);
+  const [inputIncidentDate, setInputIncidentDate] = useState<string>(() => getLocalDateString());
   const [inputStudentId, setInputStudentId] = useState<string>('');
   const [inputClassId, setInputClassId] = useState<string>('');
   const [inputTraitType, setInputTraitType] = useState<'POSITIF' | 'NEGATIF'>('POSITIF');
@@ -349,6 +351,7 @@ export const CharacterPointsView: React.FC<CharacterPointsViewProps> = ({
       setInputStudentId(targetStudent.id);
     }
     
+    setInputIncidentDate(getLocalDateString());
     setInputTraitType('POSITIF');
     setInputTraitSearch('');
     const firstPosTrait = traits.find(t => t.type === 'POSITIF');
@@ -403,8 +406,11 @@ export const CharacterPointsView: React.FC<CharacterPointsViewProps> = ({
     }
 
     const now = new Date();
-    const formattedTimestamp = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')}`;
-    const formattedDate = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+    const timePart = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')}`;
+    const selectedDate = inputIncidentDate && /^\d{4}-\d{2}-\d{2}$/.test(inputIncidentDate) 
+      ? inputIncidentDate 
+      : `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+    const formattedTimestamp = `${selectedDate} ${timePart}`;
 
     const newLog: StudentCharacterLog = {
       id: 'log-manual-' + Date.now() + '-' + Math.random().toString(36).substr(2, 6),
@@ -419,8 +425,8 @@ export const CharacterPointsView: React.FC<CharacterPointsViewProps> = ({
       points: Math.abs(selectedTrait.points),
       evaluatorName: inputEvaluatorName.trim() || 'Guru Piket',
       timestamp: formattedTimestamp,
-      date: formattedDate,
-      photoProofUrl: inputPhotoUrl || 'https://images.unsplash.com/photo-1577896851231-70ef18881754?w=400&auto=format&fit=crop&q=80',
+      date: selectedDate,
+      photoProofUrl: inputPhotoUrl && inputPhotoUrl.trim() !== '' ? inputPhotoUrl.trim() : undefined,
       notes: inputNotes.trim(),
       isManual: true
     };
@@ -923,10 +929,27 @@ export const CharacterPointsView: React.FC<CharacterPointsViewProps> = ({
                 })()
               )}
 
+              {/* Tanggal Kejadian */}
+              <div>
+                <label className="block text-xs font-extrabold uppercase tracking-wider text-slate-600 mb-1 flex items-center justify-between">
+                  <span>3. Tanggal Kejadian <span className="text-rose-500">*</span></span>
+                </label>
+                <div className="relative">
+                  <Calendar className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+                  <input
+                    type="date"
+                    required
+                    value={inputIncidentDate}
+                    onChange={(e) => setInputIncidentDate(e.target.value)}
+                    className="w-full pl-10 pr-4 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-slate-800 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 font-medium"
+                  />
+                </div>
+              </div>
+
               {/* Evaluator Name (Nama Penilai) */}
               <div>
                 <label className="block text-xs font-extrabold uppercase tracking-wider text-slate-600 mb-1">
-                  3. Nama Penilai (Guru) <span className="text-rose-500">*</span>
+                  4. Nama Penilai (Guru) <span className="text-rose-500">*</span>
                 </label>
                 <div className="relative">
                   <UserCheck className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
@@ -944,7 +967,7 @@ export const CharacterPointsView: React.FC<CharacterPointsViewProps> = ({
               {/* Upload Bukti Foto */}
               <div>
                 <label className="block text-xs font-extrabold uppercase tracking-wider text-slate-600 mb-1 flex items-center justify-between">
-                  <span>4. Bukti Foto Kegiatan <span className="text-rose-500">*</span></span>
+                  <span>5. Bukti Foto Kegiatan <span className="text-slate-400 font-normal lowercase">(opsional)</span></span>
                 </label>
                 <div className="space-y-3">
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
@@ -1204,7 +1227,7 @@ export const CharacterPointsView: React.FC<CharacterPointsViewProps> = ({
                             {log.followUpNotes ? 'Edit Tindak Lanjut' : 'Tindak Lanjut'}
                           </button>
 
-                          {log.photoProofUrl && (
+                          {log.photoProofUrl && isRealPhotoProof(log.photoProofUrl) && (
                             <button
                               onClick={() => setPreviewPhotoModalUrl(log.photoProofUrl || null)}
                               className="group relative rounded-xl overflow-hidden border border-slate-200 hover:border-indigo-500 transition-all cursor-pointer shrink-0"
@@ -1246,7 +1269,7 @@ export const CharacterPointsView: React.FC<CharacterPointsViewProps> = ({
                           {log.followUpNotes && (
                             <p className="font-medium text-slate-800 text-xs leading-relaxed">{log.followUpNotes}</p>
                           )}
-                          {log.followUpPhotoUrl && (
+                          {log.followUpPhotoUrl && isRealPhotoProof(log.followUpPhotoUrl) && (
                             <div className="pt-1 flex items-center gap-2">
                               <button
                                 type="button"

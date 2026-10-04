@@ -1850,11 +1850,14 @@ export const AutoCharacterAssessmentModal: React.FC<AutoCharacterAssessmentModal
         <div className="p-4 sm:p-5 bg-white border-t border-slate-200 flex flex-col sm:flex-row items-center justify-between gap-3 shrink-0">
           <div className="text-xs text-slate-500 text-center sm:text-left">
             {isAutoEnabled ? (
-              <span>Total <strong>{selectedCount}</strong> data nilai karakter ({groupFilter === 'ALL' ? 'Positif & Negatif' : groupFilter}) akan dimasukkan ke log siswa.</span>
+              <span className="flex items-center gap-1.5 text-emerald-700 font-medium">
+                <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                Penilaian karakter (Belum Scan, Belum Pulang, & Hadir Tepat Waktu) bekerja otomatis dan langsung tersimpan ke Detail Karakter siswa setiap pukul 16:00 WITA.
+              </span>
             ) : (
               <span className="text-rose-600 font-bold flex items-center gap-1.5 justify-center sm:justify-start">
                 <ShieldAlert className="w-4 h-4 text-rose-500" />
-                Sistem Penilaian Karakter Otomatis sedang Non-Aktif. Tidak ada data yang dapat disimpan.
+                Sistem Penilaian Karakter Otomatis sedang Non-Aktif.
               </span>
             )}
           </div>
@@ -1862,31 +1865,9 @@ export const AutoCharacterAssessmentModal: React.FC<AutoCharacterAssessmentModal
             <button
               type="button"
               onClick={onClose}
-              className="px-4 py-2.5 text-xs font-bold text-slate-600 hover:bg-slate-100 rounded-xl transition-colors cursor-pointer w-full sm:w-auto"
+              className="px-6 py-2.5 text-xs font-bold bg-slate-800 hover:bg-slate-700 text-white rounded-xl shadow-md transition-all cursor-pointer w-full sm:w-auto"
             >
               Tutup
-            </button>
-            <button
-              type="button"
-              onClick={handleProcessSubmit}
-              disabled={!isAutoEnabled || selectedCount === 0}
-              className={`inline-flex items-center justify-center gap-2 px-6 py-2.5 font-extrabold text-xs rounded-xl shadow-lg transition-all transform active:scale-95 cursor-pointer w-full sm:w-auto ${
-                !isAutoEnabled
-                  ? 'bg-slate-300 text-slate-500 cursor-not-allowed shadow-none'
-                  : 'bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 disabled:opacity-50 text-white shadow-indigo-600/30'
-              }`}
-            >
-              {!isAutoEnabled ? (
-                <>
-                  <Lock className="w-4 h-4 text-slate-400" />
-                  <span>Sistem Non-Aktif</span>
-                </>
-              ) : (
-                <>
-                  <Sparkles className="w-4 h-4 text-amber-300" />
-                  <span>Simpan {selectedCount} Nilai Otomatis</span>
-                </>
-              )}
             </button>
           </div>
         </div>

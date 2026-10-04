@@ -87,7 +87,11 @@ import {
   playTeacherKbmVoiceReminder, 
   isKbmVoiceReminderEnabled 
 } from './lib/kbmVoiceReminder';
-import { run16WitaAutoCharacterAssessment, reconcileAutoCharacterPenalties } from './lib/autoCharacterScheduler';
+import { 
+  run16WitaAutoCharacterAssessment, 
+  getWitaDateTime, 
+  isAutoAssessmentBatchDone 
+} from './lib/autoCharacterScheduler';
 
 export default function App() {
   const [userSession, setUserSessionState] = useState<UserSession | null>(() => getUserSession());
@@ -408,18 +412,28 @@ export default function App() {
     };
   }, [currentRole]);
 
-  // Penilaian Karakter Otomatis (Belum Scan, Belum Pulang, & Hadir Tepat Waktu Tiap 3 Hari)
+  // Penilaian Karakter Otomatis Secara Batching Pukul 16:00 WITA:
+  // (Belum Scan, Belum Pulang, & Hadir Tepat Waktu 3 Hari = 1 Poin dievaluasi bersamaan hanya pada jam 16:00 WITA)
+  // Menghapus interval 30 detik untuk mencegah loop write antar-perangkat dan melindungi kuota Firebase
   useEffect(() => {
     // PENGHEMAT KUOTA: Khusus Admin & Scanner Pos, jangan pernah dijalankan oleh akun Wali Murid (PARENT)!
     if (currentRole === 'PARENT') return;
 
-    // 1. Jalankan pemeriksaan saat aplikasi dimuat (HANYA evaluasi reward 3 hari hadir tepat waktu & rekaman lampau, tidak memaksa 16:00 WITA hari berjalan secara prematur)
-    reconcileAutoCharacterPenalties(false);
+    const checkAndRun16WitaBatch = () => {
+      const { witaDateStr, isPast16Wita } = getWitaDateTime();
+      const isBatchDone = isAutoAssessmentBatchDone(witaDateStr);
 
-    // 2. Timer interval ultra-hemat kuota (0 Cloud Read & 0 Cloud Write bila data tidak berubah)
-    const interval = setInterval(() => {
-      reconcileAutoCharacterPenalties(false);
-    }, 30000);
+      // HANYA jalankan jika sudah melewati 16:00 WITA dan batch hari ini belum pernah dieksekusi
+      if (isPast16Wita && !isBatchDone) {
+        run16WitaAutoCharacterAssessment(false);
+      }
+    };
+
+    // 1. Periksa saat aplikasi dibuka (jika sudah melewati 16:00 WITA dan belum dievaluasi hari ini)
+    checkAndRun16WitaBatch();
+
+    // 2. Timer hemat 60 detik (hanya memeriksa jam lokal, 0 Cloud Read & 0 Cloud Write)
+    const interval = setInterval(checkAndRun16WitaBatch, 60000);
 
     return () => {
       clearInterval(interval);

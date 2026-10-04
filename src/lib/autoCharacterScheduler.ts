@@ -421,17 +421,10 @@ export function reconcileAutoCharacterPenalties(forceToday: boolean = false): {
     const isAutoUnreturned = l.id?.startsWith('auto-unreturned-') || (l.traitType === 'NEGATIF' && l.traitName.toLowerCase().includes('belum') && l.traitName.toLowerCase().includes('pulang') && l.notes?.includes('Otomatis'));
     const isAutoOnTime = l.id?.startsWith('auto-ontime-') || (l.traitType === 'POSITIF' && l.traitName.toLowerCase().includes('tepat') && l.traitName.toLowerCase().includes('waktu') && l.notes?.includes('kelipatan'));
 
-    // Pembersihan log on-time jika rekaman HADIR siswa berkurang di bawah milestone yang pernah diberikan
+    // JAMINAN MUTLAK: Catatan karakter positif Hadir Tepat Waktu yang sudah tersimpan di detail karakter
+    // TIDAK BOLEH diubah atau dihapus sendiri oleh sistem!
     if (isAutoOnTime) {
-      const matchMilestone = l.id?.match(/milestone-(\d+)/);
-      if (matchMilestone) {
-        const requiredCount = parseInt(matchMilestone[1], 10);
-        const studentOnTimeCount = distinctOnTimeDatesMap.get(l.studentId) || 0;
-        if (studentOnTimeCount < requiredCount) {
-          removedCount++;
-          return false;
-        }
-      }
+      return true;
     }
 
     // Pencegahan log prematur hari berjalan:

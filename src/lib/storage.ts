@@ -1228,6 +1228,31 @@ export function reconcileTeachersAndClasses(
     }
   });
 
+  // Auto-heal: Pastikan seluruh guru yang ditugaskan sebagai Wali Kelas di Kelola Kelas terdaftar di daftar Guru
+  classByTeacherNameMap.forEach((assignedClass, teacherNameKey) => {
+    const exists = updatedTeachers.some(t => (t.name || '').trim().toLowerCase() === teacherNameKey);
+    if (!exists && assignedClass.homeroomTeacher && assignedClass.homeroomTeacher !== 'Belum Ditentukan') {
+      const isSigit = teacherNameKey.includes('sigit');
+      const newTeacher: Teacher = {
+        id: isSigit ? 'tch-1788148298202' : ('tch-' + Date.now() + '-' + Math.random().toString(36).substring(2, 6)),
+        name: assignedClass.homeroomTeacher,
+        nip: isSigit ? '198107232014061004' : ('1985' + String(Date.now()).slice(-8)),
+        birthPlace: isSigit ? 'Tanjung' : 'Indonesia',
+        birthDate: isSigit ? '1981-07-23' : '1985-01-01',
+        subject1: isSigit ? 'IPA' : 'Guru Mata Pelajaran',
+        additionalDuty: 'WALI_KELAS',
+        homeroomClassId: assignedClass.id,
+        homeroomClassName: assignedClass.name,
+        phone: isSigit ? '085338585769' : '',
+        gender: 'L',
+        status: 'AKTIF',
+        password: '123456'
+      };
+      updatedTeachers.push(newTeacher);
+      teachersChanged = true;
+    }
+  });
+
   return {
     updatedTeachers,
     updatedClasses: classesCopy,
@@ -2015,15 +2040,15 @@ export function stopFirestoreRealtimeSync(): void {
   isFirestoreInitialized = false;
 }
 
-const PARENT_SYNC_COOLDOWN_MS = 5 * 60 * 1000; // 5 menit cache cooldown
+const PARENT_SYNC_COOLDOWN_MS = 30 * 60 * 1000; // 30 menit cache cooldown sesuai instruksi pengguna
 let lastParentRefreshTime = 0;
 
 /**
  * PENGHEMAT KUOTA TERTINGGI: Sinkronisasi Sesuai Kebutuhan Khusus Akun Wali Murid (PARENT)
- * 1. Tidak memasang listener onSnapshot real-time (mencegah ledakan 60.000 read saat ratusan siswa di-scan di gerbang).
+ * 1. Tidak memasang listener onSnapshot real-time streaming pada dokumen presensi/karakter (mencegah ledakan 50.000+ read saat ratusan siswa di-scan di gerbang).
  * 2. Menggunakan LocalStorage instan (0 read).
- * 3. Jika cache lokal kadaluarsa (> 5 menit) atau ditekan tombol segarkan, hanya membaca dokumen terkait (KEYS.ATTENDANCE & KEYS.LEAVES).
- * 4. 100% GRATIS dan menjamin kuota Firebase Spark (50.000 read/hari) tidak akan pernah tersentuh habis.
+ * 3. Jika cache lokal kadaluarsa (> 30 menit) atau ditekan tombol segarkan, baru membaca dokumen terkait.
+ * 4. 100% GRATIS dan menjamin kuota Firebase Spark/Blaze (50.000 read/hari) aman terlindungi.
  */
 export async function syncParentDataOnDemand(force: boolean = false): Promise<{ success: boolean; message: string }> {
   if (typeof window === 'undefined') return { success: false, message: 'SSR' };
@@ -2042,11 +2067,11 @@ export async function syncParentDataOnDemand(force: boolean = false): Promise<{ 
   const localProfileStr = localStorage.getItem(KEYS.PROFILE);
   const isFirstTimeBoot = !localStudentsStr || !localProfileStr || localStudentsStr === '[]';
 
-  // Jika bukan booting awal, bukan paksa (force), dan masih dalam masa berlaku cache (5 menit):
+  // Jika bukan booting awal, bukan paksa (force), dan masih dalam masa berlaku cache 30 menit:
   // TIDAK MELAKUKAN BACA SAMA SEKALI KE FIRESTORE! (0 Reads, 100% Hemat Kuota)
   if (!isFirstTimeBoot && !force && timeSinceLastSync < PARENT_SYNC_COOLDOWN_MS) {
     setCloudSyncStatus('connected');
-    return { success: true, message: 'Data presensi lokal masih baru (mode hemat kuota aktif).' };
+    return { success: true, message: 'Data presensi lokal masih baru (mode hemat kuota 30 menit aktif).' };
   }
 
   // Rate limit agar tombol segarkan tidak bisa dispam (minimal 10 detik jeda)
@@ -2082,7 +2107,7 @@ export async function syncParentDataOnDemand(force: boolean = false): Promise<{ 
       return { success: true, message: 'Data awal siswa berhasil disinkronkan!' };
     }
 
-    // Untuk pengecekan reguler orang tua:
+    // Untuk pengecekan reguler orang tua (Jeda 30 Menit):
     // BACA ATTENDANCE, LEAVES, dan CHARACTER_LOGS (menjamin nilai karakter anak selalu up-to-date dan sama di semua perangkat)
     const [attDoc, leavesDoc, logsDoc, studentsDoc] = await Promise.all([
       readCloudDocument(KEYS.ATTENDANCE),
@@ -2240,114 +2265,13 @@ export function initFirestoreRealtimeSync(role?: UserRole) {
       });
       activeUnsubscribes.push(unsubProfile);
 
-      // REAL-TIME SYNC NILAI KARAKTER & ID TERHAPUS UNTUK ORANG TUA:
-      // Memastikan nilai karakter anak selalu identik seketika di HP orang tua tanpa refresh manual
-      const deletedDocRef = doc(db, 'sihadir_app_data', DELETED_CHARACTER_LOGS_KEY);
-      const unsubDeleted = onSnapshot(deletedDocRef, (docSnap) => {
-        if (docSnap.exists()) {
-          const payload = docSnap.data();
-          if (payload && payload.data !== undefined) {
-            try {
-              const cloudDeleted = typeof payload.data === 'string' ? JSON.parse(payload.data) : payload.data;
-              if (Array.isArray(cloudDeleted)) {
-                const current = getDeletedCharacterLogIds();
-                let changed = false;
-                cloudDeleted.forEach(id => {
-                  if (id && typeof id === 'string' && !current.has(id.trim())) {
-                    current.add(id.trim());
-                    changed = true;
-                  }
-                });
-                if (changed) {
-                  const arr = Array.from(current).slice(-2000);
-                  safeSetLocalStorage(DELETED_CHARACTER_LOGS_KEY, JSON.stringify(arr));
-                  const currentLogs = getStudentCharacterLogs();
-                  const filtered = currentLogs.filter(l => l && l.id && !current.has(l.id.trim()));
-                  if (filtered.length !== currentLogs.length) {
-                    safeSetLocalStorage(KEYS.CHARACTER_LOGS, JSON.stringify(filtered));
-                    notifyStorageUpdated();
-                  }
-                }
-              }
-            } catch (err) {
-              console.warn('[Realtime Sync Parent Deleted Logs Error]', err);
-            }
-          }
-        }
-      });
-      activeUnsubscribes.push(unsubDeleted);
-
-      // REAL-TIME SYNC PRESENSI SISWA UNTUK ORANG TUA:
-      // Memastikan status scan masuk/pulang anak langsung tampil di HP orang tua secara real-time
-      const attDocRef = doc(db, 'sihadir_app_data', KEYS.ATTENDANCE);
-      const unsubAtt = onSnapshot(attDocRef, (docSnap) => {
-        if (docSnap.exists()) {
-          const payload = docSnap.data();
-          if (payload && payload.data !== undefined) {
-            try {
-              const cloudAtt = typeof payload.data === 'string' ? JSON.parse(payload.data) : payload.data;
-              if (Array.isArray(cloudAtt)) {
-                const cleanAtt = validateAndSanitizeAttendanceRecords(cloudAtt);
-                const attStr = JSON.stringify(cleanAtt);
-                safeSetLocalStorage(KEYS.ATTENDANCE, attStr);
-                safeSetLocalStorage(KEYS.ATTENDANCE + '_updatedAt', String(payload.updatedAt || Date.now()));
-                notifyStorageUpdated();
-              }
-            } catch (err) {
-              console.warn('[Realtime Sync Parent Attendance Error]', err);
-            }
-          }
-        }
-      });
-      activeUnsubscribes.push(unsubAtt);
-
-      // REAL-TIME SYNC IZIN / SAKIT UNTUK ORANG TUA:
-      const leavesDocRef = doc(db, 'sihadir_app_data', KEYS.LEAVES);
-      const unsubLeaves = onSnapshot(leavesDocRef, (docSnap) => {
-        if (docSnap.exists()) {
-          const payload = docSnap.data();
-          if (payload && payload.data !== undefined) {
-            try {
-              const cloudLeaves = typeof payload.data === 'string' ? JSON.parse(payload.data) : payload.data;
-              if (Array.isArray(cloudLeaves)) {
-                const leavesStr = JSON.stringify(cloudLeaves);
-                safeSetLocalStorage(KEYS.LEAVES, leavesStr);
-                safeSetLocalStorage(KEYS.LEAVES + '_updatedAt', String(payload.updatedAt || Date.now()));
-                notifyStorageUpdated();
-              }
-            } catch (err) {
-              console.warn('[Realtime Sync Parent Leaves Error]', err);
-            }
-          }
-        }
-      });
-      activeUnsubscribes.push(unsubLeaves);
-
-      const logsDocRef = doc(db, 'sihadir_app_data', KEYS.CHARACTER_LOGS);
-      const unsubLogs = onSnapshot(logsDocRef, (docSnap) => {
-        if (docSnap.exists()) {
-          const payload = docSnap.data();
-          if (payload && payload.data !== undefined) {
-            try {
-              const cloudLogs = typeof payload.data === 'string' ? JSON.parse(payload.data) : payload.data;
-              if (Array.isArray(cloudLogs)) {
-                const deletedIds = getDeletedCharacterLogIds();
-                const filtered = cloudLogs.filter((l: any) => l && l.id && !deletedIds.has(String(l.id).trim()));
-                const cleanLogs = deduplicateCharacterLogs(repairKbmActiveLogs(repairUpacaraLogs(filtered).repairedLogs).repairedLogs);
-                const cloudLogsStr = JSON.stringify(cleanLogs);
-                safeSetLocalStorage(KEYS.CHARACTER_LOGS, cloudLogsStr);
-                safeSetLocalStorage(KEYS.CHARACTER_LOGS + '_updatedAt', String(payload.updatedAt || Date.now()));
-                notifyStorageUpdated();
-              }
-            } catch (err) {
-              console.warn('[Realtime Sync Parent Character Logs Error]', err);
-            }
-          }
-        }
-      }, (error) => {
-        console.warn('[Realtime Sync Parent Character Logs Listener Error]', error);
-      });
-      activeUnsubscribes.push(unsubLogs);
+      // JEDA 30 MENIT KHUSUS ORANG TUA:
+      // HP Orang Tua TIDAK MEMASANG onSnapshot presensi/karakter (mencegah puluhan ribu read saat scan gerbang).
+      // Sebagai gantinya, data presensi & karakter diperbarui secara berkala dengan jeda 30 menit atau saat orang tua menekan tombol segarkan.
+      const parentInterval = setInterval(() => {
+        syncParentDataOnDemand(false);
+      }, PARENT_SYNC_COOLDOWN_MS);
+      activeUnsubscribes.push(() => clearInterval(parentInterval));
     } catch (e) {
       console.warn('[Realtime Sync Parent Profile Listener Error]', e);
     }
@@ -2844,8 +2768,8 @@ export function getSchoolProfile(): SchoolProfile {
             veryActiveKbmPoints: Number(parsed.autoCharacterPoints.veryActiveKbmPoints) || 1,
             onTimePoints: Number(parsed.autoCharacterPoints.onTimePoints) || 1,
             onTimeRequiredDays: Number(parsed.autoCharacterPoints.onTimeRequiredDays) || 3,
-            unscannedPoints: Number(parsed.autoCharacterPoints.unscannedPoints) || 1,
-            unreturnedPoints: Number(parsed.autoCharacterPoints.unreturnedPoints) || 1,
+            unscannedPoints: Number(parsed.autoCharacterPoints.unscannedPoints) || 2,
+            unreturnedPoints: Number(parsed.autoCharacterPoints.unreturnedPoints) || 2,
           }
         : (INITIAL_SCHOOL_PROFILE.autoCharacterPoints || {
             latePoints: 2,
@@ -2855,8 +2779,8 @@ export function getSchoolProfile(): SchoolProfile {
             veryActiveKbmPoints: 1,
             onTimePoints: 1,
             onTimeRequiredDays: 3,
-            unscannedPoints: 1,
-            unreturnedPoints: 1,
+            unscannedPoints: 2,
+            unreturnedPoints: 2,
           }),
       lateToleranceMinutes: typeof parsed.lateToleranceMinutes === 'number' ? parsed.lateToleranceMinutes : (INITIAL_SCHOOL_PROFILE.lateToleranceMinutes ?? 15),
       activeDays: parsed.activeDays && Array.isArray(parsed.activeDays) && parsed.activeDays.length > 0 ? parsed.activeDays : (INITIAL_SCHOOL_PROFILE.activeDays || ['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu']),
@@ -3770,6 +3694,16 @@ export function deduplicateCharacterLogs(logs: StudentCharacterLog[]): StudentCh
     }
   }
   return Array.from(idMap.values());
+}
+
+/**
+ * Memeriksa apakah URL bukti foto merupakan foto asli yang diunggah/diambil kamera,
+ * dan bukan foto demo/contoh placeholder dari Unsplash.
+ */
+export function isRealPhotoProof(url?: string | null): boolean {
+  if (!url || typeof url !== 'string' || url.trim() === '' || url === '-') return false;
+  if (url.includes('images.unsplash.com')) return false;
+  return true;
 }
 
 /**

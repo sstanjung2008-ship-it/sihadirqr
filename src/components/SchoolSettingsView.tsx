@@ -2886,8 +2886,8 @@ export const SchoolSettingsView: React.FC<SchoolSettingsViewProps> = ({
                     onChange={(e) => setSelectedTestTeacherId(e.target.value)}
                     className="w-full text-xs font-bold bg-white text-slate-900 border border-violet-300 rounded-xl px-3 py-2.5 focus:ring-2 focus:ring-white focus:outline-none"
                   >
-                    {sortedTeachers.map((t) => (
-                      <option key={t.id} value={t.id}>
+                    {sortedTeachers.map((t, idx) => (
+                      <option key={`test-teacher-${t.id || 'tch'}-${idx}`} value={t.id}>
                         {t.name} — ({t.subject1 || 'Mata Pelajaran'})
                       </option>
                     ))}
@@ -3968,8 +3968,8 @@ export const SchoolSettingsView: React.FC<SchoolSettingsViewProps> = ({
                       className="w-full bg-white border border-slate-200 text-slate-800 rounded-xl p-2.5 font-medium focus:ring-2 focus:ring-indigo-500 cursor-pointer"
                     >
                       <option value="">-- Pilih Guru / No. HP --</option>
-                      {sortedTeachers.map(t => (
-                        <option key={t.id} value={t.id}>
+                      {sortedTeachers.map((t, idx) => (
+                        <option key={`reset-teacher-${t.id || 'tch'}-${idx}`} value={t.id}>
                           {t.name} (WA: {t.phone || '-'} | NIP: {t.nip}) {t.password ? '🔑 [Custom Password]' : '🔒 [Default: 123456]'}
                         </option>
                       ))}
@@ -4073,8 +4073,8 @@ export const SchoolSettingsView: React.FC<SchoolSettingsViewProps> = ({
                           </td>
                         </tr>
                       ) : (
-                        filteredTeachersForPassword.map((t) => (
-                          <tr key={t.id} className="hover:bg-slate-50/80 transition-colors">
+                        filteredTeachersForPassword.map((t, idx) => (
+                          <tr key={`pw-teacher-${t.id || 'tch'}-${idx}`} className="hover:bg-slate-50/80 transition-colors">
                             <td className="py-2.5 px-3">
                               <span className="font-bold text-slate-800 block">{t.name}</span>
                               <span className="text-[11px] text-slate-400 font-mono">NIP: {t.nip}</span>

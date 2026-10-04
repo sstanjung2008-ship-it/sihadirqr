@@ -1032,8 +1032,8 @@ export const LearningJournalView: React.FC<LearningJournalViewProps> = ({
                     }}
                     className="w-full bg-slate-50 border border-slate-300 text-slate-900 text-xs font-bold rounded-xl p-3 focus:ring-2 focus:ring-indigo-500 cursor-pointer disabled:bg-slate-100 disabled:text-slate-600 disabled:cursor-not-allowed"
                   >
-                    {teachers.map(t => (
-                      <option key={t.id} value={t.name}>
+                    {teachers.map((t, idx) => (
+                      <option key={`journal-teacher-${t.id || 'tch'}-${idx}`} value={t.name}>
                         {t.name} ({t.subject1 || 'Guru'})
                       </option>
                     ))}

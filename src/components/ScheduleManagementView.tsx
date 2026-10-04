@@ -1514,8 +1514,8 @@ export const ScheduleManagementView: React.FC<ScheduleManagementViewProps> = ({
                 onChange={(e) => setSelectedTeacherId(e.target.value)}
                 className="bg-slate-50 border border-slate-300 text-slate-900 text-sm font-bold rounded-xl px-3.5 py-2 focus:ring-2 focus:ring-indigo-500 focus:outline-none cursor-pointer shadow-sm"
               >
-                {sortedTeachers.map(t => (
-                  <option key={t.id} value={t.id}>
+                {sortedTeachers.map((t, idx) => (
+                  <option key={`sched-filter-teacher-${t.id || 'tch'}-${idx}`} value={t.id}>
                     {t.name} {t.nip ? `(NIP: ${t.nip})` : ''} - {t.subject1} {loggedInTeacher?.id === t.id ? '⭐ (Akun Anda)' : ''}
                   </option>
                 ))}
@@ -1996,8 +1996,8 @@ export const ScheduleManagementView: React.FC<ScheduleManagementViewProps> = ({
                   required
                 >
                   <option value="">-- Pilih Guru Pengajar --</option>
-                  {sortedTeachers.map(t => (
-                    <option key={t.id} value={t.id}>
+                  {sortedTeachers.map((t, idx) => (
+                    <option key={`sched-edit-teacher-${t.id || 'tch'}-${idx}`} value={t.id}>
                       {t.name} {t.nip ? `(NIP: ${t.nip})` : ''} - {t.subject1} {loggedInTeacher?.id === t.id ? '⭐ (Akun Anda)' : ''}
                     </option>
                   ))}

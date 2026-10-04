@@ -599,7 +599,7 @@ export const INITIAL_TEACHERS: Teacher[] = [
     additionalDuty: "WALI_KELAS",
     homeroomClassId: "class-1789736130884",
     homeroomClassName: "7E",
-    phone: "085338585769",
+    phone: "087864360253",
     gender: "L",
     status: "AKTIF",
     password: "123456"

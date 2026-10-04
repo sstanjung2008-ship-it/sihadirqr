@@ -1079,6 +1079,109 @@ export function mergeStudentGradeAssessments(local: StudentGradeAssessment[], cl
   );
 }
 
+export function deduplicateTeachers(teachers: Teacher[]): Teacher[] {
+  if (!Array.isArray(teachers) || teachers.length === 0) return [];
+  if (teachers.length === 1) {
+    const single = teachers[0];
+    return single ? [{ ...single, id: single.id ? single.id.trim() : ('tch-' + Date.now()) }] : [];
+  }
+
+  const result: Teacher[] = [];
+  const idMap = new Map<string, number>(); // id -> index
+  const nipMap = new Map<string, number>(); // clean nip -> index
+  const nameMap = new Map<string, number>(); // clean name -> index
+
+  teachers.forEach(t => {
+    if (!t) return;
+    const cleanId = (t.id || '').trim();
+    const cleanNip = (t.nip || '').trim();
+    const cleanName = (t.name || '').trim().toLowerCase();
+
+    let targetIdx: number | undefined;
+
+    if (cleanId && idMap.has(cleanId)) {
+      targetIdx = idMap.get(cleanId);
+    } else if (cleanNip && nipMap.has(cleanNip)) {
+      targetIdx = nipMap.get(cleanNip);
+    } else if (cleanName && nameMap.has(cleanName)) {
+      targetIdx = nameMap.get(cleanName);
+    } else if (cleanName.includes('sigit') && (cleanName.includes('inarsoyo') || cleanId === 'tch-1788148298202' || cleanNip === '198107232014061004')) {
+      for (let i = 0; i < result.length; i++) {
+        const rName = (result[i].name || '').trim().toLowerCase();
+        const rNip = (result[i].nip || '').trim();
+        const rId = (result[i].id || '').trim();
+        if (rId === 'tch-1788148298202' || rNip === '198107232014061004' || (rName.includes('sigit') && rName.includes('inarsoyo'))) {
+          targetIdx = i;
+          break;
+        }
+      }
+    }
+
+    if (targetIdx !== undefined) {
+      // Merge records
+      const existing = result[targetIdx];
+      const isCloudCustomPass = !!t.password && t.password !== '123456';
+      const isExistingCustomPass = !!existing.password && existing.password !== '123456';
+      const bestPassword = isExistingCustomPass ? existing.password : (isCloudCustomPass ? t.password : (existing.password || t.password || '123456'));
+
+      const isRealPhoto = (p?: string) => !!p && !p.includes('unsplash.com');
+      let bestPhoto = existing.photoUrl || t.photoUrl;
+      if (isRealPhoto(existing.photoUrl)) {
+        bestPhoto = existing.photoUrl;
+      } else if (isRealPhoto(t.photoUrl)) {
+        bestPhoto = t.photoUrl;
+      }
+
+      let bestPhone = t.phone || existing.phone;
+      if (t.phone === '087864360253' || existing.phone === '087864360253') {
+        bestPhone = '087864360253';
+      } else if (existing.phone && existing.phone.trim()) {
+        bestPhone = existing.phone.trim();
+      }
+
+      const merged: Teacher = {
+        ...existing,
+        ...t,
+        id: (existing.id && existing.id.trim()) || t.id,
+        name: (existing.name && existing.name.length >= (t.name || '').length) ? existing.name : (t.name || existing.name),
+        nip: (existing.nip && existing.nip.trim()) || t.nip,
+        phone: bestPhone,
+        email: (existing.email && existing.email.trim()) || t.email,
+        subject1: existing.subject1 || t.subject1,
+        subject2: existing.subject2 !== undefined ? existing.subject2 : t.subject2,
+        additionalDuty: (existing.additionalDuty && existing.additionalDuty !== 'TIDAK_ADA') ? existing.additionalDuty : (t.additionalDuty || existing.additionalDuty),
+        homeroomClassId: existing.homeroomClassId || t.homeroomClassId,
+        homeroomClassName: existing.homeroomClassName || t.homeroomClassName,
+        photoUrl: bestPhoto,
+        password: bestPassword,
+        status: existing.status || t.status || 'AKTIF'
+      };
+
+      result[targetIdx] = merged;
+      if (merged.id) idMap.set(merged.id.trim(), targetIdx);
+      if (merged.nip) nipMap.set(merged.nip.trim(), targetIdx);
+      if (merged.name) nameMap.set(merged.name.trim().toLowerCase(), targetIdx);
+    } else {
+      const newIdx = result.length;
+      result.push({ ...t });
+      if (cleanId) idMap.set(cleanId, newIdx);
+      if (cleanNip) nipMap.set(cleanNip, newIdx);
+      if (cleanName) nameMap.set(cleanName, newIdx);
+    }
+  });
+
+  // Guarantee strictly unique ID for every single item
+  const seenIds = new Set<string>();
+  return result.map((t, index) => {
+    let finalId = t.id ? t.id.trim() : '';
+    if (!finalId || seenIds.has(finalId)) {
+      finalId = `tch-${Date.now()}-${index}-${Math.random().toString(36).substring(2, 6)}`;
+    }
+    seenIds.add(finalId);
+    return { ...t, id: finalId };
+  });
+}
+
 export function mergeTeacherLists(local: Teacher[], cloud: Teacher[]): Teacher[] {
   const isDemoTeacher = (t: Teacher) => DEMO_TEACHER_IDS.has(t.id) || (!!t.nip && DEMO_TEACHER_NIPS.has(t.nip.trim()));
   const hasRealTeachers = local.some(t => !isDemoTeacher(t)) || cloud.some(t => !isDemoTeacher(t));
@@ -1088,67 +1191,8 @@ export function mergeTeacherLists(local: Teacher[], cloud: Teacher[]): Teacher[]
   const effectiveCloud = isDemoCleared ? cloud.filter(t => !isDemoTeacher(t)) : cloud;
   const effectiveLocal = isDemoCleared ? local.filter(t => !isDemoTeacher(t)) : local;
 
-  const map = new Map<string, Teacher>();
-  
-  // 1. Index cloud teachers
-  effectiveCloud.forEach(t => {
-    const key = (t.nip && t.nip.trim()) || t.id;
-    if (key) map.set(key, { ...t });
-  });
-
-  // 2. Merge local teachers preserving custom passwords & photos across devices
-  effectiveLocal.forEach(localItem => {
-    const key = (localItem.nip && localItem.nip.trim()) || localItem.id;
-    if (!key) return;
-
-    if (map.has(key)) {
-      const cloudItem = map.get(key)!;
-
-      // Preserve custom password:
-      // If either cloud or local has a custom password, prioritize it so it never reverts to default on device sync
-      const isCloudCustomPass = !!cloudItem.password && cloudItem.password !== '123456';
-      const isLocalCustomPass = !!localItem.password && localItem.password !== '123456';
-
-      let bestPassword = cloudItem.password || localItem.password;
-      if (isCloudCustomPass) {
-        bestPassword = cloudItem.password;
-      } else if (isLocalCustomPass) {
-        bestPassword = localItem.password;
-      }
-
-      // Determine best photo
-      const isCloudRealPhoto = !!cloudItem.photoUrl && !cloudItem.photoUrl.includes('unsplash.com');
-      const isLocalRealPhoto = !!localItem.photoUrl && !localItem.photoUrl.includes('unsplash.com');
-      let bestPhoto = cloudItem.photoUrl || localItem.photoUrl;
-      if (isCloudRealPhoto && !isLocalRealPhoto) {
-        bestPhoto = cloudItem.photoUrl;
-      } else if (!isCloudRealPhoto && isLocalRealPhoto) {
-        bestPhoto = localItem.photoUrl;
-      }
-
-      const merged: Teacher = {
-        ...localItem,
-        ...cloudItem,
-        name: cloudItem.name || localItem.name,
-        nip: cloudItem.nip || localItem.nip,
-        phone: cloudItem.phone || localItem.phone,
-        email: cloudItem.email || localItem.email,
-        subject1: cloudItem.subject1 || localItem.subject1,
-        subject2: cloudItem.subject2 !== undefined ? cloudItem.subject2 : localItem.subject2,
-        additionalDuty: cloudItem.additionalDuty || localItem.additionalDuty,
-        homeroomClassId: cloudItem.homeroomClassId !== undefined ? cloudItem.homeroomClassId : localItem.homeroomClassId,
-        homeroomClassName: cloudItem.homeroomClassName !== undefined ? cloudItem.homeroomClassName : localItem.homeroomClassName,
-        photoUrl: bestPhoto,
-        password: bestPassword,
-      };
-
-      map.set(key, merged);
-    } else {
-      map.set(key, { ...localItem });
-    }
-  });
-
-  return Array.from(map.values());
+  const combined = [...effectiveCloud, ...effectiveLocal];
+  return deduplicateTeachers(combined);
 }
 
 /**
@@ -1230,20 +1274,39 @@ export function reconcileTeachersAndClasses(
 
   // Auto-heal: Pastikan seluruh guru yang ditugaskan sebagai Wali Kelas di Kelola Kelas terdaftar di daftar Guru
   classByTeacherNameMap.forEach((assignedClass, teacherNameKey) => {
-    const exists = updatedTeachers.some(t => (t.name || '').trim().toLowerCase() === teacherNameKey);
-    if (!exists && assignedClass.homeroomTeacher && assignedClass.homeroomTeacher !== 'Belum Ditentukan') {
-      const isSigit = teacherNameKey.includes('sigit');
+    // Check if teacher already exists by exact name, partial name, or Sigit detection
+    const isSigitClass = teacherNameKey.includes('sigit');
+    const existingTeacher = updatedTeachers.find(t => {
+      const tName = (t.name || '').trim().toLowerCase();
+      if (tName === teacherNameKey) return true;
+      if (isSigitClass && (tName.includes('sigit') || t.id === 'tch-1788148298202' || t.nip === '198107232014061004')) return true;
+      if (tName.includes(teacherNameKey) || teacherNameKey.includes(tName)) return true;
+      return false;
+    });
+
+    if (existingTeacher) {
+      if (existingTeacher.homeroomClassId !== assignedClass.id || existingTeacher.additionalDuty !== 'WALI_KELAS') {
+        existingTeacher.additionalDuty = 'WALI_KELAS';
+        existingTeacher.homeroomClassId = assignedClass.id;
+        existingTeacher.homeroomClassName = assignedClass.name;
+        teachersChanged = true;
+      }
+      return;
+    }
+
+    if (assignedClass.homeroomTeacher && assignedClass.homeroomTeacher !== 'Belum Ditentukan') {
+      const idAlreadyUsed = updatedTeachers.some(t => t.id === 'tch-1788148298202');
       const newTeacher: Teacher = {
-        id: isSigit ? 'tch-1788148298202' : ('tch-' + Date.now() + '-' + Math.random().toString(36).substring(2, 6)),
+        id: (isSigitClass && !idAlreadyUsed) ? 'tch-1788148298202' : ('tch-' + Date.now() + '-' + Math.random().toString(36).substring(2, 6)),
         name: assignedClass.homeroomTeacher,
-        nip: isSigit ? '198107232014061004' : ('1985' + String(Date.now()).slice(-8)),
-        birthPlace: isSigit ? 'Tanjung' : 'Indonesia',
-        birthDate: isSigit ? '1981-07-23' : '1985-01-01',
-        subject1: isSigit ? 'IPA' : 'Guru Mata Pelajaran',
+        nip: isSigitClass ? '198107232014061004' : ('1985' + String(Date.now()).slice(-8)),
+        birthPlace: isSigitClass ? 'Tanjung' : 'Indonesia',
+        birthDate: isSigitClass ? '1981-07-23' : '1985-01-01',
+        subject1: isSigitClass ? 'IPA' : 'Guru Mata Pelajaran',
         additionalDuty: 'WALI_KELAS',
         homeroomClassId: assignedClass.id,
         homeroomClassName: assignedClass.name,
-        phone: isSigit ? '085338585769' : '',
+        phone: isSigitClass ? '087864360253' : '',
         gender: 'L',
         status: 'AKTIF',
         password: '123456'
@@ -1253,8 +1316,13 @@ export function reconcileTeachersAndClasses(
     }
   });
 
+  const finalTeachers = deduplicateTeachers(updatedTeachers);
+  if (finalTeachers.length !== updatedTeachers.length) {
+    teachersChanged = true;
+  }
+
   return {
-    updatedTeachers,
+    updatedTeachers: finalTeachers,
     updatedClasses: classesCopy,
     teachersChanged,
     classesChanged
@@ -3270,32 +3338,37 @@ export function getTeachers(): Teacher[] {
       safeSetLocalStorage(KEYS.TEACHERS + '_updatedAt', '1');
       return [];
     }
-    safeSetLocalStorage(KEYS.TEACHERS, JSON.stringify(INITIAL_TEACHERS));
+    const deduplicated = deduplicateTeachers(INITIAL_TEACHERS);
+    safeSetLocalStorage(KEYS.TEACHERS, JSON.stringify(deduplicated));
     safeSetLocalStorage(KEYS.TEACHERS + '_updatedAt', '1');
-    return INITIAL_TEACHERS;
+    return deduplicated;
   }
   try {
     const parsed = JSON.parse(data);
     if (!Array.isArray(parsed)) return [];
     const isDemoTeacher = (t: Teacher) => DEMO_TEACHER_IDS.has(t.id) || (!!t.nip && DEMO_TEACHER_NIPS.has(t.nip.trim()));
+    let filtered = parsed;
     if (parsed.some(t => !isDemoTeacher(t)) && parsed.some(isDemoTeacher)) {
-      const cleaned = parsed.filter(t => !isDemoTeacher(t));
-      safeSetLocalStorage(KEYS.TEACHERS, JSON.stringify(cleaned));
-      return cleaned;
+      filtered = parsed.filter(t => !isDemoTeacher(t));
     }
-    return parsed;
+    const deduplicated = deduplicateTeachers(filtered);
+    if (deduplicated.length !== parsed.length) {
+      safeSetLocalStorage(KEYS.TEACHERS, JSON.stringify(deduplicated));
+    }
+    return deduplicated;
   } catch {
     return [];
   }
 }
 
 export function saveTeachers(teachers: Teacher[], instant: boolean = true): void {
+  const deduplicated = deduplicateTeachers(teachers);
   const now = Date.now();
-  const dataStr = JSON.stringify(teachers);
+  const dataStr = JSON.stringify(deduplicated);
   safeSetLocalStorage(KEYS.TEACHERS, dataStr);
   safeSetLocalStorage(KEYS.TEACHERS + '_updatedAt', String(now));
   notifyStorageUpdated();
-  syncToCloud(KEYS.TEACHERS, teachers, instant, now);
+  syncToCloud(KEYS.TEACHERS, deduplicated, instant, now);
 }
 
 export function updateTeacherPassword(teacherIdOrNip: string, newPassword: string): boolean {

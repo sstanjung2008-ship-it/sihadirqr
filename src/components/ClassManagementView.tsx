@@ -2289,8 +2289,8 @@ export const ClassManagementView: React.FC<ClassManagementViewProps> = ({
                   className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer"
                 >
                   <option value="Belum Ditentukan">Belum Ditentukan</option>
-                  {sortedTeachers.map((t) => (
-                    <option key={t.id} value={t.name}>
+                  {sortedTeachers.map((t, idx) => (
+                    <option key={`class-teacher-${t.id || 'tch'}-${idx}`} value={t.name}>
                       {t.name} ({t.additionalDuty || 'Guru Mapel'})
                     </option>
                   ))}

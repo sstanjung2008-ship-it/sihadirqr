@@ -672,13 +672,13 @@ export const TeacherDirectoryView: React.FC<TeacherDirectoryViewProps> = ({
       ) : viewMode === 'CARD' ? (
         /* CARD VIEW */
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-          {filteredTeachers.map((teacher) => {
+          {filteredTeachers.map((teacher, index) => {
             const isTu = teacher.additionalDuty === 'TU';
             const homeroomInfo = getTeacherHomeroomInfo(teacher);
 
             return (
               <div
-                key={teacher.id}
+                key={`teacher-card-${teacher.id || 'tch'}-${teacher.nip || ''}-${index}`}
                 className={`bg-white border rounded-3xl p-5 shadow-xs hover:shadow-md transition-all space-y-4 relative flex flex-col justify-between group ${
                   isTu ? 'border-teal-200/80 hover:border-teal-400' : 'border-slate-200/80 hover:border-indigo-300'
                 }`}
@@ -863,7 +863,7 @@ export const TeacherDirectoryView: React.FC<TeacherDirectoryViewProps> = ({
                   const homeroomInfo = getTeacherHomeroomInfo(teacher);
 
                   return (
-                    <tr key={teacher.id} className="hover:bg-slate-50/80 transition-colors">
+                    <tr key={`teacher-row-${teacher.id || 'tch'}-${teacher.nip || ''}-${index}`} className="hover:bg-slate-50/80 transition-colors">
                       <td className="py-3.5 px-4 font-mono font-bold text-slate-400">{index + 1}</td>
                       <td className="py-3.5 px-4">
                         <div className="font-extrabold text-slate-900 flex items-center gap-1.5">

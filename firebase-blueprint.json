@@ -23,12 +23,37 @@
         }
       },
       "required": ["data", "updatedAt"]
+    },
+    "CharacterLog": {
+      "title": "CharacterLog",
+      "description": "Student character assessment point entry",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique log ID" },
+        "studentId": { "type": "string", "description": "Student ID" },
+        "studentName": { "type": "string", "description": "Student full name" },
+        "nisn": { "type": "string", "description": "Student NISN" },
+        "className": { "type": "string", "description": "Student class name" },
+        "traitId": { "type": "string", "description": "Character trait ID" },
+        "traitName": { "type": "string", "description": "Character trait name" },
+        "traitType": { "type": "string", "enum": ["POSITIF", "NEGATIF"], "description": "Trait category type" },
+        "points": { "type": "number", "description": "Points value" },
+        "evaluatorName": { "type": "string", "description": "Teacher or system evaluator name" },
+        "timestamp": { "type": "string", "description": "Timestamp formatted string" },
+        "date": { "type": "string", "description": "Date YYYY-MM-DD" },
+        "notes": { "type": "string", "description": "Evaluation notes" }
+      },
+      "required": ["id", "studentId", "traitName", "traitType", "points", "date"]
     }
   },
   "firestore": {
     "/sihadir_app_data/{docId}": {
       "schema": "AppData",
       "description": "Collection storing synchronized school datasets"
+    },
+    "/character_logs/{logId}": {
+      "schema": "CharacterLog",
+      "description": "Individual student character points collection"
     }
   }
 }

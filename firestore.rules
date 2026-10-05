@@ -1,8 +1,56 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
+    // Helper functions
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return isSignedIn() && (
+        request.auth.token.email == 'simasop2008@gmail.com' ||
+        (request.auth.token.email_verified == true && request.auth.token.email in ['simasop2008@gmail.com', 'admin@sekolah.id']) ||
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid)) ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'ADMIN')
+      );
+    }
+
+    // Aturan khusus dokumen koleksi nilai karakter dan data sekolah
+    match /sihadir_app_data/{docId} {
+      // Membaca data diperbolehkan untuk operasional presensi & laporan sekolah
+      allow read: if true;
+
+      // Menyimpan atau memperbarui data
+      allow create, update: if true;
+
+      // ATURAN HAPUS KOLEKSI NILAI KARAKTER:
+      // Hanya diizinkan jika terauthentikasi dan memiliki peran admin
+      allow delete: if docId.matches('^sihadir_character_.*')
+        ? isAdmin()
+        : (isSignedIn() || isAdmin());
+    }
+
+    // Koleksi langsung catatan nilai karakter (jika diakses per-dokumen)
+    match /character_logs/{logId} {
+      allow read: if true;
+      allow create, update: if true;
+      // Operasi hapus HANYA jika terauthentikasi dan memiliki peran admin
+      allow delete: if isAdmin();
+    }
+
+    match /sihadir_character_logs/{logId} {
+      allow read: if true;
+      allow create, update: if true;
+      // Operasi hapus HANYA jika terauthentikasi dan memiliki peran admin
+      allow delete: if isAdmin();
+    }
+
+    // Aturan fallback
     match /{document=**} {
-      allow read, write: if true;
+      allow read: if true;
+      allow create, update: if true;
+      allow delete: if isAdmin();
     }
   }
 }
+

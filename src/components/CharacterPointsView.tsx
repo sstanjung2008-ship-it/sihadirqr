@@ -362,6 +362,31 @@ export const CharacterPointsView: React.FC<CharacterPointsViewProps> = ({
     setShowAddModal(true);
   };
 
+  // Open Modal for specific preset trait (Upacara / IMTAQ)
+  const handleOpenAddModalForSpecificTrait = (traitKeyword: string, student?: Student) => {
+    const targetStudent = student || (selectedClassId !== 'ALL' ? filteredStudents[0] : students[0]);
+    if (targetStudent) {
+      setInputClassId(targetStudent.classId);
+      setInputStudentId(targetStudent.id);
+    }
+    setInputIncidentDate(getLocalDateString());
+    setInputTraitType('POSITIF');
+    setInputTraitSearch('');
+    const matched = traits.find(t => t.type === 'POSITIF' && t.name.toLowerCase().includes(traitKeyword.toLowerCase()));
+    if (matched) {
+      setInputTraitId(matched.id);
+    } else {
+      const firstPosTrait = traits.find(t => t.type === 'POSITIF');
+      setInputTraitId(firstPosTrait?.id || traits[0]?.id || '');
+    }
+    setInputPhotoUrl('');
+    setPhotoPreview(null);
+    setInputNotes(traitKeyword.toLowerCase().includes('upacara') 
+      ? 'Menjadi Petugas Upacara Bendera hari Senin (Disiplin & Kepemimpinan)'
+      : 'Menjadi Petugas Kegiatan IMTAQ / Sholat Dhuha hari Jumat');
+    setShowAddModal(true);
+  };
+
   // Handle changing character type filter (POSITIF / NEGATIF) in modal
   const handleTraitTypeChange = (type: 'POSITIF' | 'NEGATIF') => {
     setInputTraitType(type);
@@ -552,12 +577,39 @@ export const CharacterPointsView: React.FC<CharacterPointsViewProps> = ({
 
         <div className="flex flex-wrap items-center gap-2.5 shrink-0">
           <button
+            type="button"
+            onClick={() => handleOpenAddModalForSpecificTrait('upacara')}
+            className="inline-flex items-center justify-center gap-1.5 px-4 py-2.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black rounded-2xl shadow-lg transition-all transform active:scale-95 cursor-pointer shrink-0 text-xs"
+            title="Catat Cepat Siswa Petugas Upacara Bendera (+5 Poin)"
+          >
+            <span>🎖️ + Petugas Upacara (+5)</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => handleOpenAddModalForSpecificTrait('imtaq')}
+            className="inline-flex items-center justify-center gap-1.5 px-4 py-2.5 bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-black rounded-2xl shadow-lg transition-all transform active:scale-95 cursor-pointer shrink-0 text-xs"
+            title="Catat Cepat Siswa Petugas Kegiatan IMTAQ Jumat (+5 Poin)"
+          >
+            <span>🕌 + Petugas IMTAQ (+5)</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => handleOpenAddModalForStudent()}
+            className="inline-flex items-center justify-center gap-1.5 px-4 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white font-black rounded-2xl shadow-lg transition-all transform active:scale-95 cursor-pointer shrink-0 text-xs"
+          >
+            <Plus className="w-4 h-4" />
+            <span>+ Catat Poin Karakter</span>
+          </button>
+
+          <button
             onClick={handleDownloadPdf}
             disabled={isExporting}
-            className="inline-flex items-center justify-center gap-2 px-5 py-3 bg-emerald-500 hover:bg-emerald-400 disabled:bg-slate-500 text-white font-extrabold rounded-2xl shadow-lg transition-all transform active:scale-95 cursor-pointer shrink-0 text-xs sm:text-sm"
+            className="inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-emerald-500 hover:bg-emerald-400 disabled:bg-slate-500 text-white font-extrabold rounded-2xl shadow-lg transition-all transform active:scale-95 cursor-pointer shrink-0 text-xs"
           >
-            <Download className="w-5 h-5" />
-            <span>{isExporting ? 'Mencetak PDF...' : 'Download PDF'}</span>
+            <Download className="w-4 h-4" />
+            <span>{isExporting ? 'Mencetak...' : 'Download PDF'}</span>
           </button>
         </div>
       </div>
@@ -1243,14 +1295,16 @@ export const CharacterPointsView: React.FC<CharacterPointsViewProps> = ({
                             </button>
                           )}
 
-                          <button
-                            type="button"
-                            onClick={() => setDeleteConfirmLog(log)}
-                            className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition-colors cursor-pointer shrink-0"
-                            title="Hapus Log Catatan"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
+                          {currentUserRole === 'ADMIN' && (
+                            <button
+                              type="button"
+                              onClick={() => setDeleteConfirmLog(log)}
+                              className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition-colors cursor-pointer shrink-0"
+                              title="Hapus Log Catatan (Khusus Admin)"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          )}
                         </div>
                       </div>
 
@@ -1477,9 +1531,12 @@ export const CharacterPointsView: React.FC<CharacterPointsViewProps> = ({
               <Trash2 className="w-7 h-7" />
             </div>
             <div>
-              <h3 className="font-extrabold text-slate-900 text-lg">Konfirmasi Hapus Log</h3>
+              <div className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-rose-50 text-rose-700 rounded-full text-[10px] font-black border border-rose-200 mb-2">
+                <span>🔒 Hak Akses: Khusus Administrator</span>
+              </div>
+              <h3 className="font-extrabold text-slate-900 text-lg">Konfirmasi Hapus Nilai Karakter</h3>
               <p className="text-xs text-slate-600 mt-1 leading-relaxed">
-                Apakah Anda yakin ingin menghapus catatan penilaian karakter <strong className="text-slate-900">{deleteConfirmLog.traitName}</strong> ({deleteConfirmLog.traitType === 'POSITIF' ? `+${deleteConfirmLog.points}` : `-${deleteConfirmLog.points}`} poin) untuk <strong className="text-slate-900">{deleteConfirmLog.studentName}</strong>?
+                Operasi ini hanya diizinkan untuk akun terotentikasi dengan peran <strong>Admin</strong>. Apakah Anda yakin ingin menghapus catatan penilaian karakter <strong className="text-slate-900">{deleteConfirmLog.traitName}</strong> ({deleteConfirmLog.traitType === 'POSITIF' ? `+${deleteConfirmLog.points}` : `-${deleteConfirmLog.points}`} poin) untuk <strong className="text-slate-900">{deleteConfirmLog.studentName}</strong>?
               </p>
             </div>
             <div className="flex items-center justify-center gap-3 pt-2">
@@ -1493,12 +1550,17 @@ export const CharacterPointsView: React.FC<CharacterPointsViewProps> = ({
               <button
                 type="button"
                 onClick={() => {
+                  if (currentUserRole !== 'ADMIN') {
+                    alert('Akses Ditolak: Hanya pengguna terauthentikasi dengan peran Admin yang berwenang menghapus catatan nilai karakter.');
+                    setDeleteConfirmLog(null);
+                    return;
+                  }
                   onDeleteLog(deleteConfirmLog.id);
                   setDeleteConfirmLog(null);
                 }}
                 className="px-5 py-2.5 bg-rose-600 hover:bg-rose-700 text-white font-extrabold text-xs rounded-xl shadow-md shadow-rose-600/30 transition-all cursor-pointer"
               >
-                Ya, Hapus Catatan
+                Ya, Hapus Catatan (Admin)
               </button>
             </div>
           </div>

@@ -86,7 +86,7 @@ export const RecapExportView: React.FC<RecapExportViewProps> = ({
   });
   const [selectedKeaktifanSubject, setSelectedKeaktifanSubject] = useState<string>('ALL');
   const [searchQuery, setSearchQuery] = useState<string>('');
-  const [filterPeriod, setFilterPeriod] = useState<'WEEKLY' | 'MONTHLY' | 'YEARLY' | 'CUSTOM'>('MONTHLY');
+  const [filterPeriod, setFilterPeriod] = useState<'SEMESTER_GANJIL' | 'MONTHLY' | 'CUSTOM' | 'WEEKLY' | 'YEARLY'>('MONTHLY');
   const [selectedGradeType, setSelectedGradeType] = useState<'ALL' | 'HARIAN' | 'TUGAS' | 'ULANGAN'>('ALL');
   const [isExporting, setIsExporting] = useState<boolean>(false);
   const [selectedAssessmentDetail, setSelectedAssessmentDetail] = useState<StudentGradeAssessment | null>(null);
@@ -247,7 +247,11 @@ export const RecapExportView: React.FC<RecapExportViewProps> = ({
     let totalAlpa = 0;
 
     filteredStudents.forEach(std => {
-      const stdRecords = filteredRecords.filter(r => r.studentId === std.id || (std.nisn && r.nisn === std.nisn));
+      const stdRecords = filteredRecords.filter(r => 
+        r.studentId === std.id || 
+        (std.nisn && std.nisn !== '-' && r.nisn === std.nisn) ||
+        (std.name && r.studentName && r.studentName.trim().toLowerCase() === std.name.trim().toLowerCase())
+      );
       totalHadir += stdRecords.filter(r => r.status === 'HADIR').length;
       totalTerlambat += stdRecords.filter(r => r.status === 'TERLAMBAT').length;
       totalPulang += stdRecords.filter(r => r.returnTime || r.returnStatus === 'PULANG' || r.returnStatus === 'PULANG_TEPAT' || r.returnStatus === 'PULANG_CEPAT').length;
@@ -274,11 +278,14 @@ export const RecapExportView: React.FC<RecapExportViewProps> = ({
   }, [filteredStudents, filteredRecords]);
 
   // Adjust dates when period preset changes
-  const handlePeriodChange = (p: 'WEEKLY' | 'MONTHLY' | 'YEARLY' | 'CUSTOM') => {
+  const handlePeriodChange = (p: 'SEMESTER_GANJIL' | 'MONTHLY' | 'CUSTOM' | 'WEEKLY' | 'YEARLY') => {
     setFilterPeriod(p);
     const now = new Date();
 
-    if (p === 'MONTHLY') {
+    if (p === 'SEMESTER_GANJIL') {
+      setStartDate('2026-09-21');
+      setEndDate('2026-12-31');
+    } else if (p === 'MONTHLY') {
       const { startStr, endStr } = getMonthDateRange(selectedYear, selectedMonth);
       setStartDate(startStr);
       setEndDate(endStr);
@@ -620,7 +627,9 @@ export const RecapExportView: React.FC<RecapExportViewProps> = ({
 
   const filterTitle = useMemo(() => {
     let periodStr = '';
-    if (filterPeriod === 'MONTHLY') {
+    if (filterPeriod === 'SEMESTER_GANJIL') {
+      periodStr = 'Semester Ganjil: 21 September - 31 Desember 2026';
+    } else if (filterPeriod === 'MONTHLY') {
       const mLabel = MONTH_NAMES[selectedMonth]?.label || 'Bulan';
       periodStr = `Bulan ${mLabel} ${selectedYear}`;
     } else if (filterPeriod === 'WEEKLY') {
@@ -747,7 +756,9 @@ export const RecapExportView: React.FC<RecapExportViewProps> = ({
           filteredCharacterLogs,
           selectedClass,
           undefined,
-          predicateSettings
+          predicateSettings,
+          undefined,
+          filterTitle
         );
       } else if (activeMenu === 'NILAI') {
         await exportRecapStudentGradesPdf(
@@ -854,7 +865,12 @@ export const RecapExportView: React.FC<RecapExportViewProps> = ({
 
         {/* Sub Menu 3: Nilai Karakter */}
         <button
-          onClick={() => setActiveMenu('KARAKTER')}
+          onClick={() => {
+            setActiveMenu('KARAKTER');
+            setFilterPeriod('SEMESTER_GANJIL');
+            setStartDate('2026-09-21');
+            setEndDate('2026-12-31');
+          }}
           className={`flex items-center gap-3.5 p-3.5 rounded-xl font-bold text-xs transition-all cursor-pointer text-left ${
             activeMenu === 'KARAKTER'
               ? 'bg-amber-400 text-slate-950 shadow-md ring-2 ring-amber-400/50'
@@ -981,6 +997,7 @@ export const RecapExportView: React.FC<RecapExportViewProps> = ({
               onChange={(e) => handlePeriodChange(e.target.value as any)}
               className="w-full bg-slate-50 border border-slate-200 text-slate-800 rounded-xl p-2.5 font-semibold focus:ring-2 focus:ring-indigo-500 cursor-pointer"
             >
+              <option value="SEMESTER_GANJIL">Semester Ganjil (21 Sep - 31 Des 2026)</option>
               <option value="MONTHLY">Bulanan (Pilih Bulan)</option>
               <option value="CUSTOM">Rentang Waktu Custom</option>
               <option value="WEEKLY">Mingguan (7 Hari Terakhir)</option>
@@ -989,6 +1006,15 @@ export const RecapExportView: React.FC<RecapExportViewProps> = ({
           </div>
 
           {/* DYNAMIC PERIOD CONTROLS */}
+          {filterPeriod === 'SEMESTER_GANJIL' && (
+            <div className="sm:col-span-2 md:col-span-2 lg:col-span-2">
+              <label className="block text-slate-700 font-semibold mb-1">Periode Semester Ganjil 2026/2027</label>
+              <div className="w-full bg-amber-50 border border-amber-200 text-amber-900 rounded-xl p-2.5 font-bold text-xs flex items-center justify-center gap-2">
+                <Calendar className="w-4 h-4 text-amber-600 shrink-0" />
+                <span>21 September 2026 s/d 31 Desember 2026</span>
+              </div>
+            </div>
+          )}
           {filterPeriod === 'MONTHLY' && (
             <>
               {/* Month Dropdown (12 Months in 1 Year) */}
@@ -1224,7 +1250,11 @@ export const RecapExportView: React.FC<RecapExportViewProps> = ({
                       </tr>
                     ) : (
                       filteredStudents.map((std, idx) => {
-                        const stdRecords = filteredRecords.filter(r => r.studentId === std.id || (std.nisn && r.nisn === std.nisn));
+                        const stdRecords = filteredRecords.filter(r => 
+                          r.studentId === std.id || 
+                          (std.nisn && std.nisn !== '-' && r.nisn === std.nisn) ||
+                          (std.name && r.studentName && r.studentName.trim().toLowerCase() === std.name.trim().toLowerCase())
+                        );
                         
                         let hadirCount = 0;
                         let terlambatCount = 0;
@@ -1382,7 +1412,11 @@ export const RecapExportView: React.FC<RecapExportViewProps> = ({
                       </tr>
                     ) : (
                       filteredStudents.map((std, idx) => {
-                        const stdRecords = filteredRecords.filter(r => r.studentId === std.id || (std.nisn && r.nisn === std.nisn));
+                        const stdRecords = filteredRecords.filter(r => 
+                          r.studentId === std.id || 
+                          (std.nisn && std.nisn !== '-' && r.nisn === std.nisn) ||
+                          (std.name && r.studentName && r.studentName.trim().toLowerCase() === std.name.trim().toLowerCase())
+                        );
                         const hadir = stdRecords.filter(r => r.status === 'HADIR').length;
                         const terlambat = stdRecords.filter(r => r.status === 'TERLAMBAT').length;
                         const pulang = stdRecords.filter(r => r.returnTime || r.returnStatus === 'PULANG' || r.returnStatus === 'PULANG_TEPAT' || r.returnStatus === 'PULANG_CEPAT').length;
@@ -1516,7 +1550,11 @@ export const RecapExportView: React.FC<RecapExportViewProps> = ({
                     let lastNotes = '-';
 
                     filteredJournals.forEach((j) => {
-                      const match = j.studentAttendances?.find(a => a.studentId === std.id || a.nisn === std.nisn || a.studentName === std.name);
+                      const match = j.studentAttendances?.find(a => 
+                        a.studentId === std.id || 
+                        (std.nisn && std.nisn !== '-' && a.nisn === std.nisn) || 
+                        (std.name && a.studentName && std.name.trim().toLowerCase() === a.studentName.trim().toLowerCase())
+                      );
                       if (match) {
                         totalPertemuan++;
                         if (match.status === 'Sangat aktif') sangatAktif++;
@@ -1576,11 +1614,24 @@ export const RecapExportView: React.FC<RecapExportViewProps> = ({
       {/* SUB MENU 3: TABEL REKAP NILAI KARAKTER SISWA */}
       {activeMenu === 'KARAKTER' && (
         <div className="bg-white border border-slate-200/80 rounded-3xl shadow-sm overflow-hidden">
-          <div className="p-4 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-2 bg-amber-50/40">
-            <h2 className="text-sm font-extrabold text-amber-950 flex items-center gap-2">
-              <Award className="w-4 h-4 text-amber-600" />
-              Tabel Rekapitulasi Nilai Karakter Siswa: {filterTitle}
-            </h2>
+          <div className="p-4 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-amber-50/40">
+            <div>
+              <h2 className="text-sm font-extrabold text-amber-950 flex flex-wrap items-center gap-2">
+                <Award className="w-4 h-4 text-amber-600 shrink-0" />
+                <span>Tabel Rekapitulasi Nilai Karakter Siswa: {filterTitle}</span>
+              </h2>
+              <div className="text-xs text-amber-900/80 font-bold mt-1 flex flex-wrap items-center gap-2">
+                <span className="bg-amber-100 px-2.5 py-0.5 rounded-full border border-amber-200">
+                  Rentang: {startDate} s/d {endDate}
+                </span>
+                <span className="bg-emerald-100 text-emerald-900 px-2.5 py-0.5 rounded-full border border-emerald-200">
+                  {filteredCharacterLogs.length} Catatan Karakter Terdata
+                </span>
+                <span className="bg-blue-100 text-blue-900 px-2.5 py-0.5 rounded-full border border-blue-200">
+                  {filteredStudents.length} Siswa Terdaftar
+                </span>
+              </div>
+            </div>
             <div className="flex flex-wrap items-center gap-2 text-xs font-bold text-amber-900">
               <span className="px-2 py-0.5 bg-emerald-100 text-emerald-800 rounded-full">A ≥ {predicateSettings.minA ?? 30}</span>
               <span className="px-2 py-0.5 bg-blue-100 text-blue-800 rounded-full">B ≥ {predicateSettings.minB ?? 10}</span>
@@ -2531,16 +2582,10 @@ export const RecapExportView: React.FC<RecapExportViewProps> = ({
 
             {/* Modal Score Overview Bar */}
             {(() => {
-              const studentLogs = (characterLogs || []).filter(l => 
-                l.studentId === selectedCharacterStudentDetail.id ||
-                (selectedCharacterStudentDetail.nisn && l.nisn && l.nisn.trim() === selectedCharacterStudentDetail.nisn.trim()) ||
-                (l.studentName && selectedCharacterStudentDetail.name && l.studentName.trim().toLowerCase() === selectedCharacterStudentDetail.name.trim().toLowerCase())
-              );
-              const posLogs = studentLogs.filter(l => l.traitType === 'POSITIF');
-              const negLogs = studentLogs.filter(l => l.traitType === 'NEGATIF');
-              const posPoints = posLogs.reduce((sum, item) => sum + (item.points || 0), 0);
-              const negPoints = negLogs.reduce((sum, item) => sum + (item.points || 0), 0);
-              const netPoints = posPoints - negPoints;
+              const summary = calculateStudentCharacterSummary(selectedCharacterStudentDetail, characterLogs);
+              const posPoints = summary.positivePoints;
+              const negPoints = summary.negativePoints;
+              const netPoints = summary.netScore;
 
               const minA = predicateSettings.minA ?? 30;
               const minB = predicateSettings.minB ?? 10;
@@ -2599,13 +2644,8 @@ export const RecapExportView: React.FC<RecapExportViewProps> = ({
               </h4>
 
               {(() => {
-                const logs = (characterLogs || [])
-                  .filter(l => 
-                    l.studentId === selectedCharacterStudentDetail.id ||
-                    (selectedCharacterStudentDetail.nisn && l.nisn && l.nisn.trim() === selectedCharacterStudentDetail.nisn.trim()) ||
-                    (l.studentName && selectedCharacterStudentDetail.name && l.studentName.trim().toLowerCase() === selectedCharacterStudentDetail.name.trim().toLowerCase())
-                  )
-                  .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+                const summary = calculateStudentCharacterSummary(selectedCharacterStudentDetail, characterLogs);
+                const logs = [...summary.logs].sort((a, b) => new Date(b.date || b.timestamp).getTime() - new Date(a.date || a.timestamp).getTime());
 
                 if (logs.length === 0) {
                   return (
@@ -2650,7 +2690,7 @@ export const RecapExportView: React.FC<RecapExportViewProps> = ({
                                 </span>
                               </div>
                               <p className="text-xs text-slate-500">
-                                Dicatat oleh <strong className="text-slate-700">{log.recordedBy}</strong> pada {log.date} ({log.time || '-'})
+                                Dicatat oleh <strong className="text-slate-700">{log.evaluatorName || (log as any).recordedBy || 'Guru/Sistem'}</strong> pada {log.date || '-'} {log.timestamp ? `(${log.timestamp})` : ''}
                               </p>
                             </div>
                           </div>
@@ -2676,11 +2716,7 @@ export const RecapExportView: React.FC<RecapExportViewProps> = ({
                   if (!selectedCharacterStudentDetail) return;
                   setIsExportingCharacterDetail(true);
                   try {
-                    const studentLogs = (characterLogs || []).filter(l => 
-                      l.studentId === selectedCharacterStudentDetail.id ||
-                      (selectedCharacterStudentDetail.nisn && l.nisn && l.nisn.trim() === selectedCharacterStudentDetail.nisn.trim()) ||
-                      (l.studentName && selectedCharacterStudentDetail.name && l.studentName.trim().toLowerCase() === selectedCharacterStudentDetail.name.trim().toLowerCase())
-                    );
+                    const studentLogs = calculateStudentCharacterSummary(selectedCharacterStudentDetail, characterLogs).logs;
                     await exportStudentCharacterDetailPdf(
                       schoolProfile,
                       selectedCharacterStudentDetail,

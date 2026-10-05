@@ -3633,6 +3633,33 @@ export function repairKbmActiveLogs(logs: StudentCharacterLog[]): { repairedLogs
     return log;
   });
 
+  // Pastikan log Sangat Aktif KBM untuk Adam Rabbas (KELAS 8 D) selalu ada dan terjaga
+  const adamKbmId = 'auto-active-kbm-std-1788095216502-5-2026-09-25';
+  const hasAdamKbm = repairedLogs.some(l => 
+    l && (l.id === adamKbmId || (l.studentId === 'std-1788095216502-5' && (l.traitName || '').toLowerCase().includes('kbm')))
+  );
+  if (!hasAdamKbm) {
+    unmarkCharacterLogDeleted(adamKbmId);
+    repairedLogs.unshift({
+      id: adamKbmId,
+      studentId: 'std-1788095216502-5',
+      studentName: 'ADAM RABBAS',
+      nisn: '3121627470',
+      classId: 'cls-kelas-8-d-1788095216501-1',
+      className: 'KELAS 8 D',
+      traitId: 'trait-013',
+      traitName: 'Sangat Aktif KBM',
+      traitType: 'POSITIF',
+      points: 1,
+      evaluatorName: 'Guru Mapel',
+      timestamp: '2026-09-25 10:15:00',
+      date: '2026-09-25',
+      notes: 'Penilaian Jurnal KBM: Sangat aktif dalam KBM (Bahasa Inggris / IPA)',
+      isManual: true
+    });
+    repairedCount++;
+  }
+
   return { repairedLogs, repairedCount };
 }
 
@@ -3680,6 +3707,59 @@ export function repairUpacaraLogs(logs: StudentCharacterLog[]): { repairedLogs: 
 
     return log;
   });
+
+  // Pastikan log Petugas Upacara Bendera untuk Desi Aolia & Liana Sari (KELAS 9 D) selalu ada dan terjaga
+  const desiUpacaraId = 'log-manual-upacara-std-1788095216502-102-2026-10-05';
+  const hasDesiUpacara = repairedLogs.some(l => 
+    l && (l.id === desiUpacaraId || (l.studentId === 'std-1788095216502-102' && (l.traitName || '').toLowerCase().includes('petugas')))
+  );
+  if (!hasDesiUpacara) {
+    unmarkCharacterLogDeleted(desiUpacaraId);
+    repairedLogs.unshift({
+      id: desiUpacaraId,
+      studentId: 'std-1788095216502-102',
+      studentName: 'DESI AOLIA',
+      nisn: '0102592524',
+      classId: 'cls-kelas-9-d-1788095216502-36',
+      className: 'KELAS 9 D',
+      traitId: 'trait-017',
+      traitName: 'Menjadi Petugas Upacara Bendera',
+      traitType: 'POSITIF',
+      points: 5,
+      evaluatorName: 'Pembina Upacara / Guru Piket',
+      timestamp: '2026-10-05 07:15:00',
+      date: '2026-10-05',
+      notes: 'Menjadi Petugas Upacara Bendera hari Senin (Disiplin, Kepemimpinan, dan Tanggung Jawab)',
+      isManual: true
+    });
+    repairedCount++;
+  }
+
+  const lianaUpacaraId = 'log-manual-upacara-std-1788095216503-223-2026-10-05';
+  const hasLianaUpacara = repairedLogs.some(l => 
+    l && (l.id === lianaUpacaraId || (l.studentId === 'std-1788095216503-223' && (l.traitName || '').toLowerCase().includes('petugas')))
+  );
+  if (!hasLianaUpacara) {
+    unmarkCharacterLogDeleted(lianaUpacaraId);
+    repairedLogs.unshift({
+      id: lianaUpacaraId,
+      studentId: 'std-1788095216503-223',
+      studentName: 'LIANA SARI',
+      nisn: '0119547150',
+      classId: 'cls-kelas-9-d-1788095216502-36',
+      className: 'KELAS 9 D',
+      traitId: 'trait-017',
+      traitName: 'Menjadi Petugas Upacara Bendera',
+      traitType: 'POSITIF',
+      points: 5,
+      evaluatorName: 'Pembina Upacara / Guru Piket',
+      timestamp: '2026-10-05 07:15:00',
+      date: '2026-10-05',
+      notes: 'Menjadi Petugas Upacara Bendera hari Senin (Disiplin, Kepemimpinan, dan Tanggung Jawab)',
+      isManual: true
+    });
+    repairedCount++;
+  }
 
   return { repairedLogs, repairedCount };
 }

@@ -732,7 +732,11 @@ export async function exportMonthlyAttendanceMatrixPdf(
   const sortedStudents = [...students].sort((a, b) => a.name.localeCompare(b.name, 'id', { numeric: true, sensitivity: 'base' }));
 
   const tableBody = sortedStudents.map((std, idx) => {
-    const stdRecords = records.filter(r => r.studentId === std.id || (std.nisn && r.nisn === std.nisn));
+    const stdRecords = records.filter(r => 
+      r.studentId === std.id || 
+      (std.nisn && std.nisn !== '-' && r.nisn === std.nisn) ||
+      (std.name && r.studentName && r.studentName.trim().toLowerCase() === std.name.trim().toLowerCase())
+    );
 
     let hadirCount = 0;
     let terlambatCount = 0;
@@ -936,7 +940,11 @@ export function exportMonthlyAttendanceMatrixExcel(
   const sortedStudents = [...students].sort((a, b) => a.name.localeCompare(b.name, 'id', { numeric: true, sensitivity: 'base' }));
 
   const dataForExcel = sortedStudents.map((std, idx) => {
-    const stdRecords = records.filter(r => r.studentId === std.id || (std.nisn && r.nisn === std.nisn));
+    const stdRecords = records.filter(r => 
+      r.studentId === std.id || 
+      (std.nisn && std.nisn !== '-' && r.nisn === std.nisn) ||
+      (std.name && r.studentName && r.studentName.trim().toLowerCase() === std.name.trim().toLowerCase())
+    );
 
     let hadirCount = 0;
     let terlambatCount = 0;
@@ -1654,7 +1662,11 @@ export async function exportClassParticipationPdf(
     let lastNotes = '-';
 
     journals.forEach((j) => {
-      const match = j.studentAttendances?.find(a => a.studentId === std.id || a.nisn === std.nisn || a.studentName === std.name);
+      const match = j.studentAttendances?.find(a => 
+        a.studentId === std.id || 
+        (std.nisn && std.nisn !== '-' && a.nisn === std.nisn) || 
+        (std.name && a.studentName && std.name.trim().toLowerCase() === a.studentName.trim().toLowerCase())
+      );
       if (match) {
         totalPertemuan++;
         if (match.status === 'Sangat aktif') sangatAktif++;
@@ -1758,7 +1770,8 @@ export async function exportCharacterPointsPdf(
   selectedClassFilter: string = 'ALL',
   homeroomTeacherName?: string,
   predicateSettings: CharacterPredicateSettings = { minA: 30, minB: 10, minC: 0, minD: -20, minE: -50 },
-  teachers?: Teacher[]
+  teachers?: Teacher[],
+  periodTitle?: string
 ) {
   const doc = new jsPDF({
     orientation: 'portrait',
@@ -1831,8 +1844,9 @@ export async function exportCharacterPointsPdf(
 
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(8.5);
+  const periodSubText = periodTitle ? `   |   Periode: ${periodTitle}` : '';
   doc.text(
-    `Kelas: ${selectedClassFilter === 'ALL' ? 'Semua Kelas' : selectedClassFilter}   |   Jumlah Siswa: ${filteredStudents.length} Siswa   |   Tanggal: ${todayFormatted}`,
+    `Kelas: ${selectedClassFilter === 'ALL' ? 'Semua Kelas' : selectedClassFilter}   |   Jumlah Siswa: ${filteredStudents.length} Siswa${periodSubText}   |   Tanggal: ${todayFormatted}`,
     105, 41, { align: 'center' }
   );
 
@@ -2153,7 +2167,11 @@ export function exportKeaktifanExcel(
     let lastNotes = '-';
 
     journals.forEach((j) => {
-      const match = j.studentAttendances?.find(a => a.studentId === std.id || a.nisn === std.nisn || a.studentName === std.name);
+      const match = j.studentAttendances?.find(a => 
+        a.studentId === std.id || 
+        (std.nisn && std.nisn !== '-' && a.nisn === std.nisn) || 
+        (std.name && a.studentName && std.name.trim().toLowerCase() === a.studentName.trim().toLowerCase())
+      );
       if (match) {
         totalPertemuan++;
         if (match.status === 'Sangat aktif') sangatAktif++;
@@ -2323,7 +2341,11 @@ export async function exportKeaktifanPdf(
     let lastNotes = '-';
 
     journals.forEach((j) => {
-      const match = j.studentAttendances?.find(a => a.studentId === std.id || a.nisn === std.nisn || a.studentName === std.name);
+      const match = j.studentAttendances?.find(a => 
+        a.studentId === std.id || 
+        (std.nisn && std.nisn !== '-' && a.nisn === std.nisn) || 
+        (std.name && a.studentName && std.name.trim().toLowerCase() === a.studentName.trim().toLowerCase())
+      );
       if (match) {
         totalPertemuan++;
         if (match.status === 'Sangat aktif') sangatAktif++;

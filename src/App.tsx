@@ -1364,7 +1364,11 @@ export default function App() {
 
       const newKbmLogs: StudentCharacterLog[] = [];
       journal.studentAttendances.forEach(att => {
-        const student = students.find(s => s.id === att.studentId);
+        const student = students.find(s => 
+          s.id === att.studentId || 
+          (att.nisn && att.nisn !== '-' && s.nisn === att.nisn) ||
+          (att.studentName && s.name && s.name.trim().toLowerCase() === att.studentName.trim().toLowerCase())
+        );
         if (!student) return;
 
         if (att.status === 'Sangat aktif') {
@@ -1573,6 +1577,10 @@ export default function App() {
 
   const handleDeleteCharacterLog = (logId: string) => {
     if (!logId) return;
+    if (currentRole !== 'ADMIN') {
+      alert('Akses Ditolak: Hanya pengguna terauthentikasi dengan peran Admin yang berwenang menghapus catatan nilai karakter.');
+      return;
+    }
     const targetId = logId.trim();
     const targetLog = characterLogs.find(l => l?.id?.trim() === targetId);
 
@@ -1606,6 +1614,10 @@ export default function App() {
 
   const handleDeleteMultipleCharacterLogs = (logIds: string[]) => {
     if (!logIds || logIds.length === 0) return;
+    if (currentRole !== 'ADMIN') {
+      alert('Akses Ditolak: Hanya pengguna terauthentikasi dengan peran Admin yang berwenang menghapus catatan nilai karakter.');
+      return;
+    }
     const idSet = new Set(logIds.map(id => id.trim()));
     logIds.forEach(id => {
       deletePermanentManualCharacterLog(id);

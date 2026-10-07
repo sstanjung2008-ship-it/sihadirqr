@@ -6,6 +6,7 @@ import {
   getSchoolCheckoutTimeForDay,
   getScanQueueStatus,
   flushAttendanceScanQueue,
+  getAttendanceRecords,
   ScanQueueStatus
 } from '../lib/storage';
 import { 
@@ -508,7 +509,11 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
     const day = String(now.getDate()).padStart(2, '0');
     const dateStr = `${year}-${month}-${day}`;
 
-    const existingRecord = attendanceRecords.find(r => (
+    const freshRecords = getAttendanceRecords();
+    const existingRecord = freshRecords.find(r => (
+      (r.studentId === student.id) ||
+      (r.nisn && student.nisn && r.nisn === student.nisn)
+    ) && r.date === dateStr) || attendanceRecords.find(r => (
       (r.studentId === student.id) ||
       (r.nisn && student.nisn && r.nisn === student.nisn)
     ) && r.date === dateStr);

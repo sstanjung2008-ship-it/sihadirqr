@@ -629,6 +629,23 @@ export const INITIAL_CHARACTER_TRAITS: any[] = [
 
 export const INITIAL_STUDENT_CHARACTER_LOGS: any[] = [
   {
+    id: "log-manual-membantu-guru-std-1788095216501-1-2026-09-06",
+    studentId: "std-1788095216501-1",
+    studentName: "Abdul Zalil",
+    nisn: "3121563455",
+    classId: "cls-kelas-8-d-1788095216501-1",
+    className: "KELAS 8 D",
+    traitId: "trait-1788956470161",
+    traitName: "Membantu Guru membawakan perlengkapan Pembelajaran",
+    traitType: "POSITIF",
+    points: 2,
+    evaluatorName: "Sigit Inarsoyo Raharjo",
+    timestamp: "2026-09-06 08:30:00",
+    date: "2026-09-06",
+    notes: "Penilaian Guru: Membantu guru membawakan perlengkapan pembelajaran di kelas (Sikap Sosial & Kepedulian)",
+    isManual: true
+  },
+  {
     id: "log-manual-upacara-std-1788095216502-102-2026-10-05",
     studentId: "std-1788095216502-102",
     studentName: "DESI AOLIA",

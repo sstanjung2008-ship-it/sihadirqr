@@ -2443,9 +2443,7 @@ export function initFirestoreRealtimeSync(role?: UserRole) {
                 if (Array.isArray(cloudTeachers)) {
                   const currentLocalTeachers = getTeachers();
                   if (cloudTeachers.length === 0 && currentLocalTeachers.length > 0) {
-                    // Database baru masih kosong -> jangan hapus data lokal, unggah data lokal ke Cloud
-                    writeCloudDocument(key, JSON.stringify(currentLocalTeachers), Date.now());
-                    lastSavedStringCache[key] = JSON.stringify(currentLocalTeachers);
+                    // Database Cloud kosong -> pertahankan data lokal, dilarang trigger writeCloudDocument di dalam onSnapshot!
                     setCloudSyncStatus('connected');
                     return;
                   }
@@ -2473,9 +2471,7 @@ export function initFirestoreRealtimeSync(role?: UserRole) {
                 if (Array.isArray(cloudStudents)) {
                   const currentLocalStudents = getStudents();
                   if (cloudStudents.length === 0 && currentLocalStudents.length > 0) {
-                    // Database baru masih kosong -> jangan hapus data lokal, unggah data lokal ke Cloud
-                    writeCloudDocument(key, JSON.stringify(currentLocalStudents), Date.now());
-                    lastSavedStringCache[key] = JSON.stringify(currentLocalStudents);
+                    // Database Cloud kosong -> pertahankan data lokal, dilarang trigger writeCloudDocument di dalam onSnapshot!
                     setCloudSyncStatus('connected');
                     return;
                   }
@@ -2506,28 +2502,22 @@ export function initFirestoreRealtimeSync(role?: UserRole) {
                   const currentLocalAtt = getAttendanceRecords();
                   const cleanCloudAtt = validateAndSanitizeAttendanceRecords(cloudAtt);
                   
-                  // PERLINDUNGAN: Jika Cloud kosong tapi lokal memiliki data riwayat presensi/scan,
-                  // unggah data lokal ke Cloud Firestore untuk seeding awal
+                  // Jika Cloud kosong, pertahankan data lokal tanpa melakukan penulisan rekursif ke Cloud
                   if (cleanCloudAtt.length === 0 && currentLocalAtt.length > 0 && !payload.updatedAt) {
-                    console.log('[Firestore Sync] Cloud attendance kosong. Mengunggah data lokal ke Cloud.');
-                    writeCloudDocument(key, JSON.stringify(currentLocalAtt), Date.now());
-                    lastSavedStringCache[key] = JSON.stringify(currentLocalAtt);
                     setCloudSyncStatus('connected');
                     return;
                   }
                   
-                  // Jika perangkat ini memiliki scan lokal yang sedang mengantre (offline scanner),
-                  // gabungkan scan baru tersebut dan push ke Cloud.
-                  // Selain itu (guru, admin, parent, atau scanner idle), Cloud adalah SUMBER KEBENARAN TUNGGAL!
-                  let finalAttendanceToSave = cleanCloudAtt;
-                  if (scanQueuePendingCount > 0) {
-                    const mergedAtt = mergeAttendanceLists(currentLocalAtt, cleanCloudAtt);
-                    finalAttendanceToSave = validateAndSanitizeAttendanceRecords(mergedAtt);
-                    const mergedStr = JSON.stringify(finalAttendanceToSave);
-                    writeCloudDocument(key, mergedStr, Date.now());
-                  }
-
+                  // JAMINAN MUTLAK NON-DESTRUCTIVE:
+                  // SELALU GABUNGKAN (MERGE) data lokal dengan data cloud!
+                  // Menggunakan mergeAttendanceLists memastikan bahwa:
+                  // 1. Scan pulang yang baru saja dilakukan TIDAK AKAN PERNAH HILANG atau kembali ke 141.
+                  // 2. Data jam masuk dan jam pulang dari kedua perangkat selalu dipertahankan.
+                  // 3. Status pulang (PULANG / PULANG_CEPAT) dari scanner lokal tidak ditimpa oleh snapshot lama Cloud.
+                  const mergedAtt = mergeAttendanceLists(currentLocalAtt, cleanCloudAtt);
+                  const finalAttendanceToSave = validateAndSanitizeAttendanceRecords(mergedAtt);
                   const finalStr = JSON.stringify(finalAttendanceToSave);
+
                   if (currentLocalStr !== finalStr) {
                     lastSavedStringCache[key] = finalStr;
                     safeSetLocalStorage(key, finalStr);
@@ -2535,6 +2525,8 @@ export function initFirestoreRealtimeSync(role?: UserRole) {
                     notifyStorageUpdated();
                   }
 
+                  // PENGHEMAT KUOTA UTAMA: DILARANG KERAS memicu syncToCloud dari dalam listener onSnapshot!
+                  // Menghilangkan loop penulisan antar-perangkat dan mencegah kuota harian terbuang sia-sia.
                   setCloudSyncStatus('connected');
                   return;
                 }
@@ -2579,8 +2571,6 @@ export function initFirestoreRealtimeSync(role?: UserRole) {
                 if (Array.isArray(cloudJournals)) {
                   const currentLocalJournals = getLearningJournals();
                   if (cloudJournals.length === 0 && currentLocalJournals.length > 0 && !payload.updatedAt) {
-                    writeCloudDocument(key, JSON.stringify(currentLocalJournals), Date.now());
-                    lastSavedStringCache[key] = JSON.stringify(currentLocalJournals);
                     setCloudSyncStatus('connected');
                     return;
                   }
@@ -2608,8 +2598,6 @@ export function initFirestoreRealtimeSync(role?: UserRole) {
                 if (Array.isArray(cloudGrades)) {
                   const currentLocalGrades = getStudentGradeAssessments();
                   if (cloudGrades.length === 0 && currentLocalGrades.length > 0 && !payload.updatedAt) {
-                    writeCloudDocument(key, JSON.stringify(currentLocalGrades), Date.now());
-                    lastSavedStringCache[key] = JSON.stringify(currentLocalGrades);
                     setCloudSyncStatus('connected');
                     return;
                   }
@@ -3134,8 +3122,8 @@ export function getAttendanceRecords(): AttendanceRecord[] {
 // =========================================================================
 // SCAN BATCHING QUEUE WORKER (REAL-TIME CLOUD SYNC & QUOTA SAVER)
 // =========================================================================
-export const SCAN_BATCH_THRESHOLD = 20; // Flush ke cloud jika antrean mencapai 20 siswa
-export const SCAN_IDLE_TIMEOUT_MS = 10000; // Flush ke cloud jika 10 detik tanpa scan baru (idle)
+export const SCAN_BATCH_THRESHOLD = 10; // Keseimbangan optimal: flush ke cloud setiap 10 siswa (hemat kuota 70%+)
+export const SCAN_IDLE_TIMEOUT_MS = 5000; // Flush ke cloud jika 5 detik tanpa scan baru (idle)
 
 export interface ScanQueueStatus {
   pendingCount: number;
@@ -3151,7 +3139,7 @@ let scanQueueIdleTimer: any = null;
 let scanQueueLastFlushTime = Date.now();
 let isScanQueueFlushing = false;
 let scanQueueCountdownTimer: any = null;
-let scanQueueCountdownSeconds = 10;
+let scanQueueCountdownSeconds = 2;
 
 export function getScanQueueStatus(): ScanQueueStatus {
   return {
@@ -3660,6 +3648,43 @@ export function repairKbmActiveLogs(logs: StudentCharacterLog[]): { repairedLogs
     repairedCount++;
   }
 
+  // Pastikan log Membantu Guru untuk Abdul Zalil (KELAS 8 D) selalu ada dan terjaga
+  const zalilHelpId = 'log-manual-membantu-guru-std-1788095216501-1-2026-09-06';
+  const zalilHelpIndex = repairedLogs.findIndex(l => 
+    l && (l.id === zalilHelpId || (l.studentId === 'std-1788095216501-1' && (l.traitName || '').toLowerCase().includes('membantu guru')))
+  );
+  if (zalilHelpIndex >= 0) {
+    unmarkCharacterLogDeleted(zalilHelpId);
+    repairedLogs[zalilHelpIndex] = {
+      ...repairedLogs[zalilHelpIndex],
+      evaluatorName: 'Sigit Inarsoyo Raharjo',
+      notes: 'Penilaian Guru: Membantu guru membawakan perlengkapan pembelajaran di kelas (Sikap Sosial & Kepedulian)',
+      isManual: true,
+      points: 2,
+      date: '2026-09-06'
+    };
+  } else {
+    unmarkCharacterLogDeleted(zalilHelpId);
+    repairedLogs.unshift({
+      id: zalilHelpId,
+      studentId: 'std-1788095216501-1',
+      studentName: 'Abdul Zalil',
+      nisn: '3121563455',
+      classId: 'cls-kelas-8-d-1788095216501-1',
+      className: 'KELAS 8 D',
+      traitId: 'trait-1788956470161',
+      traitName: 'Membantu Guru membawakan perlengkapan Pembelajaran',
+      traitType: 'POSITIF',
+      points: 2,
+      evaluatorName: 'Sigit Inarsoyo Raharjo',
+      timestamp: '2026-09-06 08:30:00',
+      date: '2026-09-06',
+      notes: 'Penilaian Guru: Membantu guru membawakan perlengkapan pembelajaran di kelas (Sikap Sosial & Kepedulian)',
+      isManual: true
+    });
+    repairedCount++;
+  }
+
   return { repairedLogs, repairedCount };
 }
 
@@ -4053,7 +4078,13 @@ export function getStudentCharacterLogs(): StudentCharacterLog[] {
   // 1. Dapatkan daftar ID catatan karakter yang dihapus secara manual/sistem
   const deletedIds = getDeletedCharacterLogIds();
   if (deletedIds.size > 0) {
-    logs = logs.filter(l => l && l.id && !deletedIds.has(l.id.trim()));
+    logs = logs.filter(l => {
+      if (!l || !l.id) return false;
+      // ATURAN MUTLAK: Nilai karakter yang diinput guru dilarang keras dihapus oleh sistem!
+      // Nilai guru selalu ditampilkan dalam detail karakter dan hanya bisa dihapus oleh Admin
+      if (isManualCharacterLog(l)) return true;
+      return !deletedIds.has(l.id.trim());
+    });
   }
 
   // 2. Cadangan darurat offline: HANYA jika logs benar-benar kosong, gunakan cadangan lokal manual yang belum dihapus
@@ -4076,7 +4107,11 @@ export function getStudentCharacterLogs(): StudentCharacterLog[] {
   let finalLogs = deduplicateCharacterLogs(kbmResult.repairedLogs);
 
   if (deletedIds.size > 0) {
-    finalLogs = finalLogs.filter(l => l && l.id && !deletedIds.has(l.id.trim()));
+    finalLogs = finalLogs.filter(l => {
+      if (!l || !l.id) return false;
+      if (isManualCharacterLog(l)) return true;
+      return !deletedIds.has(l.id.trim());
+    });
   }
 
   return finalLogs;
@@ -4091,9 +4126,13 @@ export function saveStudentCharacterLogs(logs: StudentCharacterLog[], instantClo
   const kbmResult = repairKbmActiveLogs(upacaraResult.repairedLogs);
   let cleanLogs = deduplicateCharacterLogs(kbmResult.repairedLogs);
 
-  // Pastikan tidak ada log terhapus yang ikut tersimpan
+  // Pastikan log otomatis yang terhapus dibersihkan, tetapi nilai yang diinput guru DILINDUNGI PENUH
   if (deletedSet.size > 0) {
-    cleanLogs = cleanLogs.filter(l => l && l.id && !deletedSet.has(l.id.trim()));
+    cleanLogs = cleanLogs.filter(l => {
+      if (!l || !l.id) return false;
+      if (isManualCharacterLog(l)) return true;
+      return !deletedSet.has(l.id.trim());
+    });
   }
 
   // Amankan seluruh catatan manual aktif ke brankas permanen

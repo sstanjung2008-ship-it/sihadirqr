@@ -53,6 +53,7 @@ import {
   saveUserSession,
   initFirestoreRealtimeSync,
   stopFirestoreRealtimeSync,
+  isFirestoreSyncActive,
   reconcileTeachersAndClasses,
   checkParentLoginAccess,
   KEYS
@@ -381,13 +382,23 @@ export default function App() {
 
     // PENGHEMAT KUOTA UTAMA:
     // Saat HP Orang Tua atau Guru mengunci layar, beralih ke aplikasi lain (WA), atau tab diminimalkan (document.hidden),
-    // HENTIKAN sementara seluruh listener Firestore onSnapshot (stopFirestoreRealtimeSync).
-    // Saat tab dibuka kembali (visible), sambungkan ulang. Ini memangkas ribuan read pasif di latar belakang!
+    // HENTIKAN listener Firestore onSnapshot JIKA tab berada di latar belakang lebih dari 45 detik.
+    // Grace period 45 detik ini mencegah pembatalan dan pendaftaran ulang 14 listener (14 read baru)
+    // hanya karena pengguna membuka notifikasi WA atau beralih aplikasi sebentar!
+    let hiddenDisconnectTimer: any = null;
     const handleVisibilityChange = () => {
       if (document.hidden) {
-        stopFirestoreRealtimeSync();
+        hiddenDisconnectTimer = setTimeout(() => {
+          stopFirestoreRealtimeSync();
+        }, 45000);
       } else {
-        initFirestoreRealtimeSync(currentRole);
+        if (hiddenDisconnectTimer) {
+          clearTimeout(hiddenDisconnectTimer);
+          hiddenDisconnectTimer = null;
+        }
+        if (!isFirestoreSyncActive()) {
+          initFirestoreRealtimeSync(currentRole);
+        }
       }
     };
 
@@ -405,6 +416,10 @@ export default function App() {
     document.addEventListener('visibilitychange', handleVisibilityChange);
 
     return () => {
+      if (hiddenDisconnectTimer) {
+        clearTimeout(hiddenDisconnectTimer);
+        hiddenDisconnectTimer = null;
+      }
       window.removeEventListener('sihadir_storage_updated', refreshDataFromStorage);
       window.removeEventListener('sihadir_network_toast', handleNetworkToast);
       document.removeEventListener('visibilitychange', handleVisibilityChange);
@@ -809,7 +824,7 @@ export default function App() {
             return true;
           });
           if (logsChanged) {
-            saveStudentCharacterLogs(cleaned);
+            saveStudentCharacterLogs(cleaned, false);
             return cleaned;
           }
           return prevLogs;

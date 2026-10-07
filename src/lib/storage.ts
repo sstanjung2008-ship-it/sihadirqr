@@ -437,14 +437,7 @@ async function performSingleDocWrite(key: string, dataStr: string, timestamp: nu
       isChunked: false,
       totalChunks: 1,
     });
-    // Hapus pecahan chunk lama jika ada agar tidak lagi memicu getDoc read berlebih
-    const previousChunks = knownChunkedDocs.get(key) || 0;
-    if (previousChunks > 1) {
-      for (let i = 1; i < previousChunks; i++) {
-        deleteDoc(doc(db, 'sihadir_app_data', `${key}_chunk_${i}`)).catch(() => {});
-      }
-      knownChunkedDocs.delete(key);
-    }
+    knownChunkedDocs.delete(key);
   } else {
     // Multi-chunk document sharding
     const numChunks = Math.ceil(totalLength / FIRESTORE_MAX_CHUNK_SIZE);
@@ -483,8 +476,11 @@ async function performSingleDocWrite(key: string, dataStr: string, timestamp: nu
 export async function writeCloudDocument(key: string, dataStr: string, timestamp: number): Promise<void> {
   const currentRole = getUserSession()?.role;
   // PENGHEMAT KUOTA UTAMA:
-  // HP Orang Tua (PARENT) dilarang keras menulis data apa pun ke Cloud Firestore,
+  // Tamu belum login atau HP Orang Tua (PARENT) dilarang keras menulis data apa pun ke Cloud Firestore,
   // KECUALI dokumen permohonan izin (KEYS.LEAVES) atau saat ganti kata sandi siswa (KEYS.STUDENTS).
+  if (!currentRole && key !== KEYS.PROFILE && key !== KEYS.LEAVES) {
+    return;
+  }
   if (currentRole === 'PARENT' && key !== KEYS.LEAVES && key !== KEYS.STUDENTS) {
     return;
   }
@@ -584,6 +580,7 @@ export async function readCloudDocument(key: string): Promise<{ data: string; up
 
     if (!isChunked) {
       const dataStr = typeof payload.data === 'string' ? payload.data : JSON.stringify(payload.data || '');
+      lastSavedStringCache[key] = dataStr;
       return { data: dataStr, updatedAt };
     }
 
@@ -609,6 +606,7 @@ export async function readCloudDocument(key: string): Promise<{ data: string; up
 
     const otherChunks = await Promise.all(chunkPromises);
     const fullDataStr = (payload.data || '') + otherChunks.join('');
+    lastSavedStringCache[key] = fullDataStr;
     return { data: fullDataStr, updatedAt };
   } catch (err) {
     console.error(`[Firestore Sync] Error reading cloud document for ${key}:`, err);
@@ -622,8 +620,11 @@ export function syncToCloud(key: string, data: any, instant: boolean = false, ex
 
   const currentRole = getUserSession()?.role;
   // PENGHEMAT KUOTA UTAMA:
-  // HP Orang Tua (PARENT) dilarang keras menulis data apa pun ke Cloud Firestore,
+  // Tamu belum login atau HP Orang Tua (PARENT) dilarang keras menulis data apa pun ke Cloud Firestore,
   // KECUALI dokumen permohonan izin (KEYS.LEAVES) atau saat ganti kata sandi siswa (KEYS.STUDENTS).
+  if (!currentRole && key !== KEYS.PROFILE && key !== KEYS.LEAVES) {
+    return;
+  }
   if (currentRole === 'PARENT' && key !== KEYS.LEAVES && key !== KEYS.STUDENTS) {
     return;
   }
@@ -1603,6 +1604,18 @@ export async function smartSyncAndMergeAllWithCloud(): Promise<{ success: boolea
 
     const now = Date.now();
 
+    // Catat timestamp lokal SEBELUM proses merge agar dapat membedakan perubahan asli pengguna vs sinkronisasi cloud
+    const ALL_SYNC_KEYS = [
+      KEYS.PROFILE, KEYS.STUDENTS, KEYS.CLASSES, KEYS.TEACHERS,
+      KEYS.ATTENDANCE, KEYS.LEAVES, KEYS.LEARNING_JOURNALS,
+      KEYS.CHARACTER_TRAITS, KEYS.CHARACTER_LOGS, KEYS.CHARACTER_PREDICATES,
+      KEYS.GRADES, KEYS.PERIODS, KEYS.SCHEDULES
+    ];
+    const prevLocalTimestamps: Record<string, number> = {};
+    ALL_SYNC_KEYS.forEach(k => {
+      prevLocalTimestamps[k] = Number(localStorage.getItem(k + '_updatedAt') || '0');
+    });
+
     // 2. In-Memory Merging - Step A: Profile
     const currentLocalProfile = getSchoolProfile();
     let mergedProfile = currentLocalProfile;
@@ -1615,8 +1628,9 @@ export async function smartSyncAndMergeAllWithCloud(): Promise<{ success: boolea
       }
     }
     const profileStr = JSON.stringify(mergedProfile);
+    const profileUpdatedAt = Math.max(Number(profileCloud?.updatedAt || 0), prevLocalTimestamps[KEYS.PROFILE] || 0);
     safeSetLocalStorage(KEYS.PROFILE, profileStr);
-    safeSetLocalStorage(KEYS.PROFILE + '_updatedAt', String(now));
+    safeSetLocalStorage(KEYS.PROFILE + '_updatedAt', String(profileUpdatedAt));
 
     // Step B: Students & Photo Sanitization
     let cloudStudents: Student[] = [];
@@ -1631,8 +1645,9 @@ export async function smartSyncAndMergeAllWithCloud(): Promise<{ success: boolea
     const mergedStudents = mergeStudentLists(currentLocalStudents, cloudStudents);
     const optimizedStudents = await sanitizeAndCompressStudentPhotos(mergedStudents);
     const studentsJsonStr = JSON.stringify(optimizedStudents);
+    const studentUpdatedAt = Math.max(Number(studentCloud?.updatedAt || 0), prevLocalTimestamps[KEYS.STUDENTS] || 0);
     safeSetLocalStorage(KEYS.STUDENTS, studentsJsonStr);
-    safeSetLocalStorage(KEYS.STUDENTS + '_updatedAt', String(now));
+    safeSetLocalStorage(KEYS.STUDENTS + '_updatedAt', String(studentUpdatedAt));
 
     // Step C: Classes & Teachers
     let cloudClasses: SchoolClass[] = [];
@@ -1659,10 +1674,12 @@ export async function smartSyncAndMergeAllWithCloud(): Promise<{ success: boolea
 
     const classesJsonStr = JSON.stringify(finalClasses);
     const teachersJsonStr = JSON.stringify(finalTeachers);
+    const classUpdatedAt = Math.max(Number(classCloud?.updatedAt || 0), prevLocalTimestamps[KEYS.CLASSES] || 0);
+    const teacherUpdatedAt = Math.max(Number(teacherCloud?.updatedAt || 0), prevLocalTimestamps[KEYS.TEACHERS] || 0);
     safeSetLocalStorage(KEYS.CLASSES, classesJsonStr);
-    safeSetLocalStorage(KEYS.CLASSES + '_updatedAt', String(now));
+    safeSetLocalStorage(KEYS.CLASSES + '_updatedAt', String(classUpdatedAt));
     safeSetLocalStorage(KEYS.TEACHERS, teachersJsonStr);
-    safeSetLocalStorage(KEYS.TEACHERS + '_updatedAt', String(now));
+    safeSetLocalStorage(KEYS.TEACHERS + '_updatedAt', String(teacherUpdatedAt));
 
     // Step D: Attendance Records (Cloud Authoritative)
     let cloudAtt: AttendanceRecord[] = [];
@@ -1678,6 +1695,7 @@ export async function smartSyncAndMergeAllWithCloud(): Promise<{ success: boolea
     }
 
     let attJsonStr = '';
+    const attUpdatedAt = Math.max(Number(attCloud?.updatedAt || 0), prevLocalTimestamps[KEYS.ATTENDANCE] || 0);
     if (cloudAtt.length > 0 || attCloud?.updatedAt) {
       let finalAtt = cloudAtt;
       if (scanQueuePendingCount > 0) {
@@ -1687,13 +1705,14 @@ export async function smartSyncAndMergeAllWithCloud(): Promise<{ success: boolea
       }
       attJsonStr = JSON.stringify(finalAtt);
       safeSetLocalStorage(KEYS.ATTENDANCE, attJsonStr);
-      safeSetLocalStorage(KEYS.ATTENDANCE + '_updatedAt', String(attCloud?.updatedAt || now));
+      safeSetLocalStorage(KEYS.ATTENDANCE + '_updatedAt', String(attUpdatedAt));
     } else {
       const currentLocalAtt = getAttendanceRecords();
       attJsonStr = JSON.stringify(currentLocalAtt);
       if (currentLocalAtt.length > 0) {
         writeCloudDocument(KEYS.ATTENDANCE, attJsonStr, now);
       }
+      safeSetLocalStorage(KEYS.ATTENDANCE + '_updatedAt', String(attUpdatedAt || now));
     }
 
     // Step E: Generic Entity Merging
@@ -1704,6 +1723,10 @@ export async function smartSyncAndMergeAllWithCloud(): Promise<{ success: boolea
           cloudItems = typeof cloudDoc.data === 'string' ? JSON.parse(cloudDoc.data) : cloudDoc.data;
         } catch {}
       }
+
+      const prevTs = prevLocalTimestamps[key] || 0;
+      const cloudTs = Number(cloudDoc?.updatedAt || 0);
+      const finalTs = Math.max(cloudTs, prevTs);
 
       // CLOUD AUTHORITATIVE UNTUK CATATAN KARAKTER:
       // Seluruh perangkat membaca dan menampilkan nilai karakter langsung dari Cloud.
@@ -1717,7 +1740,7 @@ export async function smartSyncAndMergeAllWithCloud(): Promise<{ success: boolea
 
           const jsonStr = JSON.stringify(cleanCloud);
           safeSetLocalStorage(key, jsonStr);
-          safeSetLocalStorage(key + '_updatedAt', String(cloudDoc.updatedAt || now));
+          safeSetLocalStorage(key + '_updatedAt', String(finalTs));
           return jsonStr;
         }
       }
@@ -1732,7 +1755,7 @@ export async function smartSyncAndMergeAllWithCloud(): Promise<{ success: boolea
       }
       const jsonStr = JSON.stringify(merged);
       safeSetLocalStorage(key, jsonStr);
-      safeSetLocalStorage(key + '_updatedAt', String(now));
+      safeSetLocalStorage(key + '_updatedAt', String(finalTs));
       return jsonStr;
     };
 
@@ -1753,8 +1776,9 @@ export async function smartSyncAndMergeAllWithCloud(): Promise<{ success: boolea
     const localPredicates = getCharacterPredicateSettings();
     const mergedPredicates = { ...INITIAL_CHARACTER_PREDICATES, ...localPredicates, ...(cloudPredicates || {}) };
     const predicatesJsonStr = JSON.stringify(mergedPredicates);
+    const predicatesUpdatedAt = Math.max(Number(predicatesCloud?.updatedAt || 0), prevLocalTimestamps[KEYS.CHARACTER_PREDICATES] || 0);
     safeSetLocalStorage(KEYS.CHARACTER_PREDICATES, predicatesJsonStr);
-    safeSetLocalStorage(KEYS.CHARACTER_PREDICATES + '_updatedAt', String(now));
+    safeSetLocalStorage(KEYS.CHARACTER_PREDICATES + '_updatedAt', String(predicatesUpdatedAt));
 
     // Update local cache & notify UI instantly
     lastSavedStringCache[KEYS.PROFILE] = profileStr;
@@ -1780,15 +1804,16 @@ export async function smartSyncAndMergeAllWithCloud(): Promise<{ success: boolea
         const cloudStr = cloudDoc?.data;
         if (!localStr) return;
         
+        // PENGHEMAT KUOTA UTAMA & CEGAH LOOP:
         // Hanya tulis ke Cloud jika:
         // 1. Cloud masih kosong sama sekali tapi lokal punya data, ATAU
         // 2. Data presensi dan ada antrean scan pending, ATAU
-        // 3. Timestamp lokal terbukti lebih baru daripada Cloud (ada perubahan nyata dari user perangkat ini)
+        // 3. Timestamp lokal SEBELUM proses merge terbukti lebih baru daripada Cloud (ada perubahan nyata dari user perangkat ini)
         const cloudUpdatedAt = Number(cloudDoc?.updatedAt || 0);
-        const localUpdatedAt = Number(localStorage.getItem(key + '_updatedAt') || 0);
+        const prevLocalUpdatedAt = prevLocalTimestamps[key] || 0;
         const isCloudEmpty = !cloudStr || cloudStr === '[]' || cloudStr === '{}';
         const hasPendingScans = key === KEYS.ATTENDANCE && scanQueuePendingCount > 0;
-        const isLocallyModified = localUpdatedAt > (cloudUpdatedAt + 1000);
+        const isLocallyModified = prevLocalUpdatedAt > (cloudUpdatedAt + 1000);
 
         if ((isCloudEmpty && localStr !== '[]' && localStr !== '{}') || hasPendingScans || isLocallyModified) {
           if (localStr !== cloudStr) {
@@ -1859,9 +1884,17 @@ export async function triggerAutoSyncOnOnline(silent: boolean = false): Promise<
   }
 
   const now = Date.now();
-  // Cegah eksekusi ganda / spamming dalam interval < 3 detik
-  if (isAutoSyncRunning || (now - lastAutoSyncTime < 3000)) {
+  // Cegah eksekusi berulang / spamming dalam interval < 60 detik
+  if (isAutoSyncRunning || (now - lastAutoSyncTime < 60000)) {
     return false;
+  }
+
+  // Jika Firestore Realtime listener sudah aktif dan tidak ada scan antrean offline pending,
+  // listener onSnapshot otomatis menerima perubahan tanpa perlu membaca ulang seluruh 13 dokumen via REST getDoc
+  if (isFirestoreSyncActive() && scanQueuePendingCount === 0) {
+    lastAutoSyncTime = now;
+    setCloudSyncStatus('connected');
+    return true;
   }
 
   if (isFirestoreQuotaExceeded()) {
@@ -2106,6 +2139,10 @@ export function stopFirestoreRealtimeSync(): void {
     activeUnsubscribes = [];
   }
   isFirestoreInitialized = false;
+}
+
+export function isFirestoreSyncActive(): boolean {
+  return isFirestoreInitialized && activeUnsubscribes.length > 0;
 }
 
 const PARENT_SYNC_COOLDOWN_MS = 30 * 60 * 1000; // 30 menit cache cooldown sesuai instruksi pengguna
@@ -3627,7 +3664,7 @@ export function repairKbmActiveLogs(logs: StudentCharacterLog[]): { repairedLogs
     l && (l.id === adamKbmId || (l.studentId === 'std-1788095216502-5' && (l.traitName || '').toLowerCase().includes('kbm')))
   );
   if (!hasAdamKbm) {
-    unmarkCharacterLogDeleted(adamKbmId);
+    unmarkCharacterLogDeletedLocally(adamKbmId);
     repairedLogs.unshift({
       id: adamKbmId,
       studentId: 'std-1788095216502-5',
@@ -3973,10 +4010,28 @@ export function getDeletedCharacterLogIds(): Set<string> {
 export function markCharacterLogDeleted(logId: string): void {
   if (!logId || typeof window === 'undefined') return;
   const current = getDeletedCharacterLogIds();
-  current.add(logId.trim());
-  const arr = Array.from(current).slice(-1000);
-  safeSetLocalStorage(DELETED_CHARACTER_LOGS_KEY, JSON.stringify(arr));
-  syncToCloud(DELETED_CHARACTER_LOGS_KEY, arr, true);
+  const cleanId = logId.trim();
+  if (!current.has(cleanId)) {
+    current.add(cleanId);
+    const arr = Array.from(current).slice(-1000);
+    safeSetLocalStorage(DELETED_CHARACTER_LOGS_KEY, JSON.stringify(arr));
+    syncToCloud(DELETED_CHARACTER_LOGS_KEY, arr, false);
+  }
+}
+
+/**
+ * Menghapus tanda terhapus hanya di lokal/memori tanpa memicu penulisan rekursif ke Cloud.
+ * Sangat penting untuk fungsi penormalan data (pure getters) agar tidak terjadi infinite write loop.
+ */
+export function unmarkCharacterLogDeletedLocally(logId: string): void {
+  if (!logId || typeof window === 'undefined') return;
+  const current = getDeletedCharacterLogIds();
+  const cleanId = logId.trim();
+  if (current.has(cleanId)) {
+    current.delete(cleanId);
+    const arr = Array.from(current);
+    safeSetLocalStorage(DELETED_CHARACTER_LOGS_KEY, JSON.stringify(arr));
+  }
 }
 
 /**
@@ -3985,11 +4040,12 @@ export function markCharacterLogDeleted(logId: string): void {
 export function unmarkCharacterLogDeleted(logId: string): void {
   if (!logId || typeof window === 'undefined') return;
   const current = getDeletedCharacterLogIds();
-  if (current.has(logId.trim())) {
-    current.delete(logId.trim());
+  const cleanId = logId.trim();
+  if (current.has(cleanId)) {
+    current.delete(cleanId);
     const arr = Array.from(current);
     safeSetLocalStorage(DELETED_CHARACTER_LOGS_KEY, JSON.stringify(arr));
-    syncToCloud(DELETED_CHARACTER_LOGS_KEY, arr, true);
+    syncToCloud(DELETED_CHARACTER_LOGS_KEY, arr, false);
   }
 }
 
@@ -4117,7 +4173,7 @@ export function getStudentCharacterLogs(): StudentCharacterLog[] {
   return finalLogs;
 }
 
-export function saveStudentCharacterLogs(logs: StudentCharacterLog[], instantCloudSync: boolean = true): void {
+export function saveStudentCharacterLogs(logs: StudentCharacterLog[], instantCloudSync: boolean = false): void {
   const now = Date.now();
   const deletedSet = getDeletedCharacterLogIds();
 

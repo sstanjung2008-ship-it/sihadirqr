@@ -492,9 +492,24 @@ export async function writeCloudDocument(key: string, dataStr: string, timestamp
   let sanitizedDataStr = dataStr;
   if (key === KEYS.ATTENDANCE) {
     try {
-      const parsed = JSON.parse(dataStr);
-      if (Array.isArray(parsed)) {
-        const clean = validateAndSanitizeAttendanceRecords(parsed);
+      let incoming = JSON.parse(dataStr);
+      if (Array.isArray(incoming)) {
+        // PERLINDUNGAN NON-DESTRUCTIVE CLOUD MERGE (SALING MELENGKAPI):
+        // Jika Perangkat A sudah mengunggah scan Siswa 1, lalu Perangkat B mengunggah data kelas
+        // yang mana Siswa 1 di Perangkat B masih kosong, data Siswa 1 di Cloud JANGAN dihapus/diubah jadi kosong!
+        try {
+          const cloudAttDoc = await readCloudDocument(KEYS.ATTENDANCE);
+          if (cloudAttDoc && cloudAttDoc.data && cloudAttDoc.data !== '[]') {
+            const cloudRecs = JSON.parse(cloudAttDoc.data);
+            if (Array.isArray(cloudRecs) && cloudRecs.length > 0) {
+              incoming = mergeAttendanceLists(incoming, cloudRecs);
+            }
+          }
+        } catch (mergeErr) {
+          console.warn('[Attendance Cloud Non-Destructive Guard Warning]', mergeErr);
+        }
+
+        const clean = validateAndSanitizeAttendanceRecords(incoming);
         // Kompaksi payload: buang field kosong / default untuk menghemat 40-50% ukuran JSON di Firestore
         const compacted = clean.map((r: any) => {
           const item: any = {
@@ -516,6 +531,7 @@ export async function writeCloudDocument(key: string, dataStr: string, timestamp
           return item;
         });
         sanitizedDataStr = JSON.stringify(compacted);
+        safeSetLocalStorage(KEYS.ATTENDANCE, sanitizedDataStr);
       }
     } catch {}
   }
@@ -1379,10 +1395,51 @@ export function mergeAttendanceLists(local: AttendanceRecord[], cloud: Attendanc
     return s1 || s2;
   };
 
+  const isRealScanOrPresent = (rec?: AttendanceRecord | null): boolean => {
+    if (!rec) return false;
+    const hasTime = !!rec.time && rec.time !== '-' && rec.time.trim() !== '' && !rec.time.toLowerCase().includes('belum');
+    const hasReturn = !!rec.returnTime && rec.returnTime !== '-' && rec.returnTime.trim() !== '';
+    const isPresent = rec.status === 'HADIR' || rec.status === 'TERLAMBAT' || rec.status === 'SAKIT' || rec.status === 'IZIN';
+    return hasTime || hasReturn || (isPresent && rec.method === 'QR_SCAN');
+  };
+
   const mergeSingleRecord = (localRec: AttendanceRecord, cloudRec: AttendanceRecord): AttendanceRecord => {
-    // CLOUD AUTHORITATIVE: Saat menggabungkan record yang sama, Cloud selalu diutamakan
-    // agar update manual guru/admin (termasuk status ALPA, SAKIT, IZIN) tidak ditolak oleh perangkat lain.
-    const bestStatus = cloudRec.status || localRec.status || 'HADIR';
+    const localHasData = isRealScanOrPresent(localRec);
+    const cloudHasData = isRealScanOrPresent(cloudRec);
+
+    // KASUS 1: Cloud sudah memiliki data scan nyata (diupload Perangkat A),
+    // sedangkan Perangkat B mengunggah data kelas tapi Siswa 1 di Perangkat B masih kosong/belum scan:
+    // DATA CLOUD DILINDUNGI PENUH: JANGAN DIHAPUS / JANGAN DIUBAH JADI KOSONG!
+    if (cloudHasData && !localHasData) {
+      return {
+        ...localRec,
+        ...cloudRec,
+        notes: cloudRec.notes || localRec.notes,
+      };
+    }
+
+    // KASUS 2: Perangkat lokal baru saja melakukan scan nyata, sedangkan Cloud masih kosong/un-scanned:
+    // DATA SCAN LOKAL DITERAPKAN:
+    if (localHasData && !cloudHasData) {
+      return {
+        ...cloudRec,
+        ...localRec,
+        notes: localRec.notes || cloudRec.notes,
+      };
+    }
+
+    // KASUS 3: Kedua perangkat memiliki data kehadiran nyata -> gabungkan secara saling melengkapi:
+    let bestStatus: AttendanceRecord['status'] = cloudRec.status || localRec.status || 'HADIR';
+    if (cloudRec.status === 'SAKIT' || cloudRec.status === 'IZIN') {
+      bestStatus = cloudRec.status;
+    } else if (localRec.status === 'SAKIT' || localRec.status === 'IZIN') {
+      bestStatus = localRec.status;
+    } else if (cloudRec.status === 'HADIR' || cloudRec.status === 'TERLAMBAT') {
+      bestStatus = cloudRec.status;
+    } else if (localRec.status === 'HADIR' || localRec.status === 'TERLAMBAT') {
+      bestStatus = localRec.status;
+    }
+
     const bestMethod = (cloudRec.method === 'QR_SCAN' || localRec.method === 'QR_SCAN') 
       ? 'QR_SCAN' 
       : (cloudRec.method || localRec.method || 'QR_SCAN');
@@ -3159,8 +3216,8 @@ export function getAttendanceRecords(): AttendanceRecord[] {
 // =========================================================================
 // SCAN BATCHING QUEUE WORKER (REAL-TIME CLOUD SYNC & QUOTA SAVER)
 // =========================================================================
-export const SCAN_BATCH_THRESHOLD = 10; // Keseimbangan optimal: flush ke cloud setiap 10 siswa (hemat kuota 70%+)
-export const SCAN_IDLE_TIMEOUT_MS = 5000; // Flush ke cloud jika 5 detik tanpa scan baru (idle)
+export const SCAN_BATCH_THRESHOLD = 20; // Tetap jalankan batching 20 data siswa yang discan
+export const SCAN_IDLE_TIMEOUT_MS = 10000; // Tetap jalankan jeda idle 10 detik
 
 export interface ScanQueueStatus {
   pendingCount: number;
@@ -3176,7 +3233,7 @@ let scanQueueIdleTimer: any = null;
 let scanQueueLastFlushTime = Date.now();
 let isScanQueueFlushing = false;
 let scanQueueCountdownTimer: any = null;
-let scanQueueCountdownSeconds = 2;
+let scanQueueCountdownSeconds = 10;
 
 export function getScanQueueStatus(): ScanQueueStatus {
   return {

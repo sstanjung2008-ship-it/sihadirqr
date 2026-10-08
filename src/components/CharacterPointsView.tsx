@@ -1244,7 +1244,7 @@ export const CharacterPointsView: React.FC<CharacterPointsViewProps> = ({
                               )}
                               {isHighlighted && (
                                 <span className="bg-indigo-600 text-white text-[10px] font-black px-2.5 py-0.5 rounded-full shadow-xs animate-pulse">
-                                  Item Terpilih
+                                  Dipilih dari Notifikasi
                                 </span>
                               )}
                             </div>

@@ -289,7 +289,7 @@ export const MultiDeviceSyncModal: React.FC<MultiDeviceSyncModalProps> = ({
                   <span className={`relative inline-flex rounded-full h-2.5 w-2.5 ${syncStatus === 'connected' ? 'bg-emerald-400' : syncStatus === 'quota_exceeded' ? 'bg-amber-400' : 'bg-slate-400'}`}></span>
                 </span>
                 <span className={`text-xs font-extrabold ${syncStatus === 'connected' ? 'text-emerald-300' : syncStatus === 'quota_exceeded' ? 'text-amber-300' : 'text-slate-300'}`}>
-                  {syncStatus === 'connected' ? 'Terhubung Live' : syncStatus === 'quota_exceeded' ? 'Batas Kuota Cloud Harian' : syncStatus === 'syncing' ? 'Menyinkronkan...' : 'Mode Offline'}
+                  {syncStatus === 'connected' ? 'Terhubung (Hemat Kuota Aktif)' : syncStatus === 'quota_exceeded' ? 'Batas Kuota Cloud Harian' : syncStatus === 'syncing' ? 'Menyinkronkan...' : 'Mode Offline'}
                 </span>
               </div>
             </div>

@@ -37,6 +37,7 @@ import {
   saveCharacterTraits,
   getStudentCharacterLogs,
   saveStudentCharacterLogs,
+  saveStudentCharacterLogsLocally,
   deletePermanentManualCharacterLog,
   markCharacterLogDeleted,
   unmarkCharacterLogDeleted,
@@ -51,6 +52,7 @@ import {
   saveClassSchedules,
   getUserSession,
   saveUserSession,
+  initFirestoreAppSession,
   initFirestoreRealtimeSync,
   stopFirestoreRealtimeSync,
   isFirestoreSyncActive,
@@ -364,8 +366,8 @@ export default function App() {
 
 
   useEffect(() => {
-    // Jalankan sinkronisasi real-time berbasis role
-    initFirestoreRealtimeSync(currentRole);
+    // Inisialisasi sesi aplikasi: Read dari Cloud HANYA terjadi saat membuka awal dan merefresh halaman aplikasi
+    initFirestoreAppSession(currentRole);
 
     // Initial reconciliation on boot to make sure in-memory state is consistent without overwriting Cloud Firestore
     const initialRawClasses = getSchoolClasses();
@@ -380,28 +382,6 @@ export default function App() {
       setClassesState(updatedClasses);
     }
 
-    // PENGHEMAT KUOTA UTAMA:
-    // Saat HP Orang Tua atau Guru mengunci layar, beralih ke aplikasi lain (WA), atau tab diminimalkan (document.hidden),
-    // HENTIKAN listener Firestore onSnapshot JIKA tab berada di latar belakang lebih dari 45 detik.
-    // Grace period 45 detik ini mencegah pembatalan dan pendaftaran ulang 14 listener (14 read baru)
-    // hanya karena pengguna membuka notifikasi WA atau beralih aplikasi sebentar!
-    let hiddenDisconnectTimer: any = null;
-    const handleVisibilityChange = () => {
-      if (document.hidden) {
-        hiddenDisconnectTimer = setTimeout(() => {
-          stopFirestoreRealtimeSync();
-        }, 45000);
-      } else {
-        if (hiddenDisconnectTimer) {
-          clearTimeout(hiddenDisconnectTimer);
-          hiddenDisconnectTimer = null;
-        }
-        if (!isFirestoreSyncActive()) {
-          initFirestoreRealtimeSync(currentRole);
-        }
-      }
-    };
-
     const handleNetworkToast = (e: any) => {
       if (e?.detail) {
         setNetworkToast(e.detail);
@@ -413,17 +393,10 @@ export default function App() {
 
     window.addEventListener('sihadir_storage_updated', refreshDataFromStorage);
     window.addEventListener('sihadir_network_toast', handleNetworkToast);
-    document.addEventListener('visibilitychange', handleVisibilityChange);
 
     return () => {
-      if (hiddenDisconnectTimer) {
-        clearTimeout(hiddenDisconnectTimer);
-        hiddenDisconnectTimer = null;
-      }
       window.removeEventListener('sihadir_storage_updated', refreshDataFromStorage);
       window.removeEventListener('sihadir_network_toast', handleNetworkToast);
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
-      stopFirestoreRealtimeSync();
     };
   }, [currentRole]);
 
@@ -487,7 +460,7 @@ export default function App() {
         !r.scannedBy?.includes('Sistem Otomatis (Batas Alpa)') &&
         !r.notes?.includes('Otomatis Alpa')
       ));
-      saveAttendanceRecords(cleaned, true);
+      saveAttendanceRecordsLocally(cleaned);
       return cleaned;
     });
   }, []);
@@ -824,7 +797,7 @@ export default function App() {
             return true;
           });
           if (logsChanged) {
-            saveStudentCharacterLogs(cleaned, false);
+            saveStudentCharacterLogsLocally(cleaned);
             return cleaned;
           }
           return prevLogs;

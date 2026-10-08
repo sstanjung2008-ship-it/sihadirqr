@@ -1333,40 +1333,53 @@ export function reconcileTeachersAndClasses(
 export function isRealAttendance(rec?: AttendanceRecord | null): boolean {
   if (!rec) return false;
   // If return scan happened, it's definitely real
-  if (rec.returnTime && rec.returnTime !== '-') return true;
+  if (rec.returnTime && rec.returnTime !== '-' && rec.returnTime.trim() && !rec.returnTime.toLowerCase().includes('belum')) return true;
+  if (rec.returnStatus === 'PULANG' || rec.returnStatus === 'PULANG_CEPAT' || rec.returnStatus === 'PULANG_TEPAT') return true;
   // If QR code was scanned, it's definitely real
   if (rec.method === 'QR_SCAN') return true;
-  // If status is not ALPA, it's a real status (HADIR, TERLAMBAT, SAKIT, IZIN, DISPENSASI, etc.)
+  // If entry scan time is valid and not empty or '-' or 'belum'
+  const hasValidTime = !!(rec.time && rec.time !== '-' && rec.time.trim() && !rec.time.toLowerCase().includes('belum'));
+  if (hasValidTime) return true;
+  // If status is real (HADIR, TERLAMBAT, SAKIT, IZIN, DISPENSASI) and not ALPA
   if (rec.status && rec.status !== 'ALPA') return true;
-  // If it is explicitly marked as auto-alpa, it's NOT a real scan
-  if (
-    rec.id?.startsWith('att-autoalpa-') ||
-    rec.scannedBy?.includes('Sistem Otomatis') ||
-    rec.scannedBy?.includes('Batas Alpa') ||
-    rec.notes?.includes('Otomatis Alpa')
-  ) {
-    return false;
-  }
-  // Otherwise, only real if non-alpa or time is present
-  return rec.status !== 'ALPA' || (!!rec.time && rec.time !== '-');
+  // If it is explicitly marked as auto-alpa or empty, it's NOT a real scan
+  return false;
 }
 
 export function mergeSingleAttendanceRecord(a: AttendanceRecord, b: AttendanceRecord): AttendanceRecord {
   const isRealA = isRealAttendance(a);
   const isRealB = isRealAttendance(b);
 
+  // KASUS 1: Perangkat A (a) punya data scan riil, Perangkat B (b) masih kosong / belum scan (ALPA / '-').
+  // JAMINAN MUTLAK USER: DATA SISWA 1 DI CLOUD JANGAN DIHAPUS / DIUBAH JADI KOSONG!
+  if (isRealA && !isRealB) {
+    return {
+      ...a,
+      notes: (a.notes && a.notes.trim()) ? a.notes : (b.notes || a.notes || ''),
+    };
+  }
+
+  // KASUS 2: Perangkat B (b) punya data scan riil baru, Perangkat A (a) masih kosong / belum scan.
+  if (!isRealA && isRealB) {
+    return {
+      ...b,
+      notes: (b.notes && b.notes.trim()) ? b.notes : (a.notes || b.notes || ''),
+    };
+  }
+
+  // KASUS 3: Keduanya memiliki data riil -> Saling melengkapi (misal A scan datang, B scan pulang)
   // 1. Evaluasi Waktu Masuk (Entry Time):
   // Jika salah satu memiliki jam scan masuk valid (bukan '-'), pertahankan jam tersebut.
   const getEntryTime = (): string => {
     const aValid = !!(a.time && a.time !== '-' && a.time.trim() && !a.time.toLowerCase().includes('belum'));
     const bValid = !!(b.time && b.time !== '-' && b.time.trim() && !b.time.toLowerCase().includes('belum'));
     if (aValid && bValid) {
-      if (a.method === 'QR_SCAN' && b.method !== 'QR_SCAN') return a.time;
-      if (b.method === 'QR_SCAN' && a.method !== 'QR_SCAN') return b.time;
-      return a.time;
+      if (a.method === 'QR_SCAN' && b.method !== 'QR_SCAN') return a.time!;
+      if (b.method === 'QR_SCAN' && a.method !== 'QR_SCAN') return b.time!;
+      return a.time!;
     }
-    if (aValid) return a.time;
-    if (bValid) return b.time;
+    if (aValid) return a.time!;
+    if (bValid) return b.time!;
     return '-';
   };
 
@@ -1392,8 +1405,8 @@ export function mergeSingleAttendanceRecord(a: AttendanceRecord, b: AttendanceRe
   // Jangan pernah menghilangkan scan kepulangan jika Perangkat B scan pulang setelah Perangkat A scan datang!
   const getReturnInfo = () => {
     const isCompleted = (s?: string) => s === 'PULANG' || s === 'PULANG_CEPAT' || s === 'PULANG_TEPAT';
-    const aHasReturn = !!(a.returnTime && a.returnTime !== '-' && a.returnTime.trim()) || isCompleted(a.returnStatus);
-    const bHasReturn = !!(b.returnTime && b.returnTime !== '-' && b.returnTime.trim()) || isCompleted(b.returnStatus);
+    const aHasReturn = !!(a.returnTime && a.returnTime !== '-' && a.returnTime.trim() && !a.returnTime.toLowerCase().includes('belum')) || isCompleted(a.returnStatus);
+    const bHasReturn = !!(b.returnTime && b.returnTime !== '-' && b.returnTime.trim() && !b.returnTime.toLowerCase().includes('belum')) || isCompleted(b.returnStatus);
 
     let returnTime: string | undefined = undefined;
     let returnStatus: AttendanceRecord['returnStatus'] | undefined = undefined;
@@ -1432,9 +1445,10 @@ export function mergeSingleAttendanceRecord(a: AttendanceRecord, b: AttendanceRe
 
   const finalNotes = (a.notes && a.notes.trim()) ? a.notes : (b.notes || '');
 
+  const baseObj = a.method === 'QR_SCAN' ? a : (b.method === 'QR_SCAN' ? b : a);
+
   const merged: AttendanceRecord = {
-    ...a,
-    ...b,
+    ...baseObj,
     time: finalTime,
     status: finalStatus,
     method: finalMethod,
@@ -1971,6 +1985,26 @@ export async function forceUploadAllToCloud(): Promise<{ success: boolean; error
     const writePromises = ALL_KEYS.map(async (key) => {
       const raw = localStorage.getItem(key);
       if (raw) {
+        if (key === KEYS.ATTENDANCE) {
+          try {
+            const cloudDoc = await readCloudDocument(KEYS.ATTENDANCE);
+            if (cloudDoc && cloudDoc.data) {
+              const cloudRecords = typeof cloudDoc.data === 'string' ? JSON.parse(cloudDoc.data) : cloudDoc.data;
+              const localRecords = JSON.parse(raw);
+              if (Array.isArray(cloudRecords) && cloudRecords.length > 0 && Array.isArray(localRecords)) {
+                const merged = mergeAttendanceLists(cloudRecords, localRecords);
+                const mergedStr = JSON.stringify(merged);
+                safeSetLocalStorage(KEYS.ATTENDANCE, mergedStr);
+                safeSetLocalStorage(KEYS.ATTENDANCE + '_updatedAt', String(now));
+                lastSavedStringCache[key] = mergedStr;
+                await writeCloudDocument(key, mergedStr, now);
+                return;
+              }
+            }
+          } catch (e) {
+            console.warn('[forceUploadAllToCloud] Merge attendance error:', e);
+          }
+        }
         lastSavedStringCache[key] = raw;
         await writeCloudDocument(key, raw, now);
       }
@@ -2853,6 +2887,7 @@ export function notifyScanQueueChanged(): void {
  * Jika Perangkat A scan Siswa 1 dan Perangkat B scan Siswa 2, Siswa 1 TIDAK AKAN HILANG.
  */
 export async function flushAttendanceScanQueue(force: boolean = false): Promise<void> {
+  if (isScanQueueFlushing) return;
   if (scanQueuePendingCount === 0 && !force) return;
 
   if (scanQueueIdleTimer) {

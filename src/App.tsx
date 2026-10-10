@@ -52,6 +52,7 @@ import {
   saveClassSchedules,
   getUserSession,
   saveUserSession,
+  safeSetLocalStorage,
   initFirestoreAppSession,
   initFirestoreRealtimeSync,
   stopFirestoreRealtimeSync,
@@ -374,11 +375,11 @@ export default function App() {
     const initialRawTeachers = getTeachers();
     const { updatedTeachers, updatedClasses, teachersChanged, classesChanged } = reconcileTeachersAndClasses(initialRawTeachers, initialRawClasses);
     if (teachersChanged) {
-      localStorage.setItem(KEYS.TEACHERS, JSON.stringify(updatedTeachers));
+      safeSetLocalStorage(KEYS.TEACHERS, JSON.stringify(updatedTeachers));
       setTeachersState(updatedTeachers);
     }
     if (classesChanged) {
-      localStorage.setItem(KEYS.CLASSES, JSON.stringify(updatedClasses));
+      safeSetLocalStorage(KEYS.CLASSES, JSON.stringify(updatedClasses));
       setClassesState(updatedClasses);
     }
 

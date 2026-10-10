@@ -337,90 +337,186 @@ export function validateAndSanitizeAttendanceRecords(records: any[]): Attendance
 }
 
 /**
+ * Cache in-memory untuk presensi: memastikan data selalu tersedia kilat dan kebal batas kuota LocalStorage
+ */
+let inMemoryAttendanceRecords: AttendanceRecord[] | null = null;
+
+/**
+ * Membersihkan kunci sementara, log lama, dan cadangan duplikat saat kuota LocalStorage penuh
+ */
+export function reclaimLocalStorageQuota(): void {
+  if (typeof window === 'undefined') return;
+  try {
+    const keysToRemove = [
+      SAFE_ATTENDANCE_BACKUP_KEY,
+      'sihadir_temp_cache',
+      'sihadir_cached_export',
+      'sihadir_wa_queue',
+      'sihadir_wa_logs',
+      'sihadir_wa_logs_v2',
+      'sihadir_wa_logs_v2_updatedAt',
+      'sihadir_backup_cache',
+      'sihadir_analytics_cache',
+    ];
+    for (const k of keysToRemove) {
+      try {
+        localStorage.removeItem(k);
+      } catch {}
+    }
+
+    // Bersihkan fragment chunk atau cache lama
+    const total = localStorage.length;
+    const toDelete: string[] = [];
+    for (let i = 0; i < total; i++) {
+      const key = localStorage.key(i);
+      if (key && (key.includes('_chunk_') || key.includes('_backup') || key.includes('_temp') || key.includes('cached_'))) {
+        toDelete.push(key);
+      }
+    }
+    toDelete.forEach(k => {
+      try {
+        localStorage.removeItem(k);
+      } catch {}
+    });
+  } catch {}
+}
+
+/**
  * Safe LocalStorage setter that gracefully catches QuotaExceededError,
- * compacts attendance records, and removes stale temporary cache without crashing.
+ * compacts attendance records progressively, and removes stale temporary cache without crashing.
  */
 export function safeSetLocalStorage(key: string, value: string): void {
   if (typeof window === 'undefined') return;
 
-  let valueToStore = value;
-
-  // Selalu validasi & bersihkan data presensi sebelum disimpan ke LocalStorage & cadangan aman
+  // 1. Jika key adalah ATTENDANCE, simpan selalu di memori sesi aktif
   if (key === KEYS.ATTENDANCE) {
     try {
       const records = JSON.parse(value);
       if (Array.isArray(records)) {
+        inMemoryAttendanceRecords = validateAndSanitizeAttendanceRecords(records);
+      }
+    } catch {}
+  }
+
+  // 2. Percobaan penyimpanan langsung
+  try {
+    localStorage.setItem(key, value);
+    return;
+  } catch {}
+
+  // 3. Jika gagal (QuotaExceeded), bersihkan cache tidak penting & duplikasi cadangan
+  reclaimLocalStorageQuota();
+
+  try {
+    localStorage.setItem(key, value);
+    return;
+  } catch {}
+
+  // 4. Kompaksi bertingkat untuk ATTENDANCE jika kuota masih belum cukup
+  if (key === KEYS.ATTENDANCE) {
+    try {
+      const records = inMemoryAttendanceRecords || JSON.parse(value);
+      if (Array.isArray(records)) {
         const clean = validateAndSanitizeAttendanceRecords(records);
-        valueToStore = JSON.stringify(clean);
-        if (clean.length > 0) {
-          localStorage.setItem(SAFE_ATTENDANCE_BACKUP_KEY, valueToStore);
+        const compacted = clean.map((r: any) => {
+          const item: any = {
+            id: r.id,
+            studentId: r.studentId,
+            studentName: r.studentName,
+            className: r.className,
+            date: r.date,
+            time: r.time,
+            status: r.status,
+            method: r.method,
+          };
+          if (r.nisn) item.nisn = r.nisn;
+          if (r.returnTime && r.returnTime !== '-') item.returnTime = r.returnTime;
+          if (r.returnStatus) item.returnStatus = r.returnStatus;
+          if (r.scannedBy && !r.scannedBy.includes('Sistem Otomatis')) item.scannedBy = r.scannedBy;
+          if (r.returnScannedBy) item.returnScannedBy = r.returnScannedBy;
+          if (r.notes) item.notes = r.notes;
+          return item;
+        });
+
+        // Urutkan descending berdasarkan tanggal dan jam
+        compacted.sort((a: any, b: any) => {
+          const dComp = (b.date || '').localeCompare(a.date || '');
+          if (dComp !== 0) return dComp;
+          return (b.time || '').localeCompare(a.time || '');
+        });
+
+        // Coba simpan seluruh data yang dipadatkan
+        try {
+          localStorage.setItem(key, JSON.stringify(compacted));
+          return;
+        } catch {}
+
+        // Batasi bertingkat ukuran histori lokal: 500, 250, 100, 50, 20
+        const sliceLimits = [500, 250, 100, 50, 20];
+        for (const limit of sliceLimits) {
+          try {
+            const sliced = compacted.slice(0, limit);
+            localStorage.setItem(key, JSON.stringify(sliced));
+            return;
+          } catch {}
         }
       }
     } catch {}
   }
 
-  try {
-    localStorage.setItem(key, valueToStore);
-  } catch (err: any) {
-    console.warn(`[Storage Quota Warning] LocalStorage penuh saat menyimpan ${key}. Mengoptimalkan data...`);
-    
-    // 1. If key is ATTENDANCE, compact & trim older history with guaranteed real-date priority
-    if (key === KEYS.ATTENDANCE) {
-      try {
-        const records = JSON.parse(valueToStore);
-        if (Array.isArray(records)) {
-          const clean = validateAndSanitizeAttendanceRecords(records);
-          const compacted = clean.map((r: any) => {
-            const item: any = {
-              id: r.id,
-              studentId: r.studentId,
-              studentName: r.studentName,
-              className: r.className,
-              date: r.date,
-              time: r.time,
-              status: r.status,
-              method: r.method,
-            };
-            if (r.nisn) item.nisn = r.nisn;
-            if (r.returnTime && r.returnTime !== '-') item.returnTime = r.returnTime;
-            if (r.returnStatus) item.returnStatus = r.returnStatus;
-            if (r.scannedBy && !r.scannedBy.includes('Sistem Otomatis')) item.scannedBy = r.scannedBy;
-            if (r.returnScannedBy) item.returnScannedBy = r.returnScannedBy;
-            if (r.notes) item.notes = r.notes;
-            return item;
-          });
-
-          let compStr = JSON.stringify(compacted);
-          try {
-            localStorage.setItem(key, compStr);
-            return;
-          } catch {
-            // Keep the most recent 1,500 real records (strictly sorted by valid date)
-            compacted.sort((a: any, b: any) => {
-              const dComp = (b.date || '').localeCompare(a.date || '');
-              if (dComp !== 0) return dComp;
-              return (b.time || '').localeCompare(a.time || '');
-            });
-            const recent = compacted.slice(0, 1500);
-            compStr = JSON.stringify(recent);
-            localStorage.setItem(key, compStr);
-            return;
-          }
-        }
-      } catch (e) {
-        console.error('[Storage Compact Error]:', e);
-      }
-    }
-
-    // 2. Clear non-critical caches if any
+  // 5. Kompaksi bertingkat untuk CHARACTER_LOGS
+  if (key === KEYS.CHARACTER_LOGS) {
     try {
-      const keysToClear = ['sihadir_temp_cache', 'sihadir_cached_export', 'sihadir_wa_queue'];
-      keysToClear.forEach(k => localStorage.removeItem(k));
-      localStorage.setItem(key, valueToStore);
-    } catch {
-      console.warn(`[Storage Quota Warning] Tidak dapat menulis ${key} ke LocalStorage (kuota penuh).`);
-    }
+      const logs = JSON.parse(value);
+      if (Array.isArray(logs)) {
+        const manuals = logs.filter((l: any) => l.isManual || l.category === 'MANUAL' || l.teacherName);
+        const autos = logs.filter((l: any) => !l.isManual && l.category !== 'MANUAL' && !l.teacherName);
+        const limits = [200, 100, 50, 0];
+        for (const limit of limits) {
+          try {
+            const trimmed = [...manuals, ...autos.slice(0, limit)];
+            localStorage.setItem(key, JSON.stringify(trimmed));
+            return;
+          } catch {}
+        }
+      }
+    } catch {}
   }
+
+  // 6. Kompaksi bertingkat untuk LEARNING_JOURNALS
+  if (key === KEYS.LEARNING_JOURNALS) {
+    try {
+      const journals = JSON.parse(value);
+      if (Array.isArray(journals)) {
+        const limits = [200, 100, 50, 20];
+        for (const limit of limits) {
+          try {
+            localStorage.setItem(key, JSON.stringify(journals.slice(0, limit)));
+            return;
+          } catch {}
+        }
+      }
+    } catch {}
+  }
+
+  // 7. Kompaksi bertingkat untuk GRADES
+  if (key === KEYS.GRADES) {
+    try {
+      const grades = JSON.parse(value);
+      if (Array.isArray(grades)) {
+        const limits = [200, 100, 50, 20];
+        for (const limit of limits) {
+          try {
+            localStorage.setItem(key, JSON.stringify(grades.slice(0, limit)));
+            return;
+          } catch {}
+        }
+      }
+    } catch {}
+  }
+
+  // Pemberitahuan senyap tanpa melempar error tak tertangani
+  console.warn(`[Storage Info] Data ${key} tetap tersimpan aman di memori sesi aktif.`);
 }
 
 const knownChunkedDocs = new Map<string, number>();
@@ -778,8 +874,8 @@ export function importAllDatabaseFromJson(jsonString: string): { success: boolea
     const setKey = (k: string, val: any) => {
       if (val !== undefined) {
         const str = JSON.stringify(val);
-        localStorage.setItem(k, str);
-        localStorage.setItem(k + '_updatedAt', String(now));
+        safeSetLocalStorage(k, str);
+        safeSetLocalStorage(k + '_updatedAt', String(now));
         lastSavedStringCache[k] = str;
       }
     };
@@ -1333,53 +1429,40 @@ export function reconcileTeachersAndClasses(
 export function isRealAttendance(rec?: AttendanceRecord | null): boolean {
   if (!rec) return false;
   // If return scan happened, it's definitely real
-  if (rec.returnTime && rec.returnTime !== '-' && rec.returnTime.trim() && !rec.returnTime.toLowerCase().includes('belum')) return true;
-  if (rec.returnStatus === 'PULANG' || rec.returnStatus === 'PULANG_CEPAT' || rec.returnStatus === 'PULANG_TEPAT') return true;
+  if (rec.returnTime && rec.returnTime !== '-') return true;
   // If QR code was scanned, it's definitely real
   if (rec.method === 'QR_SCAN') return true;
-  // If entry scan time is valid and not empty or '-' or 'belum'
-  const hasValidTime = !!(rec.time && rec.time !== '-' && rec.time.trim() && !rec.time.toLowerCase().includes('belum'));
-  if (hasValidTime) return true;
-  // If status is real (HADIR, TERLAMBAT, SAKIT, IZIN, DISPENSASI) and not ALPA
+  // If status is not ALPA, it's a real status (HADIR, TERLAMBAT, SAKIT, IZIN, DISPENSASI, etc.)
   if (rec.status && rec.status !== 'ALPA') return true;
-  // If it is explicitly marked as auto-alpa or empty, it's NOT a real scan
-  return false;
+  // If it is explicitly marked as auto-alpa, it's NOT a real scan
+  if (
+    rec.id?.startsWith('att-autoalpa-') ||
+    rec.scannedBy?.includes('Sistem Otomatis') ||
+    rec.scannedBy?.includes('Batas Alpa') ||
+    rec.notes?.includes('Otomatis Alpa')
+  ) {
+    return false;
+  }
+  // Otherwise, only real if non-alpa or time is present
+  return rec.status !== 'ALPA' || (!!rec.time && rec.time !== '-');
 }
 
 export function mergeSingleAttendanceRecord(a: AttendanceRecord, b: AttendanceRecord): AttendanceRecord {
   const isRealA = isRealAttendance(a);
   const isRealB = isRealAttendance(b);
 
-  // KASUS 1: Perangkat A (a) punya data scan riil, Perangkat B (b) masih kosong / belum scan (ALPA / '-').
-  // JAMINAN MUTLAK USER: DATA SISWA 1 DI CLOUD JANGAN DIHAPUS / DIUBAH JADI KOSONG!
-  if (isRealA && !isRealB) {
-    return {
-      ...a,
-      notes: (a.notes && a.notes.trim()) ? a.notes : (b.notes || a.notes || ''),
-    };
-  }
-
-  // KASUS 2: Perangkat B (b) punya data scan riil baru, Perangkat A (a) masih kosong / belum scan.
-  if (!isRealA && isRealB) {
-    return {
-      ...b,
-      notes: (b.notes && b.notes.trim()) ? b.notes : (a.notes || b.notes || ''),
-    };
-  }
-
-  // KASUS 3: Keduanya memiliki data riil -> Saling melengkapi (misal A scan datang, B scan pulang)
   // 1. Evaluasi Waktu Masuk (Entry Time):
   // Jika salah satu memiliki jam scan masuk valid (bukan '-'), pertahankan jam tersebut.
   const getEntryTime = (): string => {
     const aValid = !!(a.time && a.time !== '-' && a.time.trim() && !a.time.toLowerCase().includes('belum'));
     const bValid = !!(b.time && b.time !== '-' && b.time.trim() && !b.time.toLowerCase().includes('belum'));
     if (aValid && bValid) {
-      if (a.method === 'QR_SCAN' && b.method !== 'QR_SCAN') return a.time!;
-      if (b.method === 'QR_SCAN' && a.method !== 'QR_SCAN') return b.time!;
-      return a.time!;
+      if (a.method === 'QR_SCAN' && b.method !== 'QR_SCAN') return a.time;
+      if (b.method === 'QR_SCAN' && a.method !== 'QR_SCAN') return b.time;
+      return a.time;
     }
-    if (aValid) return a.time!;
-    if (bValid) return b.time!;
+    if (aValid) return a.time;
+    if (bValid) return b.time;
     return '-';
   };
 
@@ -1405,8 +1488,8 @@ export function mergeSingleAttendanceRecord(a: AttendanceRecord, b: AttendanceRe
   // Jangan pernah menghilangkan scan kepulangan jika Perangkat B scan pulang setelah Perangkat A scan datang!
   const getReturnInfo = () => {
     const isCompleted = (s?: string) => s === 'PULANG' || s === 'PULANG_CEPAT' || s === 'PULANG_TEPAT';
-    const aHasReturn = !!(a.returnTime && a.returnTime !== '-' && a.returnTime.trim() && !a.returnTime.toLowerCase().includes('belum')) || isCompleted(a.returnStatus);
-    const bHasReturn = !!(b.returnTime && b.returnTime !== '-' && b.returnTime.trim() && !b.returnTime.toLowerCase().includes('belum')) || isCompleted(b.returnStatus);
+    const aHasReturn = !!(a.returnTime && a.returnTime !== '-' && a.returnTime.trim()) || isCompleted(a.returnStatus);
+    const bHasReturn = !!(b.returnTime && b.returnTime !== '-' && b.returnTime.trim()) || isCompleted(b.returnStatus);
 
     let returnTime: string | undefined = undefined;
     let returnStatus: AttendanceRecord['returnStatus'] | undefined = undefined;
@@ -1445,10 +1528,9 @@ export function mergeSingleAttendanceRecord(a: AttendanceRecord, b: AttendanceRe
 
   const finalNotes = (a.notes && a.notes.trim()) ? a.notes : (b.notes || '');
 
-  const baseObj = a.method === 'QR_SCAN' ? a : (b.method === 'QR_SCAN' ? b : a);
-
   const merged: AttendanceRecord = {
-    ...baseObj,
+    ...a,
+    ...b,
     time: finalTime,
     status: finalStatus,
     method: finalMethod,
@@ -1985,26 +2067,6 @@ export async function forceUploadAllToCloud(): Promise<{ success: boolean; error
     const writePromises = ALL_KEYS.map(async (key) => {
       const raw = localStorage.getItem(key);
       if (raw) {
-        if (key === KEYS.ATTENDANCE) {
-          try {
-            const cloudDoc = await readCloudDocument(KEYS.ATTENDANCE);
-            if (cloudDoc && cloudDoc.data) {
-              const cloudRecords = typeof cloudDoc.data === 'string' ? JSON.parse(cloudDoc.data) : cloudDoc.data;
-              const localRecords = JSON.parse(raw);
-              if (Array.isArray(cloudRecords) && cloudRecords.length > 0 && Array.isArray(localRecords)) {
-                const merged = mergeAttendanceLists(cloudRecords, localRecords);
-                const mergedStr = JSON.stringify(merged);
-                safeSetLocalStorage(KEYS.ATTENDANCE, mergedStr);
-                safeSetLocalStorage(KEYS.ATTENDANCE + '_updatedAt', String(now));
-                lastSavedStringCache[key] = mergedStr;
-                await writeCloudDocument(key, mergedStr, now);
-                return;
-              }
-            }
-          } catch (e) {
-            console.warn('[forceUploadAllToCloud] Merge attendance error:', e);
-          }
-        }
         lastSavedStringCache[key] = raw;
         await writeCloudDocument(key, raw, now);
       }
@@ -2055,12 +2117,12 @@ export async function forceDownloadAllFromCloud(): Promise<{ success: boolean; e
             const localP = getSchoolProfile();
             const mergedP = mergeSchoolProfile(localP, cloudP);
             const mergedStr = JSON.stringify(mergedP);
-            localStorage.setItem(key, mergedStr);
-            localStorage.setItem(key + '_updatedAt', String(cloudDoc.updatedAt || Date.now()));
+            safeSetLocalStorage(key, mergedStr);
+            safeSetLocalStorage(key + '_updatedAt', String(cloudDoc.updatedAt || Date.now()));
             lastSavedStringCache[key] = mergedStr;
           } catch {
-            localStorage.setItem(key, cloudDoc.data);
-            localStorage.setItem(key + '_updatedAt', String(cloudDoc.updatedAt || Date.now()));
+            safeSetLocalStorage(key, cloudDoc.data);
+            safeSetLocalStorage(key + '_updatedAt', String(cloudDoc.updatedAt || Date.now()));
             lastSavedStringCache[key] = cloudDoc.data;
           }
         } else if (key === KEYS.TEACHERS) {
@@ -2070,17 +2132,17 @@ export async function forceDownloadAllFromCloud(): Promise<{ success: boolean; e
               const localTeachers = getTeachers();
               const mergedTeachers = mergeTeacherLists(localTeachers, cloudTeachers);
               const mergedStr = JSON.stringify(mergedTeachers);
-              localStorage.setItem(key, mergedStr);
-              localStorage.setItem(key + '_updatedAt', String(cloudDoc.updatedAt || Date.now()));
+              safeSetLocalStorage(key, mergedStr);
+              safeSetLocalStorage(key + '_updatedAt', String(cloudDoc.updatedAt || Date.now()));
               lastSavedStringCache[key] = mergedStr;
             } else {
-              localStorage.setItem(key, cloudDoc.data);
-              localStorage.setItem(key + '_updatedAt', String(cloudDoc.updatedAt || Date.now()));
+              safeSetLocalStorage(key, cloudDoc.data);
+              safeSetLocalStorage(key + '_updatedAt', String(cloudDoc.updatedAt || Date.now()));
               lastSavedStringCache[key] = cloudDoc.data;
             }
           } catch {
-            localStorage.setItem(key, cloudDoc.data);
-            localStorage.setItem(key + '_updatedAt', String(cloudDoc.updatedAt || Date.now()));
+            safeSetLocalStorage(key, cloudDoc.data);
+            safeSetLocalStorage(key + '_updatedAt', String(cloudDoc.updatedAt || Date.now()));
             lastSavedStringCache[key] = cloudDoc.data;
           }
         } else if (key === KEYS.STUDENTS) {
@@ -2090,17 +2152,17 @@ export async function forceDownloadAllFromCloud(): Promise<{ success: boolean; e
               const localStudents = getStudents();
               const mergedStudents = mergeStudentLists(localStudents, cloudStudents);
               const mergedStr = JSON.stringify(mergedStudents);
-              localStorage.setItem(key, mergedStr);
-              localStorage.setItem(key + '_updatedAt', String(cloudDoc.updatedAt || Date.now()));
+              safeSetLocalStorage(key, mergedStr);
+              safeSetLocalStorage(key + '_updatedAt', String(cloudDoc.updatedAt || Date.now()));
               lastSavedStringCache[key] = mergedStr;
             } else {
-              localStorage.setItem(key, cloudDoc.data);
-              localStorage.setItem(key + '_updatedAt', String(cloudDoc.updatedAt || Date.now()));
+              safeSetLocalStorage(key, cloudDoc.data);
+              safeSetLocalStorage(key + '_updatedAt', String(cloudDoc.updatedAt || Date.now()));
               lastSavedStringCache[key] = cloudDoc.data;
             }
           } catch {
-            localStorage.setItem(key, cloudDoc.data);
-            localStorage.setItem(key + '_updatedAt', String(cloudDoc.updatedAt || Date.now()));
+            safeSetLocalStorage(key, cloudDoc.data);
+            safeSetLocalStorage(key + '_updatedAt', String(cloudDoc.updatedAt || Date.now()));
             lastSavedStringCache[key] = cloudDoc.data;
           }
         } else if (key === KEYS.ATTENDANCE) {
@@ -2131,8 +2193,8 @@ export async function forceDownloadAllFromCloud(): Promise<{ success: boolean; e
             console.warn('[Storage] Gagal memuat attendance records dari cloud:', e);
           }
         } else {
-          localStorage.setItem(key, cloudDoc.data);
-          localStorage.setItem(key + '_updatedAt', String(cloudDoc.updatedAt || Date.now()));
+          safeSetLocalStorage(key, cloudDoc.data);
+          safeSetLocalStorage(key + '_updatedAt', String(cloudDoc.updatedAt || Date.now()));
           lastSavedStringCache[key] = cloudDoc.data;
         }
         updatedCount++;
@@ -2416,6 +2478,10 @@ export async function refreshCloudData(force: boolean = true): Promise<{ success
  */
 export function initFirestoreAppSession(role?: UserRole): void {
   if (typeof window === 'undefined') return;
+
+  // Bebaskan kuota LocalStorage dari cache dan fragmen usang pada startup
+  reclaimLocalStorageQuota();
+
   if (isFirestoreQuotaExceeded()) {
     setCloudSyncStatus('quota_exceeded');
     return;
@@ -2497,8 +2563,8 @@ export const INITIAL_CHARACTER_PREDICATES: CharacterPredicateSettings = {
 export function getSchoolProfile(): SchoolProfile {
   const data = localStorage.getItem(KEYS.PROFILE);
   if (!data) {
-    localStorage.setItem(KEYS.PROFILE, JSON.stringify(INITIAL_SCHOOL_PROFILE));
-    localStorage.setItem(KEYS.PROFILE + '_updatedAt', '1');
+    safeSetLocalStorage(KEYS.PROFILE, JSON.stringify(INITIAL_SCHOOL_PROFILE));
+    safeSetLocalStorage(KEYS.PROFILE + '_updatedAt', '1');
     return INITIAL_SCHOOL_PROFILE;
   }
   try {
@@ -2762,17 +2828,23 @@ export function deleteAllStudents(): void {
 
 export function getAttendanceRecords(): AttendanceRecord[] {
   if (typeof window === 'undefined') return [];
+
+  // 1. Prioritas memori sesi aktif: performa instan tanpa lag baca LocalStorage
+  if (inMemoryAttendanceRecords && inMemoryAttendanceRecords.length > 0) {
+    return inMemoryAttendanceRecords;
+  }
+
   const data = localStorage.getItem(KEYS.ATTENDANCE);
   if (data === null) {
-    // Cek cadangan aman terlebih dahulu jika localStorage pernah terhapus
+    // Cek cadangan jika tersedia
     try {
       const backup = localStorage.getItem(SAFE_ATTENDANCE_BACKUP_KEY);
       if (backup) {
         const parsedBackup = JSON.parse(backup);
         const validBackup = validateAndSanitizeAttendanceRecords(parsedBackup);
         if (validBackup.length > 0) {
-          const str = JSON.stringify(validBackup);
-          safeSetLocalStorage(KEYS.ATTENDANCE, str);
+          inMemoryAttendanceRecords = validBackup;
+          safeSetLocalStorage(KEYS.ATTENDANCE, JSON.stringify(validBackup));
           safeSetLocalStorage(KEYS.ATTENDANCE + '_updatedAt', String(Date.now()));
           return validBackup;
         }
@@ -2781,62 +2853,27 @@ export function getAttendanceRecords(): AttendanceRecord[] {
 
     const initial = generateInitialAttendanceHistory(INITIAL_STUDENTS);
     const validInitial = validateAndSanitizeAttendanceRecords(initial);
+    inMemoryAttendanceRecords = validInitial;
     safeSetLocalStorage(KEYS.ATTENDANCE, JSON.stringify(validInitial));
     safeSetLocalStorage(KEYS.ATTENDANCE + '_updatedAt', '1');
     return validInitial;
   }
+
   try {
     const parsed = JSON.parse(data);
     if (Array.isArray(parsed)) {
       const sanitized = validateAndSanitizeAttendanceRecords(parsed);
-      // Jika ada data rusak yang dibersihkan, perbarui LocalStorage agar tetap bersih
-      if (sanitized.length !== parsed.length) {
-        const cleanStr = JSON.stringify(sanitized);
-        try {
-          localStorage.setItem(KEYS.ATTENDANCE, cleanStr);
-          if (sanitized.length > 0) {
-            localStorage.setItem(SAFE_ATTENDANCE_BACKUP_KEY, cleanStr);
-          }
-        } catch {}
-      }
-
-      if (sanitized.length > 0) {
-        return sanitized;
-      }
-
-      // Jika data kosong, selamatkan dari cadangan aman jika tersedia
-      try {
-        const backup = localStorage.getItem(SAFE_ATTENDANCE_BACKUP_KEY);
-        if (backup) {
-          const parsedBackup = JSON.parse(backup);
-          const validBackup = validateAndSanitizeAttendanceRecords(parsedBackup);
-          if (validBackup.length > 0) {
-            const cleanStr = JSON.stringify(validBackup);
-            safeSetLocalStorage(KEYS.ATTENDANCE, cleanStr);
-            return validBackup;
-          }
-        }
-      } catch {}
-
-      return [];
+      inMemoryAttendanceRecords = sanitized;
+      return sanitized;
     }
-    return [];
   } catch (err) {
-    console.warn('[Storage] Gagal parse attendance records, memulihkan dari cadangan aman:', err);
-    try {
-      const backup = localStorage.getItem(SAFE_ATTENDANCE_BACKUP_KEY);
-      if (backup) {
-        const parsedBackup = JSON.parse(backup);
-        const validBackup = validateAndSanitizeAttendanceRecords(parsedBackup);
-        if (validBackup.length > 0) {
-          const cleanStr = JSON.stringify(validBackup);
-          safeSetLocalStorage(KEYS.ATTENDANCE, cleanStr);
-          return validBackup;
-        }
-      }
-    } catch {}
-    return [];
+    console.warn('[Storage] Gagal parse attendance records:', err);
   }
+
+  if (inMemoryAttendanceRecords && inMemoryAttendanceRecords.length > 0) {
+    return inMemoryAttendanceRecords;
+  }
+  return [];
 }
 
 // =========================================================================
@@ -2887,7 +2924,6 @@ export function notifyScanQueueChanged(): void {
  * Jika Perangkat A scan Siswa 1 dan Perangkat B scan Siswa 2, Siswa 1 TIDAK AKAN HILANG.
  */
 export async function flushAttendanceScanQueue(force: boolean = false): Promise<void> {
-  if (isScanQueueFlushing) return;
   if (scanQueuePendingCount === 0 && !force) return;
 
   if (scanQueueIdleTimer) {

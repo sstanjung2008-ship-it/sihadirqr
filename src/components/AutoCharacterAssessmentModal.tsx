@@ -256,8 +256,8 @@ export const AutoCharacterAssessmentModal: React.FC<AutoCharacterAssessmentModal
     setTimeout(() => setPointsSavedNotice(null), 4000);
   };
 
-  // Group Filter (POSITIF / NEGATIF / UNSAVED / ALL)
-  const [groupFilter, setGroupFilter] = useState<'ALL' | 'POSITIF' | 'NEGATIF' | 'UNSAVED'>('ALL');
+  // Group Filter (POSITIF / NEGATIF / ALL)
+  const [groupFilter, setGroupFilter] = useState<'ALL' | 'POSITIF' | 'NEGATIF'>('ALL');
   
   // Specific Rule Filter inside Modal
   const [ruleFilter, setRuleFilter] = useState<'ALL' | AutoRuleType>('ALL');
@@ -813,7 +813,6 @@ export const AutoCharacterAssessmentModal: React.FC<AutoCharacterAssessmentModal
 
   const totalPositiveCount = useMemo(() => allCandidates.filter(c => c.traitType === 'POSITIF').length, [allCandidates]);
   const totalNegativeCount = useMemo(() => allCandidates.filter(c => c.traitType === 'NEGATIF').length, [allCandidates]);
-  const totalUnrecordedCount = useMemo(() => allCandidates.filter(c => !c.isAlreadyLogged).length, [allCandidates]);
 
   // Initialize selected IDs whenever candidates are re-computed
   React.useEffect(() => {
@@ -831,12 +830,8 @@ export const AutoCharacterAssessmentModal: React.FC<AutoCharacterAssessmentModal
   // Filtered view candidates
   const filteredCandidates = useMemo(() => {
     return allCandidates.filter(c => {
-      // 1. Group filter: ALL, POSITIF, NEGATIF, UNSAVED (Nilai belum tersimpan di detail)
-      const matchesGroup = groupFilter === 'ALL'
-        ? true
-        : groupFilter === 'UNSAVED'
-          ? !c.isAlreadyLogged
-          : c.traitType === groupFilter;
+      // 1. Group filter: ALL, POSITIF, NEGATIF
+      const matchesGroup = groupFilter === 'ALL' || c.traitType === groupFilter;
       
       // 2. Specific rule filter
       const matchesRule = ruleFilter === 'ALL' || c.ruleType === ruleFilter;
@@ -937,7 +932,7 @@ export const AutoCharacterAssessmentModal: React.FC<AutoCharacterAssessmentModal
     });
 
     onApplyLogs(newLogs);
-    alert(`Berhasil menyimpan ${newLogs.length} catatan nilai karakter siswa ke Detail Karakter Siswa dalam 1 kali write hemat kuota Cloud!`);
+    alert(`Berhasil menambahkan ${newLogs.length} catatan penilaian karakter otomatis dari data Presensi & Jurnal KBM!`);
     onClose();
   };
 
@@ -1528,26 +1523,6 @@ export const AutoCharacterAssessmentModal: React.FC<AutoCharacterAssessmentModal
                     {totalNegativeCount}
                   </span>
                 </button>
-
-                {/* 4. Kelompok Karakter: Nilai Belum Tersimpan di Detail Karakter Siswa */}
-                <button
-                  type="button"
-                  onClick={() => {
-                    setGroupFilter('UNSAVED');
-                    setOnlyUnrecorded(true);
-                  }}
-                  className={`px-3.5 py-2 rounded-xl text-xs font-black flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-xs ${
-                    groupFilter === 'UNSAVED'
-                      ? 'bg-amber-500 text-slate-950 shadow-amber-500/30 ring-2 ring-amber-300 scale-102 font-black'
-                      : 'bg-white text-amber-800 hover:bg-amber-50 border border-amber-300'
-                  }`}
-                >
-                  <Sparkles className="w-3.5 h-3.5 text-amber-600" />
-                  <span>Nilai Belum Tersimpan</span>
-                  <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-black ${groupFilter === 'UNSAVED' ? 'bg-slate-950 text-amber-300' : 'bg-amber-100 text-amber-900'}`}>
-                    {totalUnrecordedCount}
-                  </span>
-                </button>
               </div>
             </div>
 
@@ -1716,7 +1691,7 @@ export const AutoCharacterAssessmentModal: React.FC<AutoCharacterAssessmentModal
 
             {/* Search and Select All Bar */}
             <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-2 border-t border-slate-100">
-              <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
+              <div className="flex items-center gap-2 w-full sm:w-auto">
                 <button
                   type="button"
                   onClick={handleSelectAllFiltered}
@@ -1725,18 +1700,8 @@ export const AutoCharacterAssessmentModal: React.FC<AutoCharacterAssessmentModal
                   <CheckSquare className="w-3.5 h-3.5" />
                   <span>Pilih Semua di Tampilan</span>
                 </button>
-                <button
-                  type="button"
-                  onClick={handleProcessSubmit}
-                  disabled={selectedCount === 0}
-                  className="inline-flex items-center gap-1.5 px-3.5 py-1.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-xs font-black rounded-xl shadow-md transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed active:scale-95"
-                  title="Simpan seluruh siswa terpilih langsung ke Detail Karakter Siswa dalam 1 kali write hemat kuota"
-                >
-                  <Save className="w-3.5 h-3.5" />
-                  <span>Simpan {selectedCount} Siswa Terpilih (1x Write)</span>
-                </button>
                 <span className="text-xs text-slate-500 font-medium">
-                  {selectedCount} item dipilih
+                  {selectedCount} item dipilih untuk diproses
                 </span>
               </div>
 
@@ -1863,11 +1828,11 @@ export const AutoCharacterAssessmentModal: React.FC<AutoCharacterAssessmentModal
                           <td className="p-3 text-center whitespace-nowrap">
                             {candidate.isAlreadyLogged ? (
                               <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-slate-200 text-slate-600 rounded-full font-bold text-[10px]">
-                                <CheckCircle2 className="w-3 h-3 text-slate-500" /> Tersimpan di Detail
+                                <CheckCircle2 className="w-3 h-3 text-slate-500" /> Sudah Ada
                               </span>
                             ) : (
-                              <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-amber-100 text-amber-900 border border-amber-300 rounded-full font-extrabold text-[10px]">
-                                <Sparkles className="w-3 h-3 text-amber-600" /> Belum Tersimpan
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-indigo-100 text-indigo-700 rounded-full font-bold text-[10px]">
+                                Siap Input
                               </span>
                             )}
                           </td>
@@ -1887,7 +1852,7 @@ export const AutoCharacterAssessmentModal: React.FC<AutoCharacterAssessmentModal
             {isAutoEnabled ? (
               <span className="flex items-center gap-1.5 text-emerald-700 font-medium">
                 <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-                Nilai karakter yang dipilih akan disimpan langsung ke Detail Karakter Siswa dalam 1 kali write hemat kuota.
+                Penilaian karakter (Belum Scan, Belum Pulang, & Hadir Tepat Waktu) bekerja otomatis dan langsung tersimpan ke Detail Karakter siswa setiap pukul 16:00 WITA.
               </span>
             ) : (
               <span className="text-rose-600 font-bold flex items-center gap-1.5 justify-center sm:justify-start">
@@ -1896,23 +1861,13 @@ export const AutoCharacterAssessmentModal: React.FC<AutoCharacterAssessmentModal
               </span>
             )}
           </div>
-          <div className="flex flex-wrap items-center gap-3 w-full sm:w-auto justify-end">
+          <div className="flex items-center gap-3 w-full sm:w-auto justify-end">
             <button
               type="button"
               onClick={onClose}
-              className="px-5 py-2.5 text-xs font-bold bg-slate-200 hover:bg-slate-300 text-slate-800 rounded-xl transition-all cursor-pointer"
+              className="px-6 py-2.5 text-xs font-bold bg-slate-800 hover:bg-slate-700 text-white rounded-xl shadow-md transition-all cursor-pointer w-full sm:w-auto"
             >
               Tutup
-            </button>
-            <button
-              type="button"
-              onClick={handleProcessSubmit}
-              disabled={selectedCount === 0}
-              className="px-6 py-2.5 text-xs font-black bg-gradient-to-r from-emerald-600 via-teal-600 to-indigo-600 hover:from-emerald-500 hover:to-indigo-500 text-white rounded-xl shadow-lg shadow-emerald-600/30 transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed active:scale-95 w-full sm:w-auto"
-              title="Simpan seluruh nilai karakter siswa yang dipilih ke Detail Karakter Siswa (1 kali write ke Cloud)"
-            >
-              <Save className="w-4 h-4" />
-              <span>Simpan ke Detail Karakter Siswa ({selectedCount} Dipilih - 1x Write)</span>
             </button>
           </div>
         </div>

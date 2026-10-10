@@ -577,33 +577,6 @@ export const CharacterPointsView: React.FC<CharacterPointsViewProps> = ({
 
         <div className="flex flex-wrap items-center gap-2.5 shrink-0">
           <button
-            type="button"
-            onClick={() => handleOpenAddModalForSpecificTrait('upacara')}
-            className="inline-flex items-center justify-center gap-1.5 px-4 py-2.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black rounded-2xl shadow-lg transition-all transform active:scale-95 cursor-pointer shrink-0 text-xs"
-            title="Catat Cepat Siswa Petugas Upacara Bendera (+5 Poin)"
-          >
-            <span>🎖️ + Petugas Upacara (+5)</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => handleOpenAddModalForSpecificTrait('imtaq')}
-            className="inline-flex items-center justify-center gap-1.5 px-4 py-2.5 bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-black rounded-2xl shadow-lg transition-all transform active:scale-95 cursor-pointer shrink-0 text-xs"
-            title="Catat Cepat Siswa Petugas Kegiatan IMTAQ Jumat (+5 Poin)"
-          >
-            <span>🕌 + Petugas IMTAQ (+5)</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => handleOpenAddModalForStudent()}
-            className="inline-flex items-center justify-center gap-1.5 px-4 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white font-black rounded-2xl shadow-lg transition-all transform active:scale-95 cursor-pointer shrink-0 text-xs"
-          >
-            <Plus className="w-4 h-4" />
-            <span>+ Catat Poin Karakter</span>
-          </button>
-
-          <button
             onClick={handleDownloadPdf}
             disabled={isExporting}
             className="inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-emerald-500 hover:bg-emerald-400 disabled:bg-slate-500 text-white font-extrabold rounded-2xl shadow-lg transition-all transform active:scale-95 cursor-pointer shrink-0 text-xs"

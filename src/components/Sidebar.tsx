@@ -5,6 +5,7 @@ import {
   UserCheck, 
   Users, 
   ScanLine, 
+  Bell, 
   Building2, 
   GraduationCap, 
   FileText, 
@@ -31,6 +32,8 @@ import {
 import { getCloudSyncStatus, CloudSyncStatus, getStudents, getLeaveRequests, getAttendanceRecords, getTeachers, getStudentCharacterLogs, getSchoolClasses, getLocalDateString, refreshParentChildAttendance } from '../lib/storage';
 import { MultiDeviceSyncModal } from './MultiDeviceSyncModal';
 import { PWAInstallButton } from './PWAInstallButton';
+import { NotificationModal } from './NotificationModal';
+import { playBkNotificationChime } from '../lib/kbmVoiceReminder';
 
 interface SidebarProps {
   currentRole: UserRole;
@@ -59,6 +62,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const [isMobileOpen, setIsMobileOpen] = useState(false);
   const [syncStatus, setSyncStatus] = useState<CloudSyncStatus>(() => getCloudSyncStatus());
   const [showSyncModal, setShowSyncModal] = useState(false);
+  const [showNotificationModal, setShowNotificationModal] = useState(false);
   const [isParentRefreshing, setIsParentRefreshing] = useState(false);
   const currentStudentCount = studentCount !== undefined ? studentCount : getStudents().length;
 
@@ -157,6 +161,114 @@ export const Sidebar: React.FC<SidebarProps> = ({
       homeroomStudentNames: studentNameSet
     };
   }, [currentRole, userSession]);
+
+  // Real-time audio chime for Guru BK and Wali Kelas when character assessment is added
+  useEffect(() => {
+    if (currentRole !== 'TEACHER' || (!isTeacherBk && !isHomeroomTeacher)) return;
+
+    let prevCount = getStudentCharacterLogs().length;
+
+    const handleStorageUpdate = () => {
+      const currentLogs = getStudentCharacterLogs();
+      if (currentLogs.length > prevCount) {
+        if (isTeacherBk) {
+          // Play notification chime for BK teacher
+          playBkNotificationChime();
+        } else if (isHomeroomTeacher && homeroomClasses.length > 0) {
+          // Check if any new log is for a student in this homeroom teacher's class
+          const newLogs = currentLogs.slice(prevCount);
+          const hasStudentInClass = newLogs.some(c => {
+            const matchStudentId = c.studentId && homeroomStudentIds.has(c.studentId);
+            const matchNisn = c.nisn && homeroomStudentIds.has(c.nisn);
+            const matchName = c.studentName && homeroomStudentNames.has(c.studentName.trim().toLowerCase());
+            const matchClassName = homeroomClasses.some(hc => 
+              hc.name.trim().toLowerCase() === c.className?.trim().toLowerCase() || 
+              hc.id === c.classId || 
+              hc.name.trim().toLowerCase() === c.classId?.trim().toLowerCase()
+            );
+            return matchStudentId || matchNisn || matchName || matchClassName;
+          });
+
+          if (hasStudentInClass) {
+            playBkNotificationChime();
+          }
+        }
+      }
+      prevCount = currentLogs.length;
+    };
+
+    window.addEventListener('sihadir_storage_updated', handleStorageUpdate);
+    return () => window.removeEventListener('sihadir_storage_updated', handleStorageUpdate);
+  }, [currentRole, isTeacherBk, isHomeroomTeacher, homeroomClasses, homeroomStudentIds, homeroomStudentNames]);
+
+  // Calculate unread badge count for mobile notification bell
+  const notifBadgeCount = useMemo(() => {
+    if (currentRole !== 'TEACHER' && currentRole !== 'PARENT') return 0;
+    const storageKey = `sihadir_last_read_notif_${currentRole}_${userSession?.username || 'user'}`;
+    const lastRead = Number(localStorage.getItem(storageKey)) || 0;
+
+    if (currentRole === 'TEACHER') {
+      const pendingLeaves = getLeaveRequests().filter(l => l.status === 'PENDING').length;
+
+      // For Guru BK & Wali Kelas: include unread student character logs in badge count
+      const charLogs = getStudentCharacterLogs();
+      const unreadCharLogIds = new Set<string>();
+
+      if (isTeacherBk) {
+        charLogs.forEach(c => {
+          if (new Date(c.timestamp || c.date).getTime() > lastRead) {
+            unreadCharLogIds.add(c.id);
+          }
+        });
+      }
+
+      if (isHomeroomTeacher && homeroomClasses.length > 0) {
+        charLogs.forEach(c => {
+          const matchStudentId = c.studentId && homeroomStudentIds.has(c.studentId);
+          const matchNisn = c.nisn && homeroomStudentIds.has(c.nisn);
+          const matchName = c.studentName && homeroomStudentNames.has(c.studentName.trim().toLowerCase());
+          const matchClassName = homeroomClasses.some(hc => 
+            hc.name.trim().toLowerCase() === c.className?.trim().toLowerCase() || 
+            hc.id === c.classId || 
+            hc.name.trim().toLowerCase() === c.classId?.trim().toLowerCase()
+          );
+          if ((matchStudentId || matchNisn || matchName || matchClassName) && new Date(c.timestamp || c.date).getTime() > lastRead) {
+            unreadCharLogIds.add(c.id);
+          }
+        });
+      }
+
+      return pendingLeaves + unreadCharLogIds.size;
+    }
+
+    if (currentRole === 'PARENT') {
+      const students = getStudents();
+      let student = students.find(s => s.id === userSession?.studentId || s.nisn === userSession?.nipOrNisn);
+      if (!student && userSession?.displayName) {
+        student = students.find(s => s.name.toLowerCase().includes(userSession.displayName.toLowerCase()) || 
+                                     s.parentName?.toLowerCase().includes(userSession.displayName.toLowerCase()));
+      }
+      if (!student && students.length > 0) {
+        student = students[0];
+      }
+      if (!student) return 0;
+
+      const todayStr = getLocalDateString();
+      let count = 0;
+      
+      const todayAtt = getAttendanceRecords().find(a => a.studentId === student!.id && a.date === todayStr);
+      if (todayAtt && (!lastRead || lastRead < new Date().setHours(0, 0, 0, 0))) {
+        count += 1;
+      }
+
+      const leaves = getLeaveRequests().filter(l => (l.studentId === student!.id || l.studentName === student!.name) && new Date(l.createdAt || l.startDate).getTime() > lastRead);
+      count += leaves.length;
+
+      return count;
+    }
+
+    return 0;
+  }, [currentRole, userSession, unreadLeavesCount, isTeacherBk, isHomeroomTeacher, homeroomClasses, homeroomStudentIds, homeroomStudentNames]);
 
   useEffect(() => {
     const handleStatus = (e: any) => {
@@ -292,6 +404,23 @@ export const Sidebar: React.FC<SidebarProps> = ({
         </div>
 
         <div className="flex items-center gap-2">
+          {/* Bell Notification Icon for Teacher and Parent in Mobile Mode */}
+          {(currentRole === 'TEACHER' || currentRole === 'PARENT') && (
+            <button
+              type="button"
+              onClick={() => setShowNotificationModal(true)}
+              className="relative p-2 rounded-xl bg-transparent hover:bg-white/10 text-yellow-400 active:scale-95 transition-all cursor-pointer flex items-center justify-center shrink-0"
+              title="Pusat Notifikasi"
+              aria-label="Pusat Notifikasi"
+            >
+              <Bell className="w-5 h-5 text-yellow-400 stroke-[2.5]" />
+              {notifBadgeCount > 0 && (
+                <span className="absolute -top-1 -right-1 flex h-4 min-w-4 px-1 items-center justify-center rounded-full bg-rose-500 text-[9px] font-black text-white shadow-xs animate-pulse ring-2 ring-slate-900">
+                  {notifBadgeCount > 99 ? '99+' : notifBadgeCount}
+                </span>
+              )}
+            </button>
+          )}
 
           {currentRole === 'PARENT' ? (
             /* Khusus Role Wali Murid: Tombol Segarkan On-Demand Hemat Kuota */
@@ -488,6 +617,20 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     )}
                   </div>
                 </div>
+
+                <button
+                  type="button"
+                  onClick={() => setShowNotificationModal(true)}
+                  className="relative p-2 rounded-xl bg-indigo-900/60 hover:bg-indigo-800/80 text-indigo-200 hover:text-white border border-indigo-700/60 transition-colors cursor-pointer shrink-0"
+                  title="Pusat Notifikasi"
+                >
+                  <Bell className="w-4 h-4" />
+                  {notifBadgeCount > 0 && (
+                    <span className="absolute -top-1 -right-1 flex h-4 min-w-4 px-1 items-center justify-center rounded-full bg-rose-500 text-[9px] font-black text-white shadow-xs animate-pulse">
+                      {notifBadgeCount}
+                    </span>
+                  )}
+                </button>
               </div>
             </div>
           )}
@@ -675,6 +818,18 @@ export const Sidebar: React.FC<SidebarProps> = ({
         onClose={() => setShowSyncModal(false)}
         currentStudentCount={currentStudentCount}
         syncStatus={syncStatus}
+      />
+
+      {/* Notification Center Modal for Teachers and Parents */}
+      <NotificationModal
+        isOpen={showNotificationModal}
+        onClose={() => setShowNotificationModal(false)}
+        currentRole={currentRole}
+        userSession={userSession}
+        onTabChange={(tab) => {
+          onTabChange(tab);
+          setIsMobileOpen(false);
+        }}
       />
     </>
   );

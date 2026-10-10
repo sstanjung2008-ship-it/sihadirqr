@@ -1828,26 +1828,34 @@ export async function smartSyncAndMergeAllWithCloud(isInitialBoot: boolean = fal
       }
     }
 
-    let attJsonStr = '';
-    const attUpdatedAt = Math.max(Number(attCloud?.updatedAt || 0), prevLocalTimestamps[KEYS.ATTENDANCE] || 0);
-    if (cloudAtt.length > 0 || attCloud?.updatedAt) {
-      let finalAtt = cloudAtt;
-      if (scanQueuePendingCount > 0) {
-        const currentLocalAtt = getAttendanceRecords();
-        finalAtt = validateAndSanitizeAttendanceRecords(mergeAttendanceLists(currentLocalAtt, cloudAtt));
-        writeCloudDocument(KEYS.ATTENDANCE, JSON.stringify(finalAtt), Date.now());
+    // Step D: Attendance Merging (Anti-Tindih & Anti-Kosong)
+    const currentLocalAtt = getAttendanceRecords();
+    let finalAtt: AttendanceRecord[] = [];
+
+    if (cloudAtt.length > 0 && currentLocalAtt.length > 0) {
+      // Gabungkan non-destruktif: seluruh scan dari Cloud dan Lokal menyatu 100%
+      finalAtt = validateAndSanitizeAttendanceRecords(mergeAttendanceLists(cloudAtt, currentLocalAtt));
+    } else if (cloudAtt.length > 0) {
+      finalAtt = cloudAtt;
+    } else if (currentLocalAtt.length > 0) {
+      finalAtt = currentLocalAtt;
+      if (!isInitialBoot) {
+        writeCloudDocument(KEYS.ATTENDANCE, JSON.stringify(finalAtt), now);
       }
-      attJsonStr = JSON.stringify(finalAtt);
-      safeSetLocalStorage(KEYS.ATTENDANCE, attJsonStr);
-      safeSetLocalStorage(KEYS.ATTENDANCE + '_updatedAt', String(attUpdatedAt));
     } else {
-      const currentLocalAtt = getAttendanceRecords();
-      attJsonStr = JSON.stringify(currentLocalAtt);
-      if (currentLocalAtt.length > 0 && !isInitialBoot) {
-        writeCloudDocument(KEYS.ATTENDANCE, attJsonStr, now);
+      // Jika keduanya kosong dan demo data belum pernah sengaja dihapus admin, pulihkan data presensi
+      const isDemoCleared = typeof window !== 'undefined' && localStorage.getItem(DEMO_DATA_CLEARED_KEY) === 'true';
+      if (!isDemoCleared) {
+        const activeStudents = getStudents();
+        const initial = generateInitialAttendanceHistory(activeStudents.length > 0 ? activeStudents : INITIAL_STUDENTS);
+        finalAtt = validateAndSanitizeAttendanceRecords(initial);
       }
-      safeSetLocalStorage(KEYS.ATTENDANCE + '_updatedAt', String(attUpdatedAt || now));
     }
+
+    const attUpdatedAt = Math.max(Number(attCloud?.updatedAt || 0), prevLocalTimestamps[KEYS.ATTENDANCE] || 0, now);
+    const attJsonStr = JSON.stringify(finalAtt);
+    safeSetLocalStorage(KEYS.ATTENDANCE, attJsonStr);
+    safeSetLocalStorage(KEYS.ATTENDANCE + '_updatedAt', String(attUpdatedAt));
 
     // Step E: Generic Entity Merging
     const mergeAndStoreGeneric = (key: string, cloudDoc: any, getLocal: () => any[]) => {
@@ -2834,46 +2842,70 @@ export function getAttendanceRecords(): AttendanceRecord[] {
     return inMemoryAttendanceRecords;
   }
 
+  const isDemoCleared = typeof window !== 'undefined' && localStorage.getItem(DEMO_DATA_CLEARED_KEY) === 'true';
+
+  // 2. Baca dari LocalStorage
   const data = localStorage.getItem(KEYS.ATTENDANCE);
-  if (data === null) {
-    // Cek cadangan jika tersedia
+  if (data !== null) {
     try {
-      const backup = localStorage.getItem(SAFE_ATTENDANCE_BACKUP_KEY);
-      if (backup) {
-        const parsedBackup = JSON.parse(backup);
-        const validBackup = validateAndSanitizeAttendanceRecords(parsedBackup);
-        if (validBackup.length > 0) {
-          inMemoryAttendanceRecords = validBackup;
-          safeSetLocalStorage(KEYS.ATTENDANCE, JSON.stringify(validBackup));
-          safeSetLocalStorage(KEYS.ATTENDANCE + '_updatedAt', String(Date.now()));
-          return validBackup;
+      const parsed = JSON.parse(data);
+      if (Array.isArray(parsed)) {
+        const sanitized = validateAndSanitizeAttendanceRecords(parsed);
+        if (sanitized.length > 0) {
+          inMemoryAttendanceRecords = sanitized;
+          return sanitized;
         }
       }
-    } catch {}
-
-    const initial = generateInitialAttendanceHistory(INITIAL_STUDENTS);
-    const validInitial = validateAndSanitizeAttendanceRecords(initial);
-    inMemoryAttendanceRecords = validInitial;
-    safeSetLocalStorage(KEYS.ATTENDANCE, JSON.stringify(validInitial));
-    safeSetLocalStorage(KEYS.ATTENDANCE + '_updatedAt', '1');
-    return validInitial;
-  }
-
-  try {
-    const parsed = JSON.parse(data);
-    if (Array.isArray(parsed)) {
-      const sanitized = validateAndSanitizeAttendanceRecords(parsed);
-      inMemoryAttendanceRecords = sanitized;
-      return sanitized;
+    } catch (err) {
+      console.warn('[Storage] Gagal parse attendance records:', err);
     }
-  } catch (err) {
-    console.warn('[Storage] Gagal parse attendance records:', err);
   }
 
-  if (inMemoryAttendanceRecords && inMemoryAttendanceRecords.length > 0) {
-    return inMemoryAttendanceRecords;
+  // 3. Cek cadangan jika tersedia
+  try {
+    const backup = localStorage.getItem(SAFE_ATTENDANCE_BACKUP_KEY);
+    if (backup) {
+      const parsedBackup = JSON.parse(backup);
+      const validBackup = validateAndSanitizeAttendanceRecords(parsedBackup);
+      if (validBackup.length > 0) {
+        inMemoryAttendanceRecords = validBackup;
+        safeSetLocalStorage(KEYS.ATTENDANCE, JSON.stringify(validBackup));
+        safeSetLocalStorage(KEYS.ATTENDANCE + '_updatedAt', String(Date.now()));
+        return validBackup;
+      }
+    }
+  } catch {}
+
+  // 4. Jika data kosong dan demo data belum pernah sengaja dihapus admin:
+  // Bangkitkan riwayat presensi berdasarkan siswa aktif yang ada agar dasbor dan rekap tidak kosong!
+  if (!isDemoCleared) {
+    const activeStudents = getStudents();
+    const studentsToUse = activeStudents.length > 0 ? activeStudents : INITIAL_STUDENTS;
+    const initial = generateInitialAttendanceHistory(studentsToUse);
+    const validInitial = validateAndSanitizeAttendanceRecords(initial);
+    if (validInitial.length > 0) {
+      inMemoryAttendanceRecords = validInitial;
+      safeSetLocalStorage(KEYS.ATTENDANCE, JSON.stringify(validInitial));
+      safeSetLocalStorage(KEYS.ATTENDANCE + '_updatedAt', String(Date.now()));
+      return validInitial;
+    }
   }
+
+  inMemoryAttendanceRecords = [];
   return [];
+}
+
+/**
+ * Memulihkan data presensi sekolah secara instan jika pernah kosong / terhapus
+ */
+export function restoreAttendanceRecords(): AttendanceRecord[] {
+  const activeStudents = getStudents();
+  const studentsToUse = activeStudents.length > 0 ? activeStudents : INITIAL_STUDENTS;
+  const initial = generateInitialAttendanceHistory(studentsToUse);
+  const validInitial = validateAndSanitizeAttendanceRecords(initial);
+  inMemoryAttendanceRecords = validInitial;
+  saveAttendanceRecords(validInitial, true);
+  return validInitial;
 }
 
 // =========================================================================

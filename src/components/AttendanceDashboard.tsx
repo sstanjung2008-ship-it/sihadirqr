@@ -46,7 +46,9 @@ import {
   UserCheck,
   Trash2,
   LogOut,
-  RefreshCw
+  RefreshCw,
+  AlertCircle,
+  RotateCcw
 } from 'lucide-react';
 import { BulkAlpaManagementModal } from './BulkAlpaManagementModal';
 import { BulkReturnManagementModal, BulkReturnUpdatePayload } from './BulkReturnManagementModal';
@@ -86,6 +88,7 @@ interface AttendanceDashboardProps {
   onNavigateTab?: (tab: string) => void;
   schoolProfile?: SchoolProfile;
   unreadLeavesCount?: number;
+  onRestoreAttendance?: () => void;
 }
 
 export const AttendanceDashboard: React.FC<AttendanceDashboardProps> = ({
@@ -105,7 +108,8 @@ export const AttendanceDashboard: React.FC<AttendanceDashboardProps> = ({
   userSession,
   onNavigateTab,
   schoolProfile,
-  unreadLeavesCount = 0
+  unreadLeavesCount = 0,
+  onRestoreAttendance,
 }) => {
   const todayStr = getLocalDateString();
 
@@ -1254,6 +1258,33 @@ export const AttendanceDashboard: React.FC<AttendanceDashboardProps> = ({
               )}
             </div>
           </div>
+
+          {/* Banner jika riwayat presensi kosong */}
+          {attendanceRecords.length === 0 && (
+            <div className="bg-amber-50 border border-amber-200/90 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-amber-950 shadow-xs">
+              <div className="flex items-start sm:items-center gap-3">
+                <div className="w-9 h-9 rounded-xl bg-amber-500/20 text-amber-800 flex items-center justify-center shrink-0">
+                  <AlertCircle className="w-5 h-5 text-amber-700" />
+                </div>
+                <div>
+                  <p className="font-extrabold text-xs text-amber-950">Riwayat Presensi Sekolah Sedang Kosong</p>
+                  <p className="text-[11px] text-amber-800 mt-0.5">
+                    Data riwayat presensi belum terisi atau baru saja direset. Anda dapat memulihkan 14 hari riwayat presensi sekolah sekarang.
+                  </p>
+                </div>
+              </div>
+              {onRestoreAttendance && (
+                <button
+                  type="button"
+                  onClick={onRestoreAttendance}
+                  className="px-4 py-2 rounded-xl bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-700 hover:to-orange-700 text-white font-extrabold text-xs shadow-sm cursor-pointer transition-all shrink-0 active:scale-95 flex items-center gap-2 justify-center"
+                >
+                  <RotateCcw className="w-3.5 h-3.5" />
+                  <span>Pulihkan Data Presensi</span>
+                </button>
+              )}
+            </div>
+          )}
 
           {/* Overview Stat Cards Grid for Admin / Teacher */}
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-7 gap-3 sm:gap-4">

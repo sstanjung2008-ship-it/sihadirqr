@@ -51,7 +51,8 @@ import {
   TrendingUp,
   User,
   Clock,
-  XCircle
+  XCircle,
+  RotateCcw
 } from 'lucide-react';
 
 interface RecapExportViewProps {
@@ -64,6 +65,7 @@ interface RecapExportViewProps {
   characterLogs?: StudentCharacterLog[];
   predicateSettings?: CharacterPredicateSettings;
   gradeAssessments?: StudentGradeAssessment[];
+  onRestoreAttendance?: () => void;
 }
 
 type RecapMenuType = 'PRESENSI' | 'KEAKTIFAN' | 'KARAKTER' | 'NILAI';
@@ -77,7 +79,8 @@ export const RecapExportView: React.FC<RecapExportViewProps> = ({
   traits = [],
   characterLogs = [],
   predicateSettings = { minA: 30, minB: 10, minC: 0, minD: -20, minE: -50 },
-  gradeAssessments
+  gradeAssessments,
+  onRestoreAttendance,
 }) => {
   const [activeMenu, setActiveMenu] = useState<RecapMenuType>('PRESENSI');
   const [selectedClass, setSelectedClass] = useState<string>('ALL');
@@ -1089,6 +1092,33 @@ export const RecapExportView: React.FC<RecapExportViewProps> = ({
       {/* SUB MENU 1: TABEL REKAP PRESENSI */}
       {activeMenu === 'PRESENSI' && (
         <div className="space-y-4">
+
+          {/* Banner jika data presensi kosong */}
+          {attendanceRecords.length === 0 && (
+            <div className="bg-amber-50 border border-amber-200/90 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-amber-950 shadow-xs">
+              <div className="flex items-start sm:items-center gap-3">
+                <div className="w-9 h-9 rounded-xl bg-amber-500/20 text-amber-800 flex items-center justify-center shrink-0">
+                  <AlertCircle className="w-5 h-5 text-amber-700" />
+                </div>
+                <div>
+                  <p className="font-extrabold text-xs text-amber-950">Data Presensi untuk Rekap & Ekspor Sedang Kosong</p>
+                  <p className="text-[11px] text-amber-800 mt-0.5">
+                    Riwayat presensi siswa belum terisi atau baru saja direset. Anda dapat memulihkan riwayat presensi sekarang.
+                  </p>
+                </div>
+              </div>
+              {onRestoreAttendance && (
+                <button
+                  type="button"
+                  onClick={onRestoreAttendance}
+                  className="px-4 py-2 rounded-xl bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-700 hover:to-orange-700 text-white font-extrabold text-xs shadow-sm cursor-pointer transition-all shrink-0 active:scale-95 flex items-center gap-2 justify-center"
+                >
+                  <RotateCcw className="w-3.5 h-3.5" />
+                  <span>Pulihkan Data Presensi</span>
+                </button>
+              )}
+            </div>
+          )}
           
           {/* Monthly Overall Summary Stat Cards (When MONTHLY period is active) */}
           {filterPeriod === 'MONTHLY' && (

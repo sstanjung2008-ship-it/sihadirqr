@@ -53,6 +53,7 @@ import {
   getUserSession,
   saveUserSession,
   safeSetLocalStorage,
+  restoreAttendanceRecords,
   initFirestoreAppSession,
   initFirestoreRealtimeSync,
   stopFirestoreRealtimeSync,
@@ -381,6 +382,15 @@ export default function App() {
     if (classesChanged) {
       safeSetLocalStorage(KEYS.CLASSES, JSON.stringify(updatedClasses));
       setClassesState(updatedClasses);
+    }
+
+    // Pastikan data presensi tidak kosong saat memuat aplikasi
+    const currentAtt = getAttendanceRecords();
+    if (currentAtt.length === 0) {
+      const restored = restoreAttendanceRecords();
+      setAttendanceRecordsState(restored);
+    } else {
+      setAttendanceRecordsState(currentAtt);
     }
 
     const handleNetworkToast = (e: any) => {
@@ -1128,6 +1138,20 @@ export default function App() {
     }
   };
 
+  // Manual / Auto Restore Attendance Records
+  const handleRestoreAttendance = useCallback(() => {
+    const restored = restoreAttendanceRecords();
+    setAttendanceRecordsState(restored);
+    setNetworkToast({
+      type: 'success',
+      title: '✅ Data Presensi Dipulihkan',
+      message: `Berhasil memulihkan ${restored.length} riwayat presensi sekolah.`
+    });
+    setTimeout(() => {
+      setNetworkToast(null);
+    }, 4500);
+  }, []);
+
   // Student CRUD
   const handleAddStudent = (newStudent: Student) => {
     setStudentsState(prev => {
@@ -1757,6 +1781,7 @@ export default function App() {
               onNavigateTab={handleTabChange}
               schoolProfile={schoolProfile}
               unreadLeavesCount={leaveRequests.filter(l => l.status === 'PENDING').length}
+              onRestoreAttendance={handleRestoreAttendance}
             />
           )}
 
@@ -1941,6 +1966,7 @@ export default function App() {
               traits={traits}
               characterLogs={characterLogs}
               predicateSettings={predicateSettings}
+              onRestoreAttendance={handleRestoreAttendance}
             />
           )}
 

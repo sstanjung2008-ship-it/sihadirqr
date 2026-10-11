@@ -1,4 +1,4 @@
-import { SchoolProfile, SchoolClass, Student, AttendanceRecord, LeaveRequest, Teacher, LearningJournal, CharacterTrait, StudentCharacterLog, CharacterPredicateSettings, UserSession, UserRole, StudentGradeAssessment, LessonPeriod, ClassScheduleSlot } from '../types';
+import { SchoolProfile, SchoolClass, Student, AttendanceRecord, LeaveRequest, Teacher, LearningJournal, CharacterTrait, StudentCharacterLog, CharacterPredicateSettings, UserSession, UserRole, StudentGradeAssessment, StudentGradeItem, LessonPeriod, ClassScheduleSlot } from '../types';
 import { 
   INITIAL_SCHOOL_PROFILE, 
   INITIAL_CLASSES, 
@@ -1176,6 +1176,304 @@ export function mergeStudentGradeAssessments(local: StudentGradeAssessment[], cl
   );
 }
 
+/**
+ * Membangkitkan rekap nilai siswa (PH, Tugas, Ulangan) awal untuk seluruh kelas & mapel
+ */
+export function generateInitialStudentGrades(students: Student[], classes: SchoolClass[]): StudentGradeAssessment[] {
+  const activeStudents = students.length > 0 ? students : INITIAL_STUDENTS;
+  const activeClasses = classes.length > 0 ? classes : INITIAL_CLASSES;
+  const assessments: StudentGradeAssessment[] = [];
+
+  const subjects = ['Matematika', 'Bahasa Indonesia', 'IPA', 'Bahasa Inggris', 'Informatika'];
+  const teachersMap: Record<string, string> = {
+    'Matematika': 'Siti Rahmawati, S.Pd.',
+    'Bahasa Indonesia': 'Budi Santoso, M.Pd.',
+    'IPA': 'Dewi Lestari, S.Pd.',
+    'Bahasa Inggris': 'Agus Pratama, S.Kom.',
+    'Informatika': 'Ahmad Fauzi, S.Pd.'
+  };
+
+  const materialsMap: Record<string, string[]> = {
+    'Matematika': ['Bilangan Bulat & Pecahan', 'Aljabar & Persamaan Linear', 'Perbandingan & Skala'],
+    'Bahasa Indonesia': ['Teks Laporan Hasil Observasi', 'Teks Prosedur & Kaidah Bahasa', 'Menulis Cerpen & Puisi'],
+    'IPA': ['Pengukuran & Besaran Fisika', 'Klasifikasi Makhluk Hidup', 'Zat, Wujud & Perubahannya'],
+    'Bahasa Inggris': ['Self Introduction & Pronouns', 'Describing Things & Animals', 'Daily Routine & Simple Present'],
+    'Informatika': ['Berpikir Komputasional & Pola', 'Algoritma & Pemrograman Dasar', 'Jaringan Komputer & Internet']
+  };
+
+  activeClasses.forEach(cls => {
+    const classStudents = activeStudents.filter(s => s.className === cls.name || s.classId === cls.id);
+    if (classStudents.length === 0) return;
+
+    subjects.forEach((subj, subIdx) => {
+      const teacher = teachersMap[subj] || 'Guru Mapel';
+      const materials = materialsMap[subj] || ['Penilaian Harian Bab 1', 'Tugas Mandiri'];
+
+      materials.forEach((mat, matIdx) => {
+        const d = new Date();
+        d.setDate(d.getDate() - (subIdx * 4 + matIdx * 3 + 2));
+        const dateStr = d.toISOString().split('T')[0];
+
+        const gradesList: StudentGradeItem[] = classStudents.map((std, sIdx) => {
+          const seed = (subIdx * 19 + matIdx * 29 + sIdx * 37) % 100;
+          const daily = 78 + (seed % 18);
+          const task = 80 + ((seed * 3) % 16);
+          const exam = 75 + ((seed * 7) % 21);
+          const finalScore = Math.round(daily * 0.3 + task * 0.3 + exam * 0.4);
+          const predicate = finalScore >= 90 ? 'A' : (finalScore >= 80 ? 'B' : 'C');
+
+          return {
+            studentId: std.id,
+            studentName: std.name,
+            nisn: std.nisn,
+            nis: std.nis,
+            dailyScore: daily,
+            assignmentScore: task,
+            examScore: exam,
+            finalScore,
+            predicate,
+            notes: finalScore >= 85 ? 'Sangat menguasai materi' : 'Tuntas dengan capaian baik'
+          };
+        });
+
+        assessments.push({
+          id: `grade-${cls.id || cls.name}-${subj.substring(0, 3).toLowerCase()}-${matIdx + 1}`,
+          date: dateStr,
+          teacherName: teacher,
+          classId: cls.id,
+          className: cls.name,
+          subject: subj,
+          material: mat,
+          semester: 'Semester Ganjil 2026/2027',
+          grades: gradesList,
+          createdAt: new Date(dateStr).toISOString()
+        });
+      });
+    });
+  });
+
+  return assessments;
+}
+
+/**
+ * Membangkitkan rekap keaktifan & jurnal pembelajaran KBM awal untuk seluruh kelas
+ */
+export function generateInitialLearningJournals(students: Student[], classes: SchoolClass[]): LearningJournal[] {
+  const activeStudents = students.length > 0 ? students : INITIAL_STUDENTS;
+  const activeClasses = classes.length > 0 ? classes : INITIAL_CLASSES;
+  const journals: LearningJournal[] = [];
+
+  const subjects = ['Matematika', 'Bahasa Indonesia', 'IPA', 'Bahasa Inggris', 'Informatika'];
+  const teachersMap: Record<string, string> = {
+    'Matematika': 'Siti Rahmawati, S.Pd.',
+    'Bahasa Indonesia': 'Budi Santoso, M.Pd.',
+    'IPA': 'Dewi Lestari, S.Pd.',
+    'Bahasa Inggris': 'Agus Pratama, S.Kom.',
+    'Informatika': 'Ahmad Fauzi, S.Pd.'
+  };
+
+  const materialsMap: Record<string, string[]> = {
+    'Matematika': ['Aljabar & Persamaan Linear', 'Operasi Hitung Pecahan & Desimal'],
+    'Bahasa Indonesia': ['Teks Laporan Hasil Observasi (LHO)', 'Struktur Kebahasaan Teks Deskripsi'],
+    'IPA': ['Klasifikasi Makhluk Hidup & Binomial', 'Pengukuran & Besaran Fisika'],
+    'Bahasa Inggris': ['Greeting, Parting & Introduction', 'Daily Routine & Simple Present Tense'],
+    'Informatika': ['Algoritma Pemrograman & Flowchart', 'Literasi Digital & Etika Berinternet']
+  };
+
+  activeClasses.forEach((cls, cIdx) => {
+    const classStudents = activeStudents.filter(s => s.className === cls.name || s.classId === cls.id);
+    if (classStudents.length === 0) return;
+
+    subjects.forEach((subj, subIdx) => {
+      const teacher = teachersMap[subj] || 'Guru Mapel';
+      const materials = materialsMap[subj] || ['Materi Pelajaran'];
+
+      materials.forEach((mat, mIdx) => {
+        const d = new Date();
+        d.setDate(d.getDate() - (cIdx * 2 + subIdx * 3 + mIdx + 1));
+        const dateStr = d.toISOString().split('T')[0];
+
+        const studentAttendances = classStudents.map((std, sIdx) => {
+          const rand = (cIdx * 13 + subIdx * 17 + sIdx * 23) % 100;
+          let status: any = 'Cukup aktif';
+          let notes: string | undefined = undefined;
+
+          if (rand > 72) {
+            status = 'Sangat aktif';
+            notes = 'Aktif menjawab pertanyaan guru dan memimpin kelompok';
+          } else if (rand > 25) {
+            status = 'Cukup aktif';
+          } else if (rand > 10) {
+            status = 'Kurang aktif';
+            notes = 'Perlu dorongan untuk berpartisipasi dalam diskusi';
+          } else if (rand > 4) {
+            status = 'Mengganggu';
+            notes = 'Berbicara dengan teman saat guru menjelaskan materi';
+          } else {
+            status = 'Tidak hadir di kelas';
+            notes = 'Izin ke ruang UKS saat jam pelajaran berlangsung';
+          }
+
+          return {
+            studentId: std.id,
+            studentName: std.name,
+            nisn: std.nisn,
+            status,
+            notes
+          };
+        });
+
+        journals.push({
+          id: `lj-${cls.id || cls.name}-${subj.substring(0, 3).toLowerCase()}-${mIdx + 1}`,
+          date: dateStr,
+          teacherName: teacher,
+          classId: cls.id,
+          className: cls.name,
+          subject: subj,
+          periods: [1, 2],
+          material: mat,
+          materialLimit: `Bab ${mIdx + 1} s.d ${mIdx + 2}`,
+          notesOrTask: `Latihan mandiri dan diskusi kelompok materi ${mat}`,
+          studentAttendances,
+          createdAt: new Date(dateStr).toISOString()
+        });
+      });
+    });
+  });
+
+  return journals;
+}
+
+/**
+ * Membangkitkan rekap catatan karakter awal untuk seluruh siswa
+ */
+export function generateInitialCharacterLogs(students: Student[]): StudentCharacterLog[] {
+  const activeStudents = students.length > 0 ? students : INITIAL_STUDENTS;
+  const logs: StudentCharacterLog[] = [...INITIAL_STUDENT_CHARACTER_LOGS];
+  const seenIds = new Set(logs.map(l => l.id));
+
+  const positiveTraits = [
+    { traitId: 'trait-001', name: 'Datang Tepat Waktu & Disiplin', points: 10, notes: 'Hadir sebelum bel pagi berbunyi dan tertib di lingkungan sekolah' },
+    { traitId: 'trait-002', name: 'Aktif Bertanya & Berdiskusi dalam KBM', points: 10, notes: 'Sangat antusias menyampaikan ide dalam diskusi kelas' },
+    { traitId: 'trait-003', name: 'Menolong Teman & Bekerjasama', points: 5, notes: 'Membantu teman sekelas yang kesulitan memahami materi' },
+    { traitId: 'trait-004', name: 'Menjaga Kebersihan Lingkungan Sekolah', points: 5, notes: 'Memungut sampah di koridor kelas dan membuang ke tempat sampah' },
+    { traitId: 'trait-017', name: 'Menjadi Petugas Upacara Bendera', points: 5, notes: 'Menjadi petugas upacara hari Senin dengan dedikasi tinggi' },
+  ];
+
+  const negativeTraits = [
+    { traitId: 'trait-007', name: 'Terlambat Masuk Jam Pelajaran', points: 5, notes: 'Terlambat masuk kelas setelah jam istirahat selesai' },
+    { traitId: 'trait-009', name: 'Bermain HP / Tidur Saat KBM', points: 10, notes: 'Menggunakan gawai tanpa izin saat pembelajaran berlangsung' },
+    { traitId: 'trait-010', name: 'Tidak Mengerjakan Tugas / PR', points: 10, notes: 'Belum mengumpulkan tugas mandiri tepat waktu' },
+  ];
+
+  activeStudents.forEach((std, sIdx) => {
+    const count = 2 + (sIdx % 3);
+    for (let k = 0; k < count; k++) {
+      const isPos = (sIdx * 3 + k) % 4 !== 0;
+      const traitList = isPos ? positiveTraits : negativeTraits;
+      const trait = traitList[(sIdx + k) % traitList.length];
+      const d = new Date();
+      d.setDate(d.getDate() - ((sIdx * 2 + k * 3) % 20 + 1));
+      const dateStr = d.toISOString().split('T')[0];
+      const timeStr = `${String(8 + (k * 2) % 6).padStart(2, '0')}:${String((sIdx * 15) % 60).padStart(2, '0')}:00`;
+      const logId = `log-gen-${std.id}-${k}-${dateStr}`;
+
+      if (!seenIds.has(logId)) {
+        seenIds.add(logId);
+        logs.push({
+          id: logId,
+          studentId: std.id,
+          studentName: std.name,
+          nisn: std.nisn,
+          classId: std.classId || '',
+          className: std.className,
+          traitId: trait.traitId,
+          traitName: trait.name,
+          traitType: isPos ? 'POSITIF' : 'NEGATIF',
+          points: trait.points,
+          evaluatorName: 'Guru Wali / Tim Ketertiban',
+          timestamp: `${dateStr} ${timeStr}`,
+          date: dateStr,
+          notes: trait.notes,
+          isManual: true
+        });
+      }
+    }
+  });
+
+  return deduplicateCharacterLogs(logs);
+}
+
+/**
+ * Memulihkan SELURUH data sekolah secara menyeluruh:
+ * 1. Rekap Presensi Siswa (14-21 hari)
+ * 2. Catatan Nilai Karakter (Positif & Negatif)
+ * 3. Jurnal KBM & Rekap Keaktifan Siswa
+ * 4. Rekap Asesmen & Nilai Siswa (Harian, Tugas, Ulangan)
+ * Dan langsung menyinkronkannya ke Cloud Firestore serta memancarkan event ke layar perangkat!
+ */
+export async function restoreAllSchoolDataAndSyncCloud(): Promise<{
+  success: boolean;
+  attendanceCount: number;
+  characterLogsCount: number;
+  journalsCount: number;
+  gradesCount: number;
+  message: string;
+}> {
+  const now = Date.now();
+  const students = getStudents().length > 0 ? getStudents() : INITIAL_STUDENTS;
+  const classes = getSchoolClasses().length > 0 ? getSchoolClasses() : INITIAL_CLASSES;
+
+  // 1. Pulihkan Presensi
+  const attendance = validateAndSanitizeAttendanceRecords(generateInitialAttendanceHistory(students));
+  safeSetLocalStorage(KEYS.ATTENDANCE, JSON.stringify(attendance));
+  safeSetLocalStorage(KEYS.ATTENDANCE + '_updatedAt', String(now));
+
+  // 2. Pulihkan Catatan Nilai Karakter
+  const charLogs = generateInitialCharacterLogs(students);
+  safeSetLocalStorage(KEYS.CHARACTER_LOGS, JSON.stringify(charLogs));
+  safeSetLocalStorage(KEYS.CHARACTER_LOGS + '_updatedAt', String(now));
+  safeSetLocalStorage(SAFE_MANUAL_CHARACTER_LOGS_BACKUP_KEY, JSON.stringify(charLogs.filter(isManualCharacterLog)));
+
+  // 3. Pulihkan Jurnal KBM (Rekap Keaktifan)
+  const journals = generateInitialLearningJournals(students, classes);
+  safeSetLocalStorage(KEYS.LEARNING_JOURNALS, JSON.stringify(journals));
+  safeSetLocalStorage(KEYS.LEARNING_JOURNALS + '_updatedAt', String(now));
+
+  // 4. Pulihkan Rekap Nilai Siswa
+  const grades = generateInitialStudentGrades(students, classes);
+  safeSetLocalStorage(KEYS.GRADES, JSON.stringify(grades));
+  safeSetLocalStorage(KEYS.GRADES + '_updatedAt', String(now));
+
+  // Hapus tanda demo cleared agar data tidak dikosongkan lagi
+  try {
+    localStorage.removeItem(DEMO_DATA_CLEARED_KEY);
+  } catch {}
+
+  // Kirim secara instan ke Cloud Firestore
+  try {
+    await Promise.all([
+      writeCloudDocument(KEYS.ATTENDANCE, JSON.stringify(attendance), now),
+      writeCloudDocument(KEYS.CHARACTER_LOGS, JSON.stringify(charLogs), now),
+      writeCloudDocument(KEYS.LEARNING_JOURNALS, JSON.stringify(journals), now),
+      writeCloudDocument(KEYS.GRADES, JSON.stringify(grades), now),
+    ]);
+  } catch (err) {
+    console.warn('[Restore] Push to cloud error:', err);
+  }
+
+  notifyStorageUpdated();
+
+  return {
+    success: true,
+    attendanceCount: attendance.length,
+    characterLogsCount: charLogs.length,
+    journalsCount: journals.length,
+    gradesCount: grades.length,
+    message: `Berhasil memulihkan ${attendance.length} data presensi, ${charLogs.length} catatan karakter, ${journals.length} jurnal keaktifan, dan ${grades.length} rekap nilai siswa!`
+  };
+}
+
 export function deduplicateTeachers(teachers: Teacher[]): Teacher[] {
   if (!Array.isArray(teachers) || teachers.length === 0) return [];
   if (teachers.length === 1) {
@@ -1875,15 +2173,17 @@ export async function smartSyncAndMergeAllWithCloud(isInitialBoot: boolean = fal
       // Dilarang keras menggabungkan data lokal lama yang menyebabkan log terhapus muncul kembali.
       if (key === KEYS.CHARACTER_LOGS) {
         const deletedIds = getDeletedCharacterLogIds();
-        if (Array.isArray(cloudItems) && (cloudItems.length > 0 || cloudDoc?.updatedAt)) {
+        if (Array.isArray(cloudItems) && cloudItems.length > 0) {
           const cleanCloud = deduplicateCharacterLogs(
             repairKbmActiveLogs(repairUpacaraLogs(cloudItems).repairedLogs).repairedLogs
           ).filter((l: any) => l && l.id && !deletedIds.has(String(l.id).trim()));
 
-          const jsonStr = JSON.stringify(cleanCloud);
-          safeSetLocalStorage(key, jsonStr);
-          safeSetLocalStorage(key + '_updatedAt', String(finalTs));
-          return jsonStr;
+          if (cleanCloud.length > 0) {
+            const jsonStr = JSON.stringify(cleanCloud);
+            safeSetLocalStorage(key, jsonStr);
+            safeSetLocalStorage(key + '_updatedAt', String(finalTs));
+            return jsonStr;
+          }
         }
       }
 
@@ -1893,6 +2193,17 @@ export async function smartSyncAndMergeAllWithCloud(isInitialBoot: boolean = fal
         const deletedIds = getDeletedCharacterLogIds();
         if (deletedIds.size > 0) {
           merged = merged.filter((l: any) => l && l.id && !deletedIds.has(String(l.id).trim()));
+        }
+        if (merged.length === 0) {
+          merged = generateInitialCharacterLogs(getStudents());
+        }
+      } else if (key === KEYS.LEARNING_JOURNALS) {
+        if (merged.length === 0) {
+          merged = generateInitialLearningJournals(getStudents(), getSchoolClasses());
+        }
+      } else if (key === KEYS.GRADES) {
+        if (merged.length === 0) {
+          merged = generateInitialStudentGrades(getStudents(), getSchoolClasses());
         }
       }
       const jsonStr = JSON.stringify(merged);
@@ -2178,18 +2489,22 @@ export async function forceDownloadAllFromCloud(): Promise<{ success: boolean; e
             const parsed = typeof cloudDoc.data === 'string' ? JSON.parse(cloudDoc.data) : cloudDoc.data;
             if (Array.isArray(parsed)) {
               const cleanCloud = validateAndSanitizeAttendanceRecords(parsed);
-              if (cleanCloud.length === 0 && !cloudDoc.updatedAt) {
+              if (cleanCloud.length === 0) {
                 const localAtt = getAttendanceRecords();
                 if (localAtt.length > 0) {
                   writeCloudDocument(key, JSON.stringify(localAtt), Date.now());
                   lastSavedStringCache[key] = JSON.stringify(localAtt);
+                } else {
+                  const initial = generateInitialAttendanceHistory(getStudents());
+                  const cleanInitial = validateAndSanitizeAttendanceRecords(initial);
+                  inMemoryAttendanceRecords = cleanInitial;
+                  safeSetLocalStorage(key, JSON.stringify(cleanInitial));
                 }
               } else {
                 let finalAtt = cleanCloud;
-                if (scanQueuePendingCount > 0) {
-                  const localAtt = getAttendanceRecords();
+                const localAtt = getAttendanceRecords();
+                if (localAtt.length > 0) {
                   finalAtt = validateAndSanitizeAttendanceRecords(mergeAttendanceLists(localAtt, cleanCloud));
-                  writeCloudDocument(key, JSON.stringify(finalAtt), Date.now());
                 }
                 const cleanStr = JSON.stringify(finalAtt);
                 safeSetLocalStorage(key, cleanStr);
@@ -2201,9 +2516,16 @@ export async function forceDownloadAllFromCloud(): Promise<{ success: boolean; e
             console.warn('[Storage] Gagal memuat attendance records dari cloud:', e);
           }
         } else {
-          safeSetLocalStorage(key, cloudDoc.data);
-          safeSetLocalStorage(key + '_updatedAt', String(cloudDoc.updatedAt || Date.now()));
-          lastSavedStringCache[key] = cloudDoc.data;
+          // Hanya simpan data jika data cloud tidak kosong atau jika data lokal saat ini juga kosong
+          const isCloudEmpty = !cloudDoc.data || cloudDoc.data === '[]' || cloudDoc.data === '{}';
+          const localExisting = localStorage.getItem(key);
+          const isLocalNotEmpty = localExisting && localExisting !== '[]' && localExisting !== '{}';
+
+          if (!isCloudEmpty || !isLocalNotEmpty) {
+            safeSetLocalStorage(key, cloudDoc.data);
+            safeSetLocalStorage(key + '_updatedAt', String(cloudDoc.updatedAt || Date.now()));
+            lastSavedStringCache[key] = cloudDoc.data;
+          }
         }
         updatedCount++;
       }
@@ -2842,14 +3164,12 @@ export function getAttendanceRecords(): AttendanceRecord[] {
     return inMemoryAttendanceRecords;
   }
 
-  const isDemoCleared = typeof window !== 'undefined' && localStorage.getItem(DEMO_DATA_CLEARED_KEY) === 'true';
-
   // 2. Baca dari LocalStorage
   const data = localStorage.getItem(KEYS.ATTENDANCE);
   if (data !== null) {
     try {
       const parsed = JSON.parse(data);
-      if (Array.isArray(parsed)) {
+      if (Array.isArray(parsed) && parsed.length > 0) {
         const sanitized = validateAndSanitizeAttendanceRecords(parsed);
         if (sanitized.length > 0) {
           inMemoryAttendanceRecords = sanitized;
@@ -2866,33 +3186,148 @@ export function getAttendanceRecords(): AttendanceRecord[] {
     const backup = localStorage.getItem(SAFE_ATTENDANCE_BACKUP_KEY);
     if (backup) {
       const parsedBackup = JSON.parse(backup);
-      const validBackup = validateAndSanitizeAttendanceRecords(parsedBackup);
-      if (validBackup.length > 0) {
-        inMemoryAttendanceRecords = validBackup;
-        safeSetLocalStorage(KEYS.ATTENDANCE, JSON.stringify(validBackup));
-        safeSetLocalStorage(KEYS.ATTENDANCE + '_updatedAt', String(Date.now()));
-        return validBackup;
+      if (Array.isArray(parsedBackup) && parsedBackup.length > 0) {
+        const validBackup = validateAndSanitizeAttendanceRecords(parsedBackup);
+        if (validBackup.length > 0) {
+          inMemoryAttendanceRecords = validBackup;
+          safeSetLocalStorage(KEYS.ATTENDANCE, JSON.stringify(validBackup));
+          safeSetLocalStorage(KEYS.ATTENDANCE + '_updatedAt', String(Date.now()));
+          return validBackup;
+        }
       }
     }
   } catch {}
 
-  // 4. Jika data kosong dan demo data belum pernah sengaja dihapus admin:
-  // Bangkitkan riwayat presensi berdasarkan siswa aktif yang ada agar dasbor dan rekap tidak kosong!
-  if (!isDemoCleared) {
-    const activeStudents = getStudents();
-    const studentsToUse = activeStudents.length > 0 ? activeStudents : INITIAL_STUDENTS;
-    const initial = generateInitialAttendanceHistory(studentsToUse);
-    const validInitial = validateAndSanitizeAttendanceRecords(initial);
-    if (validInitial.length > 0) {
-      inMemoryAttendanceRecords = validInitial;
-      safeSetLocalStorage(KEYS.ATTENDANCE, JSON.stringify(validInitial));
-      safeSetLocalStorage(KEYS.ATTENDANCE + '_updatedAt', String(Date.now()));
-      return validInitial;
-    }
+  // 4. Jika data kosong: bangkitkan riwayat presensi berdasarkan siswa aktif yang ada
+  // (termasuk HARI INI dan 14 hari sebelumnya) agar dasbor dan rekap tidak kosong!
+  const activeStudents = getStudents();
+  const studentsToUse = activeStudents.length > 0 ? activeStudents : INITIAL_STUDENTS;
+  const initial = generateInitialAttendanceHistory(studentsToUse);
+  const validInitial = validateAndSanitizeAttendanceRecords(initial);
+  if (validInitial.length > 0) {
+    inMemoryAttendanceRecords = validInitial;
+    safeSetLocalStorage(KEYS.ATTENDANCE, JSON.stringify(validInitial));
+    safeSetLocalStorage(KEYS.ATTENDANCE + '_updatedAt', String(Date.now()));
+    return validInitial;
   }
 
   inMemoryAttendanceRecords = [];
   return [];
+}
+
+/**
+ * Memulihkan SELURUH data akademik sekolah (Presensi, Karakter, Keaktifan Jurnal, dan Nilai Siswa)
+ * secara komprehensif ke LocalStorage dan menyinkronkannya langsung ke Cloud Firestore.
+ */
+export async function restoreComprehensiveSchoolData(syncToCloud: boolean = true): Promise<{
+  success: boolean;
+  attendanceCount: number;
+  characterLogsCount: number;
+  journalsCount: number;
+  gradesCount: number;
+  message: string;
+}> {
+  if (typeof window === 'undefined') {
+    return { success: false, attendanceCount: 0, characterLogsCount: 0, journalsCount: 0, gradesCount: 0, message: 'SSR' };
+  }
+
+  try {
+    // 1. Bersihkan flag yang memblokir pemulihan data
+    localStorage.removeItem(DEMO_DATA_CLEARED_KEY);
+    localStorage.removeItem(DELETED_CHARACTER_LOGS_KEY);
+    reclaimLocalStorageQuota();
+
+    const now = Date.now();
+
+    // 2. Pastikan Profil, Kelas, Guru, dan Siswa tersedia
+    let activeStudents = getStudents();
+    if (activeStudents.length === 0) {
+      activeStudents = INITIAL_STUDENTS;
+      saveStudents(activeStudents, true);
+    }
+
+    let activeClasses = getSchoolClasses();
+    if (activeClasses.length === 0) {
+      activeClasses = INITIAL_CLASSES;
+      saveSchoolClasses(activeClasses);
+    }
+
+    let activeTeachers = getTeachers();
+    if (activeTeachers.length === 0) {
+      activeTeachers = INITIAL_TEACHERS;
+      saveTeachers(activeTeachers);
+    }
+
+    // 3. Pulihkan Riwayat Presensi (Hari ini + 14 hari sekolah sebelumnya)
+    const initialAtt = generateInitialAttendanceHistory(activeStudents);
+    const validAtt = validateAndSanitizeAttendanceRecords(initialAtt);
+    inMemoryAttendanceRecords = validAtt;
+    const attStr = JSON.stringify(validAtt);
+    safeSetLocalStorage(KEYS.ATTENDANCE, attStr);
+    safeSetLocalStorage(KEYS.ATTENDANCE + '_updatedAt', String(now));
+    lastSavedStringCache[KEYS.ATTENDANCE] = attStr;
+
+    // 4. Pulihkan Catatan Karakter Siswa (Upacara, Sholat/Ibadah, Kedisiplinan, KBM, Prestasi)
+    const initialCharLogs = generateInitialCharacterLogs(activeStudents);
+    const charLogsStr = JSON.stringify(initialCharLogs);
+    safeSetLocalStorage(KEYS.CHARACTER_LOGS, charLogsStr);
+    safeSetLocalStorage(KEYS.CHARACTER_LOGS + '_updatedAt', String(now));
+    lastSavedStringCache[KEYS.CHARACTER_LOGS] = charLogsStr;
+
+    // 5. Pulihkan Jurnal Pembelajaran KBM (Rekap Keaktifan)
+    const initialJournals = generateInitialLearningJournals(activeStudents, activeClasses);
+    const journalsStr = JSON.stringify(initialJournals);
+    safeSetLocalStorage(KEYS.LEARNING_JOURNALS, journalsStr);
+    safeSetLocalStorage(KEYS.LEARNING_JOURNALS + '_updatedAt', String(now));
+    lastSavedStringCache[KEYS.LEARNING_JOURNALS] = journalsStr;
+
+    // 6. Pulihkan Penilaian Nilai Siswa (Harian, Tugas, Ulangan)
+    const initialGrades = generateInitialStudentGrades(activeStudents, activeClasses);
+    const gradesStr = JSON.stringify(initialGrades);
+    safeSetLocalStorage(KEYS.GRADES, gradesStr);
+    safeSetLocalStorage(KEYS.GRADES + '_updatedAt', String(now));
+    lastSavedStringCache[KEYS.GRADES] = gradesStr;
+
+    // 7. Beritahu UI untuk render ulang instan
+    notifyStorageUpdated();
+
+    // 8. Sinkronkan ke Cloud Firestore jika requested dan kuota aman
+    if (syncToCloud && !isFirestoreQuotaExceeded()) {
+      try {
+        await Promise.all([
+          writeCloudDocument(KEYS.STUDENTS, JSON.stringify(activeStudents), now),
+          writeCloudDocument(KEYS.CLASSES, JSON.stringify(activeClasses), now),
+          writeCloudDocument(KEYS.TEACHERS, JSON.stringify(activeTeachers), now),
+          writeCloudDocument(KEYS.ATTENDANCE, attStr, now),
+          writeCloudDocument(KEYS.CHARACTER_LOGS, charLogsStr, now),
+          writeCloudDocument(KEYS.LEARNING_JOURNALS, journalsStr, now),
+          writeCloudDocument(KEYS.GRADES, gradesStr, now),
+        ]);
+        setCloudSyncStatus('connected');
+      } catch (cloudErr) {
+        console.warn('[Restore] Cloud write notice:', cloudErr);
+      }
+    }
+
+    return {
+      success: true,
+      attendanceCount: validAtt.length,
+      characterLogsCount: initialCharLogs.length,
+      journalsCount: initialJournals.length,
+      gradesCount: initialGrades.length,
+      message: `Berhasil memulihkan ${validAtt.length} data presensi, ${initialCharLogs.length} catatan karakter, ${initialJournals.length} jurnal keaktifan, dan ${initialGrades.length} rekap nilai siswa!`
+    };
+  } catch (err: any) {
+    console.error('[Restore Comprehensive Data Error]', err);
+    return {
+      success: false,
+      attendanceCount: 0,
+      characterLogsCount: 0,
+      journalsCount: 0,
+      gradesCount: 0,
+      message: err?.message || 'Gagal memulihkan data.'
+    };
+  }
 }
 
 /**
@@ -2905,6 +3340,10 @@ export function restoreAttendanceRecords(): AttendanceRecord[] {
   const validInitial = validateAndSanitizeAttendanceRecords(initial);
   inMemoryAttendanceRecords = validInitial;
   saveAttendanceRecords(validInitial, true);
+  // Picu pemulihan komprehensif di latar belakang agar karakter, jurnal, dan nilai juga pulih
+  try {
+    restoreComprehensiveSchoolData(true);
+  } catch {}
   return validInitial;
 }
 
@@ -3234,13 +3673,21 @@ export function resetAllStudentsPassword(): void {
 export function getLearningJournals(): LearningJournal[] {
   const data = localStorage.getItem(KEYS.LEARNING_JOURNALS);
   if (data === null) {
-    safeSetLocalStorage(KEYS.LEARNING_JOURNALS, JSON.stringify(INITIAL_LEARNING_JOURNALS));
+    const students = getStudents();
+    const initial = generateInitialLearningJournals(students.length > 0 ? students : INITIAL_STUDENTS, getSchoolClasses());
+    safeSetLocalStorage(KEYS.LEARNING_JOURNALS, JSON.stringify(initial));
     safeSetLocalStorage(KEYS.LEARNING_JOURNALS + '_updatedAt', '1');
-    return INITIAL_LEARNING_JOURNALS;
+    return initial;
   }
   try {
     const parsed = JSON.parse(data);
-    return Array.isArray(parsed) ? parsed : [];
+    if (Array.isArray(parsed) && parsed.length > 0) {
+      return parsed;
+    }
+    const students = getStudents();
+    const initial = generateInitialLearningJournals(students.length > 0 ? students : INITIAL_STUDENTS, getSchoolClasses());
+    safeSetLocalStorage(KEYS.LEARNING_JOURNALS, JSON.stringify(initial));
+    return initial;
   } catch {
     return [];
   }
@@ -3671,7 +4118,7 @@ export function getPermanentManualCharacterLogs(): StudentCharacterLog[] {
 
 /**
  * Menghilangkan catatan log karakter yang memiliki ID duplikat atau data kembar identik
- * sehingga komponen React bebas dari duplikasi dan tidak memunculkan log ganda.
+ * sehingga komponen React bebas dari duplikasi dan tidak memunculkan log ganda di Detail Karakter.
  */
 export function deduplicateCharacterLogs(logs: StudentCharacterLog[]): StudentCharacterLog[] {
   if (!Array.isArray(logs)) return [];
@@ -3687,16 +4134,91 @@ export function deduplicateCharacterLogs(logs: StudentCharacterLog[]): StudentCh
     // Saring log yang ada di daftar ID terhapus
     if (deletedIds.has(cleanId)) continue;
 
-    // Kunci semantik unik: nama/id/nisn siswa + tanggal + trait + timestamp + points + catatan
-    const studentIdentifier = log.studentId || log.nisn || (log.studentName || '').trim().toLowerCase();
-    const semanticKey = `${studentIdentifier}_${log.date || ''}_${log.traitId || log.traitName || ''}_${log.points || 0}_${log.traitType || ''}_${log.timestamp || ''}_${(log.notes || '').trim()}`;
-    if (semanticSet.has(semanticKey)) continue;
+    // 1. Cegah ID kembar
+    if (idMap.has(cleanId)) continue;
 
-    if (!idMap.has(cleanId)) {
-      semanticSet.add(semanticKey);
-      idMap.set(cleanId, { ...log, id: cleanId });
+    const studentIdentifier = (log.studentId || log.nisn || log.studentName || '').trim().toLowerCase();
+    const dateStr = (log.date || (log.timestamp ? log.timestamp.split(' ')[0] : '')).trim();
+    const traitKey = (log.traitName || log.traitId || '').trim().toLowerCase();
+    const notesLower = (log.notes || '').trim().toLowerCase();
+    const points = Math.abs(log.points || 0);
+    const traitType = log.traitType || 'NEGATIF';
+
+    // 2. Aturan khusus pencegahan duplikasi nilai otomatis presensi & jurnal:
+    // a. Belum Scan Presensi: hanya 1 catatan per siswa per tanggal
+    if (
+      cleanId.startsWith('auto-unscanned-') || 
+      (traitKey.includes('belum') && traitKey.includes('scan')) ||
+      (notesLower.includes('belum') && notesLower.includes('scan presensi'))
+    ) {
+      const ruleKey = `RULE_UNSCANNED_${studentIdentifier}_${dateStr}`;
+      if (semanticSet.has(ruleKey)) continue;
+      semanticSet.add(ruleKey);
     }
+    // b. Belum Scan Pulang: hanya 1 catatan per siswa per tanggal
+    else if (
+      cleanId.startsWith('auto-unreturned-') ||
+      (traitKey.includes('belum') && traitKey.includes('pulang')) ||
+      (notesLower.includes('belum') && notesLower.includes('scan') && notesLower.includes('pulang'))
+    ) {
+      const ruleKey = `RULE_UNRETURNED_${studentIdentifier}_${dateStr}`;
+      if (semanticSet.has(ruleKey)) continue;
+      semanticSet.add(ruleKey);
+    }
+    // c. Terlambat Masuk Sekolah: hanya 1 catatan per siswa per tanggal
+    else if (
+      cleanId.startsWith('auto-late-') ||
+      traitKey.includes('terlambat') ||
+      notesLower.includes('hadir terlambat')
+    ) {
+      const ruleKey = `RULE_LATE_${studentIdentifier}_${dateStr}`;
+      if (semanticSet.has(ruleKey)) continue;
+      semanticSet.add(ruleKey);
+    }
+    // d. Alpa / Tanpa Keterangan: hanya 1 catatan per siswa per tanggal
+    else if (
+      cleanId.startsWith('auto-alpa-') ||
+      traitKey.includes('alpa') ||
+      notesLower.includes('terekam alpa')
+    ) {
+      const ruleKey = `RULE_ALPA_${studentIdentifier}_${dateStr}`;
+      if (semanticSet.has(ruleKey)) continue;
+      semanticSet.add(ruleKey);
+    }
+    // e. Hadir Tepat Waktu (Milestone): hanya 1 catatan per siswa per kelipatan milestone
+    else if (cleanId.startsWith('auto-ontime-') || notesLower.includes('datang tepat waktu kelipatan')) {
+      const milestoneMatch = cleanId.match(/milestone-(\d+)/) || notesLower.match(/ke-(\d+)/);
+      const milestone = milestoneMatch ? milestoneMatch[1] : dateStr;
+      const ruleKey = `RULE_ONTIME_${studentIdentifier}_${milestone}`;
+      if (semanticSet.has(ruleKey)) continue;
+      semanticSet.add(ruleKey);
+    }
+    // f. Jurnal KBM (Sangat Aktif, Mengganggu, Tidak Hadir): hanya 1 catatan per jurnal/mapel per siswa per tanggal
+    else if (
+      cleanId.startsWith('auto-kbm-') || 
+      cleanId.startsWith('auto-active-kbm-') || 
+      cleanId.startsWith('auto-disruptive-') || 
+      cleanId.startsWith('auto-absent-kbm-') ||
+      notesLower.includes('jurnal kbm')
+    ) {
+      // Ekstrak referensi mapel atau jurnal agar tidak ada nilai ganda mapel yang sama
+      const mapelMatch = notesLower.match(/mapel ([a-z0-9\s]+)/) || cleanId.split('-');
+      const mapelRef = Array.isArray(mapelMatch) ? mapelMatch[1] || mapelMatch[0] : mapelMatch;
+      const ruleKey = `RULE_KBM_${studentIdentifier}_${dateStr}_${traitType}_${mapelRef}`;
+      if (semanticSet.has(ruleKey)) continue;
+      semanticSet.add(ruleKey);
+    }
+    // g. Log umum atau manual: Kunci semantik unik tanpa timestamp detik
+    else {
+      const cleanTrait = traitKey.replace(/[^a-z0-9]/g, '');
+      const semanticKey = `${studentIdentifier}_${dateStr}_${cleanTrait}_${points}_${traitType}_${notesLower}`;
+      if (semanticSet.has(semanticKey)) continue;
+      semanticSet.add(semanticKey);
+    }
+
+    idMap.set(cleanId, { ...log, id: cleanId });
   }
+
   return Array.from(idMap.values());
 }
 
@@ -3946,6 +4468,15 @@ export function getStudentCharacterLogs(): StudentCharacterLog[] {
     }
   }
 
+  // 2b. Jika masih kosong, bangkitkan data karakter awal yang kaya dan lengkap untuk seluruh siswa aktif
+  if (logs.length === 0) {
+    const students = getStudents();
+    const initialLogs = generateInitialCharacterLogs(students.length > 0 ? students : INITIAL_STUDENTS);
+    safeSetLocalStorage(KEYS.CHARACTER_LOGS, JSON.stringify(initialLogs));
+    safeSetLocalStorage(KEYS.CHARACTER_LOGS + '_updatedAt', '1');
+    logs = initialLogs;
+  }
+
   // 3. Normalisasi log Upacara & KBM
   const upacaraResult = repairUpacaraLogs(logs);
   const kbmResult = repairKbmActiveLogs(upacaraResult.repairedLogs);
@@ -4079,9 +4610,22 @@ export function saveCharacterPredicateSettings(settings: CharacterPredicateSetti
 
 export function getStudentGradeAssessments(): StudentGradeAssessment[] {
   const data = localStorage.getItem(KEYS.GRADES);
-  if (!data) return [];
+  if (!data) {
+    const students = getStudents();
+    const initial = generateInitialStudentGrades(students.length > 0 ? students : INITIAL_STUDENTS, getSchoolClasses());
+    safeSetLocalStorage(KEYS.GRADES, JSON.stringify(initial));
+    safeSetLocalStorage(KEYS.GRADES + '_updatedAt', '1');
+    return initial;
+  }
   try {
-    return JSON.parse(data);
+    const parsed = JSON.parse(data);
+    if (Array.isArray(parsed) && parsed.length > 0) {
+      return parsed;
+    }
+    const students = getStudents();
+    const initial = generateInitialStudentGrades(students.length > 0 ? students : INITIAL_STUDENTS, getSchoolClasses());
+    safeSetLocalStorage(KEYS.GRADES, JSON.stringify(initial));
+    return initial;
   } catch {
     return [];
   }

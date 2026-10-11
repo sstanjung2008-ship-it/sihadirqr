@@ -17,12 +17,14 @@ import {
   Upload,
   Copy,
   Check,
-  Info
+  Info,
+  RotateCcw
 } from 'lucide-react';
 import { 
   smartSyncAndMergeAllWithCloud, 
   forceUploadAllToCloud, 
   forceDownloadAllFromCloud, 
+  restoreComprehensiveSchoolData,
   CloudSyncStatus,
   downloadDatabaseBackupFile,
   importAllDatabaseFromJson,
@@ -129,6 +131,32 @@ export const MultiDeviceSyncModal: React.FC<MultiDeviceSyncModalProps> = ({
       setFeedback({
         type: 'error',
         message: e?.message || 'Gagal mengunduh.',
+      });
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleComprehensiveRestore = async () => {
+    setIsLoading(true);
+    setFeedback(null);
+    try {
+      const res = await restoreComprehensiveSchoolData(true);
+      if (res.success) {
+        setFeedback({
+          type: 'success',
+          message: `Berhasil memulihkan seluruh data sekolah: ${res.attendanceCount} riwayat presensi, ${res.characterLogsCount} catatan karakter, ${res.journalsCount} jurnal keaktifan, dan ${res.gradesCount} rekap nilai siswa! Data telah tersimpan di perangkat ini & Cloud Firestore.`,
+        });
+      } else {
+        setFeedback({
+          type: 'error',
+          message: res.message || 'Gagal memulihkan data sekolah.',
+        });
+      }
+    } catch (e: any) {
+      setFeedback({
+        type: 'error',
+        message: e?.message || 'Gagal memulihkan data.',
       });
     } finally {
       setIsLoading(false);
@@ -364,6 +392,22 @@ export const MultiDeviceSyncModal: React.FC<MultiDeviceSyncModalProps> = ({
                     <CloudDownload className="w-4 h-4 text-emerald-400" />
                     Tarik Data Terbanyak Cloud
                   </button>
+                </div>
+
+                {/* Tombol Pemulihan Komprehensif Seluruh Data Sekolah */}
+                <div className="pt-2 border-t border-slate-800/80">
+                  <button
+                    type="button"
+                    disabled={isLoading}
+                    onClick={handleComprehensiveRestore}
+                    className="w-full bg-gradient-to-r from-amber-600/90 to-orange-600/90 hover:from-amber-600 hover:to-orange-600 text-white font-extrabold py-3 px-4 rounded-xl flex items-center justify-center gap-2 transition-all cursor-pointer text-xs shadow-md disabled:opacity-50"
+                  >
+                    <RotateCcw className="w-4 h-4 text-amber-200" />
+                    <span>Pulihkan Semua Data Sekolah (Presensi, Karakter, Jurnal & Nilai)</span>
+                  </button>
+                  <p className="text-[10px] text-slate-400 text-center mt-1.5">
+                    Gunakan jika dasbor/rekap sempat kosong untuk memulihkan seluruh data dan menyinkronkannya ke Cloud.
+                  </p>
                 </div>
               </div>
             </div>

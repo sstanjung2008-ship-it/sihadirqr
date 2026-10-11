@@ -14,7 +14,8 @@ import {
   CharacterPredicateSettings,
   UserSession,
   LessonPeriod,
-  ClassScheduleSlot
+  ClassScheduleSlot,
+  StudentGradeAssessment
 } from './types';
 import { 
   getSchoolProfile, 
@@ -50,10 +51,16 @@ import {
   saveLessonPeriods,
   getClassSchedules,
   saveClassSchedules,
+  getStudentGradeAssessments,
+  saveStudentGradeAssessments,
   getUserSession,
   saveUserSession,
   safeSetLocalStorage,
   restoreAttendanceRecords,
+  restoreComprehensiveSchoolData,
+  generateInitialCharacterLogs,
+  generateInitialLearningJournals,
+  generateInitialStudentGrades,
   initFirestoreAppSession,
   initFirestoreRealtimeSync,
   stopFirestoreRealtimeSync,
@@ -216,6 +223,7 @@ export default function App() {
   const [predicateSettings, setPredicateSettingsState] = useState<CharacterPredicateSettings>(getCharacterPredicateSettings());
   const [periods, setPeriodsState] = useState<LessonPeriod[]>(getLessonPeriods());
   const [schedules, setSchedulesState] = useState<ClassScheduleSlot[]>(getClassSchedules());
+  const [grades, setGradesState] = useState<StudentGradeAssessment[]>(() => getStudentGradeAssessments());
 
   // Parent Child Identification (Strictly Bound to Logged-in NISN, studentId, or username)
   const parentStudent = useMemo(() => {
@@ -362,6 +370,7 @@ export default function App() {
       setPredicateSettingsState(getCharacterPredicateSettings());
       setPeriodsState(getLessonPeriods());
       setSchedulesState(getClassSchedules());
+      setGradesState(getStudentGradeAssessments());
       setUserSessionState(getUserSession());
     }, 150);
   }, []);
@@ -384,13 +393,40 @@ export default function App() {
       setClassesState(updatedClasses);
     }
 
-    // Pastikan data presensi tidak kosong saat memuat aplikasi
+    // Pastikan seluruh data utama sekolah (Presensi, Karakter, Jurnal Keaktifan, Nilai) tidak kosong saat memuat aplikasi
     const currentAtt = getAttendanceRecords();
     if (currentAtt.length === 0) {
       const restored = restoreAttendanceRecords();
       setAttendanceRecordsState(restored);
     } else {
       setAttendanceRecordsState(currentAtt);
+    }
+
+    const currentChar = getStudentCharacterLogs();
+    if (currentChar.length === 0) {
+      const restoredChar = generateInitialCharacterLogs(getStudents());
+      saveStudentCharacterLogs(restoredChar, false);
+      setCharacterLogsState(restoredChar);
+    } else {
+      const cleanChar = deduplicateCharacterLogs(currentChar);
+      if (cleanChar.length !== currentChar.length) {
+        saveStudentCharacterLogs(cleanChar, false);
+        setCharacterLogsState(cleanChar);
+      }
+    }
+
+    const currentJournals = getLearningJournals();
+    if (currentJournals.length === 0) {
+      const restoredJournals = generateInitialLearningJournals(getStudents(), getSchoolClasses());
+      saveLearningJournals(restoredJournals, false);
+      setJournalsState(restoredJournals);
+    }
+
+    const currentGrades = getStudentGradeAssessments();
+    if (currentGrades.length === 0) {
+      const restoredGrades = generateInitialStudentGrades(getStudents(), getSchoolClasses());
+      saveStudentGradeAssessments(restoredGrades, false);
+      setGradesState(restoredGrades);
     }
 
     const handleNetworkToast = (e: any) => {
@@ -1138,14 +1174,17 @@ export default function App() {
     }
   };
 
-  // Manual / Auto Restore Attendance Records
-  const handleRestoreAttendance = useCallback(() => {
-    const restored = restoreAttendanceRecords();
-    setAttendanceRecordsState(restored);
+  // Manual / Auto Restore Comprehensive School Records (Presensi, Karakter, Jurnal, Nilai)
+  const handleRestoreAttendance = useCallback(async () => {
+    const res = await restoreComprehensiveSchoolData(true);
+    setAttendanceRecordsState(getAttendanceRecords());
+    setCharacterLogsState(getStudentCharacterLogs());
+    setJournalsState(getLearningJournals());
+    setGradesState(getStudentGradeAssessments());
     setNetworkToast({
       type: 'success',
-      title: '✅ Data Presensi Dipulihkan',
-      message: `Berhasil memulihkan ${restored.length} riwayat presensi sekolah.`
+      title: '✅ Seluruh Data Sekolah Dipulihkan',
+      message: res.message || `Berhasil memulihkan ${res.attendanceCount} presensi, ${res.characterLogsCount} karakter, dan ${res.gradesCount} nilai siswa.`
     });
     setTimeout(() => {
       setNetworkToast(null);
@@ -1568,15 +1607,10 @@ export default function App() {
   const handleAddMultipleCharacterLogs = (newLogs: StudentCharacterLog[]) => {
     if (!newLogs || newLogs.length === 0) return;
     setCharacterLogsState(prevLogs => {
-      const logMap = new Map<string, StudentCharacterLog>();
-      prevLogs.forEach(l => { if (l?.id) logMap.set(l.id.trim(), l); });
       newLogs.forEach(l => {
-        if (l?.id) {
-          unmarkCharacterLogDeleted(l.id);
-          logMap.set(l.id.trim(), l);
-        }
+        if (l?.id) unmarkCharacterLogDeleted(l.id);
       });
-      const merged = Array.from(logMap.values());
+      const merged = deduplicateCharacterLogs([...newLogs, ...prevLogs]);
       saveStudentCharacterLogs(merged);
       return merged;
     });
@@ -1966,6 +2000,7 @@ export default function App() {
               traits={traits}
               characterLogs={characterLogs}
               predicateSettings={predicateSettings}
+              gradeAssessments={grades}
               onRestoreAttendance={handleRestoreAttendance}
             />
           )}

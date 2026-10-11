@@ -1,4 +1,4 @@
-import { SchoolProfile, SchoolClass, Student, AttendanceRecord, LeaveRequest, Teacher, LessonPeriod, ClassScheduleSlot } from '../types';
+import { SchoolProfile, SchoolClass, Student, AttendanceRecord, LeaveRequest, Teacher, LessonPeriod, ClassScheduleSlot, StudentGradeAssessment } from '../types';
 
 export const INITIAL_SCHOOL_PROFILE: SchoolProfile = {
   name: "SMP NEGERI 1 CERDAS BERSAMA",
@@ -339,47 +339,70 @@ export const INITIAL_STUDENTS: Student[] = [
   }
 ];
 
-// Generate recent 14 days attendance records
+// Helper formatting YYYY-MM-DD in WITA (UTC+8) school timezone
+function getWitaDateStr(date: Date = new Date()): string {
+  const utc = date.getTime() + (date.getTimezoneOffset() * 60000);
+  const wita = new Date(utc + (3600000 * 8));
+  const y = wita.getFullYear();
+  const m = String(wita.getMonth() + 1).padStart(2, '0');
+  const d = String(wita.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
+// Generate recent 15 school days attendance records (including TODAY)
 export function generateInitialAttendanceHistory(students: Student[]): AttendanceRecord[] {
   const records: AttendanceRecord[] = [];
-  const today = new Date();
+  const now = new Date();
+  const todayStr = getWitaDateStr(now);
 
-  for (let i = 0; i < 14; i++) {
-    const d = new Date(today);
-    d.setDate(d.getDate() - i);
-    
-    // Skip weekends (Sunday=0, Saturday=6)
-    if (d.getDay() === 0 || d.getDay() === 6) continue;
+  // 1. Tanggal 0 selalu HARI INI (todayStr) agar dasbor presensi hari ini aktif seketika dan tidak kosong
+  const dates: string[] = [todayStr];
 
-    const dateStr = d.toISOString().split('T')[0];
+  // 2. Tambahkan 14 hari sekolah sebelumnya (mundur ke belakang, lewati hari Minggu)
+  let daysBack = 1;
+  while (dates.length < 15 && daysBack < 45) {
+    const pastDate = new Date(now.getTime() - (daysBack * 86400000));
+    const dayOfWeek = pastDate.getDay();
+    if (dayOfWeek !== 0) { // Lewati hari Minggu
+      const dStr = getWitaDateStr(pastDate);
+      if (!dates.includes(dStr)) {
+        dates.push(dStr);
+      }
+    }
+    daysBack++;
+  }
 
-    students.forEach((student, idx) => {
-      // Create interesting distribution
+  dates.forEach((dateStr, dayIdx) => {
+    const isToday = dayIdx === 0;
+
+    students.forEach((student, sIdx) => {
+      // Distribusi realistis kehadiran
       let status: AttendanceRecord['status'] = 'HADIR';
       let time = "06:45:12";
-      
-      const rand = (i * 7 + idx * 13) % 100;
-      
-      if (rand > 85) {
+
+      const rand = (dayIdx * 11 + sIdx * 17) % 100;
+
+      if (rand > 88) {
         status = 'TERLAMBAT';
-        time = "07:22:10";
-      } else if (rand > 78 && rand <= 85) {
+        time = "07:18:24";
+      } else if (rand > 81 && rand <= 88) {
         status = 'IZIN';
         time = "07:00:00";
-      } else if (rand > 72 && rand <= 78) {
+      } else if (rand > 75 && rand <= 81) {
         status = 'SAKIT';
         time = "07:00:00";
-      } else if (rand > 68 && rand <= 72) {
+      } else if (rand > 71 && rand <= 75) {
         status = 'ALPA';
         time = "-";
       } else {
         status = 'HADIR';
-        time = `06:${30 + (idx % 25)}:${10 + (idx % 45)}`;
+        time = `06:${String(30 + (sIdx % 26)).padStart(2, '0')}:${String(10 + (sIdx % 45)).padStart(2, '0')}`;
       }
 
       const isPresent = status === 'HADIR' || status === 'TERLAMBAT';
-      const hasReturned = isPresent && ((i * 3 + idx) % 5 !== 0); // most present students returned
-      const returnTimeStr = hasReturned ? `15:${10 + (idx % 35)}:${12 + (idx % 40)}` : undefined;
+      // Untuk hari ini, jika belum lewat siang, sebagian siswa sudah scan masuk; yang status pulang diatur sesuai simulasi
+      const hasReturned = isPresent && ((dayIdx * 3 + sIdx) % 4 !== 0);
+      const returnTimeStr = hasReturned ? `15:${String(10 + (sIdx % 35)).padStart(2, '0')}:${String(12 + (sIdx % 40)).padStart(2, '0')}` : undefined;
       const returnStatusVal = hasReturned ? 'PULANG' : undefined;
 
       records.push({
@@ -400,7 +423,7 @@ export function generateInitialAttendanceHistory(students: Student[]): Attendanc
         returnScannedBy: hasReturned ? "Pos Satpam Utama (Pulang)" : undefined
       });
     });
-  }
+  });
 
   return records;
 }
@@ -960,5 +983,289 @@ export const INITIAL_CLASS_SCHEDULES: ClassScheduleSlot[] = [
   { id: 'sch-9a-sen-2', classId: 'c9a', className: '9-A', day: 'Senin', periodNumber: 2, subject: 'Bahasa Indonesia', teacherId: 'tch-002', teacherName: 'Budi Santoso, M.Pd.', teacherNip: '19790820 200501 1 008', room: 'Ruang 9-A', color: 'blue' },
   { id: 'sch-9a-sen-3', classId: 'c9a', className: '9-A', day: 'Senin', periodNumber: 3, subject: 'Matematika', teacherId: 'tch-003', teacherName: 'Dewi Lestari, S.Si.', teacherNip: '19881105 201402 2 009', room: 'Ruang 9-A', color: 'indigo' },
 ];
+
+/**
+ * Bangkitkan data Penilaian Nilai Siswa (Formatif Harian, Tugas LKPD, Sumatif Ulangan Harian)
+ * untuk seluruh kelas dan mapel utama agar menu Rekap Nilai Siswa terisi lengkap.
+ */
+export function generateInitialStudentGradeAssessments(studentList: Student[] = INITIAL_STUDENTS): StudentGradeAssessment[] {
+  const students = studentList && studentList.length > 0 ? studentList : INITIAL_STUDENTS;
+  const now = new Date();
+  const todayStr = getWitaDateStr(now);
+  const threeDaysAgoStr = getWitaDateStr(new Date(now.getTime() - 3 * 86400000));
+  const oneWeekAgoStr = getWitaDateStr(new Date(now.getTime() - 7 * 86400000));
+  const twoWeeksAgoStr = getWitaDateStr(new Date(now.getTime() - 14 * 86400000));
+
+  const subjectsConfig = [
+    { subject: "Matematika", teacher: "Siti Rahmawati, S.Pd.", material: "Aljabar, Pola Bilangan & Persamaan Linear", date: threeDaysAgoStr },
+    { subject: "Bahasa Indonesia", teacher: "Budi Santoso, M.Pd.", material: "Teks Laporan Hasil Observasi & Kaidah Bahasa", date: oneWeekAgoStr },
+    { subject: "IPA", teacher: "Dewi Lestari, S.Si.", material: "Sistem Organisasi Kehidupan & Ekosistem", date: twoWeeksAgoStr },
+    { subject: "Informatika", teacher: "Agus Pratama, S.Kom.", material: "Algoritma Pemrograman, Flowchart & Scratch", date: todayStr },
+    { subject: "Bahasa Inggris", teacher: "Rina Marlina, M.Pd.", material: "Descriptive Text, Pronouns & Adjectives", date: oneWeekAgoStr },
+  ];
+
+  // Kumpulkan nama kelas unik dari daftar siswa
+  const uniqueClasses = Array.from(new Set(students.map(s => s.className || '7-A')));
+
+  const assessments: StudentGradeAssessment[] = [];
+
+  uniqueClasses.forEach((className) => {
+    const classStudents = students.filter(s => s.className === className);
+    if (classStudents.length === 0) return;
+    const classId = classStudents[0].classId || `cls-${className.toLowerCase().replace(/[^a-z0-9]/g, '-')}`;
+
+    subjectsConfig.forEach((cfg, subIdx) => {
+      const assessmentId = `asmt-${classId}-${subIdx + 1}-${cfg.date}`;
+
+      const grades = classStudents.map((std, idx) => {
+        // Hasilkan rentang nilai realistis (70 - 98)
+        const base = 75 + ((idx * 7 + subIdx * 11) % 22);
+        const daily = Math.min(100, Math.max(65, base + ((idx * 3) % 7) - 2));
+        const assignment = Math.min(100, Math.max(70, base + ((idx * 5) % 9)));
+        const exam = Math.min(100, Math.max(68, base + ((idx * 2) % 6) - 1));
+        const finalScore = Math.round((daily * 0.3) + (assignment * 0.3) + (exam * 0.4));
+
+        let notes = "Pemahaman materi baik";
+        if (finalScore >= 90) notes = "Sangat istimewa, penguasaan materi mendalam";
+        else if (finalScore >= 80) notes = "Mencapai target ketuntasan dengan baik";
+        else if (finalScore < 75) notes = "Perlu pendampingan remedial latihan soal";
+
+        return {
+          studentId: std.id,
+          studentName: std.name,
+          nisn: std.nisn,
+          dailyScore: daily,
+          assignmentScore: assignment,
+          examScore: exam,
+          finalScore: finalScore,
+          notes: notes
+        };
+      });
+
+      assessments.push({
+        id: assessmentId,
+        date: cfg.date,
+        teacherName: cfg.teacher,
+        classId: classId,
+        className: className,
+        subject: cfg.subject,
+        material: cfg.material,
+        semester: "Ganjil 2026/2027",
+        grades: grades,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      });
+    });
+  });
+
+  return assessments;
+}
+
+export const INITIAL_STUDENT_GRADE_ASSESSMENTS: StudentGradeAssessment[] = generateInitialStudentGradeAssessments();
+
+/**
+ * Bangkitkan catatan karakter siswa untuk seluruh siswa aktif
+ * meliputi kegiatan hari ini, minggu ini, dan sepanjang bulan aktif.
+ */
+export function generateInitialCharacterLogs(studentList: Student[] = INITIAL_STUDENTS): any[] {
+  const students = studentList && studentList.length > 0 ? studentList : INITIAL_STUDENTS;
+  const now = new Date();
+  const todayStr = getWitaDateStr(now);
+  const yesterdayStr = getWitaDateStr(new Date(now.getTime() - 86400000));
+  const threeDaysAgoStr = getWitaDateStr(new Date(now.getTime() - 3 * 86400000));
+  const fiveDaysAgoStr = getWitaDateStr(new Date(now.getTime() - 5 * 86400000));
+  const tenDaysAgoStr = getWitaDateStr(new Date(now.getTime() - 10 * 86400000));
+
+  const sampleLogs: any[] = [];
+
+  students.forEach((std, idx) => {
+    // 1. Log Petugas Upacara Bendera (+5 Poin) untuk beberapa siswa
+    if (idx % 6 === 0) {
+      sampleLogs.push({
+        id: `log-char-upacara-${std.id}-${threeDaysAgoStr}`,
+        studentId: std.id,
+        studentName: std.name,
+        nisn: std.nisn,
+        classId: std.classId || 'cls-7a',
+        className: std.className || '7-A',
+        traitId: 'trait-017',
+        traitName: 'Menjadi Petugas Upacara Bendera',
+        traitType: 'POSITIF',
+        points: 5,
+        evaluatorName: 'Pembina Upacara / Guru Piket',
+        timestamp: `${threeDaysAgoStr} 07:15:00`,
+        date: threeDaysAgoStr,
+        notes: 'Menjadi Petugas Upacara Bendera (Disiplin, Kepemimpinan, dan Tanggung Jawab)',
+        isManual: true
+      });
+    }
+
+    // 2. Log Sangat Aktif KBM (+1 Poin)
+    if (idx % 3 === 0 || idx % 4 === 0) {
+      sampleLogs.push({
+        id: `log-char-kbm-${std.id}-${yesterdayStr}`,
+        studentId: std.id,
+        studentName: std.name,
+        nisn: std.nisn,
+        classId: std.classId || 'cls-7a',
+        className: std.className || '7-A',
+        traitId: 'trait-013',
+        traitName: 'Sangat Aktif KBM',
+        traitType: 'POSITIF',
+        points: 1,
+        evaluatorName: 'Siti Rahmawati, S.Pd.',
+        timestamp: `${yesterdayStr} 09:30:00`,
+        date: yesterdayStr,
+        notes: 'Sangat aktif mempresentasikan penyelesaian soal latihan di papan tulis',
+        isManual: true
+      });
+    }
+
+    // 3. Log Ibadah / Sholat Dhuha / Kepedulian (+5 Poin)
+    if (idx % 5 === 0) {
+      sampleLogs.push({
+        id: `log-char-ibadah-${std.id}-${todayStr}`,
+        studentId: std.id,
+        studentName: std.name,
+        nisn: std.nisn,
+        classId: std.classId || 'cls-7a',
+        className: std.className || '7-A',
+        traitId: 'trait-003',
+        traitName: 'Melaksanakan Ibadah Sholat Dhuha / Doa Bersama',
+        traitType: 'POSITIF',
+        points: 5,
+        evaluatorName: 'Nurul Hidayah, S.Ag.',
+        timestamp: `${todayStr} 06:50:00`,
+        date: todayStr,
+        notes: 'Mengikuti ibadah dhuha dan doa pagi berjamaah di musholla',
+        isManual: true
+      });
+    }
+
+    // 4. Log Kedisiplinan / Tepat Waktu Datang (+10 Poin)
+    if (idx % 2 === 0) {
+      sampleLogs.push({
+        id: `log-char-disiplin-${std.id}-${fiveDaysAgoStr}`,
+        studentId: std.id,
+        studentName: std.name,
+        nisn: std.nisn,
+        classId: std.classId || 'cls-7a',
+        className: std.className || '7-A',
+        traitId: 'trait-001',
+        traitName: 'Datang Tepat Waktu & Disiplin',
+        traitType: 'POSITIF',
+        points: 10,
+        evaluatorName: 'Guru Piket Gerbang',
+        timestamp: `${fiveDaysAgoStr} 06:40:00`,
+        date: fiveDaysAgoStr,
+        notes: 'Hadir pagi dan berbaris rapi sebelum bel masuk',
+        isManual: true
+      });
+    }
+
+    // 5. Log Prestasi / Juara Lomba (+20 Poin)
+    if (idx === 1 || idx === 12 || idx === 25) {
+      sampleLogs.push({
+        id: `log-char-prestasi-${std.id}-${tenDaysAgoStr}`,
+        studentId: std.id,
+        studentName: std.name,
+        nisn: std.nisn,
+        classId: std.classId || 'cls-7a',
+        className: std.className || '7-A',
+        traitId: 'trait-006',
+        traitName: 'Meraih Prestasi / Juara Lomba',
+        traitType: 'POSITIF',
+        points: 20,
+        evaluatorName: 'Budi Santoso, M.Pd.',
+        timestamp: `${tenDaysAgoStr} 11:00:00`,
+        date: tenDaysAgoStr,
+        notes: 'Juara Lomba Akademik & Seni Tingkat Kota',
+        isManual: true
+      });
+    }
+  });
+
+  return sampleLogs;
+}
+
+/**
+ * Bangkitkan Jurnal Pembelajaran KBM untuk seluruh kelas aktif
+ * meliputi hari ini, kemarin, dan minggu ini agar Rekap Keaktifan terisi lengkap.
+ */
+export function generateInitialLearningJournals(studentList: Student[] = INITIAL_STUDENTS): any[] {
+  const students = studentList && studentList.length > 0 ? studentList : INITIAL_STUDENTS;
+  const now = new Date();
+  const todayStr = getWitaDateStr(now);
+  const yesterdayStr = getWitaDateStr(new Date(now.getTime() - 86400000));
+  const twoDaysAgoStr = getWitaDateStr(new Date(now.getTime() - 2 * 86400000));
+  const threeDaysAgoStr = getWitaDateStr(new Date(now.getTime() - 3 * 86400000));
+
+  const uniqueClasses = Array.from(new Set(students.map(s => s.className || '7-A')));
+  const journals: any[] = [];
+
+  const subjectTemplates = [
+    { subject: "Matematika", teacher: "Siti Rahmawati, S.Pd.", material: "Aljabar dan Persamaan Linear Direct", limit: "Bab 2 s.d 2.3", task: "Latihan Mandiri 2.3 No 1-5" },
+    { subject: "Bahasa Indonesia", teacher: "Budi Santoso, M.Pd.", material: "Teks Laporan Hasil Observasi (LHO)", limit: "Struktur & Kaidah Kebahasaan", task: "Membuat draft laporan observasi" },
+    { subject: "IPA", teacher: "Dewi Lestari, S.Si.", material: "Sistem Organisasi Kehidupan", limit: "Struktur Sel dan Jaringan", task: "Gambar struktur sel hewan dan tumbuhan" },
+    { subject: "Informatika", teacher: "Agus Pratama, S.Kom.", material: "Pengenalan Algoritma & Flowchart", limit: "Percabangan & Perulangan", task: "Latihan flowchart logika percabangan" }
+  ];
+
+  uniqueClasses.forEach((clsName, clsIdx) => {
+    const classStudents = students.filter(s => s.className === clsName);
+    if (classStudents.length === 0) return;
+    const classId = classStudents[0].classId || `cls-${clsName.toLowerCase().replace(/[^a-z0-9]/g, '-')}`;
+
+    const datesList = [todayStr, yesterdayStr, twoDaysAgoStr, threeDaysAgoStr];
+
+    datesList.forEach((jDate, dIdx) => {
+      const tmpl = subjectTemplates[(clsIdx + dIdx) % subjectTemplates.length];
+      const journalId = `lj-${classId}-${dIdx + 1}-${jDate}`;
+
+      const attendances = classStudents.map((std, sIdx) => {
+        let status = "Cukup aktif";
+        let note: string | undefined = undefined;
+        const code = (sIdx * 7 + dIdx * 13) % 10;
+        if (code === 0 || code === 1) {
+          status = "Sangat aktif";
+          note = "Menjawab pertanyaan guru dengan lugas dan tepat";
+        } else if (code === 2) {
+          status = "Sangat aktif";
+          note = "Memimpin jalannya diskusi kelompok";
+        } else if (code === 8) {
+          status = "Kurang aktif";
+          note = "Pasif saat diskusi kelompok";
+        } else if (code === 9) {
+          status = "Mengganggu";
+          note = "Berisik saat penjelasan materi";
+        }
+
+        return {
+          studentId: std.id,
+          studentName: std.name,
+          nisn: std.nisn,
+          status,
+          notes: note
+        };
+      });
+
+      journals.push({
+        id: journalId,
+        date: jDate,
+        teacherName: tmpl.teacher,
+        classId: classId,
+        className: clsName,
+        subject: tmpl.subject,
+        periods: [1, 2],
+        material: tmpl.material,
+        materialLimit: tmpl.limit,
+        notesOrTask: tmpl.task,
+        studentAttendances: attendances,
+        createdAt: new Date().toISOString()
+      });
+    });
+  });
+
+  return journals;
+}
 
 

@@ -36,7 +36,7 @@ import {
   RotateCcw,
   Check
 } from 'lucide-react';
-import { saveSchoolProfile } from '../lib/storage';
+import { saveSchoolProfile, isLogForStudent } from '../lib/storage';
 import { getWitaDateTime } from '../lib/autoCharacterScheduler';
 
 export type AutoRuleType = 
@@ -127,6 +127,7 @@ export const AutoCharacterAssessmentModal: React.FC<AutoCharacterAssessmentModal
   const [unscannedPoints, setUnscannedPoints] = useState<number>(() => schoolProfile?.autoCharacterPoints?.unscannedPoints ?? 2); // Default 2 poin negatif
   const [unreturnedPoints, setUnreturnedPoints] = useState<number>(() => schoolProfile?.autoCharacterPoints?.unreturnedPoints ?? 2); // Default 2 poin negatif
   const [pointsSavedNotice, setPointsSavedNotice] = useState<{ type: 'success' | 'info'; message: string } | null>(null);
+  const [saveNotice, setSaveNotice] = useState<{ type: 'success' | 'info' | 'error'; message: string } | null>(null);
 
   // Waktu WITA untuk sinkronisasi evaluasi 16:00 WITA
   const { witaDateStr, witaTimeStr, totalMinutes } = useMemo(() => getWitaDateTime(), [isOpen]);
@@ -432,14 +433,15 @@ export const AutoCharacterAssessmentModal: React.FC<AutoCharacterAssessmentModal
       // Rule 1: Terlambat Masuk Sekolah -> Nilai Karakter Negatif (-latePoints)
       sortedRecords.forEach(rec => {
         if (rec.status === 'TERLAMBAT') {
+          const candidateId = `auto-late-${student.id}-${rec.date}`;
           const isAlready = characterLogs.some(l => 
-            l.studentId === student.id && 
-            l.date === rec.date && 
-            (l.traitType === 'NEGATIF' && (l.traitName.toLowerCase().includes('terlambat') || l.notes?.toLowerCase().includes('terlambat') || l.notes?.toLowerCase().includes('otomatis')))
+            l.id === candidateId ||
+            (isLogForStudent(l, student) && l.date === rec.date && 
+             (l.traitType === 'NEGATIF' && (l.traitName.toLowerCase().includes('terlambat') || l.notes?.toLowerCase().includes('terlambat'))))
           );
 
           candidates.push({
-            id: `auto-late-${student.id}-${rec.date}`,
+            id: candidateId,
             studentId: student.id,
             studentName: student.name,
             nisn: student.nisn,
@@ -463,14 +465,15 @@ export const AutoCharacterAssessmentModal: React.FC<AutoCharacterAssessmentModal
 
         // Rule 2: Alpa -> Nilai Karakter Negatif (-alpaPoints)
         if (rec.status === 'ALPA') {
+          const candidateId = `auto-alpa-${student.id}-${rec.date}`;
           const isAlready = characterLogs.some(l => 
-            l.studentId === student.id && 
-            l.date === rec.date && 
-            (l.traitType === 'NEGATIF' && (l.traitName.toLowerCase().includes('alpa') || l.notes?.toLowerCase().includes('alpa') || l.notes?.toLowerCase().includes('otomatis')))
+            l.id === candidateId ||
+            (isLogForStudent(l, student) && l.date === rec.date && 
+             (l.traitType === 'NEGATIF' && (l.traitName.toLowerCase().includes('alpa') || l.notes?.toLowerCase().includes('alpa'))))
           );
 
           candidates.push({
-            id: `auto-alpa-${student.id}-${rec.date}`,
+            id: candidateId,
             studentId: student.id,
             studentName: student.name,
             nisn: student.nisn,
@@ -883,33 +886,32 @@ export const AutoCharacterAssessmentModal: React.FC<AutoCharacterAssessmentModal
     });
   };
 
-  // Submit and save selected candidates to Character Logs
+  // Submit and save candidates to Character Logs (Tersimpan ke Detail Karakter siswa)
   const handleProcessSubmit = () => {
     if (!isAutoEnabled) {
       alert('Penilaian Karakter Otomatis saat ini sedang NON-AKTIF. Silakan aktifkan terlebih dahulu tombol di bagian atas.');
       return;
     }
 
-    const toApply = allCandidates.filter(c => selectedCandidateIds.has(c.id) && !c.isAlreadyLogged);
+    const unrecordedInView = filteredCandidates.filter(c => !c.isAlreadyLogged);
+    let toApply = allCandidates.filter(c => selectedCandidateIds.has(c.id) && !c.isAlreadyLogged);
+
+    // Jika belum ada checklist spesifik yang dicentang manual, simpan seluruh kandidat yang belum dinilai pada filter tampilan saat ini
+    if (toApply.length === 0 && unrecordedInView.length > 0) {
+      toApply = unrecordedInView;
+    }
 
     if (toApply.length === 0) {
-      alert('Pilih setidaknya satu data siswa untuk diberikan penilaian otomatis!');
+      alert('Semua data karakter pada tampilan saat ini sudah dinilai dan tersimpan ke Detail Karakter siswa!');
       return;
     }
 
     const now = new Date();
+    const timeStr = now.toTimeString().substring(0, 8);
 
     const newLogs: StudentCharacterLog[] = toApply.map(c => {
-      let logId = 'log-auto-' + Date.now() + '-' + Math.random().toString(36).substr(2, 7);
-      if (c.ruleType === 'UNSCANNED') {
-        logId = `auto-unscanned-${c.studentId}-${c.date}`;
-      } else if (c.ruleType === 'UNRETURNED') {
-        logId = `auto-unreturned-${c.studentId}-${c.date}`;
-      } else if (c.ruleType === 'ALPA') {
-        logId = `auto-alpa-${c.studentId}-${c.date}`;
-      } else if (c.ruleType === 'LATE') {
-        logId = `auto-late-${c.studentId}-${c.date}`;
-      }
+      // Gunakan ID unik deterministik dari candidate agar tidak pernah terjadi dobel nilai di Detail Karakter
+      const logId = c.id;
 
       return {
         id: logId,
@@ -922,18 +924,33 @@ export const AutoCharacterAssessmentModal: React.FC<AutoCharacterAssessmentModal
         traitName: c.traitName,
         traitType: c.traitType,
         points: c.points,
-        // For JURNAL_KBM rules, evaluator is the teacher who inputted the KBM Journal
-        evaluatorName: c.evaluatorName || generalEvaluatorName.trim() || 'Sistem Presensi Otomatis (16:00 WITA)',
-        timestamp: `${c.date} ${now.toTimeString().substring(0, 8)}`,
+        // Untuk aturan Jurnal KBM, evaluator adalah guru penilai di KBM
+        evaluatorName: c.evaluatorName || generalEvaluatorName.trim() || 'Sistem Penilaian Otomatis Presensi',
+        timestamp: `${c.date} ${timeStr}`,
         date: c.date,
         notes: c.notes,
         photoProofUrl: undefined,
+        isManual: c.sourceType === 'JURNAL_KBM',
       };
     });
 
     onApplyLogs(newLogs);
-    alert(`Berhasil menambahkan ${newLogs.length} catatan penilaian karakter otomatis dari data Presensi & Jurnal KBM!`);
-    onClose();
+
+    // Bersihkan id yang sudah disimpan dari seleksi
+    setSelectedCandidateIds(prev => {
+      const next = new Set(prev);
+      toApply.forEach(c => next.delete(c.id));
+      return next;
+    });
+
+    setSaveNotice({
+      type: 'success',
+      message: `Berhasil menyimpan ${newLogs.length} nilai karakter ke Detail Karakter siswa! Data yang sudah tersimpan otomatis hilang dari tabel penilaian ini dan tidak ada nilai ganda.`
+    });
+
+    setTimeout(() => {
+      setSaveNotice(null);
+    }, 6000);
   };
 
   if (!isOpen) return null;
@@ -1689,9 +1706,9 @@ export const AutoCharacterAssessmentModal: React.FC<AutoCharacterAssessmentModal
               </div>
             </div>
 
-            {/* Search and Select All Bar */}
+            {/* Search, Action, and Select All Bar */}
             <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-2 border-t border-slate-100">
-              <div className="flex items-center gap-2 w-full sm:w-auto">
+              <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
                 <button
                   type="button"
                   onClick={handleSelectAllFiltered}
@@ -1700,8 +1717,26 @@ export const AutoCharacterAssessmentModal: React.FC<AutoCharacterAssessmentModal
                   <CheckSquare className="w-3.5 h-3.5" />
                   <span>Pilih Semua di Tampilan</span>
                 </button>
+
+                <button
+                  type="button"
+                  onClick={handleProcessSubmit}
+                  disabled={filteredCandidates.filter(c => !c.isAlreadyLogged).length === 0}
+                  className="inline-flex items-center gap-1.5 px-3.5 py-1.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-xs font-black rounded-xl shadow-sm transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+                  title="Simpan nilai karakter yang belum dinilai ke detail karakter siswa"
+                >
+                  <Save className="w-3.5 h-3.5" />
+                  <span>
+                    Simpan Nilai Karakter (
+                    {selectedCount > 0
+                      ? selectedCount
+                      : filteredCandidates.filter(c => !c.isAlreadyLogged).length}
+                    )
+                  </span>
+                </button>
+
                 <span className="text-xs text-slate-500 font-medium">
-                  {selectedCount} item dipilih untuk diproses
+                  {selectedCount} item dipilih
                 </span>
               </div>
 
@@ -1714,6 +1749,23 @@ export const AutoCharacterAssessmentModal: React.FC<AutoCharacterAssessmentModal
               />
             </div>
           </div>
+
+          {/* Notifikasi Sukses Simpan Nilai Karakter */}
+          {saveNotice && (
+            <div className="p-3.5 bg-emerald-50 border border-emerald-300 text-emerald-900 rounded-2xl flex items-center justify-between text-xs font-bold shadow-xs animate-in fade-in">
+              <div className="flex items-center gap-2">
+                <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />
+                <span>{saveNotice.message}</span>
+              </div>
+              <button 
+                type="button" 
+                onClick={() => setSaveNotice(null)} 
+                className="p-1 hover:bg-emerald-100 rounded-lg text-emerald-700 cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          )}
 
           {/* Candidate Table */}
           <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
@@ -1861,7 +1913,23 @@ export const AutoCharacterAssessmentModal: React.FC<AutoCharacterAssessmentModal
               </span>
             )}
           </div>
-          <div className="flex items-center gap-3 w-full sm:w-auto justify-end">
+          <div className="flex flex-col sm:flex-row items-center gap-3 w-full sm:w-auto justify-end">
+            <button
+              type="button"
+              onClick={handleProcessSubmit}
+              disabled={filteredCandidates.filter(c => !c.isAlreadyLogged).length === 0}
+              className="inline-flex items-center justify-center gap-2 px-6 py-2.5 text-xs font-black bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded-xl shadow-lg shadow-emerald-600/30 transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed w-full sm:w-auto"
+            >
+              <Save className="w-4 h-4" />
+              <span>
+                Simpan Nilai Karakter (
+                {selectedCount > 0
+                  ? `${selectedCount} Item Terpilih`
+                  : `${filteredCandidates.filter(c => !c.isAlreadyLogged).length} Belum Dinilai`}
+                )
+              </span>
+            </button>
+
             <button
               type="button"
               onClick={onClose}

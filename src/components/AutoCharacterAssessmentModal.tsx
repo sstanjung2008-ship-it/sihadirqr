@@ -31,6 +31,7 @@ import {
   Power,
   ShieldAlert,
   AlertTriangle,
+  AlertCircle,
   Lock,
   Save,
   RotateCcw,
@@ -257,8 +258,8 @@ export const AutoCharacterAssessmentModal: React.FC<AutoCharacterAssessmentModal
     setTimeout(() => setPointsSavedNotice(null), 4000);
   };
 
-  // Group Filter (POSITIF / NEGATIF / ALL)
-  const [groupFilter, setGroupFilter] = useState<'ALL' | 'POSITIF' | 'NEGATIF'>('ALL');
+  // Group Filter (ALL / UNSAVED / SAVED / POSITIF / NEGATIF)
+  const [groupFilter, setGroupFilter] = useState<'ALL' | 'UNSAVED' | 'SAVED' | 'POSITIF' | 'NEGATIF'>('ALL');
   
   // Specific Rule Filter inside Modal
   const [ruleFilter, setRuleFilter] = useState<'ALL' | AutoRuleType>('ALL');
@@ -268,6 +269,9 @@ export const AutoCharacterAssessmentModal: React.FC<AutoCharacterAssessmentModal
 
   // Selected candidates state (set of draft IDs)
   const [selectedCandidateIds, setSelectedCandidateIds] = useState<Set<string>>(new Set());
+
+  // ID kandidat yang telah berhasil disimpan ke Detail Karakter siswa dalam sesi saat ini
+  const [localSavedIds, setLocalSavedIds] = useState<Set<string>>(new Set());
 
   // Evaluator name default for general presence rules
   const defaultGeneralEvaluator = useMemo(() => {
@@ -416,13 +420,18 @@ export const AutoCharacterAssessmentModal: React.FC<AutoCharacterAssessmentModal
     const studentMap = new Map<string, Student>();
     students.forEach(s => studentMap.set(s.id, s));
 
-    // 1. Group attendance records by student
+    // 1. Group attendance records by student (cocokkan studentId, NISN, atau nama)
     const studentAttendanceMap = new Map<string, AttendanceRecord[]>();
     attendanceRecords.forEach(rec => {
-      if (!studentAttendanceMap.has(rec.studentId)) {
-        studentAttendanceMap.set(rec.studentId, []);
+      const matchStd = studentMap.get(rec.studentId) || students.find(s => 
+        (rec.nisn && rec.nisn !== '-' && s.nisn === rec.nisn) || 
+        (rec.studentName && s.name.trim().toLowerCase() === rec.studentName.trim().toLowerCase())
+      );
+      const targetId = matchStd?.id || rec.studentId;
+      if (!studentAttendanceMap.has(targetId)) {
+        studentAttendanceMap.set(targetId, []);
       }
-      studentAttendanceMap.get(rec.studentId)!.push(rec);
+      studentAttendanceMap.get(targetId)!.push(rec);
     });
 
     // 2. Process attendance records (Late, Alpa, On-Time 3 Days)
@@ -434,7 +443,7 @@ export const AutoCharacterAssessmentModal: React.FC<AutoCharacterAssessmentModal
       sortedRecords.forEach(rec => {
         if (rec.status === 'TERLAMBAT') {
           const candidateId = `auto-late-${student.id}-${rec.date}`;
-          const isAlready = characterLogs.some(l => 
+          const isAlready = localSavedIds.has(candidateId) || characterLogs.some(l => 
             l.id === candidateId ||
             (isLogForStudent(l, student) && l.date === rec.date && 
              (l.traitType === 'NEGATIF' && (l.traitName.toLowerCase().includes('terlambat') || l.notes?.toLowerCase().includes('terlambat'))))
@@ -466,7 +475,7 @@ export const AutoCharacterAssessmentModal: React.FC<AutoCharacterAssessmentModal
         // Rule 2: Alpa -> Nilai Karakter Negatif (-alpaPoints)
         if (rec.status === 'ALPA') {
           const candidateId = `auto-alpa-${student.id}-${rec.date}`;
-          const isAlready = characterLogs.some(l => 
+          const isAlready = localSavedIds.has(candidateId) || characterLogs.some(l => 
             l.id === candidateId ||
             (isLogForStudent(l, student) && l.date === rec.date && 
              (l.traitType === 'NEGATIF' && (l.traitName.toLowerCase().includes('alpa') || l.notes?.toLowerCase().includes('alpa'))))
@@ -508,17 +517,18 @@ export const AutoCharacterAssessmentModal: React.FC<AutoCharacterAssessmentModal
         );
 
         if (isEligibleReturnTime && isPresent && !hasReturned) {
-          const isAlready = characterLogs.some(l => 
-            (l.studentId === student.id || (student.nisn && l.nisn === student.nisn) || (l.studentName && student.name && l.studentName.trim().toLowerCase() === student.name.trim().toLowerCase())) && 
+          const candidateId = `auto-unreturned-${student.id}-${rec.date}`;
+          const isAlready = localSavedIds.has(candidateId) || characterLogs.some(l => 
+            l.id === candidateId ||
+            (isLogForStudent(l, student) && 
             l.date === rec.date && 
             (
-              l.id === `auto-unreturned-${student.id}-${rec.date}` || 
-              (l.traitType === 'NEGATIF' && l.traitName.toLowerCase().includes('belum') && l.traitName.toLowerCase().includes('pulang'))
-            )
+              l.traitType === 'NEGATIF' && l.traitName.toLowerCase().includes('belum') && l.traitName.toLowerCase().includes('pulang')
+            ))
           );
 
           candidates.push({
-            id: `auto-unreturned-${student.id}-${rec.date}`,
+            id: candidateId,
             studentId: student.id,
             studentName: student.name,
             nisn: student.nisn,
@@ -561,13 +571,14 @@ export const AutoCharacterAssessmentModal: React.FC<AutoCharacterAssessmentModal
         );
 
         if (isUnscanned) {
-          const isAlready = characterLogs.some(l => 
-            (l.studentId === student.id || (student.nisn && l.nisn === student.nisn) || (l.studentName && student.name && l.studentName.trim().toLowerCase() === student.name.trim().toLowerCase())) && 
+          const candidateId = `auto-unscanned-${student.id}-${attDate}`;
+          const isAlready = localSavedIds.has(candidateId) || characterLogs.some(l => 
+            l.id === candidateId ||
+            (isLogForStudent(l, student) && 
             l.date === attDate && 
             (
-              l.id === `auto-unscanned-${student.id}-${attDate}` || 
-              (l.traitType === 'NEGATIF' && l.traitName.toLowerCase().includes('belum') && l.traitName.toLowerCase().includes('scan'))
-            )
+              l.traitType === 'NEGATIF' && l.traitName.toLowerCase().includes('belum') && l.traitName.toLowerCase().includes('scan')
+            ))
           );
 
           candidates.push({
@@ -607,14 +618,13 @@ export const AutoCharacterAssessmentModal: React.FC<AutoCharacterAssessmentModal
           const targetDate = lastRecordDate;
           const logId = `auto-ontime-${student.id}-milestone-${milestoneCount}`;
 
-          const isAlready = characterLogs.some(l => 
-            l.studentId === student.id && 
-            (
-              l.id === logId || 
-              l.id === `auto-ontime-${student.id}-group-${g}-${targetDate}` ||
+          const isAlready = localSavedIds.has(logId) || characterLogs.some(l => 
+            l.id === logId || 
+            l.id === `auto-ontime-${student.id}-group-${g}-${targetDate}` ||
+            (isLogForStudent(l, student) && (
               (l.traitType === 'POSITIF' && l.notes?.includes(`kelipatan ${onTimeRequiredDays} hari ke-${g + 1}`)) ||
               (l.traitType === 'POSITIF' && l.notes?.includes(`${milestoneCount} hari hadir`))
-            )
+            ))
           );
 
           candidates.push({
@@ -665,18 +675,22 @@ export const AutoCharacterAssessmentModal: React.FC<AutoCharacterAssessmentModal
 
         // Jurnal KBM - A. Status: 'Mengganggu' -> Negatif (disruptivePoints, default 1)
         if (sa.status === 'Mengganggu') {
-          const isAlready = characterLogs.some(l => 
-            l.studentId === sId && 
-            l.date === journal.date && 
+          const candidateId = `auto-disruptive-${journal.id}-${sId}`;
+          const isAlready = localSavedIds.has(candidateId) || characterLogs.some(l => 
+            l.id === candidateId ||
             (
-              (l.traitType === 'NEGATIF' && l.traitName.toLowerCase().includes('mengganggu') && (l.evaluatorName.toLowerCase() === teacherEvaluator.toLowerCase() || l.notes?.includes(journal.subject))) ||
-              l.notes?.includes(`Jurnal KBM ${journal.subject}`) ||
-              (l.notes?.toLowerCase().includes('mengganggu') && l.notes?.toLowerCase().includes(journal.subject.toLowerCase()))
+              isLogForStudent(l, { id: sId, nisn: sNisn, name: sName }) && 
+              l.date === journal.date && 
+              (
+                (l.traitType === 'NEGATIF' && l.traitName.toLowerCase().includes('mengganggu')) ||
+                l.notes?.includes(`Jurnal KBM ${journal.subject}`) ||
+                (l.notes?.toLowerCase().includes('mengganggu') && l.notes?.toLowerCase().includes(journal.subject.toLowerCase()))
+              )
             )
           );
 
           candidates.push({
-            id: `auto-disruptive-${journal.id}-${sId}`,
+            id: candidateId,
             studentId: sId,
             studentName: sName,
             nisn: sNisn,
@@ -701,17 +715,21 @@ export const AutoCharacterAssessmentModal: React.FC<AutoCharacterAssessmentModal
 
         // Jurnal KBM - B. Status: 'Tidak hadir di kelas' -> Negatif (absentKbmPoints, default 2)
         if (sa.status === 'Tidak hadir di kelas') {
-          const isAlready = characterLogs.some(l => 
-            l.studentId === sId && 
-            l.date === journal.date && 
+          const candidateId = `auto-absent-kbm-${journal.id}-${sId}`;
+          const isAlready = localSavedIds.has(candidateId) || characterLogs.some(l => 
+            l.id === candidateId ||
             (
-              (l.traitType === 'NEGATIF' && (l.traitName.toLowerCase().includes('tidak hadir') || l.traitName.toLowerCase().includes('bolos') || l.traitName.toLowerCase().includes('absen')) && (l.evaluatorName.toLowerCase() === teacherEvaluator.toLowerCase() || l.notes?.includes(journal.subject))) ||
-              (l.notes?.toLowerCase().includes('tidak hadir di kelas') && l.notes?.toLowerCase().includes(journal.subject.toLowerCase()))
+              isLogForStudent(l, { id: sId, nisn: sNisn, name: sName }) && 
+              l.date === journal.date && 
+              (
+                (l.traitType === 'NEGATIF' && (l.traitName.toLowerCase().includes('tidak hadir') || l.traitName.toLowerCase().includes('bolos') || l.traitName.toLowerCase().includes('absen'))) ||
+                (l.notes?.toLowerCase().includes('tidak hadir di kelas') && l.notes?.toLowerCase().includes(journal.subject.toLowerCase()))
+              )
             )
           );
 
           candidates.push({
-            id: `auto-absent-kbm-${journal.id}-${sId}`,
+            id: candidateId,
             studentId: sId,
             studentName: sName,
             nisn: sNisn,
@@ -736,17 +754,21 @@ export const AutoCharacterAssessmentModal: React.FC<AutoCharacterAssessmentModal
 
         // Jurnal KBM - C. Status: 'Sangat aktif' -> Positif (veryActiveKbmPoints, default 1)
         if (sa.status === 'Sangat aktif') {
-          const isAlready = characterLogs.some(l => 
-            l.studentId === sId && 
-            l.date === journal.date && 
+          const candidateId = `auto-active-kbm-${journal.id}-${sId}`;
+          const isAlready = localSavedIds.has(candidateId) || characterLogs.some(l => 
+            l.id === candidateId ||
             (
-              (l.traitType === 'POSITIF' && (l.traitName.toLowerCase().includes('sangat aktif') || l.traitName.toLowerCase().includes('keaktifan') || l.traitName.toLowerCase().includes('aktif')) && (l.evaluatorName.toLowerCase() === teacherEvaluator.toLowerCase() || l.notes?.includes(journal.subject))) ||
-              (l.notes?.toLowerCase().includes('sangat aktif') && l.notes?.toLowerCase().includes(journal.subject.toLowerCase()))
+              isLogForStudent(l, { id: sId, nisn: sNisn, name: sName }) && 
+              l.date === journal.date && 
+              (
+                (l.traitType === 'POSITIF' && (l.traitName.toLowerCase().includes('sangat aktif') || l.traitName.toLowerCase().includes('keaktifan') || l.traitName.toLowerCase().includes('aktif'))) ||
+                (l.notes?.toLowerCase().includes('sangat aktif') && l.notes?.toLowerCase().includes(journal.subject.toLowerCase()))
+              )
             )
           );
 
           candidates.push({
-            id: `auto-active-kbm-${journal.id}-${sId}`,
+            id: candidateId,
             studentId: sId,
             studentName: sName,
             nisn: sNisn,
@@ -783,7 +805,8 @@ export const AutoCharacterAssessmentModal: React.FC<AutoCharacterAssessmentModal
     students, 
     attendanceRecords, 
     learningJournals,
-    characterLogs, 
+    characterLogs,
+    localSavedIds,
     latePoints, 
     alpaPoints, 
     disruptivePoints,
@@ -814,6 +837,9 @@ export const AutoCharacterAssessmentModal: React.FC<AutoCharacterAssessmentModal
   const totalVeryActiveCount = useMemo(() => allCandidates.filter(c => c.ruleType === 'VERY_ACTIVE_KBM').length, [allCandidates]);
   const totalOnTimeCount = useMemo(() => allCandidates.filter(c => c.ruleType === 'ON_TIME_3_DAYS').length, [allCandidates]);
 
+  // Counts by save status and polarity
+  const totalUnsavedCount = useMemo(() => allCandidates.filter(c => !c.isAlreadyLogged).length, [allCandidates]);
+  const totalSavedCount = useMemo(() => allCandidates.filter(c => c.isAlreadyLogged).length, [allCandidates]);
   const totalPositiveCount = useMemo(() => allCandidates.filter(c => c.traitType === 'POSITIF').length, [allCandidates]);
   const totalNegativeCount = useMemo(() => allCandidates.filter(c => c.traitType === 'NEGATIF').length, [allCandidates]);
 
@@ -828,13 +854,22 @@ export const AutoCharacterAssessmentModal: React.FC<AutoCharacterAssessmentModal
       });
       setSelectedCandidateIds(initialSelected);
     }
-  }, [isOpen, allCandidates.length]);
+  }, [isOpen, allCandidates]);
 
   // Filtered view candidates
   const filteredCandidates = useMemo(() => {
     return allCandidates.filter(c => {
-      // 1. Group filter: ALL, POSITIF, NEGATIF
-      const matchesGroup = groupFilter === 'ALL' || c.traitType === groupFilter;
+      // 1. Group filter: ALL, UNSAVED, SAVED, POSITIF, NEGATIF
+      let matchesGroup = true;
+      if (groupFilter === 'UNSAVED') {
+        matchesGroup = !c.isAlreadyLogged;
+      } else if (groupFilter === 'SAVED') {
+        matchesGroup = c.isAlreadyLogged;
+      } else if (groupFilter === 'POSITIF') {
+        matchesGroup = c.traitType === 'POSITIF';
+      } else if (groupFilter === 'NEGATIF') {
+        matchesGroup = c.traitType === 'NEGATIF';
+      }
       
       // 2. Specific rule filter
       const matchesRule = ruleFilter === 'ALL' || c.ruleType === ruleFilter;
@@ -843,7 +878,9 @@ export const AutoCharacterAssessmentModal: React.FC<AutoCharacterAssessmentModal
       const matchesClass = classFilter === 'ALL' || c.classId === classFilter;
       
       // 4. Record status filter
-      const matchesStatus = onlyUnrecorded ? !c.isAlreadyLogged : true;
+      const matchesStatus = (groupFilter === 'UNSAVED' || groupFilter === 'SAVED')
+        ? true
+        : (onlyUnrecorded ? !c.isAlreadyLogged : true);
       
       // 5. Search query
       const matchesSearch = 
@@ -886,7 +923,56 @@ export const AutoCharacterAssessmentModal: React.FC<AutoCharacterAssessmentModal
     });
   };
 
-  // Submit and save candidates to Character Logs (Tersimpan ke Detail Karakter siswa)
+  // Simpan nilai karakter untuk satu siswa secara langsung ke Detail Karakter Siswa (1 kali write)
+  const handleSaveSingleCandidate = (c: AutoCharacterCandidate) => {
+    if (!isAutoEnabled) {
+      alert('Penilaian Karakter Otomatis saat ini sedang NON-AKTIF. Silakan aktifkan terlebih dahulu tombol di bagian atas.');
+      return;
+    }
+
+    const now = new Date();
+    const timeStr = now.toTimeString().substring(0, 8);
+
+    const newLog: StudentCharacterLog = {
+      id: c.id,
+      studentId: c.studentId,
+      studentName: c.studentName,
+      nisn: c.nisn,
+      classId: c.classId,
+      className: c.className,
+      traitId: c.traitId,
+      traitName: c.traitName,
+      traitType: c.traitType,
+      points: c.points,
+      evaluatorName: c.evaluatorName || generalEvaluatorName.trim() || 'Sistem Penilaian Otomatis Presensi',
+      timestamp: `${c.date} ${timeStr}`,
+      date: c.date,
+      notes: c.notes,
+      photoProofUrl: undefined,
+      isManual: true, // Wajib true agar tercatat permanen di Detail Karakter siswa
+    };
+
+    // 1 KALI WRITE:
+    onApplyLogs([newLog]);
+
+    setLocalSavedIds(prev => new Set(prev).add(c.id));
+    setSelectedCandidateIds(prev => {
+      const next = new Set(prev);
+      next.delete(c.id);
+      return next;
+    });
+
+    setSaveNotice({
+      type: 'success',
+      message: `Berhasil menyimpan nilai karakter untuk ${c.studentName} ke Detail Karakter siswa dalam 1 kali simpan!`
+    });
+
+    setTimeout(() => {
+      setSaveNotice(null);
+    }, 5000);
+  };
+
+  // Submit and save candidates to Character Logs (Tersimpan ke Detail Karakter siswa - 1 KALI WRITE)
   const handleProcessSubmit = () => {
     if (!isAutoEnabled) {
       alert('Penilaian Karakter Otomatis saat ini sedang NON-AKTIF. Silakan aktifkan terlebih dahulu tombol di bagian atas.');
@@ -930,11 +1016,21 @@ export const AutoCharacterAssessmentModal: React.FC<AutoCharacterAssessmentModal
         date: c.date,
         notes: c.notes,
         photoProofUrl: undefined,
-        isManual: c.sourceType === 'JURNAL_KBM',
+        isManual: true, // JAMINAN MUTLAK: Disimpan dengan status manual/terverifikasi agar tersimpan permanen di Detail Karakter siswa dan tidak terhapus otomatis oleh sistem scheduler
       };
     });
 
+    // 1 KALI WRITE:
+    // Seluruh siswa yang dipilih disimpan sekaligus dalam 1 kali pemanggilan onApplyLogs
     onApplyLogs(newLogs);
+
+    // Tandai langsung di state lokal agar kandidat segera berstatus 'Sudah Ada'
+    // dan langsung berpindah/menghilang dari kelompok 'Belum Tersimpan di Detail Siswa'
+    setLocalSavedIds(prev => {
+      const next = new Set(prev);
+      toApply.forEach(c => next.add(c.id));
+      return next;
+    });
 
     // Bersihkan id yang sudah disimpan dari seleksi
     setSelectedCandidateIds(prev => {
@@ -945,7 +1041,7 @@ export const AutoCharacterAssessmentModal: React.FC<AutoCharacterAssessmentModal
 
     setSaveNotice({
       type: 'success',
-      message: `Berhasil menyimpan ${newLogs.length} nilai karakter ke Detail Karakter siswa! Data yang sudah tersimpan otomatis hilang dari tabel penilaian ini dan tidak ada nilai ganda.`
+      message: `Berhasil menyimpan ${newLogs.length} nilai karakter siswa ke Detail Karakter siswa dalam 1 kali simpan! Data telah berpindah ke Detail Karakter siswa.`
     });
 
     setTimeout(() => {
@@ -1467,16 +1563,16 @@ export const AutoCharacterAssessmentModal: React.FC<AutoCharacterAssessmentModal
           {/* Filter Panel & Candidate List Controls */}
           <div className="bg-white rounded-2xl p-4 border border-slate-200 shadow-xs space-y-3.5">
             
-            {/* TOMBOL KELOMPOK KARAKTER UTAMA: POSITIF vs NEGATIF vs SEMUA */}
+            {/* TOMBOL KELOMPOK KARAKTER UTAMA: SEMUA vs BELUM TERSIMPAN vs SUDAH TERSIMPAN vs POSITIF vs NEGATIF */}
             <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 bg-slate-100/70 p-2 rounded-2xl border border-slate-200">
               <div className="flex items-center gap-1.5 w-full sm:w-auto">
-                <span className="text-xs font-black text-slate-600 uppercase tracking-wider px-2 flex items-center gap-1">
+                <span className="text-xs font-black text-slate-700 uppercase tracking-wider px-2 flex items-center gap-1">
                   <Filter className="w-3.5 h-3.5 text-indigo-600" />
                   <span>Kelompok Karakter:</span>
                 </span>
               </div>
 
-              <div className="grid grid-cols-3 gap-1.5 w-full sm:w-auto">
+              <div className="flex flex-wrap items-center gap-1.5 w-full sm:w-auto">
                 {/* 1. Semua Kelompok */}
                 <button
                   type="button"
@@ -1484,9 +1580,9 @@ export const AutoCharacterAssessmentModal: React.FC<AutoCharacterAssessmentModal
                     setGroupFilter('ALL');
                     setRuleFilter('ALL');
                   }}
-                  className={`px-3.5 py-2 rounded-xl text-xs font-extrabold flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-xs ${
+                  className={`px-3 py-1.5 rounded-xl text-xs font-extrabold flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-xs ${
                     groupFilter === 'ALL'
-                      ? 'bg-slate-900 text-white shadow-slate-900/20 scale-102'
+                      ? 'bg-slate-900 text-white shadow-slate-900/20 scale-102 ring-2 ring-slate-700/40'
                       : 'bg-white text-slate-700 hover:bg-slate-50 border border-slate-200/80'
                   }`}
                 >
@@ -1497,7 +1593,57 @@ export const AutoCharacterAssessmentModal: React.FC<AutoCharacterAssessmentModal
                   </span>
                 </button>
 
-                {/* 2. Kelompok Karakter POSITIF */}
+                {/* 2. Kelompok Karakter BELUM TERSIMPAN DI DETAIL SISWA */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setGroupFilter('UNSAVED');
+                    setRuleFilter('ALL');
+                  }}
+                  className={`px-3.5 py-1.5 rounded-xl text-xs font-black flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-xs ${
+                    groupFilter === 'UNSAVED'
+                      ? 'bg-gradient-to-r from-amber-500 to-orange-600 text-slate-950 font-black shadow-amber-500/30 ring-2 ring-amber-400 scale-102'
+                      : 'bg-amber-50 text-amber-900 hover:bg-amber-100/80 border border-amber-300'
+                  }`}
+                  title="Tampilkan hanya nilai karakter yang belum tersimpan ke Detail Karakter siswa"
+                >
+                  <AlertCircle className={`w-3.5 h-3.5 ${groupFilter === 'UNSAVED' ? 'text-slate-950' : 'text-amber-600'}`} />
+                  <span>Belum Tersimpan di Detail Siswa</span>
+                  <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-black ${
+                    groupFilter === 'UNSAVED' 
+                      ? 'bg-slate-950 text-amber-300' 
+                      : 'bg-amber-200 text-amber-950'
+                  }`}>
+                    {totalUnsavedCount}
+                  </span>
+                </button>
+
+                {/* 3. Kelompok Karakter SUDAH TERSIMPAN */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setGroupFilter('SAVED');
+                    setRuleFilter('ALL');
+                  }}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-extrabold flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-xs ${
+                    groupFilter === 'SAVED'
+                      ? 'bg-teal-700 text-white shadow-teal-700/30 ring-2 ring-teal-500 scale-102'
+                      : 'bg-white text-teal-800 hover:bg-teal-50 border border-teal-200'
+                  }`}
+                  title="Tampilkan nilai karakter yang sudah tersimpan di Detail Karakter siswa"
+                >
+                  <CheckCircle2 className="w-3.5 h-3.5 text-teal-500" />
+                  <span>Sudah Tersimpan</span>
+                  <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-black ${
+                    groupFilter === 'SAVED' 
+                      ? 'bg-white text-teal-800' 
+                      : 'bg-teal-100 text-teal-900'
+                  }`}>
+                    {totalSavedCount}
+                  </span>
+                </button>
+
+                {/* 4. Kelompok Karakter POSITIF */}
                 <button
                   type="button"
                   onClick={() => {
@@ -1506,7 +1652,7 @@ export const AutoCharacterAssessmentModal: React.FC<AutoCharacterAssessmentModal
                       setRuleFilter('ALL');
                     }
                   }}
-                  className={`px-3.5 py-2 rounded-xl text-xs font-black flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-xs ${
+                  className={`px-3 py-1.5 rounded-xl text-xs font-black flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-xs ${
                     groupFilter === 'POSITIF'
                       ? 'bg-emerald-600 text-white shadow-emerald-600/30 ring-2 ring-emerald-400/40 scale-102'
                       : 'bg-white text-emerald-800 hover:bg-emerald-50 border border-emerald-200'
@@ -1519,7 +1665,7 @@ export const AutoCharacterAssessmentModal: React.FC<AutoCharacterAssessmentModal
                   </span>
                 </button>
 
-                {/* 3. Kelompok Karakter NEGATIF */}
+                {/* 5. Kelompok Karakter NEGATIF */}
                 <button
                   type="button"
                   onClick={() => {
@@ -1528,7 +1674,7 @@ export const AutoCharacterAssessmentModal: React.FC<AutoCharacterAssessmentModal
                       setRuleFilter('ALL');
                     }
                   }}
-                  className={`px-3.5 py-2 rounded-xl text-xs font-black flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-xs ${
+                  className={`px-3 py-1.5 rounded-xl text-xs font-black flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-xs ${
                     groupFilter === 'NEGATIF'
                       ? 'bg-rose-600 text-white shadow-rose-600/30 ring-2 ring-rose-400/40 scale-102'
                       : 'bg-white text-rose-800 hover:bg-rose-50 border border-rose-200'
@@ -1722,15 +1868,15 @@ export const AutoCharacterAssessmentModal: React.FC<AutoCharacterAssessmentModal
                   type="button"
                   onClick={handleProcessSubmit}
                   disabled={filteredCandidates.filter(c => !c.isAlreadyLogged).length === 0}
-                  className="inline-flex items-center gap-1.5 px-3.5 py-1.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-xs font-black rounded-xl shadow-sm transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
-                  title="Simpan nilai karakter yang belum dinilai ke detail karakter siswa"
+                  className="inline-flex items-center gap-1.5 px-3.5 py-1.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-xs font-black rounded-xl shadow-md transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed transform active:scale-95"
+                  title="Simpan nilai karakter siswa yang dipilih ke Detail Karakter siswa dalam 1 kali simpan (1 kali write)"
                 >
                   <Save className="w-3.5 h-3.5" />
                   <span>
-                    Simpan Nilai Karakter (
+                    Simpan ke Detail Karakter Siswa (
                     {selectedCount > 0
-                      ? selectedCount
-                      : filteredCandidates.filter(c => !c.isAlreadyLogged).length}
+                      ? `${selectedCount} Terpilih`
+                      : `${filteredCandidates.filter(c => !c.isAlreadyLogged).length} Siap Input`}
                     )
                   </span>
                 </button>
@@ -1879,13 +2025,24 @@ export const AutoCharacterAssessmentModal: React.FC<AutoCharacterAssessmentModal
                           </td>
                           <td className="p-3 text-center whitespace-nowrap">
                             {candidate.isAlreadyLogged ? (
-                              <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-slate-200 text-slate-600 rounded-full font-bold text-[10px]">
-                                <CheckCircle2 className="w-3 h-3 text-slate-500" /> Sudah Ada
+                              <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-teal-100 text-teal-800 rounded-lg font-bold text-[10px]">
+                                <CheckCircle2 className="w-3.5 h-3.5 text-teal-600" /> Sudah Tersimpan
                               </span>
                             ) : (
-                              <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-indigo-100 text-indigo-700 rounded-full font-bold text-[10px]">
-                                Siap Input
-                              </span>
+                              <div className="flex items-center justify-center gap-1.5">
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-amber-100 text-amber-900 rounded-md font-bold text-[10px]">
+                                  <Clock className="w-3 h-3 text-amber-600" /> Belum Tersimpan
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => handleSaveSingleCandidate(candidate)}
+                                  className="inline-flex items-center gap-1 px-2.5 py-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg font-black text-[10px] shadow-xs cursor-pointer transition-all active:scale-95"
+                                  title={`Simpan nilai karakter ${candidate.studentName} ke Detail Karakter siswa`}
+                                >
+                                  <Save className="w-3 h-3" />
+                                  Simpan
+                                </button>
+                              </div>
                             )}
                           </td>
                         </tr>
@@ -1918,14 +2075,14 @@ export const AutoCharacterAssessmentModal: React.FC<AutoCharacterAssessmentModal
               type="button"
               onClick={handleProcessSubmit}
               disabled={filteredCandidates.filter(c => !c.isAlreadyLogged).length === 0}
-              className="inline-flex items-center justify-center gap-2 px-6 py-2.5 text-xs font-black bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded-xl shadow-lg shadow-emerald-600/30 transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed w-full sm:w-auto"
+              className="inline-flex items-center justify-center gap-2 px-6 py-2.5 text-xs font-black bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded-xl shadow-lg shadow-emerald-600/30 transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed w-full sm:w-auto transform active:scale-95"
             >
               <Save className="w-4 h-4" />
               <span>
-                Simpan Nilai Karakter (
+                Simpan ke Detail Karakter Siswa (
                 {selectedCount > 0
-                  ? `${selectedCount} Item Terpilih`
-                  : `${filteredCandidates.filter(c => !c.isAlreadyLogged).length} Belum Dinilai`}
+                  ? `${selectedCount} Siswa Terpilih (1 Kali Simpan)`
+                  : `${filteredCandidates.filter(c => !c.isAlreadyLogged).length} Belum Tersimpan`}
                 )
               </span>
             </button>

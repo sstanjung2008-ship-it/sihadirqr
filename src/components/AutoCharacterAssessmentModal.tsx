@@ -1728,9 +1728,10 @@ export const AutoCharacterAssessmentModal: React.FC<AutoCharacterAssessmentModal
                         ? 'bg-teal-600 text-white'
                         : 'bg-teal-50 text-teal-800 hover:bg-teal-100 border border-teal-200/60'
                     }`}
+                    title={`Aturan Hadir Tepat Waktu: Minimal akumulasi ${onTimeRequiredDays} hari hadir tepat waktu berbeda. Pengaturan ini bisa diubah ke 1 hari pada panel konfigurasi poin di bagian atas.`}
                   >
                     <CalendarCheck2 className="w-3 h-3" />
-                    <span>Tepat Waktu ({totalOnTimeCount})</span>
+                    <span>Tepat Waktu {onTimeRequiredDays > 1 ? `(${onTimeRequiredDays} Hari)` : ''} ({totalOnTimeCount})</span>
                   </button>
                 )}
 

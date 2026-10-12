@@ -7,6 +7,7 @@ import {
   getScanQueueStatus,
   flushAttendanceScanQueue,
   getAttendanceRecords,
+  getLocalDateString,
   ScanQueueStatus
 } from '../lib/storage';
 import { 
@@ -183,7 +184,7 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
   const activeDays = schoolProfile.activeDays || ['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
   const isTodayActiveDay = activeDays.includes(todayName);
 
-  const todayDateStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+  const todayDateStr = getLocalDateString(now);
   const holidays = schoolProfile.holidays || [];
   const todayHoliday = holidays.find(h => {
     if (h.endDate) {
@@ -504,10 +505,7 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
   const processAttendanceForStudent = (student: Student) => {
     const now = new Date();
     const timeStr = now.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-    const year = now.getFullYear();
-    const month = String(now.getMonth() + 1).padStart(2, '0');
-    const day = String(now.getDate()).padStart(2, '0');
-    const dateStr = `${year}-${month}-${day}`;
+    const dateStr = getLocalDateString(now);
 
     const freshRecords = getAttendanceRecords();
     const existingRecord = freshRecords.find(r => (

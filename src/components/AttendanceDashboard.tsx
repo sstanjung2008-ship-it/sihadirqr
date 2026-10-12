@@ -281,6 +281,21 @@ export const AttendanceDashboard: React.FC<AttendanceDashboardProps> = ({
   const countBelumPulang = Math.max(0, totalStudentsCount - countPulang);
   const attendanceRate = totalStudentsCount > 0 ? Math.round((totalPresent / totalStudentsCount) * 100) : 0;
 
+  // Hitung batas waktu toleransi keterlambatan secara dinamis dari profil sekolah
+  const { cutoffTimeStr, startTimeStr, toleranceMinutes } = React.useMemo(() => {
+    const start = schoolProfile?.startTime || '07:00';
+    const tol = schoolProfile?.lateToleranceMinutes ?? 15;
+    const [startH, startM] = start.split(':').map(Number);
+    const totalMinutes = (isNaN(startH) ? 7 : startH) * 60 + (isNaN(startM) ? 0 : startM) + tol;
+    const endH = Math.floor(totalMinutes / 60) % 24;
+    const endM = totalMinutes % 60;
+    return {
+      cutoffTimeStr: `${String(endH).padStart(2, '0')}:${String(endM).padStart(2, '0')}`,
+      startTimeStr: start,
+      toleranceMinutes: tol,
+    };
+  }, [schoolProfile?.startTime, schoolProfile?.lateToleranceMinutes]);
+
   const displayDateFormatted = React.useMemo(() => {
     try {
       const d = new Date(selectedDate + 'T00:00:00');
@@ -1305,7 +1320,7 @@ export const AttendanceDashboard: React.FC<AttendanceDashboardProps> = ({
                 <CheckCircle2 className="w-4 h-4 text-blue-500" />
               </div>
               <div className="text-3xl font-black text-blue-600">{countHadir}</div>
-              <p className="text-[11px] text-blue-500 font-medium mt-1">Scan &lt; 07:15</p>
+              <p className="text-[11px] text-blue-500 font-medium mt-1">Scan ≤ {cutoffTimeStr}</p>
             </div>
 
             {/* Terlambat */}
@@ -1315,7 +1330,7 @@ export const AttendanceDashboard: React.FC<AttendanceDashboardProps> = ({
                 <Clock className="w-4 h-4 text-amber-500" />
               </div>
               <div className="text-3xl font-black text-amber-500">{countTerlambat}</div>
-              <p className="text-[11px] text-amber-600 font-medium mt-1">Scan &gt; 07:15</p>
+              <p className="text-[11px] text-amber-600 font-medium mt-1">Scan &gt; {cutoffTimeStr}</p>
             </div>
 
             {/* Sakit */}
@@ -1365,13 +1380,25 @@ export const AttendanceDashboard: React.FC<AttendanceDashboardProps> = ({
       {currentRole !== 'PARENT' && (
         /* ADMIN / TEACHER / PIKET VIEW: TABLE OF TODAY'S STUDENT ATTENDANCE */
         <div className="bg-white border border-slate-200/80 rounded-3xl shadow-sm overflow-hidden">
-          <div className="p-5 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
-            <h2 className="text-sm font-bold text-slate-800">
-              Daftar Absensi Siswa ({filteredStudents.length} Siswa)
-            </h2>
-            <span className="text-xs text-indigo-700 bg-indigo-50 font-bold px-3 py-1 rounded-full border border-indigo-100">
-              {dateRecords.length} Sudah Melakukan Scan
-            </span>
+          <div className="p-5 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-slate-50/50">
+            <div>
+              <h2 className="text-sm font-bold text-slate-800">
+                Daftar Absensi Siswa ({filteredStudents.length} Siswa)
+              </h2>
+              {countTerlambat > 0 && (
+                <p className="text-[11px] text-amber-800 font-medium mt-0.5 flex items-center gap-1.5">
+                  <span className="inline-block w-2 h-2 rounded-full bg-amber-500 shrink-0"></span>
+                  <span>
+                    Batas toleransi tepat waktu adalah pukul <strong>{cutoffTimeStr} WITA</strong>. Siswa yang scan lewat jam tersebut otomatis tercatat <strong>Terlambat</strong>.
+                  </span>
+                </p>
+              )}
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-indigo-700 bg-indigo-50 font-bold px-3 py-1 rounded-full border border-indigo-100">
+                {dateRecords.length} Sudah Scan ({countHadir} Tepat Waktu • {countTerlambat} Terlambat)
+              </span>
+            </div>
           </div>
 
           <div className="overflow-x-auto">

@@ -48,6 +48,7 @@ interface CharacterInputViewProps {
   onDeleteTrait: (id: string) => void;
   onSavePredicateSettings?: (settings: CharacterPredicateSettings) => void;
   onApplyAutoCharacterLogs?: (logs: StudentCharacterLog[]) => void;
+  onNavigateToPoints?: () => void;
 }
 
 export const CharacterInputView: React.FC<CharacterInputViewProps> = ({
@@ -66,7 +67,8 @@ export const CharacterInputView: React.FC<CharacterInputViewProps> = ({
   onUpdateTrait,
   onDeleteTrait,
   onSavePredicateSettings,
-  onApplyAutoCharacterLogs
+  onApplyAutoCharacterLogs,
+  onNavigateToPoints
 }) => {
   const isAutoAssessmentEnabled = schoolProfile?.autoCharacterAssessmentEnabled !== false;
   const [searchQuery, setSearchQuery] = useState('');
@@ -793,6 +795,7 @@ export const CharacterInputView: React.FC<CharacterInputViewProps> = ({
           userSession={userSession}
           schoolProfile={schoolProfile}
           onUpdateSchoolProfile={onUpdateSchoolProfile}
+          onNavigateToPoints={onNavigateToPoints}
           onApplyLogs={(newLogs) => {
             if (onApplyAutoCharacterLogs) {
               onApplyAutoCharacterLogs(newLogs);

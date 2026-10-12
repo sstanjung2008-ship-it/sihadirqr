@@ -415,7 +415,10 @@ export function reconcileAutoCharacterPenalties(forceToday: boolean = false): {
   // ATAU jika waktu hari ini belum mencapai pukul 16:00 WITA (mencegah penalti prematur)
   let removedCount = 0;
   const filteredExisting = currentLogs.filter(l => {
-    if (isManualCharacterLog(l)) return true;
+    // JAMINAN MUTLAK: Log yang disimpan secara sadar oleh Guru/Admin (isManual atau saved-) DILARANG KERAS DIHAPUS!
+    if (l.isManual === true || isManualCharacterLog(l) || l.id?.startsWith('saved-auto-') || l.id?.startsWith('saved-') || l.id?.startsWith('user-saved-')) {
+      return true;
+    }
 
     const isAutoUnscanned = l.id?.startsWith('auto-unscanned-') || (l.traitType === 'NEGATIF' && l.traitName.toLowerCase().includes('belum') && l.traitName.toLowerCase().includes('scan') && l.notes?.includes('Otomatis'));
     const isAutoUnreturned = l.id?.startsWith('auto-unreturned-') || (l.traitType === 'NEGATIF' && l.traitName.toLowerCase().includes('belum') && l.traitName.toLowerCase().includes('pulang') && l.notes?.includes('Otomatis'));
@@ -427,8 +430,8 @@ export function reconcileAutoCharacterPenalties(forceToday: boolean = false): {
       return true;
     }
 
-    // Pencegahan log prematur hari berjalan:
-    // Jika HARI INI dan belum mencapai pukul 16:00 WITA dan tidak forceToday, bersihkan log penalti hari ini
+    // Pencegahan log prematur hari berjalan HANYA untuk log otomatis yang belum pernah disimpan user:
+    // Jika HARI INI dan belum mencapai pukul 16:00 WITA dan tidak forceToday, bersihkan draf log penalti hari ini
     if (!isPast16Wita && !forceToday && l.date === witaDateStr) {
       if (isAutoUnscanned || isAutoUnreturned) {
         removedCount++;

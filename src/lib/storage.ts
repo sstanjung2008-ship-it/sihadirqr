@@ -4078,9 +4078,14 @@ export function saveCharacterTraits(traits: CharacterTrait[]): void {
 export function isManualCharacterLog(log: StudentCharacterLog): boolean {
   if (!log) return false;
   if (log.isManual === true) return true;
-  if (log.id && log.id.startsWith('log-manual-')) return true;
+  if (log.id && (
+    log.id.startsWith('log-manual-') || 
+    log.id.startsWith('saved-auto-') || 
+    log.id.startsWith('saved-') || 
+    log.id.startsWith('user-saved-')
+  )) return true;
 
-  // Catatan penalti otomatis yang dibuat sistem
+  // Catatan penalti otomatis yang dibuat sistem (belum disimpan oleh guru/admin)
   if (
     log.id && (
       log.id.startsWith('auto-unscanned-') ||
@@ -4148,6 +4153,7 @@ export function deduplicateCharacterLogs(logs: StudentCharacterLog[]): StudentCh
     // a. Belum Scan Presensi: hanya 1 catatan per siswa per tanggal
     if (
       cleanId.startsWith('auto-unscanned-') || 
+      cleanId.startsWith('saved-auto-unscanned-') ||
       (traitKey.includes('belum') && traitKey.includes('scan')) ||
       (notesLower.includes('belum') && notesLower.includes('scan presensi'))
     ) {
@@ -4158,6 +4164,7 @@ export function deduplicateCharacterLogs(logs: StudentCharacterLog[]): StudentCh
     // b. Belum Scan Pulang: hanya 1 catatan per siswa per tanggal
     else if (
       cleanId.startsWith('auto-unreturned-') ||
+      cleanId.startsWith('saved-auto-unreturned-') ||
       (traitKey.includes('belum') && traitKey.includes('pulang')) ||
       (notesLower.includes('belum') && notesLower.includes('scan') && notesLower.includes('pulang'))
     ) {
@@ -4168,6 +4175,7 @@ export function deduplicateCharacterLogs(logs: StudentCharacterLog[]): StudentCh
     // c. Terlambat Masuk Sekolah: hanya 1 catatan per siswa per tanggal
     else if (
       cleanId.startsWith('auto-late-') ||
+      cleanId.startsWith('saved-auto-late-') ||
       traitKey.includes('terlambat') ||
       notesLower.includes('hadir terlambat')
     ) {
@@ -4178,6 +4186,7 @@ export function deduplicateCharacterLogs(logs: StudentCharacterLog[]): StudentCh
     // d. Alpa / Tanpa Keterangan: hanya 1 catatan per siswa per tanggal
     else if (
       cleanId.startsWith('auto-alpa-') ||
+      cleanId.startsWith('saved-auto-alpa-') ||
       traitKey.includes('alpa') ||
       notesLower.includes('terekam alpa')
     ) {
@@ -4186,7 +4195,11 @@ export function deduplicateCharacterLogs(logs: StudentCharacterLog[]): StudentCh
       semanticSet.add(ruleKey);
     }
     // e. Hadir Tepat Waktu (Milestone): hanya 1 catatan per siswa per kelipatan milestone
-    else if (cleanId.startsWith('auto-ontime-') || notesLower.includes('datang tepat waktu kelipatan')) {
+    else if (
+      cleanId.startsWith('auto-ontime-') || 
+      cleanId.startsWith('saved-auto-ontime-') || 
+      notesLower.includes('datang tepat waktu kelipatan')
+    ) {
       const milestoneMatch = cleanId.match(/milestone-(\d+)/) || notesLower.match(/ke-(\d+)/);
       const milestone = milestoneMatch ? milestoneMatch[1] : dateStr;
       const ruleKey = `RULE_ONTIME_${studentIdentifier}_${milestone}`;
@@ -4196,9 +4209,13 @@ export function deduplicateCharacterLogs(logs: StudentCharacterLog[]): StudentCh
     // f. Jurnal KBM (Sangat Aktif, Mengganggu, Tidak Hadir): hanya 1 catatan per jurnal/mapel per siswa per tanggal
     else if (
       cleanId.startsWith('auto-kbm-') || 
+      cleanId.startsWith('saved-auto-kbm-') || 
       cleanId.startsWith('auto-active-kbm-') || 
+      cleanId.startsWith('saved-auto-active-kbm-') || 
       cleanId.startsWith('auto-disruptive-') || 
+      cleanId.startsWith('saved-auto-disruptive-') || 
       cleanId.startsWith('auto-absent-kbm-') ||
+      cleanId.startsWith('saved-auto-absent-kbm-') ||
       notesLower.includes('jurnal kbm')
     ) {
       // Ekstrak referensi mapel atau jurnal agar tidak ada nilai ganda mapel yang sama

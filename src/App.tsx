@@ -58,6 +58,7 @@ import {
   safeSetLocalStorage,
   restoreAttendanceRecords,
   restoreComprehensiveSchoolData,
+  getLocalDateString,
   generateInitialCharacterLogs,
   generateInitialLearningJournals,
   generateInitialStudentGrades,
@@ -1964,6 +1965,7 @@ export default function App() {
               onDeleteTrait={handleDeleteTrait}
               onSavePredicateSettings={handleSavePredicateSettings}
               onApplyAutoCharacterLogs={handleAddMultipleCharacterLogs}
+              onNavigateToPoints={() => handleTabChange('character_points')}
             />
           )}
 

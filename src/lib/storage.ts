@@ -4354,13 +4354,19 @@ export function calculateStudentCharacterSummary(
   onTimeDays: number;
   onTimeBonusPoints: number;
   onTimeDates: string[];
+  lateDays: number;
+  latePenaltyPoints: number;
+  lateDates: string[];
 } {
-  // Saring log karakter siswa (kecualikan log manual auto-ontime lama agar tidak terjadi duplikasi nilai)
+  // Saring log karakter siswa (kecualikan log manual auto-ontime dan auto-late lama agar tidak terjadi duplikasi nilai)
   const rawLogs = (logs || []).filter(l => 
     isLogForStudent(l, student) &&
     !l.id?.startsWith('auto-ontime-') &&
     !l.id?.startsWith('saved-auto-ontime-') &&
-    !(l.traitType === 'POSITIF' && (l.notes?.toLowerCase().includes('kali hadir tepat waktu') || l.notes?.toLowerCase().includes('datang tepat waktu kelipatan')))
+    !(l.traitType === 'POSITIF' && (l.notes?.toLowerCase().includes('kali hadir tepat waktu') || l.notes?.toLowerCase().includes('datang tepat waktu kelipatan'))) &&
+    !l.id?.startsWith('auto-late-') &&
+    !l.id?.startsWith('saved-auto-late-') &&
+    !(l.traitType === 'NEGATIF' && (l.notes?.toLowerCase().includes('scan hadir terlambat') || l.notes?.toLowerCase().includes('penilaian otomatis presensi: scan hadir terlambat')))
   );
   const studentLogs = deduplicateCharacterLogs(rawLogs);
 
@@ -4376,11 +4382,12 @@ export function calculateStudentCharacterSummary(
     }
   });
 
-  // Hitung jumlah hadir tepat waktu dari presensi (status HADIR)
+  // Ambil seluruh data rekap presensi siswa
   const allAtt = (attendanceRecords && attendanceRecords.length > 0) 
     ? attendanceRecords 
     : getAttendanceRecords();
 
+  // 1. Hitung jumlah hadir tepat waktu dari presensi (status HADIR)
   const matchingHadir = allAtt.filter(r => r && r.status === 'HADIR' && isAttendanceForStudent(r, student));
   const distinctOnTimeDates = Array.from(new Set(matchingHadir.map(r => r.date))).sort();
   const onTimeDays = distinctOnTimeDates.length;
@@ -4388,8 +4395,19 @@ export function calculateStudentCharacterSummary(
   // Aturan Hadir Tepat Waktu: Setiap kelipatan 3 hari beri nilai 1 poin (3 hari = 1 poin, 6 hari = 2 poin, dst.)
   const onTimeBonusPoints = Math.floor(onTimeDays / 3);
 
-  // Akumulasikan ke total poin positif & skor bersih
+  // Akumulasikan ke total poin positif
   positivePoints += onTimeBonusPoints;
+
+  // 2. Hitung jumlah hadir terlambat dari presensi (status TERLAMBAT)
+  const matchingTerlambat = allAtt.filter(r => r && r.status === 'TERLAMBAT' && isAttendanceForStudent(r, student));
+  const distinctLateDates = Array.from(new Set(matchingTerlambat.map(r => r.date))).sort();
+  const lateDays = distinctLateDates.length;
+
+  // Aturan Hadir Terlambat: Setiap hadir terlambat selama melakukan scan diberi penalti nilai -1 poin
+  const latePenaltyPoints = lateDays * 1;
+
+  // Akumulasikan ke total poin negatif & skor akhir
+  negativePoints += latePenaltyPoints;
 
   return {
     positivePoints,
@@ -4399,7 +4417,10 @@ export function calculateStudentCharacterSummary(
     logs: studentLogs,
     onTimeDays,
     onTimeBonusPoints,
-    onTimeDates: distinctOnTimeDates
+    onTimeDates: distinctOnTimeDates,
+    lateDays,
+    latePenaltyPoints,
+    lateDates: distinctLateDates
   };
 }
 

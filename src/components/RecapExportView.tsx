@@ -1695,7 +1695,7 @@ export const RecapExportView: React.FC<RecapExportViewProps> = ({
                   </tr>
                 ) : (
                   filteredStudents.map((std, idx) => {
-                    const charSummary = calculateStudentCharacterSummary(std, filteredCharacterLogs);
+                    const charSummary = calculateStudentCharacterSummary(std, filteredCharacterLogs, attendanceRecords);
                     const posPoints = charSummary.positivePoints;
                     const negPoints = charSummary.negativePoints;
                     const netPoints = charSummary.netScore;
@@ -2612,7 +2612,7 @@ export const RecapExportView: React.FC<RecapExportViewProps> = ({
 
             {/* Modal Score Overview Bar */}
             {(() => {
-              const summary = calculateStudentCharacterSummary(selectedCharacterStudentDetail, characterLogs);
+              const summary = calculateStudentCharacterSummary(selectedCharacterStudentDetail, characterLogs, attendanceRecords);
               const posPoints = summary.positivePoints;
               const negPoints = summary.negativePoints;
               const netPoints = summary.netScore;
@@ -2639,29 +2639,93 @@ export const RecapExportView: React.FC<RecapExportViewProps> = ({
               }
 
               return (
-                <div className="bg-slate-50 p-4 border-b border-slate-200 grid grid-cols-2 sm:grid-cols-4 gap-3 text-center shrink-0">
-                  <div className="bg-white p-2.5 rounded-2xl border border-blue-200">
-                    <p className="text-[11px] font-bold text-blue-700">Total Positif</p>
-                    <p className="text-lg font-black text-blue-800">+{posPoints}</p>
+                <div className="bg-slate-50 p-4 border-b border-slate-200 space-y-3 shrink-0">
+                  <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2.5 text-center">
+                    <div className="bg-white p-2.5 rounded-2xl border border-emerald-300 shadow-2xs flex flex-col justify-between">
+                      <p className="text-[11px] font-extrabold text-emerald-800">Tepat Waktu (+1 / 3x)</p>
+                      <p className="text-base font-black text-emerald-700 mt-0.5">{summary.onTimeDays || 0}x Hadir</p>
+                      <span className="text-[10px] font-bold text-emerald-600 bg-emerald-50 rounded-md py-0.5 mt-0.5">
+                        +{summary.onTimeBonusPoints || 0} Poin
+                      </span>
+                    </div>
+                    <div className="bg-white p-2.5 rounded-2xl border border-rose-300 shadow-2xs flex flex-col justify-between">
+                      <p className="text-[11px] font-extrabold text-rose-800">Terlambat (-1 / scan)</p>
+                      <p className="text-base font-black text-rose-700 mt-0.5">{summary.lateDays || 0}x Terlambat</p>
+                      <span className={`text-[10px] font-bold rounded-md py-0.5 mt-0.5 ${
+                        (summary.lateDays || 0) > 0 ? 'text-rose-600 bg-rose-50' : 'text-slate-400 bg-slate-50'
+                      }`}>
+                        {(summary.lateDays || 0) > 0 ? `-${summary.latePenaltyPoints} Poin` : '0 Poin'}
+                      </span>
+                    </div>
+                    <div className="bg-white p-2.5 rounded-2xl border border-blue-200 shadow-2xs flex flex-col justify-between">
+                      <p className="text-[11px] font-bold text-blue-700">Total Positif</p>
+                      <p className="text-lg font-black text-blue-800">+{posPoints}</p>
+                    </div>
+                    <div className="bg-white p-2.5 rounded-2xl border border-red-200 shadow-2xs flex flex-col justify-between">
+                      <p className="text-[11px] font-bold text-red-700">Total Negatif</p>
+                      <p className="text-lg font-black text-red-800">-{negPoints}</p>
+                    </div>
+                    <div className="bg-white p-2.5 rounded-2xl border border-indigo-200 shadow-2xs flex flex-col justify-between">
+                      <p className="text-[11px] font-bold text-indigo-700">Jumlah Nilai</p>
+                      <p className={`text-lg font-black ${
+                        netPoints >= 0 ? 'text-indigo-800' : 'text-red-700'
+                      }`}>
+                        {netPoints > 0 ? `+${netPoints}` : netPoints}
+                      </p>
+                    </div>
+                    <div className="bg-white p-2.5 rounded-2xl border border-amber-200 shadow-2xs flex flex-col items-center justify-between col-span-2 sm:col-span-1">
+                      <p className="text-[11px] font-bold text-amber-800">Predikat</p>
+                      <span className={`my-auto px-2 py-0.5 rounded-full text-xs font-extrabold border ${pred.color}`}>
+                        {pred.label}
+                      </span>
+                    </div>
                   </div>
-                  <div className="bg-white p-2.5 rounded-2xl border border-red-200">
-                    <p className="text-[11px] font-bold text-red-700">Total Negatif</p>
-                    <p className="text-lg font-black text-red-800">-{negPoints}</p>
-                  </div>
-                  <div className="bg-white p-2.5 rounded-2xl border border-indigo-200">
-                    <p className="text-[11px] font-bold text-indigo-700">Jumlah Nilai</p>
-                    <p className={`text-lg font-black ${
-                      netPoints >= 0 ? 'text-indigo-800' : 'text-red-700'
-                    }`}>
-                      {netPoints > 0 ? `+${netPoints}` : netPoints}
-                    </p>
-                  </div>
-                  <div className="bg-white p-2.5 rounded-2xl border border-amber-200 flex flex-col items-center justify-center">
-                    <p className="text-[11px] font-bold text-amber-800">Predikat</p>
-                    <span className={`mt-0.5 px-2 py-0.5 rounded-full text-xs font-extrabold border ${pred.color}`}>
-                      {pred.label}
-                    </span>
-                  </div>
+
+                  {/* Banner Informasi Akumulasi Hadir Tepat Waktu */}
+                  {summary.onTimeDays > 0 && (
+                    <div className="p-3 bg-emerald-50/90 border border-emerald-300 rounded-2xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2.5 text-xs">
+                      <div className="flex items-center gap-2.5">
+                        <div className="w-8 h-8 rounded-xl bg-emerald-600 text-white flex items-center justify-center font-bold shrink-0 shadow-2xs">
+                          <CheckCircle2 className="w-4 h-4" />
+                        </div>
+                        <div>
+                          <p className="font-extrabold text-emerald-950 text-xs flex items-center gap-1.5">
+                            <span>Akumulasi Kehadiran Tepat Waktu:</span>
+                            <span className="text-emerald-700 font-black underline">{summary.onTimeDays} Kali Hadir</span>
+                          </p>
+                          <p className="text-[11px] text-emerald-800 mt-0.5 leading-snug">
+                            Setiap kelipatan 3 kali hadir tepat waktu memperoleh 1 poin bonus (3x = +1 poin, 6x = +2 poin, dst).
+                          </p>
+                        </div>
+                      </div>
+                      <span className="px-3 py-1 bg-emerald-600 text-white font-black text-xs rounded-xl shrink-0 shadow-2xs self-end sm:self-auto">
+                        +{summary.onTimeBonusPoints} Poin
+                      </span>
+                    </div>
+                  )}
+
+                  {/* Banner Informasi Akumulasi Hadir Terlambat */}
+                  {summary.lateDays > 0 && (
+                    <div className="p-3 bg-rose-50/90 border border-rose-300 rounded-2xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2.5 text-xs">
+                      <div className="flex items-center gap-2.5">
+                        <div className="w-8 h-8 rounded-xl bg-rose-600 text-white flex items-center justify-center font-bold shrink-0 shadow-2xs">
+                          <Clock className="w-4 h-4" />
+                        </div>
+                        <div>
+                          <p className="font-extrabold text-rose-950 text-xs flex items-center gap-1.5">
+                            <span>Akumulasi Kehadiran Terlambat:</span>
+                            <span className="text-rose-700 font-black underline">{summary.lateDays} Kali Scan Terlambat</span>
+                          </p>
+                          <p className="text-[11px] text-rose-800 mt-0.5 leading-snug">
+                            Setiap scan hadir terlambat selama presensi memperoleh penalti nilai -1 poin dari seluruh rekap presensi.
+                          </p>
+                        </div>
+                      </div>
+                      <span className="px-3 py-1 bg-rose-600 text-white font-black text-xs rounded-xl shrink-0 shadow-2xs self-end sm:self-auto">
+                        -{summary.latePenaltyPoints} Poin
+                      </span>
+                    </div>
+                  )}
                 </div>
               );
             })()}
@@ -2674,10 +2738,10 @@ export const RecapExportView: React.FC<RecapExportViewProps> = ({
               </h4>
 
               {(() => {
-                const summary = calculateStudentCharacterSummary(selectedCharacterStudentDetail, characterLogs);
+                const summary = calculateStudentCharacterSummary(selectedCharacterStudentDetail, characterLogs, attendanceRecords);
                 const logs = [...summary.logs].sort((a, b) => new Date(b.date || b.timestamp).getTime() - new Date(a.date || a.timestamp).getTime());
 
-                if (logs.length === 0) {
+                if (logs.length === 0 && summary.onTimeDays === 0 && summary.lateDays === 0) {
                   return (
                     <div className="p-8 text-center text-slate-400 border border-dashed rounded-2xl">
                       Belum ada catatan nilai karakter untuk siswa ini.

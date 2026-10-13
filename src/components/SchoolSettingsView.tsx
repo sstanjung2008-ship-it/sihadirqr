@@ -2430,43 +2430,18 @@ export const SchoolSettingsView: React.FC<SchoolSettingsViewProps> = ({
             </div>
 
             {/* 5. Terlambat Presensi */}
-            <div className="p-3.5 bg-red-50/30 border border-slate-200 rounded-2xl space-y-2">
+            <div className="p-3.5 bg-slate-50/70 border border-slate-200 rounded-2xl space-y-2">
               <div className="flex items-center justify-between">
-                <span className="font-extrabold text-red-800 flex items-center gap-1.5">
-                  <Clock className="w-4 h-4 text-red-600" />
+                <span className="font-extrabold text-slate-800 flex items-center gap-1.5">
+                  <Clock className="w-4 h-4 text-slate-600" />
                   Terlambat Presensi
                 </span>
-                <span className="text-[10px] font-black bg-red-100 text-red-800 px-2 py-0.5 rounded-full">
-                  -NEGATIF
+                <span className="text-[10px] font-black bg-slate-200 text-slate-800 px-2 py-0.5 rounded-full">
+                  DINAMIS (-1)
                 </span>
               </div>
-              <div className="flex items-center justify-between pt-1">
-                <span className="text-[11px] text-slate-600 font-medium">Nilai Poin:</span>
-                <div className="flex items-center gap-1">
-                  <input
-                    type="number"
-                    min="1"
-                    max="50"
-                    value={formData.autoCharacterPoints?.latePoints ?? 2}
-                    onChange={(e) => setFormData({
-                      ...formData,
-                      autoCharacterPoints: {
-                        ...(formData.autoCharacterPoints || {
-                          latePoints: 2,
-                          alpaPoints: 5,
-                          disruptivePoints: 1,
-                          absentKbmPoints: 2,
-                          veryActiveKbmPoints: 1,
-                          onTimePoints: 1,
-                          onTimeRequiredDays: 3,
-                        }),
-                        latePoints: Math.max(1, Math.abs(Number(e.target.value)) || 2)
-                      }
-                    })}
-                    className="w-14 px-2 py-1 bg-white border border-red-300 rounded-lg text-xs font-black text-center text-red-800 focus:outline-none focus:ring-1 focus:ring-red-500"
-                  />
-                  <span className="text-[11px] font-bold text-red-700">-Poin</span>
-                </div>
+              <div className="pt-1 text-[11px] text-slate-600 leading-snug">
+                Dihitung langsung pada <strong>Detail Nilai Karakter</strong> sebesar <strong>-1 Poin</strong> per scan hadir terlambat dari rekap presensi.
               </div>
             </div>
 

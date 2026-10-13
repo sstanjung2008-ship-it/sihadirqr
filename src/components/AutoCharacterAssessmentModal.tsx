@@ -416,38 +416,8 @@ export const AutoCharacterAssessmentModal: React.FC<AutoCharacterAssessmentModal
       const records = studentAttendanceMap.get(student.id) || [];
       const sortedRecords = [...records].sort((a, b) => a.date.localeCompare(b.date));
 
-      // Rule 1: Terlambat Masuk Sekolah -> Nilai Karakter Negatif (-latePoints)
       sortedRecords.forEach(rec => {
-        if (rec.status === 'TERLAMBAT') {
-          const candidateId = `auto-late-${student.id}-${rec.date}`;
-          const isAlready = localSavedIds.has(candidateId) || characterLogs.some(l => 
-            l.id === candidateId ||
-            (isLogForStudent(l, student) && l.date === rec.date && 
-             (l.traitType === 'NEGATIF' && (l.traitName.toLowerCase().includes('terlambat') || l.notes?.toLowerCase().includes('terlambat'))))
-          );
-
-          candidates.push({
-            id: candidateId,
-            studentId: student.id,
-            studentName: student.name,
-            nisn: student.nisn,
-            classId: student.classId,
-            className: student.className,
-            ruleType: 'LATE',
-            ruleLabel: 'Terlambat Masuk Sekolah',
-            traitId: lateTrait.id,
-            traitName: lateTrait.name || 'Terlambat Masuk Sekolah',
-            traitType: 'NEGATIF',
-            points: latePoints,
-            date: rec.date,
-            evaluatorName: generalEvaluatorName || 'Sistem Presensi QR',
-            notes: `Penilaian Otomatis Presensi: Scan Hadir Terlambat pukul ${rec.time || 'Pagi'} (${rec.date})`,
-            attendanceDates: [rec.date],
-            sourceType: 'PRESENSI',
-            isSelected: !isAlready,
-            isAlreadyLogged: isAlready,
-          });
-        }
+        // Catatan Hadir Terlambat dihitung langsung secara dinamis pada Detail Nilai Karakter Siswa (-1 poin per terlambat) tanpa perlu tabel penilaian otomatis
 
         // Rule 2: Alpa -> Nilai Karakter Negatif (-alpaPoints)
         if (rec.status === 'ALPA') {
@@ -1298,38 +1268,24 @@ export const AutoCharacterAssessmentModal: React.FC<AutoCharacterAssessmentModal
                 </div>
               </div>
 
-              {/* 4. Rule Negatif: Terlambat Masuk Sekolah */}
-              <div className="bg-white p-4 rounded-2xl border border-red-200/80 shadow-xs space-y-2 flex flex-col justify-between">
+              {/* Rule Negatif: Hadir Terlambat (Dihitung Dinamis di Detail Karakter) */}
+              <div className="bg-slate-50/70 p-4 rounded-2xl border border-slate-200/90 shadow-2xs space-y-2 flex flex-col justify-between">
                 <div>
                   <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-1.5 text-red-700 font-black text-xs uppercase tracking-wider">
-                      <Clock className="w-4 h-4 text-red-600" />
-                      <span>Terlambat Sekolah</span>
+                    <div className="flex items-center gap-1.5 text-slate-700 font-black text-xs uppercase tracking-wider">
+                      <Clock className="w-4 h-4 text-slate-600" />
+                      <span>Hadir Terlambat</span>
                     </div>
-                    <span className="px-2 py-0.5 rounded-full bg-red-100 text-red-800 text-[10px] font-black border border-red-200">
-                      🔴 NEGATIF
+                    <span className="px-2 py-0.5 rounded-full bg-slate-200 text-slate-800 text-[10px] font-black border border-slate-300">
+                      DINAMIS (-1)
                     </span>
                   </div>
                   <div className="text-[11px] text-slate-600 leading-relaxed mt-1">
-                    Scan hadir terlambat pada Presensi Sekolah:
+                    Dihitung langsung pada <strong>Detail Nilai Karakter</strong> siswa sebesar <strong>-1 Poin</strong> per scan terlambat dari seluruh rekap presensi.
                   </div>
                 </div>
-                <div className="flex items-center justify-between pt-2 border-t border-slate-100">
-                  <div className="flex items-center gap-1.5">
-                    <span className="text-xs font-semibold text-slate-500">Nilai:</span>
-                    <input
-                      type="number"
-                      min="1"
-                      max="50"
-                      value={latePoints}
-                      onChange={(e) => setLatePoints(Math.max(1, Math.abs(Number(e.target.value)) || 2))}
-                      className="w-12 px-1.5 py-1 bg-red-50/70 border border-red-200 rounded-lg text-xs font-black text-center text-red-700 focus:outline-none focus:ring-2 focus:ring-red-500"
-                    />
-                    <span className="text-xs font-bold text-red-600">-Poin</span>
-                  </div>
-                  <div className="text-xs font-bold text-slate-700 bg-slate-100 px-2 py-1 rounded-lg">
-                    {totalLateCount} Kasus
-                  </div>
+                <div className="pt-2 border-t border-slate-200 text-xs font-bold text-slate-600">
+                  Otomatis terakumulasi ke skor siswa
                 </div>
               </div>
 
@@ -1646,20 +1602,6 @@ export const AutoCharacterAssessmentModal: React.FC<AutoCharacterAssessmentModal
                   </button>
                 )}
 
-                {/* Negatif: Terlambat */}
-                {(groupFilter === 'ALL' || groupFilter === 'NEGATIF') && (
-                  <button
-                    onClick={() => setRuleFilter('LATE')}
-                    className={`px-2.5 py-1.5 rounded-xl font-bold transition-all cursor-pointer shrink-0 text-xs flex items-center gap-1 ${
-                      ruleFilter === 'LATE'
-                        ? 'bg-red-600 text-white'
-                        : 'bg-red-50 text-red-700 hover:bg-red-100 border border-red-200/60'
-                    }`}
-                  >
-                    <Clock className="w-3 h-3" />
-                    <span>Terlambat ({totalLateCount})</span>
-                  </button>
-                )}
 
                 {/* Negatif: Alpa */}
                 {(groupFilter === 'ALL' || groupFilter === 'NEGATIF') && (
@@ -1959,7 +1901,7 @@ export const AutoCharacterAssessmentModal: React.FC<AutoCharacterAssessmentModal
             {isAutoEnabled ? (
               <span className="flex items-center gap-1.5 text-emerald-700 font-medium">
                 <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-                Penilaian karakter (Belum Scan, Belum Pulang, Terlambat, Alpa & Jurnal KBM) langsung tersimpan ke Detail Karakter siswa dan dihapus dari tabel belum dinilai ini.
+                Penilaian karakter (Belum Scan, Belum Pulang, Alpa & Jurnal KBM) langsung tersimpan ke Detail Karakter siswa dan dihapus dari tabel belum dinilai ini.
               </span>
             ) : (
               <span className="text-rose-600 font-bold flex items-center gap-1.5 justify-center sm:justify-start">

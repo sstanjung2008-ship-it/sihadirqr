@@ -295,7 +295,10 @@ export const CharacterPointsView: React.FC<CharacterPointsViewProps> = ({
         logs: [],
         onTimeDays: 0,
         onTimeBonusPoints: 0,
-        onTimeDates: []
+        onTimeDates: [],
+        lateDays: 0,
+        latePenaltyPoints: 0,
+        lateDates: []
       };
     }
     return calculateStudentCharacterSummary(student, logs, attendanceRecords);
@@ -642,7 +645,8 @@ export const CharacterPointsView: React.FC<CharacterPointsViewProps> = ({
             <thead>
               <tr className="bg-slate-100/80 border-b border-slate-200 text-slate-700 font-extrabold text-xs uppercase tracking-wider">
                 <th className="p-4 pl-6">Nama Siswa</th>
-                <th className="p-4 text-center">Tepat Waktu (3x = +1)</th>
+                <th className="p-4 text-center">Tepat Waktu (+1 / 3x)</th>
+                <th className="p-4 text-center">Terlambat (-1 / scan)</th>
                 <th className="p-4 text-center">Karakter Positif</th>
                 <th className="p-4 text-center">Karakter Negatif</th>
                 <th className="p-4 text-center">Jumlah Nilai</th>
@@ -654,7 +658,7 @@ export const CharacterPointsView: React.FC<CharacterPointsViewProps> = ({
             <tbody className="divide-y divide-slate-100">
               {filteredStudents.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="p-10 text-center text-slate-400">
+                  <td colSpan={9} className="p-10 text-center text-slate-400">
                     Tidak ada data siswa ditemukan.
                   </td>
                 </tr>
@@ -695,6 +699,22 @@ export const CharacterPointsView: React.FC<CharacterPointsViewProps> = ({
                         <span className="inline-flex flex-col items-center justify-center px-3 py-1 rounded-2xl bg-emerald-50 text-emerald-800 border border-emerald-200 shadow-2xs">
                           <span className="font-black text-xs">{score.onTimeDays || 0}x Hadir</span>
                           <span className="text-[10px] font-extrabold text-emerald-600">+{score.onTimeBonusPoints || 0} Poin</span>
+                        </span>
+                      </td>
+
+                      {/* Hadir Terlambat */}
+                      <td className="p-4 text-center">
+                        <span className={`inline-flex flex-col items-center justify-center px-3 py-1 rounded-2xl border shadow-2xs ${
+                          (score.lateDays || 0) > 0
+                            ? 'bg-rose-50 text-rose-800 border-rose-200'
+                            : 'bg-slate-50 text-slate-500 border-slate-200'
+                        }`}>
+                          <span className="font-black text-xs">{score.lateDays || 0}x Terlambat</span>
+                          <span className={`text-[10px] font-extrabold ${
+                            (score.lateDays || 0) > 0 ? 'text-rose-600' : 'text-slate-400'
+                          }`}>
+                            {(score.lateDays || 0) > 0 ? `-${score.latePenaltyPoints} Poin` : '0 Poin'}
+                          </span>
                         </span>
                       </td>
 
@@ -1146,28 +1166,38 @@ export const CharacterPointsView: React.FC<CharacterPointsViewProps> = ({
               const pred = getPredicate(score.netScore);
               return (
                 <div className="bg-slate-50 p-4 border-b border-slate-200 space-y-3 shrink-0">
-                  <div className="grid grid-cols-2 sm:grid-cols-5 gap-2.5 text-center">
+                  <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2.5 text-center">
                     {/* 1. Hadir Tepat Waktu */}
                     <div className="bg-white p-2.5 rounded-2xl border border-emerald-300 shadow-2xs flex flex-col justify-between">
-                      <p className="text-[11px] font-extrabold text-emerald-800">Tepat Waktu (3x = +1)</p>
+                      <p className="text-[11px] font-extrabold text-emerald-800">Tepat Waktu (+1 / 3x)</p>
                       <p className="text-base font-black text-emerald-700 mt-0.5">{score.onTimeDays || 0}x Hadir</p>
                       <span className="text-[10px] font-bold text-emerald-600 bg-emerald-50 rounded-md py-0.5 mt-0.5">
                         +{score.onTimeBonusPoints || 0} Poin
                       </span>
                     </div>
-                    {/* 2. Total Positif */}
+                    {/* 2. Hadir Terlambat */}
+                    <div className="bg-white p-2.5 rounded-2xl border border-rose-300 shadow-2xs flex flex-col justify-between">
+                      <p className="text-[11px] font-extrabold text-rose-800">Terlambat (-1 / scan)</p>
+                      <p className="text-base font-black text-rose-700 mt-0.5">{score.lateDays || 0}x Terlambat</p>
+                      <span className={`text-[10px] font-bold rounded-md py-0.5 mt-0.5 ${
+                        (score.lateDays || 0) > 0 ? 'text-rose-600 bg-rose-50' : 'text-slate-400 bg-slate-50'
+                      }`}>
+                        {(score.lateDays || 0) > 0 ? `-${score.latePenaltyPoints} Poin` : '0 Poin'}
+                      </span>
+                    </div>
+                    {/* 3. Total Positif */}
                     <div className="bg-white p-2.5 rounded-2xl border border-blue-200 shadow-2xs flex flex-col justify-between">
                       <p className="text-[11px] font-bold text-blue-700">Total Positif</p>
                       <p className="text-lg font-black text-blue-800 mt-0.5">+{score.positivePoints}</p>
                       <span className="text-[10px] text-blue-600 font-medium">Termasuk bonus</span>
                     </div>
-                    {/* 3. Total Negatif */}
+                    {/* 4. Total Negatif */}
                     <div className="bg-white p-2.5 rounded-2xl border border-red-200 shadow-2xs flex flex-col justify-between">
                       <p className="text-[11px] font-bold text-red-700">Total Negatif</p>
                       <p className="text-lg font-black text-red-800 mt-0.5">-{score.negativePoints}</p>
-                      <span className="text-[10px] text-red-600 font-medium">Pelanggaran</span>
+                      <span className="text-[10px] text-red-600 font-medium">Termasuk terlambat</span>
                     </div>
-                    {/* 4. Jumlah Nilai */}
+                    {/* 5. Jumlah Nilai */}
                     <div className="bg-white p-2.5 rounded-2xl border border-indigo-200 shadow-2xs flex flex-col justify-between">
                       <p className="text-[11px] font-bold text-indigo-700">Jumlah Nilai</p>
                       <p className={`text-lg font-black mt-0.5 ${
@@ -1177,7 +1207,7 @@ export const CharacterPointsView: React.FC<CharacterPointsViewProps> = ({
                       </p>
                       <span className="text-[10px] text-indigo-600 font-medium">Skor Akhir</span>
                     </div>
-                    {/* 5. Predikat */}
+                    {/* 6. Predikat */}
                     <div className="bg-white p-2.5 rounded-2xl border border-amber-200 shadow-2xs flex flex-col items-center justify-between col-span-2 sm:col-span-1">
                       <p className="text-[11px] font-bold text-amber-800">Predikat</p>
                       <span className={`my-auto px-2 py-0.5 rounded-full text-xs font-extrabold border ${pred.color}`}>
@@ -1205,6 +1235,27 @@ export const CharacterPointsView: React.FC<CharacterPointsViewProps> = ({
                     </div>
                     <span className="px-3 py-1 bg-emerald-600 text-white font-black text-xs rounded-xl shrink-0 shadow-2xs self-end sm:self-auto">
                       +{score.onTimeBonusPoints || 0} Poin Karakter
+                    </span>
+                  </div>
+
+                  {/* Banner Informasi Akumulasi Hadir Terlambat */}
+                  <div className="p-3 bg-rose-50/90 border border-rose-300 rounded-2xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2.5 text-xs">
+                    <div className="flex items-center gap-2.5">
+                      <div className="w-8 h-8 rounded-xl bg-rose-600 text-white flex items-center justify-center font-bold shrink-0 shadow-2xs">
+                        <Clock className="w-4 h-4" />
+                      </div>
+                      <div>
+                        <p className="font-extrabold text-rose-950 text-xs flex items-center gap-1.5">
+                          <span>Akumulasi Kehadiran Terlambat:</span>
+                          <span className="text-rose-700 font-black underline">{score.lateDays || 0} Kali Scan Terlambat</span>
+                        </p>
+                        <p className="text-[11px] text-rose-800 mt-0.5 leading-snug">
+                          Setiap scan hadir terlambat selama presensi memperoleh penalti nilai -1 poin. Penalti ini otomatis terakumulasi ke Total Negatif dari seluruh rekap presensi siswa.
+                        </p>
+                      </div>
+                    </div>
+                    <span className="px-3 py-1 bg-rose-600 text-white font-black text-xs rounded-xl shrink-0 shadow-2xs self-end sm:self-auto">
+                      -{score.latePenaltyPoints || 0} Poin Penalti
                     </span>
                   </div>
                 </div>
@@ -1260,7 +1311,49 @@ export const CharacterPointsView: React.FC<CharacterPointsViewProps> = ({
                 );
               })()}
 
-              {getStudentScoreSummary(detailStudent.id).logs.length === 0 && getStudentScoreSummary(detailStudent.id).onTimeDays === 0 ? (
+              {/* Tampilkan item khusus Akumulasi Hadir Terlambat jika ada */}
+              {(() => {
+                const score = getStudentScoreSummary(detailStudent.id);
+                if (score.lateDays <= 0) return null;
+                return (
+                  <div className="p-4 rounded-2xl border border-rose-200 bg-gradient-to-r from-rose-50/80 to-pink-50/70 shadow-2xs space-y-2">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="flex items-center gap-2.5">
+                        <div className="p-2 bg-rose-600 text-white rounded-xl shadow-xs">
+                          <Clock className="w-4 h-4" />
+                        </div>
+                        <div>
+                          <p className="font-extrabold text-rose-950 text-sm flex items-center gap-2">
+                            <span>Akumulasi Presensi: Hadir Terlambat</span>
+                            <span className="px-2 py-0.5 rounded-full bg-rose-200 text-rose-900 font-black text-[10px]">
+                              PRESENSI OTOMATIS
+                            </span>
+                          </p>
+                          <p className="text-xs text-rose-800 mt-0.5">
+                            Total Hadir Terlambat: <strong>{score.lateDays} Kali Scan Terlambat</strong> (Setiap hadir terlambat = -1 poin penalti).
+                          </p>
+                        </div>
+                      </div>
+                      <span className="px-3 py-1 bg-rose-600 text-white font-black text-xs rounded-xl shadow-xs">
+                        -{score.latePenaltyPoints} Poin
+                      </span>
+                    </div>
+
+                    {score.lateDates && score.lateDates.length > 0 && (
+                      <div className="pt-2 border-t border-rose-200/60 flex items-center gap-1.5 flex-wrap text-[11px]">
+                        <span className="text-rose-900 font-bold">Daftar Tanggal Terlambat:</span>
+                        {score.lateDates.map((dateStr, i) => (
+                          <span key={i} className="px-2 py-0.5 bg-white text-rose-800 border border-rose-200 rounded-md font-mono text-[10px] font-bold">
+                            {dateStr}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
+
+              {getStudentScoreSummary(detailStudent.id).logs.length === 0 && getStudentScoreSummary(detailStudent.id).onTimeDays === 0 && getStudentScoreSummary(detailStudent.id).lateDays === 0 ? (
                 <div className="p-8 text-center text-slate-400 border border-dashed rounded-2xl">
                   Belum ada catatan nilai karakter untuk siswa ini.
                 </div>

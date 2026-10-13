@@ -366,8 +366,8 @@ export const AttendanceDashboard: React.FC<AttendanceDashboardProps> = ({
 
   // Compute Character Points data for target child
   const charSummary = targetStudent 
-    ? calculateStudentCharacterSummary(targetStudent, characterLogs)
-    : { positivePoints: 0, negativePoints: 0, netScore: 0, totalEntries: 0, logs: [] };
+    ? calculateStudentCharacterSummary(targetStudent, characterLogs, attendanceRecords)
+    : { positivePoints: 0, negativePoints: 0, netScore: 0, totalEntries: 0, logs: [], onTimeDays: 0, onTimeBonusPoints: 0, onTimeDates: [], lateDays: 0, latePenaltyPoints: 0, lateDates: [] };
   const childCharacterLogs = charSummary.logs;
   const posLogs = childCharacterLogs.filter(l => l.traitType === 'POSITIF');
   const negLogs = childCharacterLogs.filter(l => l.traitType === 'NEGATIF');
@@ -986,27 +986,95 @@ export const AttendanceDashboard: React.FC<AttendanceDashboardProps> = ({
               </div>
 
               {/* Score Overview Bar */}
-              <div className="p-4 bg-slate-50 border-b border-slate-100 grid grid-cols-2 sm:grid-cols-4 gap-3 text-center">
-                <div className="bg-white p-2.5 rounded-2xl border border-emerald-200">
-                  <p className="text-[11px] font-bold text-emerald-700">Poin Positif (+)</p>
-                  <p className="text-base font-black text-emerald-800">+{posPoints}</p>
+              <div className="p-4 bg-slate-50 border-b border-slate-100 space-y-3">
+                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2.5 text-center">
+                  <div className="bg-white p-2.5 rounded-2xl border border-emerald-300 shadow-2xs flex flex-col justify-between">
+                    <p className="text-[11px] font-extrabold text-emerald-800">Tepat Waktu (+1 / 3x)</p>
+                    <p className="text-base font-black text-emerald-700 mt-0.5">{charSummary.onTimeDays || 0}x Hadir</p>
+                    <span className="text-[10px] font-bold text-emerald-600 bg-emerald-50 rounded-md py-0.5 mt-0.5">
+                      +{charSummary.onTimeBonusPoints || 0} Poin
+                    </span>
+                  </div>
+                  <div className="bg-white p-2.5 rounded-2xl border border-rose-300 shadow-2xs flex flex-col justify-between">
+                    <p className="text-[11px] font-extrabold text-rose-800">Terlambat (-1 / scan)</p>
+                    <p className="text-base font-black text-rose-700 mt-0.5">{charSummary.lateDays || 0}x Terlambat</p>
+                    <span className={`text-[10px] font-bold rounded-md py-0.5 mt-0.5 ${
+                      (charSummary.lateDays || 0) > 0 ? 'text-rose-600 bg-rose-50' : 'text-slate-400 bg-slate-50'
+                    }`}>
+                      {(charSummary.lateDays || 0) > 0 ? `-${charSummary.latePenaltyPoints} Poin` : '0 Poin'}
+                    </span>
+                  </div>
+                  <div className="bg-white p-2.5 rounded-2xl border border-emerald-200 shadow-2xs flex flex-col justify-between">
+                    <p className="text-[11px] font-bold text-emerald-700">Total Positif</p>
+                    <p className="text-base font-black text-emerald-800 mt-0.5">+{posPoints}</p>
+                    <span className="text-[10px] text-emerald-600 font-medium">Termasuk bonus</span>
+                  </div>
+                  <div className="bg-white p-2.5 rounded-2xl border border-rose-200 shadow-2xs flex flex-col justify-between">
+                    <p className="text-[11px] font-bold text-rose-700">Total Negatif</p>
+                    <p className="text-base font-black text-rose-800 mt-0.5">-{negPoints}</p>
+                    <span className="text-[10px] text-rose-600 font-medium">Termasuk terlambat</span>
+                  </div>
+                  <div className="bg-white p-2.5 rounded-2xl border border-indigo-200 shadow-2xs flex flex-col justify-between">
+                    <p className="text-[11px] font-bold text-indigo-700">Jumlah Nilai Net</p>
+                    <p className={`text-base font-black mt-0.5 ${netPoints >= 0 ? 'text-indigo-800' : 'text-rose-700'}`}>
+                      {netPoints >= 0 ? `+${netPoints}` : netPoints}
+                    </p>
+                    <span className="text-[10px] text-indigo-600 font-medium">Skor Akhir</span>
+                  </div>
+                  <div className="bg-white p-2.5 rounded-2xl border border-amber-200 shadow-2xs flex flex-col items-center justify-between col-span-2 sm:col-span-1">
+                    <p className="text-[11px] font-bold text-amber-800">Predikat Rapor</p>
+                    <span className={`my-auto px-2 py-0.5 rounded-full text-[11px] font-extrabold border ${characterPred.color}`}>
+                      {characterPred.label}
+                    </span>
+                    <span className="text-[10px] text-amber-700 font-medium">Karakter</span>
+                  </div>
                 </div>
-                <div className="bg-white p-2.5 rounded-2xl border border-rose-200">
-                  <p className="text-[11px] font-bold text-rose-700">Poin Negatif (-)</p>
-                  <p className="text-base font-black text-rose-800">-{negPoints}</p>
-                </div>
-                <div className="bg-white p-2.5 rounded-2xl border border-indigo-200">
-                  <p className="text-[11px] font-bold text-indigo-700">Jumlah Nilai Net</p>
-                  <p className={`text-base font-black ${netPoints >= 0 ? 'text-indigo-800' : 'text-rose-700'}`}>
-                    {netPoints >= 0 ? `+${netPoints}` : netPoints}
-                  </p>
-                </div>
-                <div className="bg-white p-2.5 rounded-2xl border border-amber-200 flex flex-col items-center justify-center">
-                  <p className="text-[11px] font-bold text-amber-800">Predikat Rapor</p>
-                  <span className={`mt-0.5 px-2 py-0.5 rounded-full text-[11px] font-extrabold border ${characterPred.color}`}>
-                    {characterPred.label}
-                  </span>
-                </div>
+
+                {/* Banner Informasi Akumulasi Hadir Tepat Waktu */}
+                {charSummary.onTimeDays > 0 && (
+                  <div className="p-3 bg-emerald-50/90 border border-emerald-300 rounded-2xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2.5 text-xs">
+                    <div className="flex items-center gap-2.5">
+                      <div className="w-8 h-8 rounded-xl bg-emerald-600 text-white flex items-center justify-center font-bold shrink-0 shadow-2xs">
+                        <CheckCircle2 className="w-4 h-4" />
+                      </div>
+                      <div>
+                        <p className="font-extrabold text-emerald-950 text-xs flex items-center gap-1.5">
+                          <span>Akumulasi Kehadiran Tepat Waktu:</span>
+                          <span className="text-emerald-700 font-black underline">{charSummary.onTimeDays} Kali Hadir</span>
+                        </p>
+                        <p className="text-[11px] text-emerald-800 mt-0.5 leading-snug">
+                          Setiap kelipatan 3 kali hadir tepat waktu memperoleh 1 poin bonus (3x = +1 poin, 6x = +2 poin, dst).
+                        </p>
+                      </div>
+                    </div>
+                    <span className="px-3 py-1 bg-emerald-600 text-white font-black text-xs rounded-xl shrink-0 shadow-2xs self-end sm:self-auto">
+                      +{charSummary.onTimeBonusPoints} Poin Bonus
+                    </span>
+                  </div>
+                )}
+
+                {/* Banner Informasi Akumulasi Hadir Terlambat */}
+                {charSummary.lateDays > 0 && (
+                  <div className="p-3 bg-rose-50/90 border border-rose-300 rounded-2xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2.5 text-xs">
+                    <div className="flex items-center gap-2.5">
+                      <div className="w-8 h-8 rounded-xl bg-rose-600 text-white flex items-center justify-center font-bold shrink-0 shadow-2xs">
+                        <Clock className="w-4 h-4" />
+                      </div>
+                      <div>
+                        <p className="font-extrabold text-rose-950 text-xs flex items-center gap-1.5">
+                          <span>Akumulasi Kehadiran Terlambat:</span>
+                          <span className="text-rose-700 font-black underline">{charSummary.lateDays} Kali Scan Terlambat</span>
+                        </p>
+                        <p className="text-[11px] text-rose-800 mt-0.5 leading-snug">
+                          Setiap scan hadir terlambat selama presensi memperoleh penalti nilai -1 poin dari seluruh rekap presensi.
+                        </p>
+                      </div>
+                    </div>
+                    <span className="px-3 py-1 bg-rose-600 text-white font-black text-xs rounded-xl shrink-0 shadow-2xs self-end sm:self-auto">
+                      -{charSummary.latePenaltyPoints} Poin Penalti
+                    </span>
+                  </div>
+                )}
               </div>
 
               {/* Character Logs Table */}

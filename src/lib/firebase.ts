@@ -4,6 +4,8 @@ import {
   doc, 
   setDoc, 
   getDoc, 
+  getDocs,
+  collection,
   deleteDoc, 
   onSnapshot, 
   serverTimestamp, 
@@ -29,6 +31,6 @@ export const db = firebaseConfigData.firestoreDatabaseId && firebaseConfigData.f
   ? getFirestore(app, firebaseConfigData.firestoreDatabaseId)
   : getFirestore(app);
 
-export { doc, setDoc, getDoc, deleteDoc, onSnapshot, serverTimestamp, Timestamp };
+export { doc, setDoc, getDoc, getDocs, collection, deleteDoc, onSnapshot, serverTimestamp, Timestamp };
 export type { DocumentReference };
 

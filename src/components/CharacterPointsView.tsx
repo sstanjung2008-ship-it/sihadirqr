@@ -292,10 +292,13 @@ export const CharacterPointsView: React.FC<CharacterPointsViewProps> = ({
         negativePoints: 0,
         netScore: 0,
         totalEntries: 0,
-        logs: []
+        logs: [],
+        onTimeDays: 0,
+        onTimeBonusPoints: 0,
+        onTimeDates: []
       };
     }
-    return calculateStudentCharacterSummary(student, logs);
+    return calculateStudentCharacterSummary(student, logs, attendanceRecords);
   };
 
   // Handle Photo File Upload
@@ -639,6 +642,7 @@ export const CharacterPointsView: React.FC<CharacterPointsViewProps> = ({
             <thead>
               <tr className="bg-slate-100/80 border-b border-slate-200 text-slate-700 font-extrabold text-xs uppercase tracking-wider">
                 <th className="p-4 pl-6">Nama Siswa</th>
+                <th className="p-4 text-center">Tepat Waktu (3x = +1)</th>
                 <th className="p-4 text-center">Karakter Positif</th>
                 <th className="p-4 text-center">Karakter Negatif</th>
                 <th className="p-4 text-center">Jumlah Nilai</th>
@@ -650,7 +654,7 @@ export const CharacterPointsView: React.FC<CharacterPointsViewProps> = ({
             <tbody className="divide-y divide-slate-100">
               {filteredStudents.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="p-10 text-center text-slate-400">
+                  <td colSpan={8} className="p-10 text-center text-slate-400">
                     Tidak ada data siswa ditemukan.
                   </td>
                 </tr>
@@ -684,6 +688,14 @@ export const CharacterPointsView: React.FC<CharacterPointsViewProps> = ({
                             </p>
                           </div>
                         </button>
+                      </td>
+
+                      {/* Hadir Tepat Waktu */}
+                      <td className="p-4 text-center">
+                        <span className="inline-flex flex-col items-center justify-center px-3 py-1 rounded-2xl bg-emerald-50 text-emerald-800 border border-emerald-200 shadow-2xs">
+                          <span className="font-black text-xs">{score.onTimeDays || 0}x Hadir</span>
+                          <span className="text-[10px] font-extrabold text-emerald-600">+{score.onTimeBonusPoints || 0} Poin</span>
+                        </span>
                       </td>
 
                       {/* Karakter Positif */}
@@ -1133,27 +1145,66 @@ export const CharacterPointsView: React.FC<CharacterPointsViewProps> = ({
               const score = getStudentScoreSummary(detailStudent.id);
               const pred = getPredicate(score.netScore);
               return (
-                <div className="bg-slate-50 p-4 border-b border-slate-200 grid grid-cols-2 sm:grid-cols-4 gap-3 text-center shrink-0">
-                  <div className="bg-white p-2.5 rounded-2xl border border-blue-200">
-                    <p className="text-[11px] font-bold text-blue-700">Total Positif</p>
-                    <p className="text-lg font-black text-blue-800">+{score.positivePoints}</p>
+                <div className="bg-slate-50 p-4 border-b border-slate-200 space-y-3 shrink-0">
+                  <div className="grid grid-cols-2 sm:grid-cols-5 gap-2.5 text-center">
+                    {/* 1. Hadir Tepat Waktu */}
+                    <div className="bg-white p-2.5 rounded-2xl border border-emerald-300 shadow-2xs flex flex-col justify-between">
+                      <p className="text-[11px] font-extrabold text-emerald-800">Tepat Waktu (3x = +1)</p>
+                      <p className="text-base font-black text-emerald-700 mt-0.5">{score.onTimeDays || 0}x Hadir</p>
+                      <span className="text-[10px] font-bold text-emerald-600 bg-emerald-50 rounded-md py-0.5 mt-0.5">
+                        +{score.onTimeBonusPoints || 0} Poin
+                      </span>
+                    </div>
+                    {/* 2. Total Positif */}
+                    <div className="bg-white p-2.5 rounded-2xl border border-blue-200 shadow-2xs flex flex-col justify-between">
+                      <p className="text-[11px] font-bold text-blue-700">Total Positif</p>
+                      <p className="text-lg font-black text-blue-800 mt-0.5">+{score.positivePoints}</p>
+                      <span className="text-[10px] text-blue-600 font-medium">Termasuk bonus</span>
+                    </div>
+                    {/* 3. Total Negatif */}
+                    <div className="bg-white p-2.5 rounded-2xl border border-red-200 shadow-2xs flex flex-col justify-between">
+                      <p className="text-[11px] font-bold text-red-700">Total Negatif</p>
+                      <p className="text-lg font-black text-red-800 mt-0.5">-{score.negativePoints}</p>
+                      <span className="text-[10px] text-red-600 font-medium">Pelanggaran</span>
+                    </div>
+                    {/* 4. Jumlah Nilai */}
+                    <div className="bg-white p-2.5 rounded-2xl border border-indigo-200 shadow-2xs flex flex-col justify-between">
+                      <p className="text-[11px] font-bold text-indigo-700">Jumlah Nilai</p>
+                      <p className={`text-lg font-black mt-0.5 ${
+                        score.netScore >= 0 ? 'text-indigo-800' : 'text-red-700'
+                      }`}>
+                        {score.netScore > 0 ? `+${score.netScore}` : score.netScore}
+                      </p>
+                      <span className="text-[10px] text-indigo-600 font-medium">Skor Akhir</span>
+                    </div>
+                    {/* 5. Predikat */}
+                    <div className="bg-white p-2.5 rounded-2xl border border-amber-200 shadow-2xs flex flex-col items-center justify-between col-span-2 sm:col-span-1">
+                      <p className="text-[11px] font-bold text-amber-800">Predikat</p>
+                      <span className={`my-auto px-2 py-0.5 rounded-full text-xs font-extrabold border ${pred.color}`}>
+                        {pred.label}
+                      </span>
+                      <span className="text-[10px] text-amber-700 font-medium">Karakter</span>
+                    </div>
                   </div>
-                  <div className="bg-white p-2.5 rounded-2xl border border-red-200">
-                    <p className="text-[11px] font-bold text-red-700">Total Negatif</p>
-                    <p className="text-lg font-black text-red-800">-{score.negativePoints}</p>
-                  </div>
-                  <div className="bg-white p-2.5 rounded-2xl border border-indigo-200">
-                    <p className="text-[11px] font-bold text-indigo-700">Jumlah Nilai</p>
-                    <p className={`text-lg font-black ${
-                      score.netScore >= 0 ? 'text-indigo-800' : 'text-red-700'
-                    }`}>
-                      {score.netScore > 0 ? `+${score.netScore}` : score.netScore}
-                    </p>
-                  </div>
-                  <div className="bg-white p-2.5 rounded-2xl border border-amber-200 flex flex-col items-center justify-center">
-                    <p className="text-[11px] font-bold text-amber-800">Predikat</p>
-                    <span className={`mt-0.5 px-2 py-0.5 rounded-full text-xs font-extrabold border ${pred.color}`}>
-                      {pred.label}
+
+                  {/* Banner Informasi Akumulasi Hadir Tepat Waktu */}
+                  <div className="p-3 bg-emerald-50/90 border border-emerald-300 rounded-2xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2.5 text-xs">
+                    <div className="flex items-center gap-2.5">
+                      <div className="w-8 h-8 rounded-xl bg-emerald-600 text-white flex items-center justify-center font-bold shrink-0 shadow-2xs">
+                        <CheckCircle2 className="w-4 h-4" />
+                      </div>
+                      <div>
+                        <p className="font-extrabold text-emerald-950 text-xs flex items-center gap-1.5">
+                          <span>Akumulasi Kehadiran Tepat Waktu:</span>
+                          <span className="text-emerald-700 font-black underline">{score.onTimeDays || 0} Kali Hadir</span>
+                        </p>
+                        <p className="text-[11px] text-emerald-800 mt-0.5 leading-snug">
+                          Setiap kelipatan 3 kali hadir tepat waktu memperoleh 1 poin (3x = +1 poin, 6x = +2 poin, dst). Bonus ini otomatis terakumulasi ke Total Positif.
+                        </p>
+                      </div>
+                    </div>
+                    <span className="px-3 py-1 bg-emerald-600 text-white font-black text-xs rounded-xl shrink-0 shadow-2xs self-end sm:self-auto">
+                      +{score.onTimeBonusPoints || 0} Poin Karakter
                     </span>
                   </div>
                 </div>
@@ -1167,7 +1218,49 @@ export const CharacterPointsView: React.FC<CharacterPointsViewProps> = ({
                 Riwayat Catatan Penilaian Karakter
               </h4>
 
-              {getStudentScoreSummary(detailStudent.id).logs.length === 0 ? (
+              {/* Tampilkan item khusus Akumulasi Hadir Tepat Waktu jika ada */}
+              {(() => {
+                const score = getStudentScoreSummary(detailStudent.id);
+                if (score.onTimeDays <= 0) return null;
+                return (
+                  <div className="p-4 rounded-2xl border border-emerald-200 bg-gradient-to-r from-emerald-50/80 to-teal-50/70 shadow-2xs space-y-2">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="flex items-center gap-2.5">
+                        <div className="p-2 bg-emerald-600 text-white rounded-xl shadow-xs">
+                          <CheckCircle2 className="w-4 h-4" />
+                        </div>
+                        <div>
+                          <p className="font-extrabold text-emerald-950 text-sm flex items-center gap-2">
+                            <span>Akumulasi Presensi: Hadir Tepat Waktu</span>
+                            <span className="px-2 py-0.5 rounded-full bg-emerald-200 text-emerald-900 font-black text-[10px]">
+                              PRESENSI OTOMATIS
+                            </span>
+                          </p>
+                          <p className="text-xs text-emerald-800 mt-0.5">
+                            Total Hadir Tepat Waktu: <strong>{score.onTimeDays} Hari / Sesi</strong> (Setiap 3 kali hadir = 1 poin).
+                          </p>
+                        </div>
+                      </div>
+                      <span className="px-3 py-1 bg-emerald-600 text-white font-black text-xs rounded-xl shadow-xs">
+                        +{score.onTimeBonusPoints} Poin
+                      </span>
+                    </div>
+
+                    {score.onTimeDates && score.onTimeDates.length > 0 && (
+                      <div className="pt-2 border-t border-emerald-200/60 flex items-center gap-1.5 flex-wrap text-[11px]">
+                        <span className="text-emerald-900 font-bold">Daftar Tanggal Hadir:</span>
+                        {score.onTimeDates.map((dateStr, i) => (
+                          <span key={i} className="px-2 py-0.5 bg-white text-emerald-800 border border-emerald-200 rounded-md font-mono text-[10px] font-bold">
+                            {dateStr}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
+
+              {getStudentScoreSummary(detailStudent.id).logs.length === 0 && getStudentScoreSummary(detailStudent.id).onTimeDays === 0 ? (
                 <div className="p-8 text-center text-slate-400 border border-dashed rounded-2xl">
                   Belum ada catatan nilai karakter untuk siswa ini.
                 </div>

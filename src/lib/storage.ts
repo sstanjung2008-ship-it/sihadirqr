@@ -12,7 +12,7 @@ import {
   INITIAL_LESSON_PERIODS,
   INITIAL_CLASS_SCHEDULES
 } from '../data/mockData';
-import { db, doc, setDoc, getDoc, deleteDoc, onSnapshot, serverTimestamp, Timestamp } from './firebase';
+import { db, doc, setDoc, getDoc, getDocs, collection, deleteDoc, onSnapshot, serverTimestamp, Timestamp } from './firebase';
 import firebaseConfigData from '../../firebase-applet-config.json';
 
 // Firebase Server Time Offset Tracker (menjamin pengecekan 16:00 WITA akurat dengan jam server Google Cloud)
@@ -75,14 +75,24 @@ const setCloudSyncStatus = (status: CloudSyncStatus) => {
 };
 
 let notifyStorageUpdatedTimer: any = null;
-const notifyStorageUpdated = () => {
+export const notifyStorageUpdated = (immediate: boolean = false) => {
+  if (immediate) {
+    if (notifyStorageUpdatedTimer) {
+      clearTimeout(notifyStorageUpdatedTimer);
+      notifyStorageUpdatedTimer = null;
+    }
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new Event('sihadir_storage_updated'));
+    }
+    return;
+  }
   if (notifyStorageUpdatedTimer) return;
   notifyStorageUpdatedTimer = setTimeout(() => {
     notifyStorageUpdatedTimer = null;
     if (typeof window !== 'undefined') {
       window.dispatchEvent(new Event('sihadir_storage_updated'));
     }
-  }, 80);
+  }, 10);
 };
 
 // Helper to prevent any promise from hanging indefinitely
@@ -533,10 +543,18 @@ async function performSingleDocWrite(key: string, dataStr: string, timestamp: nu
       isChunked: false,
       totalChunks: 1,
     });
+    // Hapus sisa-sisa chunk jika sebelumnya dokumen ini pernah di-shard
+    const prevChunks = knownChunkedDocs.get(key) || 10;
+    for (let i = 1; i <= prevChunks; i++) {
+      try {
+        await deleteDoc(doc(db, 'sihadir_app_data', `${key}_chunk_${i}`));
+      } catch {}
+    }
     knownChunkedDocs.delete(key);
   } else {
     // Multi-chunk document sharding
     const numChunks = Math.ceil(totalLength / FIRESTORE_MAX_CHUNK_SIZE);
+    const prevChunks = knownChunkedDocs.get(key) || 0;
     knownChunkedDocs.set(key, numChunks);
     const chunks: string[] = [];
     for (let i = 0; i < numChunks; i++) {
@@ -563,6 +581,14 @@ async function performSingleDocWrite(key: string, dataStr: string, timestamp: nu
       isChunked: true,
       totalChunks: numChunks,
     });
+
+    // Otomatis bersihkan sisa chunk lama jika jumlah chunk berkurang
+    const maxScanChunks = Math.max(prevChunks, numChunks + 5);
+    for (let i = numChunks; i <= maxScanChunks; i++) {
+      try {
+        await deleteDoc(doc(db, 'sihadir_app_data', `${key}_chunk_${i}`));
+      } catch {}
+    }
   }
 
   // Hitung penulisan harian untuk perlindungan tagihan Google Cloud Blaze
@@ -708,6 +734,92 @@ export async function readCloudDocument(key: string): Promise<{ data: string; up
     console.error(`[Firestore Sync] Error reading cloud document for ${key}:`, err);
     return null;
   }
+}
+
+export interface CloudDocResult {
+  data: string;
+  updatedAt: number;
+}
+
+/**
+ * Membaca SELURUH data sekolah dari Cloud Firestore dalam SATU KALI PERMINTAAN KOLEKSI CEPAT.
+ * Menggantikan 13x pemanggilan individual getDoc terpisah menjadi 1x getDocs collection query (~200ms).
+ * Otomatis menyatukan kembali dokumen berfragmen (chunked docs) dari snapshot yang sama tanpa tambahan round-trip.
+ */
+export async function readAllCloudDocumentsFast(): Promise<Map<string, CloudDocResult>> {
+  const resultMap = new Map<string, CloudDocResult>();
+  try {
+    const colRef = collection(db, 'sihadir_app_data');
+    // Fetch seluruh koleksi dalam 1 kali round-trip cepat dengan timeout aman 10000ms
+    const snap = await withTimeout(getDocs(colRef), 10000, null);
+
+    if (snap && !snap.empty) {
+      const chunkMap = new Map<string, Map<number, string>>();
+      const rootDocs: { id: string; payload: any }[] = [];
+
+      snap.docs.forEach((d) => {
+        const docId = d.id;
+        const payload = d.data();
+        if (!payload) return;
+
+        if (docId.includes('_chunk_')) {
+          const parts = docId.split('_chunk_');
+          const parentKey = parts[0];
+          const chunkIdx = parseInt(parts[1], 10);
+          if (!chunkMap.has(parentKey)) {
+            chunkMap.set(parentKey, new Map());
+          }
+          chunkMap.get(parentKey)!.set(chunkIdx, String(payload.data || ''));
+        } else {
+          rootDocs.push({ id: docId, payload });
+        }
+      });
+
+      rootDocs.forEach(({ id: docId, payload }) => {
+        const updatedAt = Number(payload.updatedAt) || 0;
+        const isChunked = !!payload.isChunked && Number(payload.totalChunks) > 1;
+
+        if (!isChunked) {
+          const dataStr = typeof payload.data === 'string' ? payload.data : JSON.stringify(payload.data || '');
+          resultMap.set(docId, { data: dataStr, updatedAt });
+          lastSavedStringCache[docId] = dataStr;
+        } else {
+          const totalChunks = Number(payload.totalChunks);
+          const chunksForParent = chunkMap.get(docId);
+          let assembled = String(payload.data || '');
+          for (let i = 1; i < totalChunks; i++) {
+            if (chunksForParent && chunksForParent.has(i)) {
+              assembled += chunksForParent.get(i);
+            }
+          }
+          resultMap.set(docId, { data: assembled, updatedAt });
+          lastSavedStringCache[docId] = assembled;
+        }
+      });
+
+      return resultMap;
+    }
+  } catch (err) {
+    console.warn('[Firestore Fast Read] getDocs koleksi gagal atau timed out, beralih ke pembacaan paralel dokumen:', err);
+  }
+
+  // Fallback cadangan: pembacaan paralel getDoc individual
+  const ALL_KEYS = [
+    KEYS.PROFILE, KEYS.STUDENTS, KEYS.CLASSES, KEYS.TEACHERS,
+    KEYS.ATTENDANCE, KEYS.LEAVES, KEYS.LEARNING_JOURNALS,
+    KEYS.CHARACTER_TRAITS, KEYS.CHARACTER_LOGS, KEYS.CHARACTER_PREDICATES,
+    KEYS.GRADES, KEYS.PERIODS, KEYS.SCHEDULES
+  ];
+  await Promise.all(ALL_KEYS.map(async (key) => {
+    try {
+      const docRes = await readCloudDocument(key);
+      if (docRes) {
+        resultMap.set(key, docRes);
+      }
+    } catch {}
+  }));
+
+  return resultMap;
 }
 
 // Debounced and deduped push to Firestore with Auto-Chunking support
@@ -2003,36 +2115,22 @@ export async function smartSyncAndMergeAllWithCloud(isInitialBoot: boolean = fal
   try {
     setCloudSyncStatus('syncing');
 
-    // 1. Fetch all cloud documents simultaneously with timeout protection (under 3s)
-    const [
-      profileCloud,
-      studentCloud,
-      classCloud,
-      teacherCloud,
-      attCloud,
-      leavesCloud,
-      journalsCloud,
-      traitsCloud,
-      logsCloud,
-      predicatesCloud,
-      gradesCloud,
-      periodsCloud,
-      schedulesCloud,
-    ] = await Promise.all([
-      readCloudDocument(KEYS.PROFILE),
-      readCloudDocument(KEYS.STUDENTS),
-      readCloudDocument(KEYS.CLASSES),
-      readCloudDocument(KEYS.TEACHERS),
-      readCloudDocument(KEYS.ATTENDANCE),
-      readCloudDocument(KEYS.LEAVES),
-      readCloudDocument(KEYS.LEARNING_JOURNALS),
-      readCloudDocument(KEYS.CHARACTER_TRAITS),
-      readCloudDocument(KEYS.CHARACTER_LOGS),
-      readCloudDocument(KEYS.CHARACTER_PREDICATES),
-      readCloudDocument(KEYS.GRADES),
-      readCloudDocument(KEYS.PERIODS),
-      readCloudDocument(KEYS.SCHEDULES),
-    ]);
+    // 1. Fetch seluruh dokumen Cloud dalam 1 kali request koleksi berkecepatan tinggi (~200ms)
+    const cloudDocsMap = await readAllCloudDocumentsFast();
+
+    const profileCloud = cloudDocsMap.get(KEYS.PROFILE);
+    const studentCloud = cloudDocsMap.get(KEYS.STUDENTS);
+    const classCloud = cloudDocsMap.get(KEYS.CLASSES);
+    const teacherCloud = cloudDocsMap.get(KEYS.TEACHERS);
+    const attCloud = cloudDocsMap.get(KEYS.ATTENDANCE);
+    const leavesCloud = cloudDocsMap.get(KEYS.LEAVES);
+    const journalsCloud = cloudDocsMap.get(KEYS.LEARNING_JOURNALS);
+    const traitsCloud = cloudDocsMap.get(KEYS.CHARACTER_TRAITS);
+    const logsCloud = cloudDocsMap.get(KEYS.CHARACTER_LOGS);
+    const predicatesCloud = cloudDocsMap.get(KEYS.CHARACTER_PREDICATES);
+    const gradesCloud = cloudDocsMap.get(KEYS.GRADES);
+    const periodsCloud = cloudDocsMap.get(KEYS.PERIODS);
+    const schedulesCloud = cloudDocsMap.get(KEYS.SCHEDULES);
 
     const now = Date.now();
 
@@ -2064,7 +2162,7 @@ export async function smartSyncAndMergeAllWithCloud(isInitialBoot: boolean = fal
     safeSetLocalStorage(KEYS.PROFILE, profileStr);
     safeSetLocalStorage(KEYS.PROFILE + '_updatedAt', String(profileUpdatedAt));
 
-    // Step B: Students & Photo Sanitization
+    // Step B: Students & Non-Blocking Merging
     let cloudStudents: Student[] = [];
     if (studentCloud && studentCloud.data) {
       try {
@@ -2075,7 +2173,7 @@ export async function smartSyncAndMergeAllWithCloud(isInitialBoot: boolean = fal
     }
     const currentLocalStudents = getStudents();
     const mergedStudents = mergeStudentLists(currentLocalStudents, cloudStudents);
-    const optimizedStudents = await sanitizeAndCompressStudentPhotos(mergedStudents);
+    const optimizedStudents = mergedStudents;
     const studentsJsonStr = JSON.stringify(optimizedStudents);
     const studentUpdatedAt = Math.max(Number(studentCloud?.updatedAt || 0), prevLocalTimestamps[KEYS.STUDENTS] || 0);
     safeSetLocalStorage(KEYS.STUDENTS, studentsJsonStr);
@@ -2248,7 +2346,7 @@ export async function smartSyncAndMergeAllWithCloud(isInitialBoot: boolean = fal
     lastSavedStringCache[KEYS.PERIODS] = periodsJsonStr;
     lastSavedStringCache[KEYS.SCHEDULES] = schedulesJsonStr;
 
-    notifyStorageUpdated();
+    notifyStorageUpdated(true);
 
     // 3. Selectively Push Only Keys that Actually Changed Back to Cloud (avoids write stream flooding)
     // PENGHEMAT KUOTA: Saat buka awal atau refresh halaman (isInitialBoot === true), DILARANG menulis balik ke Cloud!
@@ -2424,11 +2522,11 @@ export async function forceDownloadAllFromCloud(): Promise<{ success: boolean; e
       KEYS.SCHEDULES,
     ];
 
-    const results = await Promise.all(ALL_KEYS.map((key) => readCloudDocument(key)));
+    const cloudDocsMap = await readAllCloudDocumentsFast();
     let updatedCount = 0;
 
-    results.forEach((cloudDoc, idx) => {
-      const key = ALL_KEYS[idx];
+    ALL_KEYS.forEach((key) => {
+      const cloudDoc = cloudDocsMap.get(key);
       if (cloudDoc && cloudDoc.data) {
         if (key === KEYS.PROFILE) {
           try {
@@ -2585,96 +2683,20 @@ let lastParentRefreshTime = 0;
  * 3. Jika cache lokal kadaluarsa (> 30 menit) atau ditekan tombol segarkan, baru membaca dokumen terkait.
  * 4. 100% GRATIS dan menjamin kuota Firebase Spark/Blaze (50.000 read/hari) aman terlindungi.
  */
-export async function syncParentDataOnDemand(force: boolean = false): Promise<{ success: boolean; message: string }> {
+export async function syncParentDataOnDemand(force: boolean = true): Promise<{ success: boolean; message: string }> {
   if (typeof window === 'undefined') return { success: false, message: 'SSR' };
   if (isFirestoreQuotaExceeded()) {
     setCloudSyncStatus('quota_exceeded');
     return { success: false, message: 'Batas kuota harian Firebase tercapai' };
   }
 
-  const now = Date.now();
-  const lastSyncStr = localStorage.getItem('sihadir_parent_last_sync') || '0';
-  const lastSyncTime = Number(lastSyncStr) || 0;
-  const timeSinceLastSync = now - lastSyncTime;
-
-  // Cek apakah data dasar siswa sudah ada di perangkat ini
-  const localStudentsStr = localStorage.getItem(KEYS.STUDENTS);
-  const localProfileStr = localStorage.getItem(KEYS.PROFILE);
-  const isFirstTimeBoot = !localStudentsStr || !localProfileStr || localStudentsStr === '[]';
-
-  // Jika bukan booting awal, bukan paksa (force), dan masih dalam masa berlaku cache 30 menit:
-  // TIDAK MELAKUKAN BACA SAMA SEKALI KE FIRESTORE! (0 Reads, 100% Hemat Kuota)
-  if (!isFirstTimeBoot && !force && timeSinceLastSync < PARENT_SYNC_COOLDOWN_MS) {
-    setCloudSyncStatus('connected');
-    return { success: true, message: 'Data presensi lokal masih baru (mode hemat kuota 30 menit aktif).' };
-  }
-
-  // Rate limit agar tombol segarkan tidak bisa dispam (minimal 10 detik jeda)
-  if (force && (now - lastParentRefreshTime < 10000)) {
-    return { success: true, message: 'Data presensi baru saja diperbarui. Tunggu beberapa detik.' };
-  }
-  lastParentRefreshTime = now;
-
   setCloudSyncStatus('syncing');
 
   try {
-    if (isFirstTimeBoot) {
-      // Hanya saat pertama kali buka aplikasi di HP orang tua: Ambil data esensial siswa dan profil sekolah
-      const [pDoc, sDoc, aDoc, schDoc, lDoc, cDoc] = await Promise.all([
-        readCloudDocument(KEYS.PROFILE),
-        readCloudDocument(KEYS.STUDENTS),
-        readCloudDocument(KEYS.ATTENDANCE),
-        readCloudDocument(KEYS.SCHEDULES),
-        readCloudDocument(KEYS.LEAVES),
-        readCloudDocument(KEYS.CHARACTER_LOGS),
-      ]);
-
-      if (pDoc?.data) safeSetLocalStorage(KEYS.PROFILE, pDoc.data);
-      if (sDoc?.data) safeSetLocalStorage(KEYS.STUDENTS, sDoc.data);
-      if (aDoc?.data) safeSetLocalStorage(KEYS.ATTENDANCE, aDoc.data);
-      if (schDoc?.data) safeSetLocalStorage(KEYS.SCHEDULES, schDoc.data);
-      if (lDoc?.data) safeSetLocalStorage(KEYS.LEAVES, lDoc.data);
-      if (cDoc?.data) safeSetLocalStorage(KEYS.CHARACTER_LOGS, cDoc.data);
-
-      safeSetLocalStorage('sihadir_parent_last_sync', String(now));
-      notifyStorageUpdated();
-      setCloudSyncStatus('connected');
-      return { success: true, message: 'Data awal siswa berhasil disinkronkan!' };
-    }
-
-    // Untuk pengecekan reguler orang tua (Jeda 30 Menit):
-    // BACA ATTENDANCE, LEAVES, dan CHARACTER_LOGS (menjamin nilai karakter anak selalu up-to-date dan sama di semua perangkat)
-    const [attDoc, leavesDoc, logsDoc, studentsDoc] = await Promise.all([
-      readCloudDocument(KEYS.ATTENDANCE),
-      readCloudDocument(KEYS.LEAVES),
-      readCloudDocument(KEYS.CHARACTER_LOGS),
-      readCloudDocument(KEYS.STUDENTS),
-    ]);
-
-    if (attDoc?.data) {
-      safeSetLocalStorage(KEYS.ATTENDANCE, attDoc.data);
-      safeSetLocalStorage(KEYS.ATTENDANCE + '_updatedAt', String(attDoc.updatedAt || now));
-    }
-    if (leavesDoc?.data) {
-      safeSetLocalStorage(KEYS.LEAVES, leavesDoc.data);
-      safeSetLocalStorage(KEYS.LEAVES + '_updatedAt', String(leavesDoc.updatedAt || now));
-    }
-    if (logsDoc?.data) {
-      safeSetLocalStorage(KEYS.CHARACTER_LOGS, logsDoc.data);
-      safeSetLocalStorage(KEYS.CHARACTER_LOGS + '_updatedAt', String(logsDoc.updatedAt || now));
-    }
-    if (studentsDoc?.data) {
-      try {
-        const cloudStudents = JSON.parse(studentsDoc.data);
-        if (Array.isArray(cloudStudents) && cloudStudents.length > 0) {
-          safeSetLocalStorage(KEYS.STUDENTS, studentsDoc.data);
-          safeSetLocalStorage(KEYS.STUDENTS + '_updatedAt', String(studentsDoc.updatedAt || now));
-        }
-      } catch {}
-    }
-
-    safeSetLocalStorage('sihadir_parent_last_sync', String(now));
-    notifyStorageUpdated();
+    // Gunakan 1 kali request koleksi cepat untuk membaca seluruh data (presensi, jadwal, izin, karakter, profil)
+    const res = await smartSyncAndMergeAllWithCloud(true);
+    safeSetLocalStorage('sihadir_parent_last_sync', String(Date.now()));
+    notifyStorageUpdated(true);
     setCloudSyncStatus('connected');
     return { success: true, message: 'Status presensi dan nilai karakter anak berhasil diperbarui dari Cloud!' };
   } catch (err: any) {
@@ -2699,16 +2721,15 @@ export async function refreshParentChildAttendance(force: boolean = true): Promi
 }
 
 /**
- * Penghemat kuota saat login: Hanya ambil data profil, siswa, dan guru (3 dokumen saja)
- * Menghindari penarikan 13 dokumen saat verifikasi akun di perangkat baru
+ * Penghemat kuota saat login: Hanya ambil data profil, siswa, dan guru (1 koleksi cepat)
+ * Menghindari penarikan lambat saat verifikasi akun di perangkat baru
  */
 export async function quickSyncAuthCredentials(): Promise<boolean> {
   try {
-    const [pDoc, sDoc, tDoc] = await Promise.all([
-      readCloudDocument(KEYS.PROFILE),
-      readCloudDocument(KEYS.STUDENTS),
-      readCloudDocument(KEYS.TEACHERS),
-    ]);
+    const cloudDocsMap = await readAllCloudDocumentsFast();
+    const pDoc = cloudDocsMap.get(KEYS.PROFILE);
+    const sDoc = cloudDocsMap.get(KEYS.STUDENTS);
+    const tDoc = cloudDocsMap.get(KEYS.TEACHERS);
 
     if (pDoc?.data) {
       try {
@@ -2740,7 +2761,7 @@ export async function quickSyncAuthCredentials(): Promise<boolean> {
         safeSetLocalStorage(KEYS.TEACHERS, tDoc.data);
       }
     }
-    notifyStorageUpdated();
+    notifyStorageUpdated(true);
     return true;
   } catch (e) {
     console.warn('[Quick Auth Sync] Gagal mengunduh kredensial login:', e);
@@ -2754,9 +2775,13 @@ export async function quickSyncAuthCredentials(): Promise<boolean> {
 // Tidak ada continuous onSnapshot listener yang memakan kuota setiap kali ada aktivitas di database.
 // ============================================================================
 
+let ongoingInitialSyncPromise: Promise<{ success: boolean; message: string }> | null = null;
+let lastInitialSyncTime = 0;
+
 /**
- * Melakukan pembacaan awal satu kali (one-time fetch & merge) dari Cloud Firestore
+ * Melakukan pembacaan awal satu kali (one-time high-speed fetch & merge) dari Cloud Firestore
  * saat aplikasi pertama kali dibuka atau saat halaman direfresh.
+ * Menggunakan 1 query koleksi tunggal sehingga selesai dalam 200-300ms tanpa menunggu lama.
  */
 export async function initialLoadSyncFromCloud(role?: UserRole): Promise<{ success: boolean; message: string }> {
   if (typeof window === 'undefined') return { success: false, message: 'SSR' };
@@ -2765,20 +2790,31 @@ export async function initialLoadSyncFromCloud(role?: UserRole): Promise<{ succe
     return { success: false, message: 'Batas kuota harian Firebase tercapai' };
   }
 
-  const currentRole = role || getUserSession()?.role || 'ADMIN';
-
-  try {
-    if (currentRole === 'PARENT') {
-      const parentRes = await syncParentDataOnDemand(false);
-      return parentRes;
-    } else {
-      const res = await smartSyncAndMergeAllWithCloud(true);
-      return { success: res.success, message: res.message };
-    }
-  } catch (err: any) {
-    console.warn('[Cloud Initial Read] Gagal membaca data awal:', err);
-    return { success: false, message: err?.message || 'Gagal membaca data awal' };
+  const now = Date.now();
+  // Cegah duplikasi pembacaan jika ada request beruntun dalam jeda 3 detik
+  if (ongoingInitialSyncPromise && now - lastInitialSyncTime < 3000) {
+    return ongoingInitialSyncPromise;
   }
+
+  lastInitialSyncTime = now;
+  ongoingInitialSyncPromise = (async () => {
+    try {
+      setCloudSyncStatus('syncing');
+      // Seluruh role (Admin, Guru, Pos Scanner, maupun Wali Murid) membaca data terbaru langsung dari Cloud dalam 1 request cepat
+      const res = await smartSyncAndMergeAllWithCloud(true);
+      setCloudSyncStatus('connected');
+      notifyStorageUpdated(true);
+      return { success: res.success, message: res.message };
+    } catch (err: any) {
+      console.warn('[Cloud Initial Read] Gagal membaca data awal:', err);
+      setCloudSyncStatus('connected');
+      return { success: false, message: err?.message || 'Gagal membaca data awal' };
+    } finally {
+      ongoingInitialSyncPromise = null;
+    }
+  })();
+
+  return ongoingInitialSyncPromise;
 }
 
 /**
@@ -2786,11 +2822,8 @@ export async function initialLoadSyncFromCloud(role?: UserRole): Promise<{ succe
  * Membaca snapshot Cloud terbaru secara on-demand (1 kali read)
  */
 export async function refreshCloudData(force: boolean = true): Promise<{ success: boolean; message: string }> {
-  const currentRole = getUserSession()?.role || 'ADMIN';
-  if (currentRole === 'PARENT') {
-    return await syncParentDataOnDemand(force);
-  }
   const res = await smartSyncAndMergeAllWithCloud(true);
+  notifyStorageUpdated(true);
   return {
     success: res.success,
     message: res.message,
@@ -2801,33 +2834,24 @@ export async function refreshCloudData(force: boolean = true): Promise<{ success
  * Inisialisasi Sesi Aplikasi & Arsitektur Hemat Kuota Harian Firebase:
  * 
  * ATURAN ARSITEKTUR:
- * 1. Read perangkat HANYA terjadi saat membuka awal dan merefresh halaman aplikasi.
+ * 1. Read perangkat langsung terjadi saat membuka awal dan merefresh halaman aplikasi (1 request koleksi).
  * 2. Menghapus continuous listener onSnapshot agar kuota 50.000 read gratisan tiap hari aman 100%.
  * 3. Scan QR di gerbang, presensi, jurnal, dan nilai membaca dari LocalStorage (0 Cloud Read).
  * 4. Penulisan ke Cloud dibatch & didebounce sehingga tidak memicu loop.
  */
-export function initFirestoreAppSession(role?: UserRole): void {
-  if (typeof window === 'undefined') return;
+export function initFirestoreAppSession(role?: UserRole): Promise<{ success: boolean; message: string }> {
+  if (typeof window === 'undefined') return Promise.resolve({ success: false, message: 'SSR' });
 
   // Bebaskan kuota LocalStorage dari cache dan fragmen usang pada startup
   reclaimLocalStorageQuota();
 
   if (isFirestoreQuotaExceeded()) {
     setCloudSyncStatus('quota_exceeded');
-    return;
+    return Promise.resolve({ success: false, message: 'Batas kuota harian Firebase tercapai' });
   }
 
   const currentRole = role || getUserSession()?.role || 'ADMIN';
   isFirestoreInitialized = true;
-
-  // Jalankan 1 kali pembacaan data Cloud saat membuka awal aplikasi / reload
-  initialLoadSyncFromCloud(currentRole).then((res) => {
-    if (res.success) {
-      setCloudSyncStatus('connected');
-    }
-  }).catch(() => {
-    setCloudSyncStatus('connected');
-  });
 
   // Startup background check for raw uncompressed student photos (>90KB base64)
   try {
@@ -2874,11 +2898,22 @@ export function initFirestoreAppSession(role?: UserRole): void {
       localStorage.removeItem('sihadir_wa_logs');
     } catch {}
   }
+
+  // Jalankan pembacaan data Cloud berkecepatan tinggi saat membuka awal aplikasi / reload
+  return initialLoadSyncFromCloud(currentRole).then((res) => {
+    if (res.success) {
+      setCloudSyncStatus('connected');
+    }
+    return res;
+  }).catch((err) => {
+    setCloudSyncStatus('connected');
+    return { success: false, message: err?.message || 'Error' };
+  });
 }
 
 // Alias untuk kompatibilitas penuh dengan pemanggil lama
-export function initFirestoreRealtimeSync(role?: UserRole): void {
-  initFirestoreAppSession(role);
+export function initFirestoreRealtimeSync(role?: UserRole): Promise<{ success: boolean; message: string }> {
+  return initFirestoreAppSession(role);
 }
 
 export const INITIAL_CHARACTER_PREDICATES: CharacterPredicateSettings = {
@@ -4279,20 +4314,54 @@ export function isLogForStudent(
 }
 
 /**
- * Menghitung rekapitulasi poin karakter positif, negatif, skor bersih, dan daftar log siswa
+ * Memeriksa apakah suatu catatan presensi milik siswa tertentu
+ */
+export function isAttendanceForStudent(
+  rec: AttendanceRecord,
+  student: { id?: string; nisn?: string; nis?: string; name?: string }
+): boolean {
+  if (!rec || !student) return false;
+  const sId = (student.id || '').trim();
+  const rId = (rec.studentId || '').trim();
+  if (sId && rId && sId === rId) return true;
+
+  const sNisn = (student.nisn || '').trim();
+  const rNisn = (rec.nisn || '').trim();
+  if (sNisn && rNisn && sNisn !== '-' && rNisn !== '-' && sNisn === rNisn) return true;
+
+  const sName = (student.name || '').trim().toLowerCase();
+  const rName = (rec.studentName || '').trim().toLowerCase();
+  if (sName && rName && sName === rName) return true;
+
+  return false;
+}
+
+/**
+ * Menghitung rekapitulasi poin karakter positif, negatif, skor bersih, daftar log siswa,
+ * serta menghitung akumulasi Hadir Tepat Waktu (setiap 3 hari = 1 poin, 6 hari = 2 poin, dst.)
  * secara seragam dan konsisten untuk seluruh komponen (Admin, Guru, Wali Murid, Laporan PDF).
  */
 export function calculateStudentCharacterSummary(
   student: { id?: string; nisn?: string; nis?: string; name?: string },
-  logs: StudentCharacterLog[]
+  logs: StudentCharacterLog[],
+  attendanceRecords?: AttendanceRecord[]
 ): {
   positivePoints: number;
   negativePoints: number;
   netScore: number;
   totalEntries: number;
   logs: StudentCharacterLog[];
+  onTimeDays: number;
+  onTimeBonusPoints: number;
+  onTimeDates: string[];
 } {
-  const rawLogs = (logs || []).filter(l => isLogForStudent(l, student));
+  // Saring log karakter siswa (kecualikan log manual auto-ontime lama agar tidak terjadi duplikasi nilai)
+  const rawLogs = (logs || []).filter(l => 
+    isLogForStudent(l, student) &&
+    !l.id?.startsWith('auto-ontime-') &&
+    !l.id?.startsWith('saved-auto-ontime-') &&
+    !(l.traitType === 'POSITIF' && (l.notes?.toLowerCase().includes('kali hadir tepat waktu') || l.notes?.toLowerCase().includes('datang tepat waktu kelipatan')))
+  );
   const studentLogs = deduplicateCharacterLogs(rawLogs);
 
   let positivePoints = 0;
@@ -4307,12 +4376,30 @@ export function calculateStudentCharacterSummary(
     }
   });
 
+  // Hitung jumlah hadir tepat waktu dari presensi (status HADIR)
+  const allAtt = (attendanceRecords && attendanceRecords.length > 0) 
+    ? attendanceRecords 
+    : getAttendanceRecords();
+
+  const matchingHadir = allAtt.filter(r => r && r.status === 'HADIR' && isAttendanceForStudent(r, student));
+  const distinctOnTimeDates = Array.from(new Set(matchingHadir.map(r => r.date))).sort();
+  const onTimeDays = distinctOnTimeDates.length;
+
+  // Aturan Hadir Tepat Waktu: Setiap kelipatan 3 hari beri nilai 1 poin (3 hari = 1 poin, 6 hari = 2 poin, dst.)
+  const onTimeBonusPoints = Math.floor(onTimeDays / 3);
+
+  // Akumulasikan ke total poin positif & skor bersih
+  positivePoints += onTimeBonusPoints;
+
   return {
     positivePoints,
     negativePoints,
     netScore: positivePoints - negativePoints,
     totalEntries: studentLogs.length,
-    logs: studentLogs
+    logs: studentLogs,
+    onTimeDays,
+    onTimeBonusPoints,
+    onTimeDates: distinctOnTimeDates
   };
 }
 

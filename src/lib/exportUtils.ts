@@ -2061,10 +2061,10 @@ export async function exportStudentCharacterDetailPdf(
       5: { cellWidth: 52 }
     },
     body: [
-      ['Nama Siswa', ':', student.name, 'Total Poin Positif (+)', ':', `+${posPoints} Poin (${posLogs.length} Catatan)`],
-      ['NISN / NIS', ':', `${student.nisn || '-'} / ${student.nis || '-'}`, 'Total Poin Negatif (-)', ':', `-${negPoints} Poin (${negLogs.length} Catatan)`],
-      ['Kelas', ':', student.className || '-', 'Akumulasi Total Skor', ':', `${netPoints >= 0 ? '+' : ''}${netPoints} Poin`],
-      ['Jenis Kelamin', ':', student.gender === 'L' ? 'Laki-laki' : student.gender === 'P' ? 'Perempuan' : (student.gender || '-'), 'Predikat Karakter', ':', predikat]
+      ['Nama Siswa', ':', student.name, 'Hadir Tepat Waktu (3x=+1)', ':', `${summary.onTimeDays || 0} Kali (+${summary.onTimeBonusPoints || 0} Poin)`],
+      ['NISN / NIS', ':', `${student.nisn || '-'} / ${student.nis || '-'}`, 'Total Poin Positif (+)', ':', `+${posPoints} Poin (${posLogs.length} Catatan)`],
+      ['Kelas', ':', student.className || '-', 'Total Poin Negatif (-)', ':', `-${negPoints} Poin (${negLogs.length} Catatan)`],
+      ['Jenis Kelamin', ':', student.gender === 'L' ? 'Laki-laki' : student.gender === 'P' ? 'Perempuan' : (student.gender || '-'), 'Skor Akhir & Predikat', ':', `${netPoints >= 0 ? '+' : ''}${netPoints} Poin • ${predikat}`]
     ]
   });
 

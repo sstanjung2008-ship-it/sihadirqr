@@ -304,7 +304,7 @@ export const LoginView: React.FC<LoginViewProps> = ({
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-100 via-indigo-50/50 to-blue-100/60 text-slate-800 flex flex-col justify-between p-4 sm:p-6 lg:p-8 relative overflow-hidden font-sans">
+    <div className="min-h-screen w-full bg-gradient-to-br from-slate-100 via-indigo-50/50 to-blue-100/60 text-slate-800 flex flex-col justify-between p-4 sm:p-6 lg:p-8 relative overflow-x-hidden overflow-y-auto font-sans">
       
       {/* Background Decorative Soft Glow Blobs */}
       <div className="absolute top-0 left-1/4 -mt-20 w-96 h-96 bg-indigo-300/30 rounded-full blur-3xl pointer-events-none"></div>

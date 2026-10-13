@@ -35,7 +35,8 @@ import {
   Lock,
   Save,
   RotateCcw,
-  Check
+  Check,
+  Award
 } from 'lucide-react';
 import { saveSchoolProfile, isLogForStudent } from '../lib/storage';
 import { getWitaDateTime } from '../lib/autoCharacterScheduler';
@@ -47,8 +48,7 @@ export type AutoRuleType =
   | 'UNRETURNED'
   | 'DISRUPTIVE_KBM' 
   | 'ABSENT_KBM'
-  | 'VERY_ACTIVE_KBM'
-  | 'ON_TIME_3_DAYS';
+  | 'VERY_ACTIVE_KBM';
 
 export interface AutoCharacterCandidate {
   id: string; // unique draft id
@@ -87,6 +87,7 @@ interface AutoCharacterAssessmentModalProps {
   schoolProfile?: SchoolProfile;
   onUpdateSchoolProfile?: (profile: SchoolProfile) => void;
   onApplyLogs: (newLogs: StudentCharacterLog[]) => void;
+  onNavigateToPoints?: () => void;
 }
 
 export const AutoCharacterAssessmentModal: React.FC<AutoCharacterAssessmentModalProps> = ({
@@ -103,6 +104,7 @@ export const AutoCharacterAssessmentModal: React.FC<AutoCharacterAssessmentModal
   schoolProfile,
   onUpdateSchoolProfile,
   onApplyLogs,
+  onNavigateToPoints,
 }) => {
   // Auto assessment status (Defaults to true if undefined)
   const isAutoEnabled = schoolProfile?.autoCharacterAssessmentEnabled !== false;
@@ -123,8 +125,6 @@ export const AutoCharacterAssessmentModal: React.FC<AutoCharacterAssessmentModal
   const [disruptivePoints, setDisruptivePoints] = useState<number>(() => schoolProfile?.autoCharacterPoints?.disruptivePoints ?? 1);
   const [absentKbmPoints, setAbsentKbmPoints] = useState<number>(() => schoolProfile?.autoCharacterPoints?.absentKbmPoints ?? 2); // Default 2 poin negatif
   const [veryActiveKbmPoints, setVeryActiveKbmPoints] = useState<number>(() => schoolProfile?.autoCharacterPoints?.veryActiveKbmPoints ?? 1); // Default 1 poin positif
-  const [onTimePoints, setOnTimePoints] = useState<number>(() => schoolProfile?.autoCharacterPoints?.onTimePoints ?? 1);
-  const [onTimeRequiredDays, setOnTimeRequiredDays] = useState<number>(() => schoolProfile?.autoCharacterPoints?.onTimeRequiredDays ?? 3);
   const [unscannedPoints, setUnscannedPoints] = useState<number>(() => schoolProfile?.autoCharacterPoints?.unscannedPoints ?? 2); // Default 2 poin negatif
   const [unreturnedPoints, setUnreturnedPoints] = useState<number>(() => schoolProfile?.autoCharacterPoints?.unreturnedPoints ?? 2); // Default 2 poin negatif
   const [pointsSavedNotice, setPointsSavedNotice] = useState<{ type: 'success' | 'info'; message: string } | null>(null);
@@ -143,8 +143,6 @@ export const AutoCharacterAssessmentModal: React.FC<AutoCharacterAssessmentModal
       if (typeof p.disruptivePoints === 'number') setDisruptivePoints(p.disruptivePoints);
       if (typeof p.absentKbmPoints === 'number') setAbsentKbmPoints(p.absentKbmPoints);
       if (typeof p.veryActiveKbmPoints === 'number') setVeryActiveKbmPoints(p.veryActiveKbmPoints);
-      if (typeof p.onTimePoints === 'number') setOnTimePoints(p.onTimePoints);
-      if (typeof p.onTimeRequiredDays === 'number') setOnTimeRequiredDays(p.onTimeRequiredDays);
       if (typeof p.unscannedPoints === 'number') setUnscannedPoints(p.unscannedPoints);
       if (typeof p.unreturnedPoints === 'number') setUnreturnedPoints(p.unreturnedPoints);
     }
@@ -157,8 +155,6 @@ export const AutoCharacterAssessmentModal: React.FC<AutoCharacterAssessmentModal
       disruptivePoints: schoolProfile?.autoCharacterPoints?.disruptivePoints ?? 1,
       absentKbmPoints: schoolProfile?.autoCharacterPoints?.absentKbmPoints ?? 2,
       veryActiveKbmPoints: schoolProfile?.autoCharacterPoints?.veryActiveKbmPoints ?? 1,
-      onTimePoints: schoolProfile?.autoCharacterPoints?.onTimePoints ?? 1,
-      onTimeRequiredDays: schoolProfile?.autoCharacterPoints?.onTimeRequiredDays ?? 3,
       unscannedPoints: schoolProfile?.autoCharacterPoints?.unscannedPoints ?? 1,
       unreturnedPoints: schoolProfile?.autoCharacterPoints?.unreturnedPoints ?? 1,
     };
@@ -171,8 +167,6 @@ export const AutoCharacterAssessmentModal: React.FC<AutoCharacterAssessmentModal
       disruptivePoints !== currentSavedConfig.disruptivePoints ||
       absentKbmPoints !== currentSavedConfig.absentKbmPoints ||
       veryActiveKbmPoints !== currentSavedConfig.veryActiveKbmPoints ||
-      onTimePoints !== currentSavedConfig.onTimePoints ||
-      onTimeRequiredDays !== currentSavedConfig.onTimeRequiredDays ||
       unscannedPoints !== currentSavedConfig.unscannedPoints ||
       unreturnedPoints !== currentSavedConfig.unreturnedPoints
     );
@@ -182,8 +176,6 @@ export const AutoCharacterAssessmentModal: React.FC<AutoCharacterAssessmentModal
     disruptivePoints,
     absentKbmPoints,
     veryActiveKbmPoints,
-    onTimePoints,
-    onTimeRequiredDays,
     unscannedPoints,
     unreturnedPoints,
     currentSavedConfig
@@ -191,13 +183,14 @@ export const AutoCharacterAssessmentModal: React.FC<AutoCharacterAssessmentModal
 
   const handleSavePoints = () => {
     const newPoints: AutoCharacterPointSettings = {
+      ...(schoolProfile?.autoCharacterPoints || {}),
       latePoints: Math.max(1, Math.abs(Number(latePoints)) || 2),
       alpaPoints: Math.max(1, Math.abs(Number(alpaPoints)) || 5),
       disruptivePoints: Math.max(1, Math.abs(Number(disruptivePoints)) || 1),
       absentKbmPoints: Math.max(1, Math.abs(Number(absentKbmPoints)) || 2),
       veryActiveKbmPoints: Math.max(1, Math.abs(Number(veryActiveKbmPoints)) || 1),
-      onTimePoints: Math.max(1, Math.abs(Number(onTimePoints)) || 1),
-      onTimeRequiredDays: Math.max(1, Math.abs(Number(onTimeRequiredDays)) || 3),
+      onTimePoints: schoolProfile?.autoCharacterPoints?.onTimePoints ?? 1,
+      onTimeRequiredDays: schoolProfile?.autoCharacterPoints?.onTimeRequiredDays ?? 3,
       unscannedPoints: Math.max(1, Math.abs(Number(unscannedPoints)) || 1),
       unreturnedPoints: Math.max(1, Math.abs(Number(unreturnedPoints)) || 1),
     };
@@ -221,13 +214,12 @@ export const AutoCharacterAssessmentModal: React.FC<AutoCharacterAssessmentModal
 
   const handleResetDefaultPoints = () => {
     const defaultPoints: AutoCharacterPointSettings = {
+      ...(schoolProfile?.autoCharacterPoints || {}),
       latePoints: 2,
       alpaPoints: 5,
       disruptivePoints: 1,
       absentKbmPoints: 2,
       veryActiveKbmPoints: 1,
-      onTimePoints: 1,
-      onTimeRequiredDays: 3,
       unscannedPoints: 1,
       unreturnedPoints: 1,
     };
@@ -236,8 +228,6 @@ export const AutoCharacterAssessmentModal: React.FC<AutoCharacterAssessmentModal
     setDisruptivePoints(1);
     setAbsentKbmPoints(2);
     setVeryActiveKbmPoints(1);
-    setOnTimePoints(1);
-    setOnTimeRequiredDays(3);
     setUnscannedPoints(1);
     setUnreturnedPoints(1);
 
@@ -258,8 +248,8 @@ export const AutoCharacterAssessmentModal: React.FC<AutoCharacterAssessmentModal
     setTimeout(() => setPointsSavedNotice(null), 4000);
   };
 
-  // Group Filter (ALL / UNSAVED / SAVED / POSITIF / NEGATIF)
-  const [groupFilter, setGroupFilter] = useState<'ALL' | 'UNSAVED' | 'SAVED' | 'POSITIF' | 'NEGATIF'>('ALL');
+  // Group Filter (UNSAVED / SAVED / ALL / POSITIF / NEGATIF) - Default to UNSAVED (Tabel Belum Dinilai)
+  const [groupFilter, setGroupFilter] = useState<'ALL' | 'UNSAVED' | 'SAVED' | 'POSITIF' | 'NEGATIF'>('UNSAVED');
   
   // Specific Rule Filter inside Modal
   const [ruleFilter, setRuleFilter] = useState<'ALL' | AutoRuleType>('ALL');
@@ -361,19 +351,6 @@ export const AutoCharacterAssessmentModal: React.FC<AutoCharacterAssessmentModal
       category: 'Keaktifan'
     };
   }, [traits, veryActiveKbmPoints]);
-
-  const onTimeTrait = useMemo(() => {
-    return traits.find(t => 
-      t.id === 'trait-001' || 
-      (t.type === 'POSITIF' && (t.name.toLowerCase().includes('tepat waktu') || t.name.toLowerCase().includes('hadir tepat')))
-    ) || {
-      id: 'trait-auto-ontime',
-      name: 'Datang Tepat Waktu & Disiplin',
-      type: 'POSITIF' as const,
-      points: onTimePoints,
-      category: 'Kedisiplinan'
-    };
-  }, [traits, onTimePoints]);
 
   const unscannedTrait = useMemo(() => {
     return traits.find(t => 
@@ -604,52 +581,6 @@ export const AutoCharacterAssessmentModal: React.FC<AutoCharacterAssessmentModal
           });
         }
       });
-
-      // Rule: Datang Tepat Waktu (HADIR) setiap kelipatan 3 hari -> Nilai Karakter Positif (+onTimePoints per kelipatan)
-      const onTimeRecords = sortedRecords.filter(r => r.status === 'HADIR');
-      const distinctOnTimeDates = Array.from(new Set(onTimeRecords.map(r => r.date))).sort();
-      if (distinctOnTimeDates.length >= onTimeRequiredDays) {
-        const totalGroups = Math.floor(distinctOnTimeDates.length / onTimeRequiredDays);
-        for (let g = 0; g < totalGroups; g++) {
-          const groupDates = distinctOnTimeDates.slice(g * onTimeRequiredDays, (g + 1) * onTimeRequiredDays);
-          const milestoneCount = (g + 1) * onTimeRequiredDays;
-          const lastRecordDate = groupDates[groupDates.length - 1];
-          const datesFormatted = groupDates.join(', ');
-          const targetDate = lastRecordDate;
-          const logId = `auto-ontime-${student.id}-milestone-${milestoneCount}`;
-
-          const isAlready = localSavedIds.has(logId) || characterLogs.some(l => 
-            l.id === logId || 
-            l.id === `auto-ontime-${student.id}-group-${g}-${targetDate}` ||
-            (isLogForStudent(l, student) && (
-              (l.traitType === 'POSITIF' && l.notes?.includes(`kelipatan ${onTimeRequiredDays} hari ke-${g + 1}`)) ||
-              (l.traitType === 'POSITIF' && l.notes?.includes(`${milestoneCount} hari hadir`))
-            ))
-          );
-
-          candidates.push({
-            id: logId,
-            studentId: student.id,
-            studentName: student.name,
-            nisn: student.nisn,
-            classId: student.classId,
-            className: student.className,
-            ruleType: 'ON_TIME_3_DAYS',
-            ruleLabel: `Datang Tepat Waktu (${milestoneCount} Kali Hadir = Nilai ${g + 1} Poin)`,
-            traitId: onTimeTrait.id,
-            traitName: onTimeTrait.name || 'Datang Tepat Waktu & Disiplin',
-            traitType: 'POSITIF',
-            points: onTimePoints,
-            date: targetDate,
-            evaluatorName: generalEvaluatorName || 'Sistem Presensi Otomatis (Tepat Waktu)',
-            notes: `Penilaian Karakter Positif Presensi: Datang tepat waktu kelipatan ${onTimeRequiredDays} hari ke-${g + 1} (${milestoneCount} kali hadir tepat waktu dinilai akumulasi ${g + 1} poin: ${datesFormatted})`,
-            attendanceDates: groupDates,
-            sourceType: 'PRESENSI',
-            isSelected: !isAlready,
-            isAlreadyLogged: isAlready,
-          });
-        }
-      }
     });
 
     // 3. Process Jurnal KBM entries (Mengganggu, Tidak Hadir di Kelas, Sangat Aktif)
@@ -812,8 +743,6 @@ export const AutoCharacterAssessmentModal: React.FC<AutoCharacterAssessmentModal
     disruptivePoints,
     absentKbmPoints,
     veryActiveKbmPoints,
-    onTimePoints, 
-    onTimeRequiredDays, 
     unscannedPoints,
     unreturnedPoints,
     generalEvaluatorName,
@@ -822,7 +751,6 @@ export const AutoCharacterAssessmentModal: React.FC<AutoCharacterAssessmentModal
     disruptiveTrait,
     absentKbmTrait,
     veryActiveKbmTrait,
-    onTimeTrait,
     unscannedTrait,
     unreturnedTrait
   ]);
@@ -835,7 +763,6 @@ export const AutoCharacterAssessmentModal: React.FC<AutoCharacterAssessmentModal
   const totalDisruptiveCount = useMemo(() => allCandidates.filter(c => c.ruleType === 'DISRUPTIVE_KBM').length, [allCandidates]);
   const totalAbsentKbmCount = useMemo(() => allCandidates.filter(c => c.ruleType === 'ABSENT_KBM').length, [allCandidates]);
   const totalVeryActiveCount = useMemo(() => allCandidates.filter(c => c.ruleType === 'VERY_ACTIVE_KBM').length, [allCandidates]);
-  const totalOnTimeCount = useMemo(() => allCandidates.filter(c => c.ruleType === 'ON_TIME_3_DAYS').length, [allCandidates]);
 
   // Counts by save status and polarity
   const totalUnsavedCount = useMemo(() => allCandidates.filter(c => !c.isAlreadyLogged).length, [allCandidates]);
@@ -932,9 +859,10 @@ export const AutoCharacterAssessmentModal: React.FC<AutoCharacterAssessmentModal
 
     const now = new Date();
     const timeStr = now.toTimeString().substring(0, 8);
+    const logId = c.id.startsWith('saved-') ? c.id : `saved-${c.id}`;
 
     const newLog: StudentCharacterLog = {
-      id: c.id,
+      id: logId,
       studentId: c.studentId,
       studentName: c.studentName,
       nisn: c.nisn,
@@ -955,21 +883,28 @@ export const AutoCharacterAssessmentModal: React.FC<AutoCharacterAssessmentModal
     // 1 KALI WRITE:
     onApplyLogs([newLog]);
 
-    setLocalSavedIds(prev => new Set(prev).add(c.id));
+    setLocalSavedIds(prev => {
+      const next = new Set(prev);
+      next.add(c.id);
+      next.add(logId);
+      return next;
+    });
+
     setSelectedCandidateIds(prev => {
       const next = new Set(prev);
       next.delete(c.id);
+      next.delete(logId);
       return next;
     });
 
     setSaveNotice({
       type: 'success',
-      message: `Berhasil menyimpan nilai karakter untuk ${c.studentName} ke Detail Karakter siswa dalam 1 kali simpan!`
+      message: `Berhasil menyimpan nilai karakter untuk ${c.studentName} ke Detail Karakter siswa! Data telah tersimpan dan dihapus dari tabel karakter yang belum dinilai.`
     });
 
     setTimeout(() => {
       setSaveNotice(null);
-    }, 5000);
+    }, 6000);
   };
 
   // Submit and save candidates to Character Logs (Tersimpan ke Detail Karakter siswa - 1 KALI WRITE)
@@ -996,8 +931,8 @@ export const AutoCharacterAssessmentModal: React.FC<AutoCharacterAssessmentModal
     const timeStr = now.toTimeString().substring(0, 8);
 
     const newLogs: StudentCharacterLog[] = toApply.map(c => {
-      // Gunakan ID unik deterministik dari candidate agar tidak pernah terjadi dobel nilai di Detail Karakter
-      const logId = c.id;
+      // Gunakan ID unik deterministik dengan prefix saved- agar tersimpan permanen di Detail Karakter
+      const logId = c.id.startsWith('saved-') ? c.id : `saved-${c.id}`;
 
       return {
         id: logId,
@@ -1016,7 +951,7 @@ export const AutoCharacterAssessmentModal: React.FC<AutoCharacterAssessmentModal
         date: c.date,
         notes: c.notes,
         photoProofUrl: undefined,
-        isManual: true, // JAMINAN MUTLAK: Disimpan dengan status manual/terverifikasi agar tersimpan permanen di Detail Karakter siswa dan tidak terhapus otomatis oleh sistem scheduler
+        isManual: true, // JAMINAN MUTLAK: Disimpan dengan status manual/terverifikasi agar tersimpan permanen di Detail Karakter siswa
       };
     });
 
@@ -1028,20 +963,26 @@ export const AutoCharacterAssessmentModal: React.FC<AutoCharacterAssessmentModal
     // dan langsung berpindah/menghilang dari kelompok 'Belum Tersimpan di Detail Siswa'
     setLocalSavedIds(prev => {
       const next = new Set(prev);
-      toApply.forEach(c => next.add(c.id));
+      toApply.forEach(c => {
+        next.add(c.id);
+        next.add(c.id.startsWith('saved-') ? c.id : `saved-${c.id}`);
+      });
       return next;
     });
 
     // Bersihkan id yang sudah disimpan dari seleksi
     setSelectedCandidateIds(prev => {
       const next = new Set(prev);
-      toApply.forEach(c => next.delete(c.id));
+      toApply.forEach(c => {
+        next.delete(c.id);
+        next.delete(c.id.startsWith('saved-') ? c.id : `saved-${c.id}`);
+      });
       return next;
     });
 
     setSaveNotice({
       type: 'success',
-      message: `Berhasil menyimpan ${newLogs.length} nilai karakter siswa ke Detail Karakter siswa dalam 1 kali simpan! Data telah berpindah ke Detail Karakter siswa.`
+      message: `Berhasil menyimpan ${newLogs.length} nilai karakter ke Detail Karakter siswa! Data telah tersimpan dan dihapus dari tabel karakter yang belum dinilai.`
     });
 
     setTimeout(() => {
@@ -1357,51 +1298,7 @@ export const AutoCharacterAssessmentModal: React.FC<AutoCharacterAssessmentModal
                 </div>
               </div>
 
-              {/* 4. Rule Positif: Datang Tepat Waktu Presensi */}
-              <div className="bg-white p-4 rounded-2xl border border-emerald-200/80 shadow-xs space-y-2 flex flex-col justify-between">
-                <div>
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-1.5 text-emerald-800 font-black text-xs uppercase tracking-wider">
-                      <CalendarCheck2 className="w-4 h-4 text-emerald-600" />
-                      <span>Tepat Waktu ({onTimeRequiredDays} Hari)</span>
-                    </div>
-                    <span className="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 text-[10px] font-black border border-emerald-200">
-                      🟢 POSITIF
-                    </span>
-                  </div>
-                  <div className="text-[11px] text-slate-600 leading-relaxed mt-1 flex items-center gap-1 flex-wrap">
-                    <span>Hadir berturut-turut:</span>
-                    <input
-                      type="number"
-                      min="1"
-                      max="30"
-                      value={onTimeRequiredDays}
-                      onChange={(e) => setOnTimeRequiredDays(Math.max(1, Math.abs(Number(e.target.value)) || 3))}
-                      className="w-10 px-1 py-0.5 bg-slate-50 border border-slate-300 rounded text-[11px] font-black text-center text-slate-800 focus:outline-none focus:ring-1 focus:ring-indigo-500"
-                    />
-                    <span>hari presensi</span>
-                  </div>
-                </div>
-                <div className="flex items-center justify-between pt-2 border-t border-slate-100">
-                  <div className="flex items-center gap-1.5">
-                    <span className="text-xs font-semibold text-slate-500">Nilai:</span>
-                    <input
-                      type="number"
-                      min="1"
-                      max="50"
-                      value={onTimePoints}
-                      onChange={(e) => setOnTimePoints(Math.max(1, Math.abs(Number(e.target.value)) || 1))}
-                      className="w-12 px-1.5 py-1 bg-emerald-50/70 border border-emerald-200 rounded-lg text-xs font-black text-center text-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                    />
-                    <span className="text-xs font-bold text-emerald-600">+Poin</span>
-                  </div>
-                  <div className="text-xs font-bold text-slate-700 bg-slate-100 px-2 py-1 rounded-lg">
-                    {totalOnTimeCount} Paket
-                  </div>
-                </div>
-              </div>
-
-              {/* 5. Rule Negatif: Terlambat Masuk Sekolah */}
+              {/* 4. Rule Negatif: Terlambat Masuk Sekolah */}
               <div className="bg-white p-4 rounded-2xl border border-red-200/80 shadow-xs space-y-2 flex flex-col justify-between">
                 <div>
                   <div className="flex items-center justify-between">
@@ -1648,7 +1545,7 @@ export const AutoCharacterAssessmentModal: React.FC<AutoCharacterAssessmentModal
                   type="button"
                   onClick={() => {
                     setGroupFilter('POSITIF');
-                    if (ruleFilter !== 'ALL' && ruleFilter !== 'VERY_ACTIVE_KBM' && ruleFilter !== 'ON_TIME_3_DAYS') {
+                    if (ruleFilter !== 'ALL' && ruleFilter !== 'VERY_ACTIVE_KBM') {
                       setRuleFilter('ALL');
                     }
                   }}
@@ -1670,7 +1567,7 @@ export const AutoCharacterAssessmentModal: React.FC<AutoCharacterAssessmentModal
                   type="button"
                   onClick={() => {
                     setGroupFilter('NEGATIF');
-                    if (ruleFilter === 'VERY_ACTIVE_KBM' || ruleFilter === 'ON_TIME_3_DAYS') {
+                    if (ruleFilter === 'VERY_ACTIVE_KBM') {
                       setRuleFilter('ALL');
                     }
                   }}
@@ -1716,22 +1613,6 @@ export const AutoCharacterAssessmentModal: React.FC<AutoCharacterAssessmentModal
                   >
                     <Flame className="w-3 h-3" />
                     <span>Sangat Aktif KBM ({totalVeryActiveCount})</span>
-                  </button>
-                )}
-
-                {/* Positif: Tepat Waktu */}
-                {(groupFilter === 'ALL' || groupFilter === 'POSITIF') && (
-                  <button
-                    onClick={() => setRuleFilter('ON_TIME_3_DAYS')}
-                    className={`px-2.5 py-1.5 rounded-xl font-bold transition-all cursor-pointer shrink-0 text-xs flex items-center gap-1 ${
-                      ruleFilter === 'ON_TIME_3_DAYS'
-                        ? 'bg-teal-600 text-white'
-                        : 'bg-teal-50 text-teal-800 hover:bg-teal-100 border border-teal-200/60'
-                    }`}
-                    title={`Aturan Hadir Tepat Waktu: Minimal akumulasi ${onTimeRequiredDays} hari hadir tepat waktu berbeda. Pengaturan ini bisa diubah ke 1 hari pada panel konfigurasi poin di bagian atas.`}
-                  >
-                    <CalendarCheck2 className="w-3 h-3" />
-                    <span>Tepat Waktu {onTimeRequiredDays > 1 ? `(${onTimeRequiredDays} Hari)` : ''} ({totalOnTimeCount})</span>
                   </button>
                 )}
 
@@ -1899,18 +1780,35 @@ export const AutoCharacterAssessmentModal: React.FC<AutoCharacterAssessmentModal
 
           {/* Notifikasi Sukses Simpan Nilai Karakter */}
           {saveNotice && (
-            <div className="p-3.5 bg-emerald-50 border border-emerald-300 text-emerald-900 rounded-2xl flex items-center justify-between text-xs font-bold shadow-xs animate-in fade-in">
+            <div className="p-3.5 bg-emerald-50 border border-emerald-300 text-emerald-900 rounded-2xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs font-bold shadow-xs animate-in fade-in">
               <div className="flex items-center gap-2">
                 <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />
                 <span>{saveNotice.message}</span>
               </div>
-              <button 
-                type="button" 
-                onClick={() => setSaveNotice(null)} 
-                className="p-1 hover:bg-emerald-100 rounded-lg text-emerald-700 cursor-pointer"
-              >
-                <X className="w-4 h-4" />
-              </button>
+              <div className="flex items-center gap-2 self-end sm:self-auto shrink-0">
+                {onNavigateToPoints && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onClose();
+                      onNavigateToPoints();
+                    }}
+                    className="px-3 py-1.5 bg-emerald-700 hover:bg-emerald-800 text-white rounded-xl text-xs font-black shadow-xs transition-all cursor-pointer flex items-center gap-1.5 active:scale-95"
+                    title="Buka menu Detail Karakter Siswa"
+                  >
+                    <Award className="w-3.5 h-3.5" />
+                    <span>Lihat di Detail Karakter</span>
+                  </button>
+                )}
+                <button 
+                  type="button" 
+                  onClick={() => setSaveNotice(null)} 
+                  className="p-1 hover:bg-emerald-100 rounded-lg text-emerald-700 cursor-pointer"
+                  title="Tutup Pesan"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
             </div>
           )}
 
@@ -1980,7 +1878,6 @@ export const AutoCharacterAssessmentModal: React.FC<AutoCharacterAssessmentModal
                               {candidate.ruleType === 'UNSCANNED' && <UserX className="w-3.5 h-3.5 text-orange-600 shrink-0" />}
                               {candidate.ruleType === 'UNRETURNED' && <Clock className="w-3.5 h-3.5 text-amber-600 shrink-0" />}
                               {candidate.ruleType === 'DISRUPTIVE_KBM' && <VolumeX className="w-3.5 h-3.5 text-amber-600 shrink-0" />}
-                              {candidate.ruleType === 'ON_TIME_3_DAYS' && <CalendarCheck2 className="w-3.5 h-3.5 text-emerald-500 shrink-0" />}
                               
                               <span className={
                                 candidate.traitType === 'POSITIF' 
@@ -2062,7 +1959,7 @@ export const AutoCharacterAssessmentModal: React.FC<AutoCharacterAssessmentModal
             {isAutoEnabled ? (
               <span className="flex items-center gap-1.5 text-emerald-700 font-medium">
                 <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-                Penilaian karakter (Belum Scan, Belum Pulang, & Hadir Tepat Waktu) bekerja otomatis dan langsung tersimpan ke Detail Karakter siswa setiap pukul 16:00 WITA.
+                Penilaian karakter (Belum Scan, Belum Pulang, Terlambat, Alpa & Jurnal KBM) langsung tersimpan ke Detail Karakter siswa dan dihapus dari tabel belum dinilai ini.
               </span>
             ) : (
               <span className="text-rose-600 font-bold flex items-center gap-1.5 justify-center sm:justify-start">

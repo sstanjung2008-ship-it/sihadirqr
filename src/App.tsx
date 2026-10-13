@@ -106,11 +106,21 @@ import {
   isAutoAssessmentBatchDone 
 } from './lib/autoCharacterScheduler';
 
+const VALID_TABS = [
+  'scanner', 'dashboard', 'schedule', 'analytics', 'learning',
+  'teachers', 'students', 'classes', 'leaves', 'account', 'idcard',
+  'discipline_rules', 'character_input', 'character_points', 'recap', 'settings'
+];
+
 export default function App() {
   const [userSession, setUserSessionState] = useState<UserSession | null>(() => getUserSession());
   const [currentRole, setCurrentRole] = useState<UserRole>(userSession?.role || 'ADMIN');
   const [activeTab, setActiveTab] = useState<string>(() => {
-    if (window.history.state && window.history.state.tab) {
+    const rawHash = typeof window !== 'undefined' ? window.location.hash.replace(/^#/, '') : '';
+    if (rawHash && VALID_TABS.includes(rawHash)) {
+      return rawHash;
+    }
+    if (window.history.state && window.history.state.tab && VALID_TABS.includes(window.history.state.tab)) {
       return window.history.state.tab;
     }
     return userSession?.role === 'SCANNER_POS' ? 'scanner' : 'dashboard';
@@ -123,17 +133,18 @@ export default function App() {
 
   // Track tab changes in browser history for Hardware Back Button & Browser Back Button support
   const handleTabChange = useCallback((tabId: string, replace: boolean = false) => {
-    if (activeTabRef.current === tabId) return;
-    setActiveTab(tabId);
-    activeTabRef.current = tabId;
+    const safeTab = VALID_TABS.includes(tabId) ? tabId : (currentRoleRef.current === 'SCANNER_POS' ? 'scanner' : 'dashboard');
+    if (activeTabRef.current === safeTab) return;
+    setActiveTab(safeTab);
+    activeTabRef.current = safeTab;
 
     try {
       if (replace) {
-        window.history.replaceState({ tab: tabId, role: currentRoleRef.current }, '', `#${tabId}`);
+        window.history.replaceState({ tab: safeTab, role: currentRoleRef.current }, '', `#${safeTab}`);
       } else {
         // Only push new history entry if different from current history state
-        if (window.history.state?.tab !== tabId) {
-          window.history.pushState({ tab: tabId, role: currentRoleRef.current }, '', `#${tabId}`);
+        if (window.history.state?.tab !== safeTab) {
+          window.history.pushState({ tab: safeTab, role: currentRoleRef.current }, '', `#${safeTab}`);
         }
       }
     } catch {
@@ -176,7 +187,7 @@ export default function App() {
       }
 
       // 2. Navigate back to previous tab
-      if (event.state && event.state.tab) {
+      if (event.state && event.state.tab && VALID_TABS.includes(event.state.tab)) {
         setActiveTab(event.state.tab);
         activeTabRef.current = event.state.tab;
         if (event.state.role && event.state.role !== currentRoleRef.current) {
@@ -346,42 +357,33 @@ export default function App() {
     message: string;
   } | null>(null);
 
-  // Debounced sync state on local storage events to prevent UI freeze and DOM thrashing
-  const refreshTimerRef = useRef<any>(null);
+  // Sinkronisasi status state seketika dari storage lokal & cloud tanpa penundaan (zero delay)
   const refreshDataFromStorage = useCallback(() => {
-    if (refreshTimerRef.current) return;
-    refreshTimerRef.current = setTimeout(() => {
-      refreshTimerRef.current = null;
-      const rawProfile = getSchoolProfile();
-      const rawStudents = getStudents();
-      const rawClasses = getSchoolClasses();
-      const rawTeachers = getTeachers();
+    const rawProfile = getSchoolProfile();
+    const rawStudents = getStudents();
+    const rawClasses = getSchoolClasses();
+    const rawTeachers = getTeachers();
 
-      const { updatedTeachers, updatedClasses } = reconcileTeachersAndClasses(rawTeachers, rawClasses);
+    const { updatedTeachers, updatedClasses } = reconcileTeachersAndClasses(rawTeachers, rawClasses);
 
-      setSchoolProfileState(rawProfile);
-      setStudentsState(rawStudents);
-      setClassesState(updatedClasses);
-      setTeachersState(updatedTeachers);
-      setAttendanceRecordsState(getAttendanceRecords());
-      setLeaveRequestsState(getLeaveRequests());
-      setJournalsState(getLearningJournals());
-      setTraitsState(getCharacterTraits());
-      setCharacterLogsState(getStudentCharacterLogs());
-      setPredicateSettingsState(getCharacterPredicateSettings());
-      setPeriodsState(getLessonPeriods());
-      setSchedulesState(getClassSchedules());
-      setGradesState(getStudentGradeAssessments());
-      setUserSessionState(getUserSession());
-    }, 150);
+    setSchoolProfileState(rawProfile);
+    setStudentsState(rawStudents);
+    setClassesState(updatedClasses);
+    setTeachersState(updatedTeachers);
+    setAttendanceRecordsState(getAttendanceRecords());
+    setLeaveRequestsState(getLeaveRequests());
+    setJournalsState(getLearningJournals());
+    setTraitsState(getCharacterTraits());
+    setCharacterLogsState(getStudentCharacterLogs());
+    setPredicateSettingsState(getCharacterPredicateSettings());
+    setPeriodsState(getLessonPeriods());
+    setSchedulesState(getClassSchedules());
+    setGradesState(getStudentGradeAssessments());
+    setUserSessionState(getUserSession());
   }, []);
 
-
   useEffect(() => {
-    // Inisialisasi sesi aplikasi: Read dari Cloud HANYA terjadi saat membuka awal dan merefresh halaman aplikasi
-    initFirestoreAppSession(currentRole);
-
-    // Initial reconciliation on boot to make sure in-memory state is consistent without overwriting Cloud Firestore
+    // 1. Inisialisasi rekonsiliasi awal memori
     const initialRawClasses = getSchoolClasses();
     const initialRawTeachers = getTeachers();
     const { updatedTeachers, updatedClasses, teachersChanged, classesChanged } = reconcileTeachersAndClasses(initialRawTeachers, initialRawClasses);
@@ -394,41 +396,13 @@ export default function App() {
       setClassesState(updatedClasses);
     }
 
-    // Pastikan seluruh data utama sekolah (Presensi, Karakter, Jurnal Keaktifan, Nilai) tidak kosong saat memuat aplikasi
-    const currentAtt = getAttendanceRecords();
-    if (currentAtt.length === 0) {
-      const restored = restoreAttendanceRecords();
-      setAttendanceRecordsState(restored);
-    } else {
-      setAttendanceRecordsState(currentAtt);
-    }
-
-    const currentChar = getStudentCharacterLogs();
-    if (currentChar.length === 0) {
-      const restoredChar = generateInitialCharacterLogs(getStudents());
-      saveStudentCharacterLogs(restoredChar, false);
-      setCharacterLogsState(restoredChar);
-    } else {
-      const cleanChar = deduplicateCharacterLogs(currentChar);
-      if (cleanChar.length !== currentChar.length) {
-        saveStudentCharacterLogs(cleanChar, false);
-        setCharacterLogsState(cleanChar);
-      }
-    }
-
-    const currentJournals = getLearningJournals();
-    if (currentJournals.length === 0) {
-      const restoredJournals = generateInitialLearningJournals(getStudents(), getSchoolClasses());
-      saveLearningJournals(restoredJournals, false);
-      setJournalsState(restoredJournals);
-    }
-
-    const currentGrades = getStudentGradeAssessments();
-    if (currentGrades.length === 0) {
-      const restoredGrades = generateInitialStudentGrades(getStudents(), getSchoolClasses());
-      saveStudentGradeAssessments(restoredGrades, false);
-      setGradesState(restoredGrades);
-    }
+    // 2. Pembacaan Cloud Firestore Seketika: Read 1 kali round-trip cepat saat membuka awal dan refresh halaman
+    initFirestoreAppSession(currentRole).then(() => {
+      // Langsung mutasikan seluruh data cloud ke antarmuka aplikasi begitu data selesai diunduh
+      refreshDataFromStorage();
+    }).catch(() => {
+      refreshDataFromStorage();
+    });
 
     const handleNetworkToast = (e: any) => {
       if (e?.detail) {
@@ -446,7 +420,7 @@ export default function App() {
       window.removeEventListener('sihadir_storage_updated', refreshDataFromStorage);
       window.removeEventListener('sihadir_network_toast', handleNetworkToast);
     };
-  }, [currentRole]);
+  }, [currentRole, refreshDataFromStorage]);
 
   // Penilaian Karakter Otomatis Secara Batching Pukul 16:00 WITA:
   // (Belum Scan, Belum Pulang, & Hadir Tepat Waktu 3 Hari = 1 Poin dievaluasi bersamaan hanya pada jam 16:00 WITA)
@@ -1713,7 +1687,7 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-800 font-sans antialiased selection:bg-indigo-500 selection:text-white flex flex-col lg:flex-row">
+    <div className="min-h-screen w-full bg-slate-50 text-slate-800 font-sans antialiased selection:bg-indigo-500 selection:text-white flex flex-col lg:flex-row overflow-x-hidden">
       
       {/* Left Sidebar - Vertical 1-Column Feature Menu */}
       <Sidebar
@@ -1729,7 +1703,7 @@ export default function App() {
       />
 
       {/* Right Content Area */}
-      <div className="flex-1 flex flex-col min-w-0">
+      <div className="flex-1 flex flex-col min-w-0 w-full">
         
         {/* PWA In-App Install Prompt Banner (Visible on browser and not installed) */}
         <PWAInstallBanner />
@@ -2019,6 +1993,30 @@ export default function App() {
               onBatchDeleteStudents={handleBatchDeleteStudents}
               onBatchResetTeachersPassword={handleBatchResetTeachersPassword}
               onBatchResetStudentsPassword={handleBatchResetStudentsPassword}
+            />
+          )}
+
+          {/* Fallback View jika tab tidak cocok atau kosong di browser mobile */}
+          {!VALID_TABS.includes(activeTab) && (
+            <AttendanceDashboard
+              students={students}
+              classes={classes}
+              attendanceRecords={attendanceRecords}
+              onUpdateStatus={handleUpdateAttendanceStatus}
+              onDeleteAttendanceRecords={handleDeleteAttendanceRecords}
+              onBulkUpdateAttendanceRecords={handleBulkUpdateAttendanceRecords}
+              onBulkUpdateReturnStatus={handleBulkUpdateReturnStatus}
+              currentRole={currentRole}
+              selectedChildId={effectiveChildId}
+              learningJournals={journals}
+              traits={traits}
+              characterLogs={characterLogs}
+              predicateSettings={predicateSettings}
+              userSession={userSession}
+              onNavigateTab={handleTabChange}
+              schoolProfile={schoolProfile}
+              unreadLeavesCount={leaveRequests.filter(l => l.status === 'PENDING').length}
+              onRestoreAttendance={handleRestoreAttendance}
             />
           )}
         </main>

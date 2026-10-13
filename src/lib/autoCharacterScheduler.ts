@@ -339,77 +339,9 @@ export function reconcileAutoCharacterPenalties(forceToday: boolean = false): {
     }
   });
 
-  // 3. ATURAN POSITIF: HADIR TEPAT WAKTU (Setiap 3 Hari = 1 Poin, 6 Hari = 2 Poin, dan Kelipatannya)
-  // Mengelompokkan rekaman absensi per siswa untuk menghitung jumlah hari HADIR
-  const studentAttendanceMap = new Map<string, AttendanceRecord[]>();
-  attendanceRecords.forEach(rec => {
-    if (!studentAttendanceMap.has(rec.studentId)) {
-      studentAttendanceMap.set(rec.studentId, []);
-    }
-    studentAttendanceMap.get(rec.studentId)!.push(rec);
-  });
-
-  const distinctOnTimeDatesMap = new Map<string, number>();
-
-  students.forEach(student => {
-    const studentId = student.id;
-    const studentName = student.name;
-    const nisn = student.nisn || '-';
-    const classId = student.classId || '';
-    const className = student.className || '';
-
-    const records = studentAttendanceMap.get(studentId) || [];
-    // Rekaman kehadiran berstatus HADIR
-    const onTimeRecords = records.filter(r => r.status === 'HADIR');
-    // Tanggal unik dan diurutkan
-    const distinctDates = Array.from(new Set(onTimeRecords.map(r => r.date))).sort();
-    distinctOnTimeDatesMap.set(studentId, distinctDates.length);
-
-    // Hitung setiap kelipatan 3 hari hadir tepat waktu (3 hari = 1 poin, 6 hari = 2 poin, 9 hari = 3 poin, dst.)
-    if (distinctDates.length >= onTimeRequiredDays) {
-      const totalGroups = Math.floor(distinctDates.length / onTimeRequiredDays);
-      for (let g = 0; g < totalGroups; g++) {
-        const groupDates = distinctDates.slice(g * onTimeRequiredDays, (g + 1) * onTimeRequiredDays);
-        const milestoneCount = (g + 1) * onTimeRequiredDays;
-        const targetDate = groupDates[groupDates.length - 1];
-        const logId = `auto-ontime-${studentId}-milestone-${milestoneCount}`;
-
-        // Jika log ini sudah pernah dihapus oleh pengguna, jangan dibuat ulang
-        const deletedIds = getDeletedCharacterLogIds();
-        if (deletedIds.has(logId)) continue;
-
-        const alreadyHasLog = [...currentLogs, ...newLogs].some(l => 
-          (l.studentId === studentId || (nisn !== '-' && l.nisn === nisn) || (studentName && l.studentName && l.studentName.trim().toLowerCase() === studentName.trim().toLowerCase())) &&
-          (
-            l.id === logId || 
-            l.id === `auto-ontime-${studentId}-group-${g}-${targetDate}` ||
-            (l.traitType === 'POSITIF' && l.notes?.includes(`kelipatan ${onTimeRequiredDays} hari ke-${g + 1}`)) ||
-            (l.traitType === 'POSITIF' && l.notes?.includes(`${milestoneCount} hari hadir`))
-          )
-        );
-
-        if (!alreadyHasLog) {
-          newLogs.push({
-            id: logId,
-            studentId: studentId,
-            studentName: studentName,
-            nisn: nisn,
-            classId: classId,
-            className: className,
-            traitId: onTimeTrait.id,
-            traitName: onTimeTrait.name,
-            traitType: 'POSITIF',
-            points: onTimePoints, // dinilai 1 untuk setiap kelipatan 3 hari (akumulasi: 3 hari = 1 poin, 6 hari = 2 poin, 9 hari = 3 poin, dst)
-            evaluatorName: 'Sistem Presensi Otomatis (Tepat Waktu)',
-            timestamp: `${targetDate} 16:00:00`,
-            date: targetDate,
-            notes: `Penilaian Karakter Positif Presensi: Datang tepat waktu kelipatan ${onTimeRequiredDays} hari ke-${g + 1} (Total ${milestoneCount} kali hadir tepat waktu dinilai akumulasi ${g + 1} poin: ${groupDates.join(', ')})`,
-          });
-          addedOnTimeCount++;
-        }
-      }
-    }
-  });
+  // 3. Catatan Hadir Tepat Waktu dihitung langsung secara dinamis pada Detail Karakter Siswa
+  // (3 hari = 1 poin, 6 hari = 2 poin, dst.) tanpa perlu membuat draf log statis
+  addedOnTimeCount = 0;
 
   // Pembersihan log penalti otomatis jika data presensi sudah dikoreksi/siswa sudah scan,
   // ATAU jika waktu hari ini belum mencapai pukul 16:00 WITA (mencegah penalti prematur)

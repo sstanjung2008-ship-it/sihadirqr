@@ -1385,11 +1385,11 @@ export const CharacterPointsView: React.FC<CharacterPointsViewProps> = ({
                         </div>
                         <div>
                           <p className="font-extrabold text-orange-950 text-xs flex items-center gap-1.5">
-                            <span>Akumulasi Presensi: Jam Masuk Belum Scan (Status Hadir):</span>
+                            <span>Akumulasi Presensi: Jam Masuk Belum Scan (Status Hadir & Belum Absen):</span>
                             <span className="text-orange-700 font-black underline">{score.unscannedInDays} Kali Belum Scan</span>
                           </p>
                           <p className="text-[11px] text-orange-800 mt-0.5 leading-snug">
-                            Kriteria status masuk Hadir namun kolom jam masuk belum scan memperoleh penalti nilai karakter sebesar -2 poin per kejadian dari data seluruh presensi.
+                            Kriteria status masuk Hadir dan Belum Absen namun jam masuk belum scan memperoleh penalti nilai karakter sebesar -2 poin per kejadian dari data seluruh presensi siswa.
                           </p>
                         </div>
                       </div>
@@ -1408,11 +1408,11 @@ export const CharacterPointsView: React.FC<CharacterPointsViewProps> = ({
                         </div>
                         <div>
                           <p className="font-extrabold text-amber-950 text-xs flex items-center gap-1.5">
-                            <span>Akumulasi Presensi: Status Pulang Belum Pulang (Status Hadir):</span>
+                            <span>Akumulasi Presensi: Status Pulang Belum Pulang (Status Hadir & Belum Absen):</span>
                             <span className="text-amber-700 font-black underline">{score.unreturnedDays} Kali Belum Pulang</span>
                           </p>
                           <p className="text-[11px] text-amber-800 mt-0.5 leading-snug">
-                            Kriteria status masuk Hadir namun status kepulangan belum pulang memperoleh penalti nilai karakter sebesar -2 poin per kejadian dari data seluruh presensi.
+                            Kriteria status masuk Hadir dan Belum Absen namun status kepulangan belum pulang memperoleh penalti nilai karakter sebesar -2 poin per kejadian dari data seluruh presensi siswa.
                           </p>
                         </div>
                       </div>
@@ -1577,7 +1577,7 @@ export const CharacterPointsView: React.FC<CharacterPointsViewProps> = ({
                             </span>
                           </p>
                           <p className="text-xs text-orange-800 mt-0.5">
-                            Status Masuk Hadir (Jam Belum Scan): <strong>{score.unscannedInDays} Kali</strong> (Setiap belum scan masuk = -2 poin penalti).
+                            Status Masuk Hadir & Belum Absen (Jam Belum Scan): <strong>{score.unscannedInDays} Kali</strong> (Setiap belum scan masuk = -2 poin penalti).
                           </p>
                         </div>
                       </div>
@@ -1619,7 +1619,7 @@ export const CharacterPointsView: React.FC<CharacterPointsViewProps> = ({
                             </span>
                           </p>
                           <p className="text-xs text-amber-800 mt-0.5">
-                            Status Masuk Hadir (Status Belum Pulang): <strong>{score.unreturnedDays} Kali</strong> (Setiap belum pulang = -2 poin penalti).
+                            Status Masuk Hadir & Belum Absen (Status Belum Pulang): <strong>{score.unreturnedDays} Kali</strong> (Setiap belum pulang = -2 poin penalti).
                           </p>
                         </div>
                       </div>

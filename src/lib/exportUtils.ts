@@ -2111,7 +2111,7 @@ export async function exportStudentCharacterDetailPdf(
       'Belum Scan Presensi Masuk\n[NEGATIF (-)]',
       `-${summary.unscannedInPenaltyPoints}`,
       'Sistem Presensi Otomatis',
-      `Status masuk Hadir namun belum scan jam masuk: ${summary.unscannedInDays} kali (-2 poin / kejadian)`,
+      `Kriteria status masuk Hadir & Belum Absen (belum scan jam masuk): ${summary.unscannedInDays} kali (-2 poin / kejadian)`,
       'Edukasi scan QR presensi masuk'
     ]);
   }
@@ -2122,7 +2122,7 @@ export async function exportStudentCharacterDetailPdf(
       'Belum Scan Pulang Sekolah\n[NEGATIF (-)]',
       `-${summary.unreturnedPenaltyPoints}`,
       'Sistem Presensi Otomatis',
-      `Status masuk Hadir namun status kepulangan belum pulang: ${summary.unreturnedDays} kali (-2 poin / kejadian)`,
+      `Kriteria status masuk Hadir & Belum Absen (status pulang belum pulang): ${summary.unreturnedDays} kali (-2 poin / kejadian)`,
       'Edukasi scan QR presensi kepulangan'
     ]);
   }

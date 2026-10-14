@@ -1078,12 +1078,12 @@ export const AutoCharacterAssessmentModal: React.FC<AutoCharacterAssessmentModal
                   <div className="bg-white/80 p-2 rounded-xl border border-orange-200 text-orange-950">
                     <p className="font-extrabold text-[10px] text-orange-800 uppercase">Belum Scan Masuk</p>
                     <p className="font-black text-xs text-orange-700 mt-0.5">-2 Poin / Kejadian</p>
-                    <p className="text-[9px] text-orange-600">Status Hadir (tanpa jam)</p>
+                    <p className="text-[9px] text-orange-600">Status Hadir & Belum Absen</p>
                   </div>
                   <div className="bg-white/80 p-2 rounded-xl border border-amber-200 text-amber-950">
                     <p className="font-extrabold text-[10px] text-amber-800 uppercase">Belum Scan Pulang</p>
                     <p className="font-black text-xs text-amber-700 mt-0.5">-2 Poin / Kejadian</p>
-                    <p className="text-[9px] text-amber-600">Status Hadir (belum pulang)</p>
+                    <p className="text-[9px] text-amber-600">Status Hadir & Belum Absen</p>
                   </div>
                 </div>
               </div>

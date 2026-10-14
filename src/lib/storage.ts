@@ -4342,7 +4342,7 @@ export function isAttendanceForStudent(
  * secara seragam dan konsisten untuk seluruh komponen (Admin, Guru, Wali Murid, Laporan PDF).
  */
 export function calculateStudentCharacterSummary(
-  student: { id?: string; nisn?: string; nis?: string; name?: string },
+  student: { id?: string; nisn?: string; nis?: string; name?: string; className?: string; classId?: string },
   logs: StudentCharacterLog[],
   attendanceRecords?: AttendanceRecord[]
 ): {
@@ -4431,35 +4431,101 @@ export function calculateStudentCharacterSummary(
   const alpaPenaltyPoints = alpaDays * 5;
   negativePoints += alpaPenaltyPoints;
 
-  // 4. Hitung AKUMULASI BELUM SCAN PRESENSI & BELUM PULANG:
-  // Kriteria: Status Masuk HADIR
-  // - Nilai -2 jika jam masuk belum scan (waktu jam masuk kosong / '-' / 'belum')
-  // - Nilai -2 jika status pulang belum pulang (returnTime kosong / '-' / 'belum' atau returnStatus 'BELUM_PULANG' atau bukan PULANG)
-  const matchingHadirEntries = allAtt.filter(r => r && (r.status || '').toUpperCase() === 'HADIR' && isAttendanceForStudent(r, student));
+  // 4. Hitung AKUMULASI BELUM SCAN PRESENSI & BELUM PULANG DARI SELURUH DATA PRESENSI SISWA:
+  // Kriteria: Status Masuk HADIR dan BELUM ABSEN
+  // - Nilai -2 jika jam masuk belum scan
+  // - Nilai -2 jika status pulang belum pulang
+  const studentAtt = allAtt.filter(r => r && isAttendanceForStudent(r, student));
+  
+  // Seluruh tanggal sekolah aktif yang berlaku bagi siswa (dari rekaman siswa atau teman sekelasnya)
+  const studentClassDates = allAtt
+    .filter(r => r && ((student.className && r.className === student.className) || isAttendanceForStudent(r, student)))
+    .map(r => r.date);
+  const activeAttendanceDates = Array.from(new Set(
+    studentClassDates.length > 0 ? studentClassDates : allAtt.map(r => r?.date)
+  )).filter(Boolean).sort();
 
-  // A. Jam Masuk Belum Scan
-  const unscannedInRecords = matchingHadirEntries.filter(r => 
-    !r.time || 
-    r.time === '-' || 
-    r.time.trim() === '' || 
-    r.time.toLowerCase().includes('belum')
-  );
-  const distinctUnscannedInDates = Array.from(new Set(unscannedInRecords.map(r => r.date))).sort();
+  const unscannedInDateSet = new Set<string>();
+  const unreturnedDateSet = new Set<string>();
+
+  activeAttendanceDates.forEach(dateStr => {
+    const rec = studentAtt.find(r => r.date === dateStr);
+    const rawStatus = rec ? (rec.status || '').toUpperCase().trim() : 'BELUM_ABSEN';
+
+    const isHadir = rawStatus === 'HADIR';
+    const isBelumAbsen = rawStatus === 'BELUM_ABSEN' || 
+                         rawStatus === 'BELUM ABSEN' || 
+                         (rec?.notes || '').toLowerCase().includes('belum absen');
+
+    // Hanya evaluasi jika status masuk adalah HADIR atau BELUM ABSEN
+    // (Jika Alpa dinilai -5 pada aturan Alpa, jika Izin/Sakit tidak dinilai penalti)
+    if (isHadir || isBelumAbsen) {
+      // A. Jam Masuk Belum Scan (-2 Poin):
+      // Jika status Belum Absen, otomatis belum scan jam masuk.
+      // Jika status Hadir, dinilai -2 jika kolom jam belum terisi / '-' / bertuliskan 'belum'
+      const isEntryUnscanned = isBelumAbsen || (isHadir && (
+        !rec?.time || 
+        rec.time === '-' || 
+        rec.time.trim() === '' || 
+        rec.time.toLowerCase().includes('belum')
+      ));
+      if (isEntryUnscanned) {
+        unscannedInDateSet.add(dateStr);
+      }
+
+      // B. Status Pulang Belum Pulang (-2 Poin):
+      // Jika status Belum Absen, otomatis belum scan pulang.
+      // Jika status Hadir, dinilai -2 jika belum pulang (returnTime kosong / '-' / 'belum' atau returnStatus bukan PULANG)
+      const hasReturned = isHadir && !!(
+        (rec?.returnTime && rec.returnTime !== '-' && rec.returnTime.trim() !== '' && !rec.returnTime.toLowerCase().includes('belum')) || 
+        rec?.returnStatus === 'PULANG' || 
+        rec?.returnStatus === 'PULANG_TEPAT' || 
+        rec?.returnStatus === 'PULANG_CEPAT'
+      );
+      if (!hasReturned) {
+        unreturnedDateSet.add(dateStr);
+      }
+    }
+  });
+
+  // Tambahkan juga pemeriksaan langsung rekaman individual siswa jika ada tanggal di luar activeAttendanceDates
+  studentAtt.forEach(rec => {
+    if (!rec || !rec.date) return;
+    const rawStatus = (rec.status || '').toUpperCase().trim();
+    const isHadir = rawStatus === 'HADIR';
+    const isBelumAbsen = rawStatus === 'BELUM_ABSEN' || 
+                         rawStatus === 'BELUM ABSEN' || 
+                         (rec.notes || '').toLowerCase().includes('belum absen');
+
+    if (isHadir || isBelumAbsen) {
+      const isEntryUnscanned = isBelumAbsen || (isHadir && (
+        !rec.time || 
+        rec.time === '-' || 
+        rec.time.trim() === '' || 
+        rec.time.toLowerCase().includes('belum')
+      ));
+      if (isEntryUnscanned) {
+        unscannedInDateSet.add(rec.date);
+      }
+
+      const hasReturned = isHadir && !!(
+        (rec.returnTime && rec.returnTime !== '-' && rec.returnTime.trim() !== '' && !rec.returnTime.toLowerCase().includes('belum')) || 
+        rec.returnStatus === 'PULANG' || 
+        rec.returnStatus === 'PULANG_TEPAT' || 
+        rec.returnStatus === 'PULANG_CEPAT'
+      );
+      if (!hasReturned) {
+        unreturnedDateSet.add(rec.date);
+      }
+    }
+  });
+
+  const distinctUnscannedInDates = Array.from(unscannedInDateSet).sort();
   const unscannedInDays = distinctUnscannedInDates.length;
   const unscannedInPenaltyPoints = unscannedInDays * 2;
   negativePoints += unscannedInPenaltyPoints;
 
-  // B. Status Pulang Belum Pulang
-  const unreturnedRecords = matchingHadirEntries.filter(r => {
-    const hasReturned = !!(
-      (r.returnTime && r.returnTime !== '-' && r.returnTime.trim() !== '' && !r.returnTime.toLowerCase().includes('belum')) || 
-      r.returnStatus === 'PULANG' || 
-      r.returnStatus === 'PULANG_TEPAT' || 
-      r.returnStatus === 'PULANG_CEPAT'
-    );
-    return !hasReturned;
-  });
-  const distinctUnreturnedDates = Array.from(new Set(unreturnedRecords.map(r => r.date))).sort();
+  const distinctUnreturnedDates = Array.from(unreturnedDateSet).sort();
   const unreturnedDays = distinctUnreturnedDates.length;
   const unreturnedPenaltyPoints = unreturnedDays * 2;
   negativePoints += unreturnedPenaltyPoints;

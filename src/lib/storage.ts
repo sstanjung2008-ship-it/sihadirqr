@@ -4438,9 +4438,16 @@ export function calculateStudentCharacterSummary(
   const studentAtt = allAtt.filter(r => r && isAttendanceForStudent(r, student));
   
   // Seluruh tanggal sekolah aktif yang berlaku bagi siswa (dari rekaman siswa atau teman sekelasnya)
+  const normalizeCls = (c?: string) => (c || '').trim().toLowerCase().replace(/^kelas\s*/i, '');
+  const sNormClass = normalizeCls(student.className);
+
   const studentClassDates = allAtt
-    .filter(r => r && ((student.className && r.className === student.className) || isAttendanceForStudent(r, student)))
+    .filter(r => r && (
+      isAttendanceForStudent(r, student) ||
+      (sNormClass && normalizeCls(r.className) === sNormClass)
+    ))
     .map(r => r.date);
+
   const activeAttendanceDates = Array.from(new Set(
     studentClassDates.length > 0 ? studentClassDates : allAtt.map(r => r?.date)
   )).filter(Boolean).sort();

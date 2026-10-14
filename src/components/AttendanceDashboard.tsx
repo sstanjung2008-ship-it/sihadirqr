@@ -369,7 +369,28 @@ export const AttendanceDashboard: React.FC<AttendanceDashboardProps> = ({
   // Compute Character Points data for target child
   const charSummary = targetStudent 
     ? calculateStudentCharacterSummary(targetStudent, characterLogs, attendanceRecords)
-    : { positivePoints: 0, negativePoints: 0, netScore: 0, totalEntries: 0, logs: [], onTimeDays: 0, onTimeBonusPoints: 0, onTimeDates: [], lateDays: 0, latePenaltyPoints: 0, lateDates: [] };
+    : { 
+        positivePoints: 0, 
+        negativePoints: 0, 
+        netScore: 0, 
+        totalEntries: 0, 
+        logs: [], 
+        onTimeDays: 0, 
+        onTimeBonusPoints: 0, 
+        onTimeDates: [], 
+        lateDays: 0, 
+        latePenaltyPoints: 0, 
+        lateDates: [],
+        alpaDays: 0,
+        alpaPenaltyPoints: 0,
+        alpaDates: [],
+        unscannedInDays: 0,
+        unscannedInPenaltyPoints: 0,
+        unscannedInDates: [],
+        unreturnedDays: 0,
+        unreturnedPenaltyPoints: 0,
+        unreturnedDates: []
+      };
   const childCharacterLogs = charSummary.logs;
   const posLogs = childCharacterLogs.filter(l => l.traitType === 'POSITIF');
   const negLogs = childCharacterLogs.filter(l => l.traitType === 'NEGATIF');

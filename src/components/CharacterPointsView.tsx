@@ -1139,6 +1139,17 @@ export const CharacterPointsView: React.FC<CharacterPointsViewProps> = ({
               <div className="flex items-center gap-2">
                 <button
                   type="button"
+                  onClick={handleExportDetailPdf}
+                  disabled={isExportingDetail}
+                  className="px-3.5 py-1.5 bg-rose-600 hover:bg-rose-500 active:scale-95 text-white font-bold text-xs rounded-xl transition-all flex items-center gap-1.5 shadow-sm cursor-pointer disabled:opacity-50"
+                  title={`Cetak / Ekspor PDF Resmi Detail Nilai Karakter (${detailStudent.name})`}
+                >
+                  <Download className={`w-4 h-4 ${isExportingDetail ? 'animate-bounce' : ''}`} />
+                  <span>{isExportingDetail ? 'Menyusun PDF...' : 'Ekspor PDF'}</span>
+                </button>
+
+                <button
+                  type="button"
                   onClick={() => handleOpenAddModalForStudent(detailStudent)}
                   className="px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-500 active:scale-95 text-white font-bold text-xs rounded-xl transition-all flex items-center gap-1.5 shadow-sm cursor-pointer"
                   title={`Isi Nilai Karakter Siswa (${detailStudent.name})`}

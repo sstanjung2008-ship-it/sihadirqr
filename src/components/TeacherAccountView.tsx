@@ -98,35 +98,31 @@ export const TeacherAccountView: React.FC<TeacherAccountViewProps> = ({
     setIsTestingVoice(false);
   };
 
-  if (!teacher) {
-    return (
-      <div className="p-6 max-w-4xl mx-auto text-center">
-        <div className="bg-amber-50 border border-amber-200 rounded-3xl p-8 space-y-3">
-          <AlertCircle className="w-12 h-12 text-amber-600 mx-auto" />
-          <h2 className="text-lg font-bold text-amber-900">Data Akun Guru Tidak Ditemukan</h2>
-          <p className="text-sm text-amber-700 max-w-md mx-auto">
-            Sistem tidak menemukan profil data guru yang terkait dengan sesi login aktif ini. Silakan hubungi Administrator sekolah.
-          </p>
-          {onLogout && (
-            <button
-              onClick={onLogout}
-              className="mt-4 px-5 py-2.5 bg-amber-600 text-white font-bold rounded-xl text-xs hover:bg-amber-700 transition shadow-sm cursor-pointer"
-            >
-              Keluar & Login Ulang
-            </button>
-          )}
-        </div>
-      </div>
-    );
-  }
+  const effectiveTeacher: Teacher = teacher || {
+    id: userSession?.teacherId || `tch-${userSession?.username || 'user'}`,
+    nip: userSession?.nipOrNisn || '',
+    name: userSession?.displayName || 'Guru Terdaftar',
+    gender: 'L',
+    birthPlace: '-',
+    birthDate: '1990-01-01',
+    subject1: 'Mata Pelajaran',
+    subject2: '',
+    additionalDuty: 'TIDAK_ADA',
+    homeroomClassId: '',
+    homeroomClassName: '',
+    phone: userSession?.username || '',
+    email: '',
+    status: 'AKTIF',
+    photoUrl: userSession?.photoUrl || ''
+  };
 
-  const isCustomPassword = Boolean(teacher.password && teacher.password !== '123456');
+  const isCustomPassword = Boolean(effectiveTeacher.password && effectiveTeacher.password !== '123456');
 
   // Format Additional Duty Label
   const getAdditionalDutyLabel = () => {
-    switch (teacher.additionalDuty) {
+    switch (effectiveTeacher.additionalDuty) {
       case 'WALI_KELAS':
-        return `Wali Kelas ${teacher.homeroomClassName || ''}`;
+        return `Wali Kelas ${effectiveTeacher.homeroomClassName || ''}`;
       case 'BK':
         return 'Guru Bimbingan & Konseling (BK)';
       case 'HUMAS':

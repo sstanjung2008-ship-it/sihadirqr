@@ -284,7 +284,7 @@ export default function App() {
     // 2. By nipOrNisn from session (exact match, trimming spaces)
     if (userSession?.nipOrNisn) {
       const cleanNip = userSession.nipOrNisn.replace(/[\.,\s\-_]/g, '').toLowerCase();
-      const found = teachers.find(t => t.nip.replace(/[\.,\s\-_]/g, '').toLowerCase() === cleanNip);
+      const found = teachers.find(t => (t.nip || '').replace(/[\.,\s\-_]/g, '').toLowerCase() === cleanNip);
       if (found) return found;
     }
 
@@ -292,7 +292,7 @@ export default function App() {
     if (userSession?.username) {
       const cleanUser = userSession.username.replace(/[\.,\s\-_]/g, '').toLowerCase();
       const found = teachers.find(t => 
-        t.nip.replace(/[\.,\s\-_]/g, '').toLowerCase() === cleanUser ||
+        (t.nip || '').replace(/[\.,\s\-_]/g, '').toLowerCase() === cleanUser ||
         (t.phone && t.phone.replace(/[\.,\s\-_]/g, '').toLowerCase() === cleanUser)
       );
       if (found) return found;
@@ -301,26 +301,43 @@ export default function App() {
     // 4. By displayName from session
     if (userSession?.displayName) {
       const cleanDisplay = userSession.displayName.replace(/[\.,\s\-_]/g, '').toLowerCase();
-      const found = teachers.find(t => t.name.replace(/[\.,\s\-_]/g, '').toLowerCase() === cleanDisplay);
+      const found = teachers.find(t => (t.name || '').replace(/[\.,\s\-_]/g, '').toLowerCase() === cleanDisplay);
       if (found) return found;
 
       // Also try normalized academic titles
       const normDisplay = userSession.displayName.toLowerCase().replace(/\b(dr|dra|drs|h|hj|prof|ir|s\.pd|m\.pd|s\.kom|m\.kom|s\.ag|m\.ag|s\.si|m\.si|s\.e|m\.m|s\.sos|m\.sos|s\.t|m\.t|b\.sc|m\.sc|gr|lc)\b/gi, '').replace(/[\.,\s\-_]/g, '');
       if (normDisplay) {
         const foundNorm = teachers.find(t => {
-          const normT = t.name.toLowerCase().replace(/\b(dr|dra|drs|h|hj|prof|ir|s\.pd|m\.pd|s\.kom|m\.kom|s\.ag|m\.ag|s\.si|m\.si|s\.e|m\.m|s\.sos|m\.sos|s\.t|m\.t|b\.sc|m\.sc|gr|lc)\b/gi, '').replace(/[\.,\s\-_]/g, '');
+          const normT = (t.name || '').toLowerCase().replace(/\b(dr|dra|drs|h|hj|prof|ir|s\.pd|m\.pd|s\.kom|m\.kom|s\.ag|m\.ag|s\.si|m\.si|s\.e|m\.m|s\.sos|m\.sos|s\.t|m\.t|b\.sc|m\.sc|gr|lc)\b/gi, '').replace(/[\.,\s\-_]/g, '');
           return normT && (normT === normDisplay || normT.includes(normDisplay) || normDisplay.includes(normT));
         });
         if (foundNorm) return foundNorm;
       }
     }
 
-    // Fallback only if no userSession exists (demo/preview unauthenticated mode)
-    if (!userSession || !userSession.isLoggedIn) {
-      return teachers[0] || null;
+    // 5. Synthesize safe fallback Teacher object from userSession if logged in as TEACHER
+    if (userSession && userSession.isLoggedIn) {
+      return {
+        id: userSession.teacherId || `tch-${userSession.username || 'user'}`,
+        nip: userSession.nipOrNisn || '',
+        name: userSession.displayName || 'Guru Terdaftar',
+        gender: 'L' as const,
+        birthPlace: '-',
+        birthDate: '1990-01-01',
+        subject1: 'Mata Pelajaran',
+        subject2: '',
+        additionalDuty: 'TIDAK_ADA' as const,
+        homeroomClassId: '',
+        homeroomClassName: '',
+        phone: userSession.username || '',
+        email: '',
+        status: 'AKTIF' as const,
+        photoUrl: userSession.photoUrl || ''
+      };
     }
 
-    return null;
+    // Fallback only if no userSession exists (demo/preview unauthenticated mode)
+    return teachers[0] || null;
   }, [currentRole, userSession, teachers]);
 
   // Selected Child ID state (for Parent role, automatically locked to parentStudent)
@@ -1889,7 +1906,7 @@ export default function App() {
             />
           )}
 
-          {activeTab === 'account' && currentRole === 'TEACHER' && (
+          {(activeTab === 'account' || activeTab === 'idcard') && currentRole === 'TEACHER' && (
             <TeacherAccountView
               teacher={currentTeacher}
               schoolProfile={schoolProfile}
@@ -1997,7 +2014,13 @@ export default function App() {
           )}
 
           {/* Fallback View jika tab tidak cocok atau kosong di browser mobile */}
-          {!VALID_TABS.includes(activeTab) && (
+          {(!VALID_TABS.includes(activeTab) ||
+            (activeTab === 'settings' && currentRole !== 'ADMIN') ||
+            (activeTab === 'teachers' && currentRole !== 'ADMIN') ||
+            (activeTab === 'students' && currentRole === 'PARENT') ||
+            (activeTab === 'classes' && currentRole === 'PARENT') ||
+            (activeTab === 'character_input' && currentRole === 'PARENT')
+          ) && (
             <AttendanceDashboard
               students={students}
               classes={classes}

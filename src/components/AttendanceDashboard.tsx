@@ -48,11 +48,13 @@ import {
   LogOut,
   RefreshCw,
   AlertCircle,
-  RotateCcw
+  RotateCcw,
+  Download
 } from 'lucide-react';
 import { BulkAlpaManagementModal } from './BulkAlpaManagementModal';
 import { BulkReturnManagementModal, BulkReturnUpdatePayload } from './BulkReturnManagementModal';
 import { getLocalDateString, refreshParentChildAttendance, calculateStudentCharacterSummary, isRealPhotoProof } from '../lib/storage';
+import { exportStudentCharacterDetailPdf } from '../lib/exportUtils';
 
 interface AttendanceDashboardProps {
   students: Student[];
@@ -389,6 +391,25 @@ export const AttendanceDashboard: React.FC<AttendanceDashboardProps> = ({
   else if (netPoints >= minE) characterPred = { label: 'Tidak Naik Kelas (E)', color: 'bg-rose-100 text-rose-800 border-rose-300' };
   else characterPred = { label: 'Pindah Sekolah (F)', color: 'bg-purple-100 text-purple-800 border-purple-300' };
 
+  const [isExportingCharPdf, setIsExportingCharPdf] = useState(false);
+  const handleExportChildCharacterPdf = async () => {
+    if (!targetStudent || !schoolProfile) return;
+    setIsExportingCharPdf(true);
+    try {
+      await exportStudentCharacterDetailPdf(
+        schoolProfile,
+        targetStudent,
+        characterLogs,
+        classes,
+        predicateSettings
+      );
+    } catch (err) {
+      console.error('Error exporting character PDF:', err);
+      alert('Gagal mengekspor PDF detail nilai karakter siswa.');
+    } finally {
+      setIsExportingCharPdf(false);
+    }
+  };
 
   const handleOpenEdit = (rec: AttendanceRecord | undefined, student: Student) => {
     if (rec) {
@@ -976,12 +997,25 @@ export const AttendanceDashboard: React.FC<AttendanceDashboardProps> = ({
                   </p>
                 </div>
 
-                {/* Predikat Badge */}
-                <div className="flex items-center gap-2 shrink-0">
-                  <span className="text-xs font-bold text-slate-600">Predikat Karakter:</span>
-                  <span className={`px-3 py-1 rounded-full text-xs font-extrabold border shadow-2xs ${characterPred.color}`}>
-                    {characterPred.label}
-                  </span>
+                {/* Predikat Badge & Ekspor PDF */}
+                <div className="flex items-center gap-2.5 shrink-0 flex-wrap">
+                  <button
+                    type="button"
+                    onClick={handleExportChildCharacterPdf}
+                    disabled={isExportingCharPdf}
+                    className="px-3.5 py-1.5 bg-rose-600 hover:bg-rose-700 active:scale-95 text-white font-bold text-xs rounded-xl transition-all flex items-center gap-1.5 shadow-xs cursor-pointer disabled:opacity-50"
+                    title={`Ekspor PDF Rincian Nilai Karakter (${targetStudent?.name || 'Siswa'})`}
+                  >
+                    <Download className={`w-3.5 h-3.5 ${isExportingCharPdf ? 'animate-bounce' : ''}`} />
+                    <span>{isExportingCharPdf ? 'Menyusun PDF...' : 'Ekspor PDF'}</span>
+                  </button>
+
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-xs font-bold text-slate-600 hidden sm:inline">Predikat:</span>
+                    <span className={`px-3 py-1 rounded-full text-xs font-extrabold border shadow-2xs ${characterPred.color}`}>
+                      {characterPred.label}
+                    </span>
+                  </div>
                 </div>
               </div>
 

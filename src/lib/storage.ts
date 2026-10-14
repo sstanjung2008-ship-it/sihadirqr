@@ -4357,8 +4357,17 @@ export function calculateStudentCharacterSummary(
   lateDays: number;
   latePenaltyPoints: number;
   lateDates: string[];
+  alpaDays: number;
+  alpaPenaltyPoints: number;
+  alpaDates: string[];
+  unscannedInDays: number;
+  unscannedInPenaltyPoints: number;
+  unscannedInDates: string[];
+  unreturnedDays: number;
+  unreturnedPenaltyPoints: number;
+  unreturnedDates: string[];
 } {
-  // Saring log karakter siswa (kecualikan log manual auto-ontime dan auto-late lama agar tidak terjadi duplikasi nilai)
+  // Saring log karakter siswa (kecualikan log auto presensi statis lama agar tidak terjadi duplikasi nilai dengan kalkulasi dinamis presensi)
   const rawLogs = (logs || []).filter(l => 
     isLogForStudent(l, student) &&
     !l.id?.startsWith('auto-ontime-') &&
@@ -4366,7 +4375,16 @@ export function calculateStudentCharacterSummary(
     !(l.traitType === 'POSITIF' && (l.notes?.toLowerCase().includes('kali hadir tepat waktu') || l.notes?.toLowerCase().includes('datang tepat waktu kelipatan'))) &&
     !l.id?.startsWith('auto-late-') &&
     !l.id?.startsWith('saved-auto-late-') &&
-    !(l.traitType === 'NEGATIF' && (l.notes?.toLowerCase().includes('scan hadir terlambat') || l.notes?.toLowerCase().includes('penilaian otomatis presensi: scan hadir terlambat')))
+    !(l.traitType === 'NEGATIF' && (l.notes?.toLowerCase().includes('scan hadir terlambat') || l.notes?.toLowerCase().includes('penilaian otomatis presensi: scan hadir terlambat'))) &&
+    !l.id?.startsWith('auto-alpa-') &&
+    !l.id?.startsWith('saved-auto-alpa-') &&
+    !(l.traitType === 'NEGATIF' && (l.notes?.toLowerCase().includes('terekam alpa') || l.notes?.toLowerCase().includes('penilaian otomatis presensi: terekam alpa'))) &&
+    !l.id?.startsWith('auto-unscanned-') &&
+    !l.id?.startsWith('saved-auto-unscanned-') &&
+    !(l.traitType === 'NEGATIF' && (l.notes?.toLowerCase().includes('jam masuk belum scan') || l.notes?.toLowerCase().includes('belum melakukan scan presensi'))) &&
+    !l.id?.startsWith('auto-unreturned-') &&
+    !l.id?.startsWith('saved-auto-unreturned-') &&
+    !(l.traitType === 'NEGATIF' && (l.notes?.toLowerCase().includes('belum scan kepulangan') || l.notes?.toLowerCase().includes('belum melakukan scan pulang') || l.notes?.toLowerCase().includes('belum pulang')))
   );
   const studentLogs = deduplicateCharacterLogs(rawLogs);
 
@@ -4388,26 +4406,63 @@ export function calculateStudentCharacterSummary(
     : getAttendanceRecords();
 
   // 1. Hitung jumlah hadir tepat waktu dari presensi (status HADIR)
-  const matchingHadir = allAtt.filter(r => r && r.status === 'HADIR' && isAttendanceForStudent(r, student));
+  const matchingHadir = allAtt.filter(r => r && (r.status || '').toUpperCase() === 'HADIR' && isAttendanceForStudent(r, student));
   const distinctOnTimeDates = Array.from(new Set(matchingHadir.map(r => r.date))).sort();
   const onTimeDays = distinctOnTimeDates.length;
 
   // Aturan Hadir Tepat Waktu: Setiap kelipatan 3 hari beri nilai 1 poin (3 hari = 1 poin, 6 hari = 2 poin, dst.)
   const onTimeBonusPoints = Math.floor(onTimeDays / 3);
-
-  // Akumulasikan ke total poin positif
   positivePoints += onTimeBonusPoints;
 
   // 2. Hitung jumlah hadir terlambat dari presensi (status TERLAMBAT)
-  const matchingTerlambat = allAtt.filter(r => r && r.status === 'TERLAMBAT' && isAttendanceForStudent(r, student));
+  const matchingTerlambat = allAtt.filter(r => r && (r.status || '').toUpperCase() === 'TERLAMBAT' && isAttendanceForStudent(r, student));
   const distinctLateDates = Array.from(new Set(matchingTerlambat.map(r => r.date))).sort();
   const lateDays = distinctLateDates.length;
 
   // Aturan Hadir Terlambat: Setiap hadir terlambat selama melakukan scan diberi penalti nilai -1 poin
   const latePenaltyPoints = lateDays * 1;
-
-  // Akumulasikan ke total poin negatif & skor akhir
   negativePoints += latePenaltyPoints;
+
+  // 3. Hitung AKUMULASI TOTAL ALPA SELURUHNYA:
+  // Aturan Alpa: Beri nilai karakter setiap 1 kali Alpa = -5 poin
+  const matchingAlpa = allAtt.filter(r => r && (r.status || '').toUpperCase() === 'ALPA' && isAttendanceForStudent(r, student));
+  const distinctAlpaDates = Array.from(new Set(matchingAlpa.map(r => r.date))).sort();
+  const alpaDays = distinctAlpaDates.length;
+  const alpaPenaltyPoints = alpaDays * 5;
+  negativePoints += alpaPenaltyPoints;
+
+  // 4. Hitung AKUMULASI BELUM SCAN PRESENSI & BELUM PULANG:
+  // Kriteria: Status Masuk HADIR
+  // - Nilai -2 jika jam masuk belum scan (waktu jam masuk kosong / '-' / 'belum')
+  // - Nilai -2 jika status pulang belum pulang (returnTime kosong / '-' / 'belum' atau returnStatus 'BELUM_PULANG' atau bukan PULANG)
+  const matchingHadirEntries = allAtt.filter(r => r && (r.status || '').toUpperCase() === 'HADIR' && isAttendanceForStudent(r, student));
+
+  // A. Jam Masuk Belum Scan
+  const unscannedInRecords = matchingHadirEntries.filter(r => 
+    !r.time || 
+    r.time === '-' || 
+    r.time.trim() === '' || 
+    r.time.toLowerCase().includes('belum')
+  );
+  const distinctUnscannedInDates = Array.from(new Set(unscannedInRecords.map(r => r.date))).sort();
+  const unscannedInDays = distinctUnscannedInDates.length;
+  const unscannedInPenaltyPoints = unscannedInDays * 2;
+  negativePoints += unscannedInPenaltyPoints;
+
+  // B. Status Pulang Belum Pulang
+  const unreturnedRecords = matchingHadirEntries.filter(r => {
+    const hasReturned = !!(
+      (r.returnTime && r.returnTime !== '-' && r.returnTime.trim() !== '' && !r.returnTime.toLowerCase().includes('belum')) || 
+      r.returnStatus === 'PULANG' || 
+      r.returnStatus === 'PULANG_TEPAT' || 
+      r.returnStatus === 'PULANG_CEPAT'
+    );
+    return !hasReturned;
+  });
+  const distinctUnreturnedDates = Array.from(new Set(unreturnedRecords.map(r => r.date))).sort();
+  const unreturnedDays = distinctUnreturnedDates.length;
+  const unreturnedPenaltyPoints = unreturnedDays * 2;
+  negativePoints += unreturnedPenaltyPoints;
 
   return {
     positivePoints,
@@ -4420,7 +4475,16 @@ export function calculateStudentCharacterSummary(
     onTimeDates: distinctOnTimeDates,
     lateDays,
     latePenaltyPoints,
-    lateDates: distinctLateDates
+    lateDates: distinctLateDates,
+    alpaDays,
+    alpaPenaltyPoints,
+    alpaDates: distinctAlpaDates,
+    unscannedInDays,
+    unscannedInPenaltyPoints,
+    unscannedInDates: distinctUnscannedInDates,
+    unreturnedDays,
+    unreturnedPenaltyPoints,
+    unreturnedDates: distinctUnreturnedDates
   };
 }
 

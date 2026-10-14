@@ -2056,22 +2056,79 @@ export async function exportStudentCharacterDetailPdf(
       0: { fontStyle: 'bold', cellWidth: 26 },
       1: { cellWidth: 3 },
       2: { cellWidth: 64 },
-      3: { fontStyle: 'bold', cellWidth: 34 },
+      3: { fontStyle: 'bold', cellWidth: 38 },
       4: { cellWidth: 3 },
-      5: { cellWidth: 52 }
+      5: { cellWidth: 48 }
     },
     body: [
-      ['Nama Siswa', ':', student.name, 'Hadir Tepat Waktu (3x=+1)', ':', `${summary.onTimeDays || 0} Kali (+${summary.onTimeBonusPoints || 0} Poin)`],
-      ['NISN / NIS', ':', `${student.nisn || '-'} / ${student.nis || '-'}`, 'Total Poin Positif (+)', ':', `+${posPoints} Poin (${posLogs.length} Catatan)`],
-      ['Kelas', ':', student.className || '-', 'Total Poin Negatif (-)', ':', `-${negPoints} Poin (${negLogs.length} Catatan)`],
+      ['Nama Siswa', ':', student.name, 'Rekap Presensi Masuk & Pulang', ':', `Tepat: ${summary.onTimeDays || 0}x (+${summary.onTimeBonusPoints || 0}) • Terlambat: ${summary.lateDays || 0}x (-${summary.latePenaltyPoints || 0})`],
+      ['NISN / NIS', ':', `${student.nisn || '-'} / ${student.nis || '-'}`, 'Rekap Alpa & Belum Scan', ':', `Alpa: ${summary.alpaDays || 0}x (-${summary.alpaPenaltyPoints || 0}) • Belum Scan: ${summary.unscannedInDays || 0}x • Belum Pulang: ${summary.unreturnedDays || 0}x`],
+      ['Kelas', ':', student.className || '-', 'Total Positif / Negatif', ':', `+${posPoints} Poin (${posLogs.length} Catatan) / -${negPoints} Poin (${negLogs.length} Catatan)`],
       ['Jenis Kelamin', ':', student.gender === 'L' ? 'Laki-laki' : student.gender === 'P' ? 'Perempuan' : (student.gender || '-'), 'Skor Akhir & Predikat', ':', `${netPoints >= 0 ? '+' : ''}${netPoints} Poin • ${predikat}`]
     ]
   });
 
   const tableStartPos = (doc as any).lastAutoTable.finalY + 4;
 
+  const presenceRows: any[] = [];
+  if (summary.onTimeDays > 0) {
+    presenceRows.push([
+      '*',
+      summary.onTimeDates?.slice(0, 3).join(', ') + (summary.onTimeDates && summary.onTimeDates.length > 3 ? ` (+${summary.onTimeDates.length - 3} lainnya)` : '') || 'Data Presensi',
+      'Hadir Tepat Waktu (Presensi)\n[POSITIF (+)]',
+      `+${summary.onTimeBonusPoints}`,
+      'Sistem Presensi Otomatis',
+      `Akumulasi kehadiran tepat waktu: ${summary.onTimeDays} kali hadir (setiap 3x = +1 poin)`,
+      'Pembiasaan disiplin positif'
+    ]);
+  }
+  if (summary.lateDays > 0) {
+    presenceRows.push([
+      '*',
+      summary.lateDates?.slice(0, 3).join(', ') + (summary.lateDates && summary.lateDates.length > 3 ? ` (+${summary.lateDates.length - 3} lainnya)` : '') || 'Data Presensi',
+      'Hadir Terlambat (Presensi)\n[NEGATIF (-)]',
+      `-${summary.latePenaltyPoints}`,
+      'Sistem Presensi Otomatis',
+      `Akumulasi scan presensi terlambat: ${summary.lateDays} kali (-1 poin / scan)`,
+      'Pembinaan kedisiplinan jam hadir'
+    ]);
+  }
+  if (summary.alpaDays > 0) {
+    presenceRows.push([
+      '*',
+      summary.alpaDates?.slice(0, 3).join(', ') + (summary.alpaDates && summary.alpaDates.length > 3 ? ` (+${summary.alpaDates.length - 3} lainnya)` : '') || 'Data Presensi',
+      'Alpa / Tanpa Keterangan\n[NEGATIF (-)]',
+      `-${summary.alpaPenaltyPoints}`,
+      'Sistem Presensi Otomatis',
+      `Akumulasi siswa alpa tanpa keterangan: ${summary.alpaDays} kali (-5 poin / alpa)`,
+      'Peringatan & pemanggilan orang tua / wali'
+    ]);
+  }
+  if (summary.unscannedInDays > 0) {
+    presenceRows.push([
+      '*',
+      summary.unscannedInDates?.slice(0, 3).join(', ') + (summary.unscannedInDates && summary.unscannedInDates.length > 3 ? ` (+${summary.unscannedInDates.length - 3} lainnya)` : '') || 'Data Presensi',
+      'Belum Scan Presensi Masuk\n[NEGATIF (-)]',
+      `-${summary.unscannedInPenaltyPoints}`,
+      'Sistem Presensi Otomatis',
+      `Status masuk Hadir namun belum scan jam masuk: ${summary.unscannedInDays} kali (-2 poin / kejadian)`,
+      'Edukasi scan QR presensi masuk'
+    ]);
+  }
+  if (summary.unreturnedDays > 0) {
+    presenceRows.push([
+      '*',
+      summary.unreturnedDates?.slice(0, 3).join(', ') + (summary.unreturnedDates && summary.unreturnedDates.length > 3 ? ` (+${summary.unreturnedDates.length - 3} lainnya)` : '') || 'Data Presensi',
+      'Belum Scan Pulang Sekolah\n[NEGATIF (-)]',
+      `-${summary.unreturnedPenaltyPoints}`,
+      'Sistem Presensi Otomatis',
+      `Status masuk Hadir namun status kepulangan belum pulang: ${summary.unreturnedDays} kali (-2 poin / kejadian)`,
+      'Edukasi scan QR presensi kepulangan'
+    ]);
+  }
+
   // Log Items
-  const tableData = sortedLogs.map((log, idx) => {
+  const manualTableData = sortedLogs.map((log, idx) => {
     const followUpText = [
       log.followUpNotes ? `Catatan: ${log.followUpNotes}` : '',
       log.followUpBy ? `Oleh: ${log.followUpBy}` : '',
@@ -2079,7 +2136,7 @@ export async function exportStudentCharacterDetailPdf(
     ].filter(Boolean).join('\n');
 
     return [
-      (idx + 1).toString(),
+      (presenceRows.length + idx + 1).toString(),
       log.timestamp || '-',
       `${log.traitName}\n[${log.traitType === 'POSITIF' ? 'POSITIF (+)' : 'NEGATIF (-)'}]`,
       log.traitType === 'POSITIF' ? `+${log.points}` : `-${log.points}`,
@@ -2088,6 +2145,8 @@ export async function exportStudentCharacterDetailPdf(
       followUpText || 'Belum ada tindak lanjut'
     ];
   });
+
+  const tableData = [...presenceRows, ...manualTableData];
 
   autoTable(doc, {
     startY: tableStartPos,

@@ -42,10 +42,6 @@ import { saveSchoolProfile, isLogForStudent } from '../lib/storage';
 import { getWitaDateTime } from '../lib/autoCharacterScheduler';
 
 export type AutoRuleType = 
-  | 'LATE' 
-  | 'ALPA' 
-  | 'UNSCANNED'
-  | 'UNRETURNED'
   | 'DISRUPTIVE_KBM' 
   | 'ABSENT_KBM'
   | 'VERY_ACTIVE_KBM';
@@ -278,33 +274,7 @@ export const AutoCharacterAssessmentModal: React.FC<AutoCharacterAssessmentModal
 
   const [generalEvaluatorName, setGeneralEvaluatorName] = useState<string>(defaultGeneralEvaluator);
 
-  // Find or determine matching traits from trait list
-  const lateTrait = useMemo(() => {
-    return traits.find(t => 
-      t.type === 'NEGATIF' && 
-      (t.name.toLowerCase().includes('terlambat') || t.name.toLowerCase().includes('masuk sekolah'))
-    ) || traits.find(t => t.type === 'NEGATIF') || {
-      id: 'trait-auto-late',
-      name: 'Terlambat Masuk Sekolah',
-      type: 'NEGATIF' as const,
-      points: latePoints,
-      category: 'Kedisiplinan'
-    };
-  }, [traits, latePoints]);
-
-  const alpaTrait = useMemo(() => {
-    return traits.find(t => 
-      t.type === 'NEGATIF' && 
-      (t.name.toLowerCase().includes('alpa') || t.name.toLowerCase().includes('membolos') || t.name.toLowerCase().includes('tanpa keterangan'))
-    ) || traits.find(t => t.type === 'NEGATIF') || {
-      id: 'trait-auto-alpa',
-      name: 'Alpa / Tanpa Keterangan',
-      type: 'NEGATIF' as const,
-      points: alpaPoints,
-      category: 'Kedisiplinan'
-    };
-  }, [traits, alpaPoints]);
-
+  // Determine matching traits from trait list for Jurnal KBM rules
   const disruptiveTrait = useMemo(() => {
     return traits.find(t => 
       t.type === 'NEGATIF' && 
@@ -352,217 +322,42 @@ export const AutoCharacterAssessmentModal: React.FC<AutoCharacterAssessmentModal
     };
   }, [traits, veryActiveKbmPoints]);
 
-  const unscannedTrait = useMemo(() => {
-    return traits.find(t => 
-      t.id === 'trait-015' || 
-      (t.type === 'NEGATIF' && t.name.toLowerCase().includes('belum') && t.name.toLowerCase().includes('scan'))
-    ) || traits.find(t => t.type === 'NEGATIF') || {
-      id: 'trait-auto-unscanned',
-      name: 'Belum Melakukan Scan Presensi',
-      type: 'NEGATIF' as const,
-      points: unscannedPoints,
-      category: 'Kedisiplinan'
-    };
-  }, [traits, unscannedPoints]);
-
-  const unreturnedTrait = useMemo(() => {
-    return traits.find(t => 
-      t.id === 'trait-016' || 
-      (t.type === 'NEGATIF' && t.name.toLowerCase().includes('belum') && t.name.toLowerCase().includes('pulang'))
-    ) || traits.find(t => t.type === 'NEGATIF') || {
-      id: 'trait-auto-unreturned',
-      name: 'Belum Melakukan Scan Pulang',
-      type: 'NEGATIF' as const,
-      points: unreturnedPoints,
-      category: 'Kedisiplinan'
-    };
-  }, [traits, unreturnedPoints]);
-
-  // Compute all potential candidates from Attendance Records & Jurnal KBM
+  // Compute all potential candidates from Jurnal KBM Guru (Penilaian Karakter Otomatis)
+  // Presensi (Alpa, Belum Scan Masuk, Belum Scan Pulang, Hadir Terlambat, Hadir Tepat Waktu) 
+  // dihitung langsung secara dinamis dan real-time pada Detail Nilai Karakter Siswa.
   const allCandidates = useMemo<AutoCharacterCandidate[]>(() => {
     if (!isOpen) return [];
 
-    const { witaDateStr, totalMinutes } = getWitaDateTime();
-    const isPast16Wita = totalMinutes >= 16 * 60;
-
-    const endParts = (schoolProfile?.endTime || '15:00').split(':');
-    const endMinutes = (parseInt(endParts[0], 10) || 15) * 60 + (parseInt(endParts[1], 10) || 0);
-    const isPastSchoolEndTime = totalMinutes >= endMinutes;
-
-    const startParts = (schoolProfile?.startTime || '07:00').split(':');
-    const startMinutes = (parseInt(startParts[0], 10) || 7) * 60 + (parseInt(startParts[1], 10) || 0);
-    const isPastSchoolStartTime = totalMinutes >= (startMinutes + (schoolProfile?.lateToleranceMinutes || 15));
-
     const candidates: AutoCharacterCandidate[] = [];
-    const studentMap = new Map<string, Student>();
-    students.forEach(s => studentMap.set(s.id, s));
 
-    // 1. Group attendance records by student (cocokkan studentId, NISN, atau nama)
-    const studentAttendanceMap = new Map<string, AttendanceRecord[]>();
-    attendanceRecords.forEach(rec => {
-      const matchStd = studentMap.get(rec.studentId) || students.find(s => 
-        (rec.nisn && rec.nisn !== '-' && s.nisn === rec.nisn) || 
-        (rec.studentName && s.name.trim().toLowerCase() === rec.studentName.trim().toLowerCase())
-      );
-      const targetId = matchStd?.id || rec.studentId;
-      if (!studentAttendanceMap.has(targetId)) {
-        studentAttendanceMap.set(targetId, []);
+    // Indeks cepat siswa berdasarkan ID, NISN, dan Nama untuk lookup O(1)
+    const studentById = new Map<string, Student>();
+    const studentByNisn = new Map<string, Student>();
+    const studentByName = new Map<string, Student>();
+    students.forEach(s => {
+      studentById.set(s.id, s);
+      if (s.nisn && s.nisn !== '-') studentByNisn.set(s.nisn, s);
+      studentByName.set(s.name.trim().toLowerCase(), s);
+    });
+
+    // Indeks cepat log karakter yang sudah ada untuk pencocokan O(1)
+    const existingLogKeys = new Set<string>();
+    characterLogs.forEach(l => {
+      if (l.id) existingLogKeys.add(l.id);
+      if (l.studentId && l.date) {
+        existingLogKeys.add(`${l.studentId}_${l.date}_${l.traitType}`);
+        if (l.traitName) existingLogKeys.add(`${l.studentId}_${l.date}_${l.traitName.toLowerCase()}`);
       }
-      studentAttendanceMap.get(targetId)!.push(rec);
     });
 
-    // 2. Process attendance records (Late, Alpa, On-Time 3 Days)
-    students.forEach(student => {
-      const records = studentAttendanceMap.get(student.id) || [];
-      const sortedRecords = [...records].sort((a, b) => a.date.localeCompare(b.date));
-
-      sortedRecords.forEach(rec => {
-        // Catatan Hadir Terlambat dihitung langsung secara dinamis pada Detail Nilai Karakter Siswa (-1 poin per terlambat) tanpa perlu tabel penilaian otomatis
-
-        // Rule 2: Alpa -> Nilai Karakter Negatif (-alpaPoints)
-        if (rec.status === 'ALPA') {
-          const candidateId = `auto-alpa-${student.id}-${rec.date}`;
-          const isAlready = localSavedIds.has(candidateId) || characterLogs.some(l => 
-            l.id === candidateId ||
-            (isLogForStudent(l, student) && l.date === rec.date && 
-             (l.traitType === 'NEGATIF' && (l.traitName.toLowerCase().includes('alpa') || l.notes?.toLowerCase().includes('alpa'))))
-          );
-
-          candidates.push({
-            id: candidateId,
-            studentId: student.id,
-            studentName: student.name,
-            nisn: student.nisn,
-            classId: student.classId,
-            className: student.className,
-            ruleType: 'ALPA',
-            ruleLabel: 'Alpa / Tanpa Keterangan',
-            traitId: alpaTrait.id,
-            traitName: alpaTrait.name || 'Alpa Tanpa Keterangan',
-            traitType: 'NEGATIF',
-            points: alpaPoints,
-            date: rec.date,
-            evaluatorName: generalEvaluatorName || 'Sistem Presensi QR',
-            notes: `Penilaian Otomatis Presensi: Terekam Alpa pada tanggal ${rec.date}`,
-            attendanceDates: [rec.date],
-            sourceType: 'PRESENSI',
-            isSelected: !isAlready,
-            isAlreadyLogged: isAlready,
-          });
-        }
-
-        // Rule 3: Belum Scan Pulang Sekolah -> Nilai Karakter Negatif (-unreturnedPoints)
-        // Terpenuhi jika siswa hadir di sekolah (HADIR atau TERLAMBAT), namun belum melakukan scan kepulangan
-        // Berlaku jika tanggal lampau, atau hari ini jika sudah melewati jam pulang sekolah atau 16:00 WITA
-        const isEligibleReturnTime = rec.date < witaDateStr || (rec.date === witaDateStr && (isPast16Wita || isPastSchoolEndTime));
-        const isPresent = rec.status === 'HADIR' || rec.status === 'TERLAMBAT';
-        const hasReturned = !!(
-          (rec.returnTime && rec.returnTime !== '-' && rec.returnTime.trim() !== '' && !rec.returnTime.toLowerCase().includes('belum')) || 
-          rec.returnStatus === 'PULANG' || 
-          rec.returnStatus === 'PULANG_TEPAT' || 
-          rec.returnStatus === 'PULANG_CEPAT'
-        );
-
-        if (isEligibleReturnTime && isPresent && !hasReturned) {
-          const candidateId = `auto-unreturned-${student.id}-${rec.date}`;
-          const isAlready = localSavedIds.has(candidateId) || characterLogs.some(l => 
-            l.id === candidateId ||
-            (isLogForStudent(l, student) && 
-            l.date === rec.date && 
-            (
-              l.traitType === 'NEGATIF' && l.traitName.toLowerCase().includes('belum') && l.traitName.toLowerCase().includes('pulang')
-            ))
-          );
-
-          candidates.push({
-            id: candidateId,
-            studentId: student.id,
-            studentName: student.name,
-            nisn: student.nisn,
-            classId: student.classId,
-            className: student.className,
-            ruleType: 'UNRETURNED',
-            ruleLabel: 'Belum Scan Pulang',
-            traitId: unreturnedTrait.id,
-            traitName: unreturnedTrait.name || 'Belum Melakukan Scan Pulang',
-            traitType: 'NEGATIF',
-            points: unreturnedPoints,
-            date: rec.date,
-            evaluatorName: generalEvaluatorName || 'Sistem Presensi Otomatis',
-            notes: `Penilaian Otomatis Presensi: Status Masuk (${rec.status === 'HADIR' ? 'Hadir Tepat Waktu' : 'Terlambat'}) pukul ${rec.time || 'Pagi'} tetapi belum scan kepulangan (${rec.date})`,
-            attendanceDates: [rec.date],
-            sourceType: 'PRESENSI',
-            isSelected: !isAlready,
-            isAlreadyLogged: isAlready,
-          });
-        }
-      });
-
-      // Rule 4: Belum Melakukan Scan Presensi -> Nilai Karakter Negatif (-unscannedPoints)
-      // Berlaku jika tanggal lampau, atau hari ini jika sudah melewati jam masuk sekolah atau 16:00 WITA
-      const distinctDates = Array.from(new Set<string>(attendanceRecords.map(r => r.date))).sort();
-      distinctDates.forEach((attDate: string) => {
-        if (attDate > witaDateStr) return; // Tanggal masa depan tidak dievaluasi
-        const isEligibleUnscannedTime = attDate < witaDateStr || (attDate === witaDateStr && (isPast16Wita || isPastSchoolStartTime));
-        if (!isEligibleUnscannedTime) return;
-
-        const rec = sortedRecords.find(r => r.date === attDate);
-        const isLegitPermit = rec && (rec.status === 'SAKIT' || rec.status === 'IZIN');
-        const isUnscanned = !isLegitPermit && (
-          !rec ||
-          !rec.time || 
-          rec.time === '-' || 
-          rec.time.trim() === '' || 
-          rec.time.toLowerCase().includes('belum') ||
-          (rec.status as string) === 'BELUM_ABSEN'
-        );
-
-        if (isUnscanned) {
-          const candidateId = `auto-unscanned-${student.id}-${attDate}`;
-          const isAlready = localSavedIds.has(candidateId) || characterLogs.some(l => 
-            l.id === candidateId ||
-            (isLogForStudent(l, student) && 
-            l.date === attDate && 
-            (
-              l.traitType === 'NEGATIF' && l.traitName.toLowerCase().includes('belum') && l.traitName.toLowerCase().includes('scan')
-            ))
-          );
-
-          candidates.push({
-            id: `auto-unscanned-${student.id}-${attDate}`,
-            studentId: student.id,
-            studentName: student.name,
-            nisn: student.nisn,
-            classId: student.classId,
-            className: student.className,
-            ruleType: 'UNSCANNED',
-            ruleLabel: 'Belum Scan Presensi (Mulai 16:00 WITA)',
-            traitId: unscannedTrait.id,
-            traitName: unscannedTrait.name || 'Belum Melakukan Scan Presensi',
-            traitType: 'NEGATIF',
-            points: unscannedPoints,
-            date: attDate,
-            evaluatorName: generalEvaluatorName || 'Sistem Presensi Otomatis (16:00 WITA)',
-            notes: `Penilaian Otomatis Presensi (16:00 WITA): Kolom Jam Masuk belum melakukan scan presensi (${attDate})`,
-            attendanceDates: [attDate],
-            sourceType: 'PRESENSI',
-            isSelected: !isAlready,
-            isAlreadyLogged: isAlready,
-          });
-        }
-      });
-    });
-
-    // 3. Process Jurnal KBM entries (Mengganggu, Tidak Hadir di Kelas, Sangat Aktif)
+    // Process Jurnal KBM entries (Mengganggu, Tidak Hadir di Kelas, Sangat Aktif)
     learningJournals.forEach(journal => {
       if (!journal.studentAttendances || !Array.isArray(journal.studentAttendances)) return;
 
       journal.studentAttendances.forEach(sa => {
-        const student = studentMap.get(sa.studentId) || students.find(s => 
-          s.id === sa.studentId || 
-          (sa.nisn && s.nisn === sa.nisn) || 
-          s.name.toLowerCase() === sa.studentName.toLowerCase()
-        );
+        const student = studentById.get(sa.studentId) || 
+          (sa.nisn ? studentByNisn.get(sa.nisn) : undefined) || 
+          studentByName.get(sa.studentName.trim().toLowerCase());
 
         const sId = student?.id || sa.studentId;
         const sName = student?.name || sa.studentName;
@@ -577,18 +372,11 @@ export const AutoCharacterAssessmentModal: React.FC<AutoCharacterAssessmentModal
         // Jurnal KBM - A. Status: 'Mengganggu' -> Negatif (disruptivePoints, default 1)
         if (sa.status === 'Mengganggu') {
           const candidateId = `auto-disruptive-${journal.id}-${sId}`;
-          const isAlready = localSavedIds.has(candidateId) || characterLogs.some(l => 
-            l.id === candidateId ||
-            (
-              isLogForStudent(l, { id: sId, nisn: sNisn, name: sName }) && 
-              l.date === journal.date && 
-              (
-                (l.traitType === 'NEGATIF' && l.traitName.toLowerCase().includes('mengganggu')) ||
-                l.notes?.includes(`Jurnal KBM ${journal.subject}`) ||
-                (l.notes?.toLowerCase().includes('mengganggu') && l.notes?.toLowerCase().includes(journal.subject.toLowerCase()))
-              )
-            )
-          );
+          const isAlready = localSavedIds.has(candidateId) || 
+            localSavedIds.has(`saved-${candidateId}`) || 
+            existingLogKeys.has(candidateId) ||
+            existingLogKeys.has(`saved-${candidateId}`) ||
+            existingLogKeys.has(`${sId}_${journal.date}_NEGATIF`);
 
           candidates.push({
             id: candidateId,
@@ -617,17 +405,11 @@ export const AutoCharacterAssessmentModal: React.FC<AutoCharacterAssessmentModal
         // Jurnal KBM - B. Status: 'Tidak hadir di kelas' -> Negatif (absentKbmPoints, default 2)
         if (sa.status === 'Tidak hadir di kelas') {
           const candidateId = `auto-absent-kbm-${journal.id}-${sId}`;
-          const isAlready = localSavedIds.has(candidateId) || characterLogs.some(l => 
-            l.id === candidateId ||
-            (
-              isLogForStudent(l, { id: sId, nisn: sNisn, name: sName }) && 
-              l.date === journal.date && 
-              (
-                (l.traitType === 'NEGATIF' && (l.traitName.toLowerCase().includes('tidak hadir') || l.traitName.toLowerCase().includes('bolos') || l.traitName.toLowerCase().includes('absen'))) ||
-                (l.notes?.toLowerCase().includes('tidak hadir di kelas') && l.notes?.toLowerCase().includes(journal.subject.toLowerCase()))
-              )
-            )
-          );
+          const isAlready = localSavedIds.has(candidateId) || 
+            localSavedIds.has(`saved-${candidateId}`) || 
+            existingLogKeys.has(candidateId) ||
+            existingLogKeys.has(`saved-${candidateId}`) ||
+            existingLogKeys.has(`${sId}_${journal.date}_NEGATIF`);
 
           candidates.push({
             id: candidateId,
@@ -656,17 +438,11 @@ export const AutoCharacterAssessmentModal: React.FC<AutoCharacterAssessmentModal
         // Jurnal KBM - C. Status: 'Sangat aktif' -> Positif (veryActiveKbmPoints, default 1)
         if (sa.status === 'Sangat aktif') {
           const candidateId = `auto-active-kbm-${journal.id}-${sId}`;
-          const isAlready = localSavedIds.has(candidateId) || characterLogs.some(l => 
-            l.id === candidateId ||
-            (
-              isLogForStudent(l, { id: sId, nisn: sNisn, name: sName }) && 
-              l.date === journal.date && 
-              (
-                (l.traitType === 'POSITIF' && (l.traitName.toLowerCase().includes('sangat aktif') || l.traitName.toLowerCase().includes('keaktifan') || l.traitName.toLowerCase().includes('aktif'))) ||
-                (l.notes?.toLowerCase().includes('sangat aktif') && l.notes?.toLowerCase().includes(journal.subject.toLowerCase()))
-              )
-            )
-          );
+          const isAlready = localSavedIds.has(candidateId) || 
+            localSavedIds.has(`saved-${candidateId}`) || 
+            existingLogKeys.has(candidateId) ||
+            existingLogKeys.has(`saved-${candidateId}`) ||
+            existingLogKeys.has(`${sId}_${journal.date}_POSITIF`);
 
           candidates.push({
             id: candidateId,
@@ -704,32 +480,18 @@ export const AutoCharacterAssessmentModal: React.FC<AutoCharacterAssessmentModal
   }, [
     isOpen, 
     students, 
-    attendanceRecords, 
     learningJournals,
     characterLogs,
     localSavedIds,
-    latePoints, 
-    alpaPoints, 
     disruptivePoints,
     absentKbmPoints,
     veryActiveKbmPoints,
-    unscannedPoints,
-    unreturnedPoints,
-    generalEvaluatorName,
-    lateTrait, 
-    alpaTrait, 
     disruptiveTrait,
     absentKbmTrait,
-    veryActiveKbmTrait,
-    unscannedTrait,
-    unreturnedTrait
+    veryActiveKbmTrait
   ]);
 
   // Counts by rule and group
-  const totalLateCount = useMemo(() => allCandidates.filter(c => c.ruleType === 'LATE').length, [allCandidates]);
-  const totalAlpaCount = useMemo(() => allCandidates.filter(c => c.ruleType === 'ALPA').length, [allCandidates]);
-  const totalUnscannedCount = useMemo(() => allCandidates.filter(c => c.ruleType === 'UNSCANNED').length, [allCandidates]);
-  const totalUnreturnedCount = useMemo(() => allCandidates.filter(c => c.ruleType === 'UNRETURNED').length, [allCandidates]);
   const totalDisruptiveCount = useMemo(() => allCandidates.filter(c => c.ruleType === 'DISRUPTIVE_KBM').length, [allCandidates]);
   const totalAbsentKbmCount = useMemo(() => allCandidates.filter(c => c.ruleType === 'ABSENT_KBM').length, [allCandidates]);
   const totalVeryActiveCount = useMemo(() => allCandidates.filter(c => c.ruleType === 'VERY_ACTIVE_KBM').length, [allCandidates]);
@@ -879,11 +641,6 @@ export const AutoCharacterAssessmentModal: React.FC<AutoCharacterAssessmentModal
 
   // Submit and save candidates to Character Logs (Tersimpan ke Detail Karakter siswa - 1 KALI WRITE)
   const handleProcessSubmit = () => {
-    if (!isAutoEnabled) {
-      alert('Penilaian Karakter Otomatis saat ini sedang NON-AKTIF. Silakan aktifkan terlebih dahulu tombol di bagian atas.');
-      return;
-    }
-
     const unrecordedInView = filteredCandidates.filter(c => !c.isAlreadyLogged);
     let toApply = allCandidates.filter(c => selectedCandidateIds.has(c.id) && !c.isAlreadyLogged);
 
@@ -1268,128 +1025,65 @@ export const AutoCharacterAssessmentModal: React.FC<AutoCharacterAssessmentModal
                 </div>
               </div>
 
-              {/* Rule Negatif: Hadir Terlambat (Dihitung Dinamis di Detail Karakter) */}
-              <div className="bg-slate-50/70 p-4 rounded-2xl border border-slate-200/90 shadow-2xs space-y-2 flex flex-col justify-between">
-                <div>
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-1.5 text-slate-700 font-black text-xs uppercase tracking-wider">
-                      <Clock className="w-4 h-4 text-slate-600" />
-                      <span>Hadir Terlambat</span>
+              {/* Card Informasi: Penilaian Karakter Presensi Dihitung Dinamis di Detail Karakter */}
+              <div className="bg-gradient-to-r from-indigo-50 via-purple-50/60 to-blue-50/50 p-4 rounded-2xl border border-indigo-200 shadow-xs space-y-2.5 flex flex-col justify-between sm:col-span-2 lg:col-span-3">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+                  <div className="flex items-center gap-2">
+                    <div className="w-8 h-8 rounded-xl bg-indigo-600 text-white flex items-center justify-center font-bold shrink-0">
+                      <Sparkles className="w-4 h-4" />
                     </div>
-                    <span className="px-2 py-0.5 rounded-full bg-slate-200 text-slate-800 text-[10px] font-black border border-slate-300">
-                      DINAMIS (-1)
-                    </span>
+                    <div>
+                      <h4 className="font-extrabold text-xs text-indigo-950 uppercase tracking-wide flex items-center gap-2">
+                        <span>Penilaian Karakter Otomatis Presensi Sekolah</span>
+                        <span className="px-2 py-0.5 rounded-full bg-indigo-200 text-indigo-900 text-[10px] font-black">
+                          TERAKUMULASI DINAMIS
+                        </span>
+                      </h4>
+                      <p className="text-[11px] text-indigo-800/90 mt-0.5">
+                        Seluruh kriteria presensi di bawah ini langsung terakumulasi dinamis dari data seluruh presensi pada Detail Nilai Karakter Siswa:
+                      </p>
+                    </div>
                   </div>
-                  <div className="text-[11px] text-slate-600 leading-relaxed mt-1">
-                    Dihitung langsung pada <strong>Detail Nilai Karakter</strong> siswa sebesar <strong>-1 Poin</strong> per scan terlambat dari seluruh rekap presensi.
-                  </div>
+                  {onNavigateToPoints && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onClose();
+                        onNavigateToPoints();
+                      }}
+                      className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs rounded-xl shadow-xs transition-all flex items-center gap-1.5 self-start sm:self-auto shrink-0 cursor-pointer"
+                    >
+                      <Award className="w-3.5 h-3.5" />
+                      <span>Buka Detail Nilai Karakter</span>
+                    </button>
+                  )}
                 </div>
-                <div className="pt-2 border-t border-slate-200 text-xs font-bold text-slate-600">
-                  Otomatis terakumulasi ke skor siswa
-                </div>
-              </div>
 
-              {/* 6. Rule Negatif: Siswa Alpa */}
-              <div className="bg-white p-4 rounded-2xl border border-rose-200/80 shadow-xs space-y-2 flex flex-col justify-between">
-                <div>
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-1.5 text-rose-700 font-black text-xs uppercase tracking-wider">
-                      <UserX className="w-4 h-4 text-rose-600" />
-                      <span>Siswa Alpa</span>
-                    </div>
-                    <span className="px-2 py-0.5 rounded-full bg-rose-100 text-rose-800 text-[10px] font-black border border-rose-200">
-                      🔴 NEGATIF
-                    </span>
+                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2 pt-1 text-[11px]">
+                  <div className="bg-white/80 p-2 rounded-xl border border-emerald-200 text-emerald-900">
+                    <p className="font-extrabold text-[10px] text-emerald-800 uppercase">Hadir Tepat Waktu</p>
+                    <p className="font-black text-xs text-emerald-700 mt-0.5">+1 Poin / 3 Hari</p>
+                    <p className="text-[9px] text-emerald-600">Kelipatan 3x hadir</p>
                   </div>
-                  <div className="text-[11px] text-slate-600 leading-relaxed mt-1">
-                    Terekam status Alpa pada Presensi Sekolah:
+                  <div className="bg-white/80 p-2 rounded-xl border border-rose-200 text-rose-900">
+                    <p className="font-extrabold text-[10px] text-rose-800 uppercase">Hadir Terlambat</p>
+                    <p className="font-black text-xs text-rose-700 mt-0.5">-1 Poin / Scan</p>
+                    <p className="text-[9px] text-rose-600">Scan terlambat</p>
                   </div>
-                </div>
-                <div className="flex items-center justify-between pt-2 border-t border-slate-100">
-                  <div className="flex items-center gap-1.5">
-                    <span className="text-xs font-semibold text-slate-500">Nilai:</span>
-                    <input
-                      type="number"
-                      min="1"
-                      max="50"
-                      value={alpaPoints}
-                      onChange={(e) => setAlpaPoints(Math.max(1, Math.abs(Number(e.target.value)) || 5))}
-                      className="w-12 px-1.5 py-1 bg-rose-50/70 border border-rose-200 rounded-lg text-xs font-black text-center text-rose-700 focus:outline-none focus:ring-2 focus:ring-rose-500"
-                    />
-                    <span className="text-xs font-bold text-rose-600">-Poin</span>
+                  <div className="bg-white/80 p-2 rounded-xl border border-red-300 text-red-950">
+                    <p className="font-extrabold text-[10px] text-red-800 uppercase">Siswa Alpa</p>
+                    <p className="font-black text-xs text-red-700 mt-0.5">-5 Poin / Alpa</p>
+                    <p className="text-[9px] text-red-600">Tanpa keterangan</p>
                   </div>
-                  <div className="text-xs font-bold text-slate-700 bg-slate-100 px-2 py-1 rounded-lg">
-                    {totalAlpaCount} Kasus
+                  <div className="bg-white/80 p-2 rounded-xl border border-orange-200 text-orange-950">
+                    <p className="font-extrabold text-[10px] text-orange-800 uppercase">Belum Scan Masuk</p>
+                    <p className="font-black text-xs text-orange-700 mt-0.5">-2 Poin / Kejadian</p>
+                    <p className="text-[9px] text-orange-600">Status Hadir (tanpa jam)</p>
                   </div>
-                </div>
-              </div>
-
-              {/* 7. Rule Negatif: Belum Scan Presensi */}
-              <div className="bg-white p-4 rounded-2xl border border-orange-200/80 shadow-xs space-y-2 flex flex-col justify-between">
-                <div>
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-1.5 text-orange-800 font-black text-xs uppercase tracking-wider">
-                      <UserX className="w-4 h-4 text-orange-600" />
-                      <span>Belum Scan Presensi</span>
-                    </div>
-                    <span className="px-2 py-0.5 rounded-full bg-orange-100 text-orange-800 text-[10px] font-black border border-orange-200">
-                      🔴 NEGATIF
-                    </span>
-                  </div>
-                  <div className="text-[11px] text-slate-600 leading-relaxed mt-1">
-                    Khusus siswa dengan status masuk Hadir yang pada kolom Jam Masuk belum scan presensi (status Sakit, Izin, Alpa, dan Terlambat tidak dinilai):
-                  </div>
-                </div>
-                <div className="flex items-center justify-between pt-2 border-t border-slate-100">
-                  <div className="flex items-center gap-1.5">
-                    <span className="text-xs font-semibold text-slate-500">Nilai:</span>
-                    <input
-                      type="number"
-                      min="1"
-                      max="50"
-                      value={unscannedPoints}
-                      onChange={(e) => setUnscannedPoints(Math.max(1, Math.abs(Number(e.target.value)) || 1))}
-                      className="w-12 px-1.5 py-1 bg-orange-50/70 border border-orange-200 rounded-lg text-xs font-black text-center text-orange-800 focus:outline-none focus:ring-2 focus:ring-orange-500"
-                    />
-                    <span className="text-xs font-bold text-orange-600">-Poin</span>
-                  </div>
-                  <div className="text-xs font-bold text-slate-700 bg-slate-100 px-2 py-1 rounded-lg">
-                    {totalUnscannedCount} Kasus
-                  </div>
-                </div>
-              </div>
-
-              {/* 8. Rule Negatif: Belum Scan Pulang */}
-              <div className="bg-white p-4 rounded-2xl border border-amber-200/80 shadow-xs space-y-2 flex flex-col justify-between">
-                <div>
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-1.5 text-amber-800 font-black text-xs uppercase tracking-wider">
-                      <Clock className="w-4 h-4 text-amber-600" />
-                      <span>Belum Scan Pulang</span>
-                    </div>
-                    <span className="px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 text-[10px] font-black border border-amber-200">
-                      🔴 NEGATIF
-                    </span>
-                  </div>
-                  <div className="text-[11px] text-slate-600 leading-relaxed mt-1">
-                    Khusus siswa dengan status masuk Hadir atau Terlambat yang belum scan pulang (status Sakit, Izin, dan Alpa tidak dinilai):
-                  </div>
-                </div>
-                <div className="flex items-center justify-between pt-2 border-t border-slate-100">
-                  <div className="flex items-center gap-1.5">
-                    <span className="text-xs font-semibold text-slate-500">Nilai:</span>
-                    <input
-                      type="number"
-                      min="1"
-                      max="50"
-                      value={unreturnedPoints}
-                      onChange={(e) => setUnreturnedPoints(Math.max(1, Math.abs(Number(e.target.value)) || 1))}
-                      className="w-12 px-1.5 py-1 bg-amber-50/70 border border-amber-200 rounded-lg text-xs font-black text-center text-amber-800 focus:outline-none focus:ring-2 focus:ring-amber-500"
-                    />
-                    <span className="text-xs font-bold text-amber-600">-Poin</span>
-                  </div>
-                  <div className="text-xs font-bold text-slate-700 bg-slate-100 px-2 py-1 rounded-lg">
-                    {totalUnreturnedCount} Kasus
+                  <div className="bg-white/80 p-2 rounded-xl border border-amber-200 text-amber-950">
+                    <p className="font-extrabold text-[10px] text-amber-800 uppercase">Belum Scan Pulang</p>
+                    <p className="font-black text-xs text-amber-700 mt-0.5">-2 Poin / Kejadian</p>
+                    <p className="text-[9px] text-amber-600">Status Hadir (belum pulang)</p>
                   </div>
                 </div>
               </div>
@@ -1601,52 +1295,6 @@ export const AutoCharacterAssessmentModal: React.FC<AutoCharacterAssessmentModal
                     <span>Mengganggu KBM ({totalDisruptiveCount})</span>
                   </button>
                 )}
-
-
-                {/* Negatif: Alpa */}
-                {(groupFilter === 'ALL' || groupFilter === 'NEGATIF') && (
-                  <button
-                    onClick={() => setRuleFilter('ALPA')}
-                    className={`px-2.5 py-1.5 rounded-xl font-bold transition-all cursor-pointer shrink-0 text-xs flex items-center gap-1 ${
-                      ruleFilter === 'ALPA'
-                        ? 'bg-red-700 text-white'
-                        : 'bg-red-50 text-red-800 hover:bg-red-100 border border-red-200/60'
-                    }`}
-                  >
-                    <UserX className="w-3 h-3" />
-                    <span>Alpa ({totalAlpaCount})</span>
-                  </button>
-                )}
-
-                {/* Negatif: Belum Scan Presensi */}
-                {(groupFilter === 'ALL' || groupFilter === 'NEGATIF') && (
-                  <button
-                    onClick={() => setRuleFilter('UNSCANNED')}
-                    className={`px-2.5 py-1.5 rounded-xl font-bold transition-all cursor-pointer shrink-0 text-xs flex items-center gap-1 ${
-                      ruleFilter === 'UNSCANNED'
-                        ? 'bg-orange-600 text-white'
-                        : 'bg-orange-50 text-orange-800 hover:bg-orange-100 border border-orange-200/60'
-                    }`}
-                  >
-                    <UserX className="w-3 h-3" />
-                    <span>Belum Scan ({totalUnscannedCount})</span>
-                  </button>
-                )}
-
-                {/* Negatif: Belum Scan Pulang */}
-                {(groupFilter === 'ALL' || groupFilter === 'NEGATIF') && (
-                  <button
-                    onClick={() => setRuleFilter('UNRETURNED')}
-                    className={`px-2.5 py-1.5 rounded-xl font-bold transition-all cursor-pointer shrink-0 text-xs flex items-center gap-1 ${
-                      ruleFilter === 'UNRETURNED'
-                        ? 'bg-amber-600 text-white'
-                        : 'bg-amber-50 text-amber-800 hover:bg-amber-100 border border-amber-200/60'
-                    }`}
-                  >
-                    <Clock className="w-3 h-3" />
-                    <span>Belum Pulang ({totalUnreturnedCount})</span>
-                  </button>
-                )}
               </div>
 
               {/* Class Filter & Checkbox Only Unrecorded */}
@@ -1815,10 +1463,6 @@ export const AutoCharacterAssessmentModal: React.FC<AutoCharacterAssessmentModal
 
                               {candidate.ruleType === 'VERY_ACTIVE_KBM' && <Flame className="w-3.5 h-3.5 text-emerald-600 shrink-0" />}
                               {candidate.ruleType === 'ABSENT_KBM' && <UserX className="w-3.5 h-3.5 text-rose-600 shrink-0" />}
-                              {candidate.ruleType === 'LATE' && <Clock className="w-3.5 h-3.5 text-red-500 shrink-0" />}
-                              {candidate.ruleType === 'ALPA' && <UserX className="w-3.5 h-3.5 text-rose-500 shrink-0" />}
-                              {candidate.ruleType === 'UNSCANNED' && <UserX className="w-3.5 h-3.5 text-orange-600 shrink-0" />}
-                              {candidate.ruleType === 'UNRETURNED' && <Clock className="w-3.5 h-3.5 text-amber-600 shrink-0" />}
                               {candidate.ruleType === 'DISRUPTIVE_KBM' && <VolumeX className="w-3.5 h-3.5 text-amber-600 shrink-0" />}
                               
                               <span className={

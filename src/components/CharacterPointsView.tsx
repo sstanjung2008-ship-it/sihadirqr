@@ -24,7 +24,8 @@ import {
   Zap,
   AlertTriangle,
   RefreshCw,
-  Calendar
+  Calendar,
+  UserX
 } from 'lucide-react';
 
 interface CharacterPointsViewProps {
@@ -298,7 +299,16 @@ export const CharacterPointsView: React.FC<CharacterPointsViewProps> = ({
         onTimeDates: [],
         lateDays: 0,
         latePenaltyPoints: 0,
-        lateDates: []
+        lateDates: [],
+        alpaDays: 0,
+        alpaPenaltyPoints: 0,
+        alpaDates: [],
+        unscannedInDays: 0,
+        unscannedInPenaltyPoints: 0,
+        unscannedInDates: [],
+        unreturnedDays: 0,
+        unreturnedPenaltyPoints: 0,
+        unreturnedDates: []
       };
     }
     return calculateStudentCharacterSummary(student, logs, attendanceRecords);
@@ -646,7 +656,9 @@ export const CharacterPointsView: React.FC<CharacterPointsViewProps> = ({
               <tr className="bg-slate-100/80 border-b border-slate-200 text-slate-700 font-extrabold text-xs uppercase tracking-wider">
                 <th className="p-4 pl-6">Nama Siswa</th>
                 <th className="p-4 text-center">Tepat Waktu (+1 / 3x)</th>
-                <th className="p-4 text-center">Terlambat (-1 / scan)</th>
+                <th className="p-4 text-center">Terlambat (-1)</th>
+                <th className="p-4 text-center">Alpa (-5)</th>
+                <th className="p-4 text-center">Belum Scan / Pulang (-2)</th>
                 <th className="p-4 text-center">Karakter Positif</th>
                 <th className="p-4 text-center">Karakter Negatif</th>
                 <th className="p-4 text-center">Jumlah Nilai</th>
@@ -658,7 +670,7 @@ export const CharacterPointsView: React.FC<CharacterPointsViewProps> = ({
             <tbody className="divide-y divide-slate-100">
               {filteredStudents.length === 0 ? (
                 <tr>
-                  <td colSpan={9} className="p-10 text-center text-slate-400">
+                  <td colSpan={11} className="p-10 text-center text-slate-400">
                     Tidak ada data siswa ditemukan.
                   </td>
                 </tr>
@@ -714,6 +726,42 @@ export const CharacterPointsView: React.FC<CharacterPointsViewProps> = ({
                             (score.lateDays || 0) > 0 ? 'text-rose-600' : 'text-slate-400'
                           }`}>
                             {(score.lateDays || 0) > 0 ? `-${score.latePenaltyPoints} Poin` : '0 Poin'}
+                          </span>
+                        </span>
+                      </td>
+
+                      {/* Siswa Alpa */}
+                      <td className="p-4 text-center">
+                        <span className={`inline-flex flex-col items-center justify-center px-3 py-1 rounded-2xl border shadow-2xs ${
+                          (score.alpaDays || 0) > 0
+                            ? 'bg-red-50 text-red-800 border-red-200'
+                            : 'bg-slate-50 text-slate-500 border-slate-200'
+                        }`}>
+                          <span className="font-black text-xs">{score.alpaDays || 0}x Alpa</span>
+                          <span className={`text-[10px] font-extrabold ${
+                            (score.alpaDays || 0) > 0 ? 'text-red-600' : 'text-slate-400'
+                          }`}>
+                            {(score.alpaDays || 0) > 0 ? `-${score.alpaPenaltyPoints} Poin` : '0 Poin'}
+                          </span>
+                        </span>
+                      </td>
+
+                      {/* Belum Scan Masuk & Pulang */}
+                      <td className="p-4 text-center">
+                        <span className={`inline-flex flex-col items-center justify-center px-2.5 py-1 rounded-2xl border shadow-2xs ${
+                          (score.unscannedInDays || 0) > 0 || (score.unreturnedDays || 0) > 0
+                            ? 'bg-orange-50 text-orange-900 border-orange-200'
+                            : 'bg-slate-50 text-slate-500 border-slate-200'
+                        }`}>
+                          <span className="font-black text-xs">
+                            {(score.unscannedInDays || 0) + (score.unreturnedDays || 0)}x Presensi
+                          </span>
+                          <span className={`text-[10px] font-extrabold ${
+                            (score.unscannedInDays || 0) > 0 || (score.unreturnedDays || 0) > 0 ? 'text-orange-700' : 'text-slate-400'
+                          }`}>
+                            {(score.unscannedInDays || 0) > 0 || (score.unreturnedDays || 0) > 0 
+                              ? `-${(score.unscannedInPenaltyPoints || 0) + (score.unreturnedPenaltyPoints || 0)} Poin` 
+                              : '0 Poin'}
                           </span>
                         </span>
                       </td>
@@ -1177,98 +1225,202 @@ export const CharacterPointsView: React.FC<CharacterPointsViewProps> = ({
               const pred = getPredicate(score.netScore);
               return (
                 <div className="bg-slate-50 p-4 border-b border-slate-200 space-y-3 shrink-0">
-                  <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2.5 text-center">
+                  <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-2 text-center">
                     {/* 1. Hadir Tepat Waktu */}
-                    <div className="bg-white p-2.5 rounded-2xl border border-emerald-300 shadow-2xs flex flex-col justify-between">
-                      <p className="text-[11px] font-extrabold text-emerald-800">Tepat Waktu (+1 / 3x)</p>
-                      <p className="text-base font-black text-emerald-700 mt-0.5">{score.onTimeDays || 0}x Hadir</p>
+                    <div className="bg-white p-2 rounded-2xl border border-emerald-300 shadow-2xs flex flex-col justify-between">
+                      <p className="text-[10px] font-extrabold text-emerald-800 uppercase">Tepat Waktu (+1/3x)</p>
+                      <p className="text-base font-black text-emerald-700 mt-0.5">{score.onTimeDays || 0}x</p>
                       <span className="text-[10px] font-bold text-emerald-600 bg-emerald-50 rounded-md py-0.5 mt-0.5">
                         +{score.onTimeBonusPoints || 0} Poin
                       </span>
                     </div>
+
                     {/* 2. Hadir Terlambat */}
-                    <div className="bg-white p-2.5 rounded-2xl border border-rose-300 shadow-2xs flex flex-col justify-between">
-                      <p className="text-[11px] font-extrabold text-rose-800">Terlambat (-1 / scan)</p>
-                      <p className="text-base font-black text-rose-700 mt-0.5">{score.lateDays || 0}x Terlambat</p>
+                    <div className="bg-white p-2 rounded-2xl border border-rose-300 shadow-2xs flex flex-col justify-between">
+                      <p className="text-[10px] font-extrabold text-rose-800 uppercase">Terlambat (-1)</p>
+                      <p className="text-base font-black text-rose-700 mt-0.5">{score.lateDays || 0}x</p>
                       <span className={`text-[10px] font-bold rounded-md py-0.5 mt-0.5 ${
                         (score.lateDays || 0) > 0 ? 'text-rose-600 bg-rose-50' : 'text-slate-400 bg-slate-50'
                       }`}>
                         {(score.lateDays || 0) > 0 ? `-${score.latePenaltyPoints} Poin` : '0 Poin'}
                       </span>
                     </div>
-                    {/* 3. Total Positif */}
-                    <div className="bg-white p-2.5 rounded-2xl border border-blue-200 shadow-2xs flex flex-col justify-between">
-                      <p className="text-[11px] font-bold text-blue-700">Total Positif</p>
-                      <p className="text-lg font-black text-blue-800 mt-0.5">+{score.positivePoints}</p>
-                      <span className="text-[10px] text-blue-600 font-medium">Termasuk bonus</span>
+
+                    {/* 3. Siswa Alpa */}
+                    <div className="bg-white p-2 rounded-2xl border border-red-300 shadow-2xs flex flex-col justify-between">
+                      <p className="text-[10px] font-extrabold text-red-800 uppercase">Alpa (-5)</p>
+                      <p className="text-base font-black text-red-700 mt-0.5">{score.alpaDays || 0}x</p>
+                      <span className={`text-[10px] font-bold rounded-md py-0.5 mt-0.5 ${
+                        (score.alpaDays || 0) > 0 ? 'text-red-600 bg-red-50' : 'text-slate-400 bg-slate-50'
+                      }`}>
+                        {(score.alpaDays || 0) > 0 ? `-${score.alpaPenaltyPoints} Poin` : '0 Poin'}
+                      </span>
                     </div>
-                    {/* 4. Total Negatif */}
-                    <div className="bg-white p-2.5 rounded-2xl border border-red-200 shadow-2xs flex flex-col justify-between">
-                      <p className="text-[11px] font-bold text-red-700">Total Negatif</p>
-                      <p className="text-lg font-black text-red-800 mt-0.5">-{score.negativePoints}</p>
-                      <span className="text-[10px] text-red-600 font-medium">Termasuk terlambat</span>
+
+                    {/* 4. Belum Scan Masuk */}
+                    <div className="bg-white p-2 rounded-2xl border border-orange-300 shadow-2xs flex flex-col justify-between">
+                      <p className="text-[10px] font-extrabold text-orange-800 uppercase">Belum Scan (-2)</p>
+                      <p className="text-base font-black text-orange-700 mt-0.5">{score.unscannedInDays || 0}x</p>
+                      <span className={`text-[10px] font-bold rounded-md py-0.5 mt-0.5 ${
+                        (score.unscannedInDays || 0) > 0 ? 'text-orange-700 bg-orange-50' : 'text-slate-400 bg-slate-50'
+                      }`}>
+                        {(score.unscannedInDays || 0) > 0 ? `-${score.unscannedInPenaltyPoints} Poin` : '0 Poin'}
+                      </span>
                     </div>
-                    {/* 5. Jumlah Nilai */}
-                    <div className="bg-white p-2.5 rounded-2xl border border-indigo-200 shadow-2xs flex flex-col justify-between">
-                      <p className="text-[11px] font-bold text-indigo-700">Jumlah Nilai</p>
-                      <p className={`text-lg font-black mt-0.5 ${
+
+                    {/* 5. Belum Pulang */}
+                    <div className="bg-white p-2 rounded-2xl border border-amber-300 shadow-2xs flex flex-col justify-between">
+                      <p className="text-[10px] font-extrabold text-amber-800 uppercase">Belum Pulang (-2)</p>
+                      <p className="text-base font-black text-amber-700 mt-0.5">{score.unreturnedDays || 0}x</p>
+                      <span className={`text-[10px] font-bold rounded-md py-0.5 mt-0.5 ${
+                        (score.unreturnedDays || 0) > 0 ? 'text-amber-700 bg-amber-50' : 'text-slate-400 bg-slate-50'
+                      }`}>
+                        {(score.unreturnedDays || 0) > 0 ? `-${score.unreturnedPenaltyPoints} Poin` : '0 Poin'}
+                      </span>
+                    </div>
+
+                    {/* 6. Total Positif */}
+                    <div className="bg-white p-2 rounded-2xl border border-blue-200 shadow-2xs flex flex-col justify-between">
+                      <p className="text-[10px] font-bold text-blue-700 uppercase">Total Positif</p>
+                      <p className="text-base font-black text-blue-800 mt-0.5">+{score.positivePoints}</p>
+                      <span className="text-[9px] text-blue-600 font-medium">Termasuk bonus</span>
+                    </div>
+
+                    {/* 7. Total Negatif */}
+                    <div className="bg-white p-2 rounded-2xl border border-red-200 shadow-2xs flex flex-col justify-between">
+                      <p className="text-[10px] font-bold text-red-700 uppercase">Total Negatif</p>
+                      <p className="text-base font-black text-red-800 mt-0.5">-{score.negativePoints}</p>
+                      <span className="text-[9px] text-red-600 font-medium">Termasuk penalti</span>
+                    </div>
+
+                    {/* 8. Skor Akhir & Predikat */}
+                    <div className="bg-white p-2 rounded-2xl border border-indigo-200 shadow-2xs flex flex-col items-center justify-between col-span-2 sm:col-span-1">
+                      <p className="text-[10px] font-bold text-indigo-700 uppercase">Skor & Predikat</p>
+                      <p className={`text-base font-black mt-0.5 ${
                         score.netScore >= 0 ? 'text-indigo-800' : 'text-red-700'
                       }`}>
                         {score.netScore > 0 ? `+${score.netScore}` : score.netScore}
                       </p>
-                      <span className="text-[10px] text-indigo-600 font-medium">Skor Akhir</span>
-                    </div>
-                    {/* 6. Predikat */}
-                    <div className="bg-white p-2.5 rounded-2xl border border-amber-200 shadow-2xs flex flex-col items-center justify-between col-span-2 sm:col-span-1">
-                      <p className="text-[11px] font-bold text-amber-800">Predikat</p>
-                      <span className={`my-auto px-2 py-0.5 rounded-full text-xs font-extrabold border ${pred.color}`}>
+                      <span className={`px-2 py-0.5 rounded-full text-[10px] font-extrabold border ${pred.color}`}>
                         {pred.label}
                       </span>
-                      <span className="text-[10px] text-amber-700 font-medium">Karakter</span>
                     </div>
                   </div>
 
                   {/* Banner Informasi Akumulasi Hadir Tepat Waktu */}
-                  <div className="p-3 bg-emerald-50/90 border border-emerald-300 rounded-2xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2.5 text-xs">
-                    <div className="flex items-center gap-2.5">
-                      <div className="w-8 h-8 rounded-xl bg-emerald-600 text-white flex items-center justify-center font-bold shrink-0 shadow-2xs">
-                        <CheckCircle2 className="w-4 h-4" />
+                  {score.onTimeDays > 0 && (
+                    <div className="p-3 bg-emerald-50/90 border border-emerald-300 rounded-2xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2.5 text-xs">
+                      <div className="flex items-center gap-2.5">
+                        <div className="w-8 h-8 rounded-xl bg-emerald-600 text-white flex items-center justify-center font-bold shrink-0 shadow-2xs">
+                          <CheckCircle2 className="w-4 h-4" />
+                        </div>
+                        <div>
+                          <p className="font-extrabold text-emerald-950 text-xs flex items-center gap-1.5">
+                            <span>Akumulasi Kehadiran Tepat Waktu:</span>
+                            <span className="text-emerald-700 font-black underline">{score.onTimeDays} Kali Hadir</span>
+                          </p>
+                          <p className="text-[11px] text-emerald-800 mt-0.5 leading-snug">
+                            Setiap kelipatan 3 kali hadir tepat waktu memperoleh 1 poin (3x = +1 poin, 6x = +2 poin, dst). Bonus ini otomatis terakumulasi ke Total Positif.
+                          </p>
+                        </div>
                       </div>
-                      <div>
-                        <p className="font-extrabold text-emerald-950 text-xs flex items-center gap-1.5">
-                          <span>Akumulasi Kehadiran Tepat Waktu:</span>
-                          <span className="text-emerald-700 font-black underline">{score.onTimeDays || 0} Kali Hadir</span>
-                        </p>
-                        <p className="text-[11px] text-emerald-800 mt-0.5 leading-snug">
-                          Setiap kelipatan 3 kali hadir tepat waktu memperoleh 1 poin (3x = +1 poin, 6x = +2 poin, dst). Bonus ini otomatis terakumulasi ke Total Positif.
-                        </p>
-                      </div>
+                      <span className="px-3 py-1 bg-emerald-600 text-white font-black text-xs rounded-xl shrink-0 shadow-2xs self-end sm:self-auto">
+                        +{score.onTimeBonusPoints} Poin Karakter
+                      </span>
                     </div>
-                    <span className="px-3 py-1 bg-emerald-600 text-white font-black text-xs rounded-xl shrink-0 shadow-2xs self-end sm:self-auto">
-                      +{score.onTimeBonusPoints || 0} Poin Karakter
-                    </span>
-                  </div>
+                  )}
 
                   {/* Banner Informasi Akumulasi Hadir Terlambat */}
-                  <div className="p-3 bg-rose-50/90 border border-rose-300 rounded-2xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2.5 text-xs">
-                    <div className="flex items-center gap-2.5">
-                      <div className="w-8 h-8 rounded-xl bg-rose-600 text-white flex items-center justify-center font-bold shrink-0 shadow-2xs">
-                        <Clock className="w-4 h-4" />
+                  {score.lateDays > 0 && (
+                    <div className="p-3 bg-rose-50/90 border border-rose-300 rounded-2xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2.5 text-xs">
+                      <div className="flex items-center gap-2.5">
+                        <div className="w-8 h-8 rounded-xl bg-rose-600 text-white flex items-center justify-center font-bold shrink-0 shadow-2xs">
+                          <Clock className="w-4 h-4" />
+                        </div>
+                        <div>
+                          <p className="font-extrabold text-rose-950 text-xs flex items-center gap-1.5">
+                            <span>Akumulasi Kehadiran Terlambat:</span>
+                            <span className="text-rose-700 font-black underline">{score.lateDays} Kali Scan Terlambat</span>
+                          </p>
+                          <p className="text-[11px] text-rose-800 mt-0.5 leading-snug">
+                            Setiap scan hadir terlambat selama presensi memperoleh penalti nilai -1 poin. Penalti ini otomatis terakumulasi ke Total Negatif dari seluruh rekap presensi siswa.
+                          </p>
+                        </div>
                       </div>
-                      <div>
-                        <p className="font-extrabold text-rose-950 text-xs flex items-center gap-1.5">
-                          <span>Akumulasi Kehadiran Terlambat:</span>
-                          <span className="text-rose-700 font-black underline">{score.lateDays || 0} Kali Scan Terlambat</span>
-                        </p>
-                        <p className="text-[11px] text-rose-800 mt-0.5 leading-snug">
-                          Setiap scan hadir terlambat selama presensi memperoleh penalti nilai -1 poin. Penalti ini otomatis terakumulasi ke Total Negatif dari seluruh rekap presensi siswa.
-                        </p>
-                      </div>
+                      <span className="px-3 py-1 bg-rose-600 text-white font-black text-xs rounded-xl shrink-0 shadow-2xs self-end sm:self-auto">
+                        -{score.latePenaltyPoints} Poin Penalti
+                      </span>
                     </div>
-                    <span className="px-3 py-1 bg-rose-600 text-white font-black text-xs rounded-xl shrink-0 shadow-2xs self-end sm:self-auto">
-                      -{score.latePenaltyPoints || 0} Poin Penalti
-                    </span>
-                  </div>
+                  )}
+
+                  {/* Banner Informasi Akumulasi Alpa */}
+                  {score.alpaDays > 0 && (
+                    <div className="p-3 bg-red-50/90 border border-red-300 rounded-2xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2.5 text-xs">
+                      <div className="flex items-center gap-2.5">
+                        <div className="w-8 h-8 rounded-xl bg-red-600 text-white flex items-center justify-center font-bold shrink-0 shadow-2xs">
+                          <UserX className="w-4 h-4" />
+                        </div>
+                        <div>
+                          <p className="font-extrabold text-red-950 text-xs flex items-center gap-1.5">
+                            <span>Akumulasi Presensi: Siswa Alpa (Tanpa Keterangan):</span>
+                            <span className="text-red-700 font-black underline">{score.alpaDays} Kali Alpa</span>
+                          </p>
+                          <p className="text-[11px] text-red-800 mt-0.5 leading-snug">
+                            Setiap 1 kali status Alpa pada seluruh rekap presensi memperoleh penalti nilai karakter sebesar -5 poin. Penalti ini otomatis terakumulasi ke Total Negatif.
+                          </p>
+                        </div>
+                      </div>
+                      <span className="px-3 py-1 bg-red-600 text-white font-black text-xs rounded-xl shrink-0 shadow-2xs self-end sm:self-auto">
+                        -{score.alpaPenaltyPoints} Poin Penalti
+                      </span>
+                    </div>
+                  )}
+
+                  {/* Banner Informasi Akumulasi Belum Scan Presensi Masuk */}
+                  {score.unscannedInDays > 0 && (
+                    <div className="p-3 bg-orange-50/90 border border-orange-300 rounded-2xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2.5 text-xs">
+                      <div className="flex items-center gap-2.5">
+                        <div className="w-8 h-8 rounded-xl bg-orange-600 text-white flex items-center justify-center font-bold shrink-0 shadow-2xs">
+                          <Clock className="w-4 h-4" />
+                        </div>
+                        <div>
+                          <p className="font-extrabold text-orange-950 text-xs flex items-center gap-1.5">
+                            <span>Akumulasi Presensi: Jam Masuk Belum Scan (Status Hadir):</span>
+                            <span className="text-orange-700 font-black underline">{score.unscannedInDays} Kali Belum Scan</span>
+                          </p>
+                          <p className="text-[11px] text-orange-800 mt-0.5 leading-snug">
+                            Kriteria status masuk Hadir namun kolom jam masuk belum scan memperoleh penalti nilai karakter sebesar -2 poin per kejadian dari data seluruh presensi.
+                          </p>
+                        </div>
+                      </div>
+                      <span className="px-3 py-1 bg-orange-600 text-white font-black text-xs rounded-xl shrink-0 shadow-2xs self-end sm:self-auto">
+                        -{score.unscannedInPenaltyPoints} Poin Penalti
+                      </span>
+                    </div>
+                  )}
+
+                  {/* Banner Informasi Akumulasi Belum Scan Pulang */}
+                  {score.unreturnedDays > 0 && (
+                    <div className="p-3 bg-amber-50/90 border border-amber-300 rounded-2xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2.5 text-xs">
+                      <div className="flex items-center gap-2.5">
+                        <div className="w-8 h-8 rounded-xl bg-amber-600 text-white flex items-center justify-center font-bold shrink-0 shadow-2xs">
+                          <Clock className="w-4 h-4" />
+                        </div>
+                        <div>
+                          <p className="font-extrabold text-amber-950 text-xs flex items-center gap-1.5">
+                            <span>Akumulasi Presensi: Status Pulang Belum Pulang (Status Hadir):</span>
+                            <span className="text-amber-700 font-black underline">{score.unreturnedDays} Kali Belum Pulang</span>
+                          </p>
+                          <p className="text-[11px] text-amber-800 mt-0.5 leading-snug">
+                            Kriteria status masuk Hadir namun status kepulangan belum pulang memperoleh penalti nilai karakter sebesar -2 poin per kejadian dari data seluruh presensi.
+                          </p>
+                        </div>
+                      </div>
+                      <span className="px-3 py-1 bg-amber-600 text-white font-black text-xs rounded-xl shrink-0 shadow-2xs self-end sm:self-auto">
+                        -{score.unreturnedPenaltyPoints} Poin Penalti
+                      </span>
+                    </div>
+                  )}
                 </div>
               );
             })()}
@@ -1299,7 +1451,7 @@ export const CharacterPointsView: React.FC<CharacterPointsViewProps> = ({
                             </span>
                           </p>
                           <p className="text-xs text-emerald-800 mt-0.5">
-                            Total Hadir Tepat Waktu: <strong>{score.onTimeDays} Hari / Sesi</strong> (Setiap 3 kali hadir = 1 poin).
+                            Total Hadir Tepat Waktu: <strong>{score.onTimeDays} Hari / Sesi</strong> (Setiap 3 kali hadir = +1 poin).
                           </p>
                         </div>
                       </div>
@@ -1364,7 +1516,138 @@ export const CharacterPointsView: React.FC<CharacterPointsViewProps> = ({
                 );
               })()}
 
-              {getStudentScoreSummary(detailStudent.id).logs.length === 0 && getStudentScoreSummary(detailStudent.id).onTimeDays === 0 && getStudentScoreSummary(detailStudent.id).lateDays === 0 ? (
+              {/* Tampilkan item khusus Akumulasi Siswa Alpa jika ada */}
+              {(() => {
+                const score = getStudentScoreSummary(detailStudent.id);
+                if (score.alpaDays <= 0) return null;
+                return (
+                  <div className="p-4 rounded-2xl border border-red-300 bg-gradient-to-r from-red-50/90 to-rose-50/80 shadow-2xs space-y-2">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="flex items-center gap-2.5">
+                        <div className="p-2 bg-red-600 text-white rounded-xl shadow-xs">
+                          <UserX className="w-4 h-4" />
+                        </div>
+                        <div>
+                          <p className="font-extrabold text-red-950 text-sm flex items-center gap-2">
+                            <span>Akumulasi Presensi: Siswa Alpa</span>
+                            <span className="px-2 py-0.5 rounded-full bg-red-200 text-red-900 font-black text-[10px]">
+                              PRESENSI OTOMATIS
+                            </span>
+                          </p>
+                          <p className="text-xs text-red-800 mt-0.5">
+                            Total Siswa Alpa: <strong>{score.alpaDays} Kali Alpa</strong> (Setiap 1 kali Alpa = -5 poin penalti karakter).
+                          </p>
+                        </div>
+                      </div>
+                      <span className="px-3 py-1 bg-red-600 text-white font-black text-xs rounded-xl shadow-xs">
+                        -{score.alpaPenaltyPoints} Poin
+                      </span>
+                    </div>
+
+                    {score.alpaDates && score.alpaDates.length > 0 && (
+                      <div className="pt-2 border-t border-red-200/60 flex items-center gap-1.5 flex-wrap text-[11px]">
+                        <span className="text-red-950 font-bold">Daftar Tanggal Alpa:</span>
+                        {score.alpaDates.map((dateStr, i) => (
+                          <span key={i} className="px-2 py-0.5 bg-white text-red-800 border border-red-200 rounded-md font-mono text-[10px] font-bold">
+                            {dateStr}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
+
+              {/* Tampilkan item khusus Akumulasi Belum Scan Presensi Masuk jika ada */}
+              {(() => {
+                const score = getStudentScoreSummary(detailStudent.id);
+                if (score.unscannedInDays <= 0) return null;
+                return (
+                  <div className="p-4 rounded-2xl border border-orange-300 bg-gradient-to-r from-orange-50/90 to-amber-50/80 shadow-2xs space-y-2">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="flex items-center gap-2.5">
+                        <div className="p-2 bg-orange-600 text-white rounded-xl shadow-xs">
+                          <Clock className="w-4 h-4" />
+                        </div>
+                        <div>
+                          <p className="font-extrabold text-orange-950 text-sm flex items-center gap-2">
+                            <span>Akumulasi Presensi: Belum Scan Masuk</span>
+                            <span className="px-2 py-0.5 rounded-full bg-orange-200 text-orange-900 font-black text-[10px]">
+                              PRESENSI OTOMATIS
+                            </span>
+                          </p>
+                          <p className="text-xs text-orange-800 mt-0.5">
+                            Status Masuk Hadir (Jam Belum Scan): <strong>{score.unscannedInDays} Kali</strong> (Setiap belum scan masuk = -2 poin penalti).
+                          </p>
+                        </div>
+                      </div>
+                      <span className="px-3 py-1 bg-orange-600 text-white font-black text-xs rounded-xl shadow-xs">
+                        -{score.unscannedInPenaltyPoints} Poin
+                      </span>
+                    </div>
+
+                    {score.unscannedInDates && score.unscannedInDates.length > 0 && (
+                      <div className="pt-2 border-t border-orange-200/60 flex items-center gap-1.5 flex-wrap text-[11px]">
+                        <span className="text-orange-950 font-bold">Daftar Tanggal Belum Scan Masuk:</span>
+                        {score.unscannedInDates.map((dateStr, i) => (
+                          <span key={i} className="px-2 py-0.5 bg-white text-orange-800 border border-orange-200 rounded-md font-mono text-[10px] font-bold">
+                            {dateStr}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
+
+              {/* Tampilkan item khusus Akumulasi Belum Scan Pulang jika ada */}
+              {(() => {
+                const score = getStudentScoreSummary(detailStudent.id);
+                if (score.unreturnedDays <= 0) return null;
+                return (
+                  <div className="p-4 rounded-2xl border border-amber-300 bg-gradient-to-r from-amber-50/90 to-yellow-50/80 shadow-2xs space-y-2">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="flex items-center gap-2.5">
+                        <div className="p-2 bg-amber-600 text-white rounded-xl shadow-xs">
+                          <Clock className="w-4 h-4" />
+                        </div>
+                        <div>
+                          <p className="font-extrabold text-amber-950 text-sm flex items-center gap-2">
+                            <span>Akumulasi Presensi: Belum Scan Pulang</span>
+                            <span className="px-2 py-0.5 rounded-full bg-amber-200 text-amber-900 font-black text-[10px]">
+                              PRESENSI OTOMATIS
+                            </span>
+                          </p>
+                          <p className="text-xs text-amber-800 mt-0.5">
+                            Status Masuk Hadir (Status Belum Pulang): <strong>{score.unreturnedDays} Kali</strong> (Setiap belum pulang = -2 poin penalti).
+                          </p>
+                        </div>
+                      </div>
+                      <span className="px-3 py-1 bg-amber-600 text-white font-black text-xs rounded-xl shadow-xs">
+                        -{score.unreturnedPenaltyPoints} Poin
+                      </span>
+                    </div>
+
+                    {score.unreturnedDates && score.unreturnedDates.length > 0 && (
+                      <div className="pt-2 border-t border-amber-200/60 flex items-center gap-1.5 flex-wrap text-[11px]">
+                        <span className="text-amber-950 font-bold">Daftar Tanggal Belum Pulang:</span>
+                        {score.unreturnedDates.map((dateStr, i) => (
+                          <span key={i} className="px-2 py-0.5 bg-white text-amber-800 border border-amber-200 rounded-md font-mono text-[10px] font-bold">
+                            {dateStr}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
+
+              {getStudentScoreSummary(detailStudent.id).logs.length === 0 && 
+               getStudentScoreSummary(detailStudent.id).onTimeDays === 0 && 
+               getStudentScoreSummary(detailStudent.id).lateDays === 0 &&
+               getStudentScoreSummary(detailStudent.id).alpaDays === 0 &&
+               getStudentScoreSummary(detailStudent.id).unscannedInDays === 0 &&
+               getStudentScoreSummary(detailStudent.id).unreturnedDays === 0 ? (
                 <div className="p-8 text-center text-slate-400 border border-dashed rounded-2xl">
                   Belum ada catatan nilai karakter untuk siswa ini.
                 </div>

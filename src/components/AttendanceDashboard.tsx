@@ -422,7 +422,10 @@ export const AttendanceDashboard: React.FC<AttendanceDashboardProps> = ({
         targetStudent,
         characterLogs,
         classes,
-        predicateSettings
+        predicateSettings,
+        undefined,
+        undefined,
+        attendanceRecords
       );
     } catch (err) {
       console.error('Error exporting character PDF:', err);

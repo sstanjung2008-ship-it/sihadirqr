@@ -251,7 +251,9 @@ export const CharacterPointsView: React.FC<CharacterPointsViewProps> = ({
         logs,
         classes,
         predicateSettings,
-        initialEvaluatorName
+        initialEvaluatorName,
+        teachers,
+        attendanceRecords
       );
     } catch (error) {
       console.error('Error exporting student character detail PDF:', error);

@@ -1955,7 +1955,8 @@ export async function exportStudentCharacterDetailPdf(
   classes: SchoolClass[] = [],
   predicateSettings: CharacterPredicateSettings = { minA: 30, minB: 10, minC: 0, minD: -20, minE: -50 },
   homeroomTeacherName?: string,
-  teachers?: Teacher[]
+  teachers?: Teacher[],
+  attendanceRecords?: AttendanceRecord[]
 ) {
   const doc = new jsPDF({
     orientation: 'portrait',
@@ -2022,8 +2023,8 @@ export async function exportStudentCharacterDetailPdf(
   const periodText = [yearInfo, semesterInfo].filter(Boolean).join(' • ') || 'Periode Aktif';
   doc.text(periodText, 105, 41, { align: 'center' });
 
-  // Student Logs Calculation
-  const summary = calculateStudentCharacterSummary(student, logs);
+  // Student Logs Calculation (menggunakan seluruh data presensi)
+  const summary = calculateStudentCharacterSummary(student, logs, attendanceRecords);
   const studentLogs = summary.logs;
   const posLogs = studentLogs.filter(l => l.traitType === 'POSITIF');
   const negLogs = studentLogs.filter(l => l.traitType === 'NEGATIF');

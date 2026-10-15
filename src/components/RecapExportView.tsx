@@ -2810,7 +2810,7 @@ export const RecapExportView: React.FC<RecapExportViewProps> = ({
                   if (!selectedCharacterStudentDetail) return;
                   setIsExportingCharacterDetail(true);
                   try {
-                    const studentLogs = calculateStudentCharacterSummary(selectedCharacterStudentDetail, characterLogs).logs;
+                    const studentLogs = calculateStudentCharacterSummary(selectedCharacterStudentDetail, characterLogs, attendanceRecords).logs;
                     await exportStudentCharacterDetailPdf(
                       schoolProfile,
                       selectedCharacterStudentDetail,
@@ -2818,7 +2818,8 @@ export const RecapExportView: React.FC<RecapExportViewProps> = ({
                       classes,
                       predicateSettings,
                       undefined,
-                      getTeachers()
+                      getTeachers(),
+                      attendanceRecords
                     );
                   } catch (e) {
                     console.error('Failed to export character detail PDF:', e);

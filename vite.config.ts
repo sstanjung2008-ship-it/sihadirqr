@@ -21,6 +21,42 @@ export default defineConfig(({ mode }) => {
         alias: {
           '@': path.resolve(__dirname, '.'),
         }
+      },
+      build: {
+        target: 'esnext',
+        chunkSizeWarningLimit: 1200,
+        rollupOptions: {
+          output: {
+            manualChunks(id) {
+              if (id.includes('node_modules')) {
+                if (id.includes('react') || id.includes('scheduler')) {
+                  return 'vendor-react';
+                }
+                if (id.includes('firebase')) {
+                  return 'vendor-firebase';
+                }
+                if (id.includes('xlsx')) {
+                  return 'vendor-xlsx';
+                }
+                if (id.includes('jspdf') || id.includes('html2canvas') || id.includes('canvg')) {
+                  return 'vendor-pdf';
+                }
+                if (id.includes('recharts') || id.includes('d3-')) {
+                  return 'vendor-charts';
+                }
+                if (id.includes('html5-qrcode')) {
+                  return 'vendor-scanner';
+                }
+                if (id.includes('lucide-react')) {
+                  return 'vendor-icons';
+                }
+                if (id.includes('@google/genai')) {
+                  return 'vendor-genai';
+                }
+              }
+            }
+          }
+        }
       }
     };
 });

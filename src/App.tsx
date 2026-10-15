@@ -73,28 +73,38 @@ import {
 import { ShieldCheck, CheckCircle2, WifiOff, RefreshCw, Wifi } from 'lucide-react';
 
 import { Sidebar } from './components/Sidebar';
-import { QRScannerView } from './components/QRScannerView';
 import { AttendanceDashboard } from './components/AttendanceDashboard';
-import { AnalyticsView } from './components/AnalyticsView';
-import { StudentDirectoryView } from './components/StudentDirectoryView';
-import { ClassManagementView } from './components/ClassManagementView';
-import { LeaveRequestView } from './components/LeaveRequestView';
 import { BulkReturnUpdatePayload } from './components/BulkReturnManagementModal';
-import { SchoolSettingsView } from './components/SchoolSettingsView';
-import { RecapExportView } from './components/RecapExportView';
-import { TeacherDirectoryView } from './components/TeacherDirectoryView';
-import { LearningJournalView } from './components/LearningJournalView';
-import { DisciplineRulesView } from './components/DisciplineRulesView';
-import { CharacterInputView } from './components/CharacterInputView';
-import { CharacterPointsView } from './components/CharacterPointsView';
-import { ScheduleManagementView } from './components/ScheduleManagementView';
-import { ParentAccountView } from './components/ParentAccountView';
-import { TeacherAccountView } from './components/TeacherAccountView';
 import { ParentBottomNav } from './components/ParentBottomNav';
 import { TeacherBottomNav } from './components/TeacherBottomNav';
 import { LoginView } from './components/LoginView';
 import { PWAInstallBanner } from './components/PWAInstallBanner';
 import { KbmVoiceReminderBanner } from './components/KbmVoiceReminderBanner';
+
+// Code-splitting via React.lazy untuk pemuatan awal aplikasi yang super ringan & cepat
+const QRScannerView = React.lazy(() => import('./components/QRScannerView').then(m => ({ default: m.QRScannerView })));
+const AnalyticsView = React.lazy(() => import('./components/AnalyticsView').then(m => ({ default: m.AnalyticsView })));
+const StudentDirectoryView = React.lazy(() => import('./components/StudentDirectoryView').then(m => ({ default: m.StudentDirectoryView })));
+const ClassManagementView = React.lazy(() => import('./components/ClassManagementView').then(m => ({ default: m.ClassManagementView })));
+const LeaveRequestView = React.lazy(() => import('./components/LeaveRequestView').then(m => ({ default: m.LeaveRequestView })));
+const SchoolSettingsView = React.lazy(() => import('./components/SchoolSettingsView').then(m => ({ default: m.SchoolSettingsView })));
+const RecapExportView = React.lazy(() => import('./components/RecapExportView').then(m => ({ default: m.RecapExportView })));
+const TeacherDirectoryView = React.lazy(() => import('./components/TeacherDirectoryView').then(m => ({ default: m.TeacherDirectoryView })));
+const LearningJournalView = React.lazy(() => import('./components/LearningJournalView').then(m => ({ default: m.LearningJournalView })));
+const DisciplineRulesView = React.lazy(() => import('./components/DisciplineRulesView').then(m => ({ default: m.DisciplineRulesView })));
+const CharacterInputView = React.lazy(() => import('./components/CharacterInputView').then(m => ({ default: m.CharacterInputView })));
+const CharacterPointsView = React.lazy(() => import('./components/CharacterPointsView').then(m => ({ default: m.CharacterPointsView })));
+const ScheduleManagementView = React.lazy(() => import('./components/ScheduleManagementView').then(m => ({ default: m.ScheduleManagementView })));
+const ParentAccountView = React.lazy(() => import('./components/ParentAccountView').then(m => ({ default: m.ParentAccountView })));
+const TeacherAccountView = React.lazy(() => import('./components/TeacherAccountView').then(m => ({ default: m.TeacherAccountView })));
+
+const ViewLoadingFallback: React.FC = () => (
+  <div className="flex flex-col items-center justify-center p-12 min-h-[45vh] text-center">
+    <div className="w-9 h-9 border-3 border-indigo-600 border-t-transparent rounded-full animate-spin mb-3"></div>
+    <p className="text-xs font-bold text-slate-700">Memuat Halaman...</p>
+    <p className="text-[11px] text-slate-400 mt-0.5">Menyiapkan modul dan data komponen</p>
+  </div>
+);
 import { 
   KbmReminderInfo, 
   playTeacherKbmVoiceReminder, 
@@ -1776,6 +1786,7 @@ export default function App() {
 
         {/* Main View Router */}
         <main className={`flex-1 p-4 sm:p-6 lg:p-8 max-w-7xl w-full mx-auto ${(currentRole === 'PARENT' || currentRole === 'TEACHER') ? 'pb-28 lg:pb-8' : ''}`}>
+          <React.Suspense fallback={<ViewLoadingFallback />}>
           {activeTab === 'scanner' && (
             <QRScannerView
               students={students}
@@ -2042,6 +2053,7 @@ export default function App() {
               onRestoreAttendance={handleRestoreAttendance}
             />
           )}
+          </React.Suspense>
         </main>
       </div>
 

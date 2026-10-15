@@ -283,32 +283,32 @@ export default function App() {
 
     // 2. By nipOrNisn from session (exact match, trimming spaces)
     if (userSession?.nipOrNisn) {
-      const cleanNip = userSession.nipOrNisn.replace(/[\.,\s\-_]/g, '').toLowerCase();
-      const found = teachers.find(t => (t.nip || '').replace(/[\.,\s\-_]/g, '').toLowerCase() === cleanNip);
+      const cleanNip = String(userSession.nipOrNisn).replace(/[\.,\s\-_]/g, '').toLowerCase();
+      const found = teachers.find(t => String(t.nip || '').replace(/[\.,\s\-_]/g, '').toLowerCase() === cleanNip);
       if (found) return found;
     }
 
     // 3. By username from session (phone or nip)
     if (userSession?.username) {
-      const cleanUser = userSession.username.replace(/[\.,\s\-_]/g, '').toLowerCase();
+      const cleanUser = String(userSession.username).replace(/[\.,\s\-_]/g, '').toLowerCase();
       const found = teachers.find(t => 
-        (t.nip || '').replace(/[\.,\s\-_]/g, '').toLowerCase() === cleanUser ||
-        (t.phone && t.phone.replace(/[\.,\s\-_]/g, '').toLowerCase() === cleanUser)
+        String(t.nip || '').replace(/[\.,\s\-_]/g, '').toLowerCase() === cleanUser ||
+        (t.phone && String(t.phone).replace(/[\.,\s\-_]/g, '').toLowerCase() === cleanUser)
       );
       if (found) return found;
     }
 
     // 4. By displayName from session
     if (userSession?.displayName) {
-      const cleanDisplay = userSession.displayName.replace(/[\.,\s\-_]/g, '').toLowerCase();
-      const found = teachers.find(t => (t.name || '').replace(/[\.,\s\-_]/g, '').toLowerCase() === cleanDisplay);
+      const cleanDisplay = String(userSession.displayName).replace(/[\.,\s\-_]/g, '').toLowerCase();
+      const found = teachers.find(t => String(t.name || '').replace(/[\.,\s\-_]/g, '').toLowerCase() === cleanDisplay);
       if (found) return found;
 
       // Also try normalized academic titles
-      const normDisplay = userSession.displayName.toLowerCase().replace(/\b(dr|dra|drs|h|hj|prof|ir|s\.pd|m\.pd|s\.kom|m\.kom|s\.ag|m\.ag|s\.si|m\.si|s\.e|m\.m|s\.sos|m\.sos|s\.t|m\.t|b\.sc|m\.sc|gr|lc)\b/gi, '').replace(/[\.,\s\-_]/g, '');
+      const normDisplay = String(userSession.displayName).toLowerCase().replace(/\b(dr|dra|drs|h|hj|prof|ir|s\.pd|m\.pd|s\.kom|m\.kom|s\.ag|m\.ag|s\.si|m\.si|s\.e|m\.m|s\.sos|m\.sos|s\.t|m\.t|b\.sc|m\.sc|gr|lc)\b/gi, '').replace(/[\.,\s\-_]/g, '');
       if (normDisplay) {
         const foundNorm = teachers.find(t => {
-          const normT = (t.name || '').toLowerCase().replace(/\b(dr|dra|drs|h|hj|prof|ir|s\.pd|m\.pd|s\.kom|m\.kom|s\.ag|m\.ag|s\.si|m\.si|s\.e|m\.m|s\.sos|m\.sos|s\.t|m\.t|b\.sc|m\.sc|gr|lc)\b/gi, '').replace(/[\.,\s\-_]/g, '');
+          const normT = String(t.name || '').toLowerCase().replace(/\b(dr|dra|drs|h|hj|prof|ir|s\.pd|m\.pd|s\.kom|m\.kom|s\.ag|m\.ag|s\.si|m\.si|s\.e|m\.m|s\.sos|m\.sos|s\.t|m\.t|b\.sc|m\.sc|gr|lc)\b/gi, '').replace(/[\.,\s\-_]/g, '');
           return normT && (normT === normDisplay || normT.includes(normDisplay) || normDisplay.includes(normT));
         });
         if (foundNorm) return foundNorm;

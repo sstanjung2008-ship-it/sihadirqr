@@ -63,9 +63,9 @@ export const LoginView: React.FC<LoginViewProps> = ({
     return () => clearInterval(timer);
   }, []);
 
-  const normalizePhone = (p?: string) => {
+  const normalizePhone = (p?: any) => {
     if (!p) return '';
-    let digits = p.replace(/\D/g, '');
+    let digits = String(p).replace(/\D/g, '');
     if (digits.startsWith('62')) {
       digits = '0' + digits.slice(2);
     }
@@ -147,21 +147,21 @@ export const LoginView: React.FC<LoginViewProps> = ({
       if (tPhoneDigits && cleanDigitsUser && tPhoneDigits === cleanDigitsUser) {
         return true;
       }
-      if (t.phone && t.phone.replace(/\s+/g, '') === cleanNoSpaceUser) {
+      if (t.phone && String(t.phone).replace(/\s+/g, '') === cleanNoSpaceUser) {
         return true;
       }
       // Check Email match
-      if (t.email && t.email.trim().toLowerCase() === cleanInputUser.toLowerCase()) {
+      if (t.email && String(t.email).trim().toLowerCase() === cleanInputUser.toLowerCase()) {
         return true;
       }
       // Check NIP or ID match
       if (t.nip) {
-        const tNipPure = t.nip.replace(/\D/g, '');
+        const tNipPure = String(t.nip).replace(/\D/g, '');
         if (pureDigitsInput && tNipPure && pureDigitsInput === tNipPure) return true;
-        if (t.nip.replace(/\s+/g, '') === cleanNoSpaceUser) return true;
-        if (t.nip.toLowerCase() === cleanInputUser.toLowerCase()) return true;
+        if (String(t.nip).replace(/\s+/g, '') === cleanNoSpaceUser) return true;
+        if (String(t.nip).toLowerCase() === cleanInputUser.toLowerCase()) return true;
       }
-      if (t.id && t.id.toLowerCase() === cleanInputUser.toLowerCase()) {
+      if (t.id && String(t.id).toLowerCase() === cleanInputUser.toLowerCase()) {
         return true;
       }
       // Check Teacher Name match (case-insensitive & titles tolerant)
@@ -218,16 +218,16 @@ export const LoginView: React.FC<LoginViewProps> = ({
 
     // 4. PARENT / STUDENT (WALI MURID) LOGIC
     const matchedStudent = currentStudents.find(s => {
-      const sNisnPure = (s.nisn || '').replace(/\D/g, '');
-      const sNisPure = (s.nis || '').replace(/\D/g, '');
+      const sNisnPure = String(s.nisn || '').replace(/\D/g, '');
+      const sNisPure = String(s.nis || '').replace(/\D/g, '');
       const sParentPhoneDigits = normalizePhone(s.parentPhone);
 
       if (pureDigitsInput && sNisnPure && pureDigitsInput === sNisnPure) return true;
       if (pureDigitsInput && sNisPure && pureDigitsInput === sNisPure) return true;
       if (cleanDigitsUser && sParentPhoneDigits && cleanDigitsUser === sParentPhoneDigits) return true;
-      if (s.nisn && s.nisn.replace(/\s+/g, '') === cleanNoSpaceUser) return true;
-      if (s.nisn && s.nisn.toLowerCase() === cleanInputUser.toLowerCase()) return true;
-      if (s.nis && s.nis.toLowerCase() === cleanInputUser.toLowerCase()) return true;
+      if (s.nisn && String(s.nisn).replace(/\s+/g, '') === cleanNoSpaceUser) return true;
+      if (s.nisn && String(s.nisn).toLowerCase() === cleanInputUser.toLowerCase()) return true;
+      if (s.nis && String(s.nis).toLowerCase() === cleanInputUser.toLowerCase()) return true;
       if (s.name) {
         const sLower = s.name.toLowerCase().trim();
         const inputLower = cleanInputUser.toLowerCase();

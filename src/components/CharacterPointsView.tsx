@@ -269,7 +269,7 @@ export const CharacterPointsView: React.FC<CharacterPointsViewProps> = ({
   const [followUpBy, setFollowUpBy] = useState<string>('');
 
   const sortedClasses = [...classes].sort((a, b) =>
-    a.name.localeCompare(b.name, 'id', { numeric: true, sensitivity: 'base' })
+    (a.name || '').localeCompare(b.name || '', 'id', { numeric: true, sensitivity: 'base' })
   );
 
   // Filter Nilai Karakter Siswa (Lebih besar dari / Kurang dari)
@@ -290,9 +290,9 @@ export const CharacterPointsView: React.FC<CharacterPointsViewProps> = ({
     return students
       .filter(student => {
         const matchesClass = selectedClassId === 'ALL' || student.classId === selectedClassId;
-        const matchesSearch = student.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-          student.nisn.includes(searchQuery) ||
-          student.className.toLowerCase().includes(searchQuery.toLowerCase());
+        const matchesSearch = (student.name || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+          String(student.nisn || '').includes(searchQuery) ||
+          (student.className || '').toLowerCase().includes(searchQuery.toLowerCase());
         if (!matchesClass || !matchesSearch) return false;
 
         if (scoreFilterOp !== 'ALL') {
@@ -303,7 +303,7 @@ export const CharacterPointsView: React.FC<CharacterPointsViewProps> = ({
 
         return true;
       })
-      .sort((a, b) => a.name.localeCompare(b.name, 'id', { numeric: true, sensitivity: 'base' }));
+      .sort((a, b) => (a.name || '').localeCompare(b.name || '', 'id', { numeric: true, sensitivity: 'base' }));
   }, [students, selectedClassId, searchQuery, scoreFilterOp, scoreFilterVal, studentScoresMap]);
 
   // Calculate character score summary for a student (using memoized cache)
@@ -712,66 +712,97 @@ export const CharacterPointsView: React.FC<CharacterPointsViewProps> = ({
           </div>
         </div>
 
-        {/* Quick Filter Chips: Pilihan Cepat Lebih Besar Dari & Kurang Dari (50, 25, 0, -25, -50, -100) */}
-        <div className="pt-2 border-t border-slate-100 flex flex-wrap items-center gap-1.5 text-xs">
-          <span className="text-[11px] font-extrabold text-slate-500 uppercase tracking-wider mr-1">
-            Filter Cepat Nilai:
-          </span>
+        {/* Quick Filter: Pilihan Lengkap Lebih Besar Dari (≥) & Kurang Dari (≤) untuk Nilai 50, 25, 0, -25, -50, -100 */}
+        <div className="pt-2.5 border-t border-slate-100 flex flex-wrap items-center gap-2 text-xs">
+          <div className="flex items-center gap-1.5 shrink-0">
+            <span className="text-[11px] font-extrabold text-slate-500 uppercase tracking-wider mr-1">
+              Filter Nilai:
+            </span>
+            <button
+              type="button"
+              onClick={() => setScoreFilterOp('ALL')}
+              className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                scoreFilterOp === 'ALL'
+                  ? 'bg-slate-800 text-white shadow-2xs ring-2 ring-slate-400'
+                  : 'bg-slate-100 hover:bg-slate-200 text-slate-600'
+              }`}
+            >
+              Semua Nilai
+            </button>
+          </div>
 
-          <button
-            type="button"
-            onClick={() => setScoreFilterOp('ALL')}
-            className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-              scoreFilterOp === 'ALL'
-                ? 'bg-slate-800 text-white shadow-2xs'
-                : 'bg-slate-100 hover:bg-slate-200 text-slate-600'
-            }`}
-          >
-            Semua Nilai
-          </button>
+          {/* Group: Lebih Besar Dari (≥) */}
+          <div className="flex items-center gap-1 flex-wrap">
+            <span className="text-[10px] font-black text-emerald-800 bg-emerald-100/80 px-2 py-1 rounded-lg border border-emerald-300 shrink-0">
+              Lebih Besar (≥):
+            </span>
+            {[50, 25, 0, -25, -50, -100].map((val) => {
+              const isSelected = scoreFilterOp === 'GTE' && scoreFilterVal === val;
+              return (
+                <button
+                  key={`gte-${val}`}
+                  type="button"
+                  onClick={() => {
+                    if (isSelected) {
+                      setScoreFilterOp('ALL');
+                    } else {
+                      setScoreFilterOp('GTE');
+                      setScoreFilterVal(val);
+                    }
+                  }}
+                  className={`px-2.5 py-1 rounded-lg text-xs font-black transition-all cursor-pointer border ${
+                    isSelected
+                      ? 'bg-emerald-600 text-white border-emerald-600 shadow-xs ring-2 ring-emerald-300 scale-105'
+                      : 'bg-white hover:bg-emerald-50 text-emerald-800 border-emerald-200 shadow-2xs'
+                  }`}
+                  title={`Filter siswa dengan Nilai Karakter Lebih Besar Dari atau Sama Dengan (≥) ${val}`}
+                >
+                  ≥ {val}
+                </button>
+              );
+            })}
+          </div>
 
-          {[
-            { label: '≥ 50', op: 'GTE' as const, val: 50, color: 'text-emerald-700 border-emerald-300' },
-            { label: '≥ 25', op: 'GTE' as const, val: 25, color: 'text-emerald-700 border-emerald-300' },
-            { label: '≥ 0', op: 'GTE' as const, val: 0, color: 'text-teal-700 border-teal-300' },
-            { label: '≤ 0', op: 'LTE' as const, val: 0, color: 'text-amber-700 border-amber-300' },
-            { label: '≤ -25', op: 'LTE' as const, val: -25, color: 'text-rose-700 border-rose-300' },
-            { label: '≤ -50', op: 'LTE' as const, val: -50, color: 'text-rose-700 border-rose-300' },
-            { label: '≤ -100', op: 'LTE' as const, val: -100, color: 'text-red-900 border-red-400' },
-          ].map((chip) => {
-            const isSelected = scoreFilterOp === chip.op && scoreFilterVal === chip.val;
-            return (
-              <button
-                key={chip.label}
-                type="button"
-                onClick={() => {
-                  if (isSelected) {
-                    setScoreFilterOp('ALL');
-                  } else {
-                    setScoreFilterOp(chip.op);
-                    setScoreFilterVal(chip.val);
-                  }
-                }}
-                className={`px-2.5 py-1 rounded-lg text-xs font-black transition-all cursor-pointer border ${
-                  isSelected
-                    ? 'bg-indigo-600 text-white border-indigo-600 shadow-xs ring-2 ring-indigo-300 scale-105'
-                    : `bg-white hover:bg-slate-50 ${chip.color}`
-                }`}
-                title={`Filter siswa dengan Nilai Karakter ${chip.op === 'GTE' ? 'Lebih besar dari atau sama dengan' : 'Kurang dari atau sama dengan'} ${chip.val}`}
-              >
-                {chip.label}
-              </button>
-            );
-          })}
+          {/* Group: Kurang Dari (≤) */}
+          <div className="flex items-center gap-1 flex-wrap">
+            <span className="text-[10px] font-black text-rose-800 bg-rose-100/80 px-2 py-1 rounded-lg border border-rose-300 shrink-0">
+              Kurang Dari (≤):
+            </span>
+            {[50, 25, 0, -25, -50, -100].map((val) => {
+              const isSelected = scoreFilterOp === 'LTE' && scoreFilterVal === val;
+              return (
+                <button
+                  key={`lte-${val}`}
+                  type="button"
+                  onClick={() => {
+                    if (isSelected) {
+                      setScoreFilterOp('ALL');
+                    } else {
+                      setScoreFilterOp('LTE');
+                      setScoreFilterVal(val);
+                    }
+                  }}
+                  className={`px-2.5 py-1 rounded-lg text-xs font-black transition-all cursor-pointer border ${
+                    isSelected
+                      ? 'bg-rose-600 text-white border-rose-600 shadow-xs ring-2 ring-rose-300 scale-105'
+                      : 'bg-white hover:bg-rose-50 text-rose-800 border-rose-200 shadow-2xs'
+                  }`}
+                  title={`Filter siswa dengan Nilai Karakter Kurang Dari atau Sama Dengan (≤) ${val}`}
+                >
+                  ≤ {val}
+                </button>
+              );
+            })}
+          </div>
 
           {scoreFilterOp !== 'ALL' && (
-            <span className="ml-auto inline-flex items-center gap-1 text-[11px] font-bold text-indigo-700 bg-indigo-50 border border-indigo-200 px-2 py-0.5 rounded-md">
+            <span className="ml-auto inline-flex items-center gap-1.5 text-[11px] font-black text-indigo-800 bg-indigo-50 border border-indigo-200 px-2.5 py-1 rounded-lg shadow-2xs">
               <span>Aktif: Nilai {scoreFilterOp === 'GTE' ? '≥' : '≤'} {scoreFilterVal}</span>
               <button
                 type="button"
                 onClick={() => setScoreFilterOp('ALL')}
-                className="hover:text-rose-600 cursor-pointer ml-0.5 font-black"
-                title="Reset"
+                className="hover:text-rose-600 cursor-pointer ml-1 font-black text-slate-400 hover:scale-110 transition-transform"
+                title="Hapus filter nilai"
               >
                 ✕
               </button>

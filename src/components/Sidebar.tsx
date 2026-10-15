@@ -82,8 +82,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
     const teachers = getTeachers();
     const currentTeacher = teachers.find(t => 
       (userSession?.teacherId && t.id === userSession.teacherId) ||
-      (userSession?.nipOrNisn && t.nip === userSession.nipOrNisn) ||
-      (userSession?.displayName && t.name.toLowerCase() === userSession.displayName.toLowerCase())
+      (userSession?.nipOrNisn && String(t.nip || '') === String(userSession.nipOrNisn)) ||
+      (userSession?.displayName && String(t.name || '').toLowerCase() === String(userSession.displayName).toLowerCase())
     );
 
     return !!(
@@ -115,8 +115,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
     const teachers = getTeachers();
     const currentTeacher = teachers.find(t => 
       (userSession?.teacherId && t.id === userSession.teacherId) ||
-      (userSession?.nipOrNisn && t.nip === userSession.nipOrNisn) ||
-      (userSession?.displayName && t.name.toLowerCase() === userSession.displayName.toLowerCase())
+      (userSession?.nipOrNisn && String(t.nip || '') === String(userSession.nipOrNisn)) ||
+      (userSession?.displayName && String(t.name || '').toLowerCase() === String(userSession.displayName).toLowerCase())
     );
 
     const allClasses = getSchoolClasses();
@@ -245,8 +245,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
       const students = getStudents();
       let student = students.find(s => s.id === userSession?.studentId || s.nisn === userSession?.nipOrNisn);
       if (!student && userSession?.displayName) {
-        student = students.find(s => s.name.toLowerCase().includes(userSession.displayName.toLowerCase()) || 
-                                     s.parentName?.toLowerCase().includes(userSession.displayName.toLowerCase()));
+        student = students.find(s => String(s.name || '').toLowerCase().includes(String(userSession.displayName).toLowerCase()) || 
+                                     String(s.parentName || '').toLowerCase().includes(String(userSession.displayName).toLowerCase()));
       }
       if (!student && students.length > 0) {
         student = students[0];

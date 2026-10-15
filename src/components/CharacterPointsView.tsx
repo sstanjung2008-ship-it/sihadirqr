@@ -25,7 +25,8 @@ import {
   AlertTriangle,
   RefreshCw,
   Calendar,
-  UserX
+  UserX,
+  SlidersHorizontal
 } from 'lucide-react';
 
 interface CharacterPointsViewProps {
@@ -271,7 +272,20 @@ export const CharacterPointsView: React.FC<CharacterPointsViewProps> = ({
     a.name.localeCompare(b.name, 'id', { numeric: true, sensitivity: 'base' })
   );
 
-  // Filter students based on Class and Search (sorted Ascending by student name)
+  // Filter Nilai Karakter Siswa (Lebih besar dari / Kurang dari)
+  const [scoreFilterOp, setScoreFilterOp] = useState<'ALL' | 'GTE' | 'LTE'>('ALL');
+  const [scoreFilterVal, setScoreFilterVal] = useState<number>(0);
+
+  // Pre-calculate/memoize character summary map for fast lookup and filtering
+  const studentScoresMap = useMemo(() => {
+    const map = new Map<string, ReturnType<typeof calculateStudentCharacterSummary>>();
+    students.forEach(s => {
+      map.set(s.id, calculateStudentCharacterSummary(s, logs, attendanceRecords));
+    });
+    return map;
+  }, [students, logs, attendanceRecords]);
+
+  // Filter students based on Class, Search, and Score Filter (sorted Ascending by student name)
   const filteredStudents = useMemo(() => {
     return students
       .filter(student => {
@@ -279,13 +293,23 @@ export const CharacterPointsView: React.FC<CharacterPointsViewProps> = ({
         const matchesSearch = student.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
           student.nisn.includes(searchQuery) ||
           student.className.toLowerCase().includes(searchQuery.toLowerCase());
-        return matchesClass && matchesSearch;
+        if (!matchesClass || !matchesSearch) return false;
+
+        if (scoreFilterOp !== 'ALL') {
+          const score = studentScoresMap.get(student.id)?.netScore ?? 0;
+          if (scoreFilterOp === 'GTE' && !(score >= scoreFilterVal)) return false;
+          if (scoreFilterOp === 'LTE' && !(score <= scoreFilterVal)) return false;
+        }
+
+        return true;
       })
       .sort((a, b) => a.name.localeCompare(b.name, 'id', { numeric: true, sensitivity: 'base' }));
-  }, [students, selectedClassId, searchQuery]);
+  }, [students, selectedClassId, searchQuery, scoreFilterOp, scoreFilterVal, studentScoresMap]);
 
-  // Calculate character score summary for a student
+  // Calculate character score summary for a student (using memoized cache)
   const getStudentScoreSummary = (studentId: string) => {
+    const cached = studentScoresMap.get(studentId);
+    if (cached) return cached;
     const student = students.find(s => s.id === studentId);
     if (!student) {
       return {
@@ -604,40 +628,155 @@ export const CharacterPointsView: React.FC<CharacterPointsViewProps> = ({
       </div>
 
       {/* Filters and Search Bar */}
-      <div className="bg-white rounded-2xl p-4 border border-slate-200 shadow-xs flex flex-col sm:flex-row items-center justify-between gap-4">
-        <div className="flex flex-col sm:flex-row items-center gap-3 w-full sm:w-auto">
-          {/* Class Filter */}
-          <div className="flex items-center gap-2 w-full sm:w-auto">
-            <Filter className="w-4 h-4 text-slate-400 shrink-0" />
-            <select
-              value={selectedClassId}
-              onChange={(e) => setSelectedClassId(e.target.value)}
-              className="px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm font-semibold text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 w-full sm:w-48"
-            >
-              <option value="ALL">Semua Kelas ({students.length} Siswa)</option>
-              {sortedClasses.map(c => (
-                <option key={c.id} value={c.id}>
-                  Kelas {c.name}
-                </option>
-              ))}
-            </select>
+      <div className="bg-white rounded-2xl p-4 border border-slate-200 shadow-xs space-y-3">
+        <div className="flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-3">
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 flex-1">
+            {/* Class Filter */}
+            <div className="flex items-center gap-2 w-full sm:w-auto">
+              <Filter className="w-4 h-4 text-slate-400 shrink-0" />
+              <select
+                value={selectedClassId}
+                onChange={(e) => setSelectedClassId(e.target.value)}
+                className="px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs sm:text-sm font-semibold text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 w-full sm:w-44"
+              >
+                <option value="ALL">Semua Kelas ({students.length} Siswa)</option>
+                {sortedClasses.map(c => (
+                  <option key={c.id} value={c.id}>
+                    Kelas {c.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* Score / Nilai Karakter Filter (Lebih Besar Dari / Kurang Dari) */}
+            <div className="flex items-center gap-1.5 w-full sm:w-auto">
+              <div className="flex items-center bg-slate-50 border border-slate-200 rounded-xl overflow-hidden focus-within:ring-2 focus-within:ring-indigo-500 w-full sm:w-auto">
+                <div className="pl-3 pr-1 text-indigo-600 flex items-center shrink-0">
+                  <SlidersHorizontal className="w-3.5 h-3.5" />
+                </div>
+                <select
+                  value={scoreFilterOp}
+                  onChange={(e) => setScoreFilterOp(e.target.value as 'ALL' | 'GTE' | 'LTE')}
+                  className="py-2 pl-1 pr-2 bg-transparent text-xs sm:text-sm font-bold text-slate-700 focus:outline-none cursor-pointer"
+                  title="Pilih operator perbandingan nilai karakter"
+                >
+                  <option value="ALL">Semua Nilai</option>
+                  <option value="GTE">Lebih besar dari (≥)</option>
+                  <option value="LTE">Kurang dari (≤)</option>
+                </select>
+
+                {scoreFilterOp !== 'ALL' && (
+                  <select
+                    value={scoreFilterVal}
+                    onChange={(e) => setScoreFilterVal(Number(e.target.value))}
+                    className="py-2 px-2.5 bg-indigo-50 border-l border-indigo-200 text-xs sm:text-sm font-black text-indigo-800 focus:outline-none cursor-pointer"
+                    title="Pilih batas nilai karakter"
+                  >
+                    <option value={50}>Nilai 50</option>
+                    <option value={25}>Nilai 25</option>
+                    <option value={0}>Nilai 0</option>
+                    <option value={-25}>Nilai -25</option>
+                    <option value={-50}>Nilai -50</option>
+                    <option value={-100}>Nilai -100</option>
+                  </select>
+                )}
+              </div>
+
+              {scoreFilterOp !== 'ALL' && (
+                <button
+                  type="button"
+                  onClick={() => setScoreFilterOp('ALL')}
+                  className="p-2 text-rose-500 hover:text-rose-700 hover:bg-rose-50 rounded-xl text-xs font-bold transition-colors cursor-pointer shrink-0"
+                  title="Hapus filter nilai"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              )}
+            </div>
+
+            {/* Search Box */}
+            <div className="relative flex-1 min-w-[200px]">
+              <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
+              <input
+                type="text"
+                placeholder="Cari nama atau NISN siswa..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="w-full pl-10 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              />
+            </div>
           </div>
 
-          {/* Search Box */}
-          <div className="relative w-full sm:w-72">
-            <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
-            <input
-              type="text"
-              placeholder="Cari nama atau NISN..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full pl-10 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-            />
+          <div className="text-xs text-slate-500 font-medium shrink-0 self-end lg:self-center">
+            Menampilkan <span className="font-bold text-slate-800">{filteredStudents.length}</span> dari <span className="font-bold text-slate-700">{students.length}</span> siswa
           </div>
         </div>
 
-        <div className="text-xs text-slate-500 font-medium">
-          Menampilkan <span className="font-bold text-slate-800">{filteredStudents.length}</span> siswa
+        {/* Quick Filter Chips: Pilihan Cepat Lebih Besar Dari & Kurang Dari (50, 25, 0, -25, -50, -100) */}
+        <div className="pt-2 border-t border-slate-100 flex flex-wrap items-center gap-1.5 text-xs">
+          <span className="text-[11px] font-extrabold text-slate-500 uppercase tracking-wider mr-1">
+            Filter Cepat Nilai:
+          </span>
+
+          <button
+            type="button"
+            onClick={() => setScoreFilterOp('ALL')}
+            className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+              scoreFilterOp === 'ALL'
+                ? 'bg-slate-800 text-white shadow-2xs'
+                : 'bg-slate-100 hover:bg-slate-200 text-slate-600'
+            }`}
+          >
+            Semua Nilai
+          </button>
+
+          {[
+            { label: '≥ 50', op: 'GTE' as const, val: 50, color: 'text-emerald-700 border-emerald-300' },
+            { label: '≥ 25', op: 'GTE' as const, val: 25, color: 'text-emerald-700 border-emerald-300' },
+            { label: '≥ 0', op: 'GTE' as const, val: 0, color: 'text-teal-700 border-teal-300' },
+            { label: '≤ 0', op: 'LTE' as const, val: 0, color: 'text-amber-700 border-amber-300' },
+            { label: '≤ -25', op: 'LTE' as const, val: -25, color: 'text-rose-700 border-rose-300' },
+            { label: '≤ -50', op: 'LTE' as const, val: -50, color: 'text-rose-700 border-rose-300' },
+            { label: '≤ -100', op: 'LTE' as const, val: -100, color: 'text-red-900 border-red-400' },
+          ].map((chip) => {
+            const isSelected = scoreFilterOp === chip.op && scoreFilterVal === chip.val;
+            return (
+              <button
+                key={chip.label}
+                type="button"
+                onClick={() => {
+                  if (isSelected) {
+                    setScoreFilterOp('ALL');
+                  } else {
+                    setScoreFilterOp(chip.op);
+                    setScoreFilterVal(chip.val);
+                  }
+                }}
+                className={`px-2.5 py-1 rounded-lg text-xs font-black transition-all cursor-pointer border ${
+                  isSelected
+                    ? 'bg-indigo-600 text-white border-indigo-600 shadow-xs ring-2 ring-indigo-300 scale-105'
+                    : `bg-white hover:bg-slate-50 ${chip.color}`
+                }`}
+                title={`Filter siswa dengan Nilai Karakter ${chip.op === 'GTE' ? 'Lebih besar dari atau sama dengan' : 'Kurang dari atau sama dengan'} ${chip.val}`}
+              >
+                {chip.label}
+              </button>
+            );
+          })}
+
+          {scoreFilterOp !== 'ALL' && (
+            <span className="ml-auto inline-flex items-center gap-1 text-[11px] font-bold text-indigo-700 bg-indigo-50 border border-indigo-200 px-2 py-0.5 rounded-md">
+              <span>Aktif: Nilai {scoreFilterOp === 'GTE' ? '≥' : '≤'} {scoreFilterVal}</span>
+              <button
+                type="button"
+                onClick={() => setScoreFilterOp('ALL')}
+                className="hover:text-rose-600 cursor-pointer ml-0.5 font-black"
+                title="Reset"
+              >
+                ✕
+              </button>
+            </span>
+          )}
         </div>
       </div>
 

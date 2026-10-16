@@ -31,7 +31,8 @@ import {
   Filter,
   XCircle,
   FlipHorizontal,
-  Zap
+  Zap,
+  Info
 } from 'lucide-react';
 
 interface QRScannerViewProps {
@@ -201,10 +202,11 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
     record: AttendanceRecord;
     mode: 'MASUK' | 'PULANG';
     isRejected?: boolean;
+    isDuplicate?: boolean;
     rejectionReason?: string;
   } | null>(null);
   const [scanNotification, setScanNotification] = useState<{
-    type: 'SUCCESS' | 'REJECTED';
+    type: 'SUCCESS' | 'REJECTED' | 'DUPLICATE';
     badgeText?: string;
     title?: string;
     studentName: string;
@@ -283,12 +285,12 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
     };
   }, []);
 
-  // Auto-dismiss notification (2s for SUCCESS, 4s for REJECTED)
+  // Auto-dismiss notification (2s for SUCCESS, 4s for REJECTED / DUPLICATE)
   useEffect(() => {
     if (scanNotification) {
       const timer = setTimeout(() => {
         setScanNotification(null);
-      }, scanNotification.type === 'REJECTED' ? 4000 : 2000);
+      }, scanNotification.type === 'SUCCESS' ? 2000 : 4000);
       return () => clearTimeout(timer);
     }
   }, [scanNotification]);
@@ -523,15 +525,17 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
         playScanSound('ERROR');
 
         const recordedTime = existingRecord.returnTime;
-        const rejectionReason = `DITOLAK: Siswa ${student.name} (${student.className}) sudah pernah melakukan scan Pulang hari ini pada pukul ${recordedTime} WITA. Scan QR kepulangan hanya berlaku 1 kali per hari!`;
+        const timeParts = recordedTime.replace(/\./g, ':').split(':');
+        const formattedTime = timeParts.length >= 2 ? `${timeParts[0]}:${timeParts[1]}` : recordedTime;
+        const rejectionReason = `DITOLAK: Siswa ${student.name} sudah presensi Pulang hari ini pukul ${formattedTime} WITA. Scan QR hanya berlaku 1 kali per hari!`;
 
         setScanNotification({
-          type: 'REJECTED',
-          badgeText: '❌ SUDAH SCAN PULANG HARI INI',
-          title: 'Presensi Pulang Sudah Pernah Tercatat',
+          type: 'DUPLICATE',
+          badgeText: 'ℹ️ SUDAH SCAN PULANG HARI INI',
+          title: 'Presensi Pulang Siswa Sudah Pernah Tercatat',
           studentName: student.name,
           className: student.className,
-          time: recordedTime,
+          time: formattedTime,
           mode: 'PULANG',
           reason: rejectionReason,
           timestamp: Date.now()
@@ -542,7 +546,8 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
           record: existingRecord,
           mode: 'PULANG',
           isRejected: true,
-          rejectionReason: `QR Code Sudah Digunakan (Sudah Scan Pulang Pukul ${recordedTime} WITA)`
+          isDuplicate: true,
+          rejectionReason
         });
 
         return;
@@ -653,15 +658,17 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
         playScanSound('ERROR');
 
         const recordedTime = (existingRecord?.time && existingRecord.time !== '-') ? existingRecord.time : timeStr;
-        const rejectionReason = `DITOLAK: Siswa ${student.name} (${student.className}) sudah memiliki catatan presensi Masuk (${existingRecord?.status || 'HADIR'}) hari ini pada pukul ${recordedTime} WITA. Scan QR masuk hanya berlaku 1 kali per hari!`;
+        const timeParts = recordedTime.replace(/\./g, ':').split(':');
+        const formattedTime = timeParts.length >= 2 ? `${timeParts[0]}:${timeParts[1]}` : recordedTime;
+        const rejectionReason = `DITOLAK: Siswa ${student.name} sudah presensi Masuk hari ini pukul ${formattedTime} WITA. Scan QR hanya berlaku 1 kali per hari!`;
 
         setScanNotification({
-          type: 'REJECTED',
-          badgeText: '❌ SUDAH SCAN MASUK HARI INI',
+          type: 'DUPLICATE',
+          badgeText: 'ℹ️ SUDAH SCAN MASUK HARI INI',
           title: 'Presensi Masuk Siswa Sudah Pernah Tercatat',
           studentName: student.name,
           className: student.className,
-          time: recordedTime,
+          time: formattedTime,
           mode: 'MASUK',
           reason: rejectionReason,
           timestamp: Date.now()
@@ -672,7 +679,8 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
           record: existingRecord!,
           mode: 'MASUK',
           isRejected: true,
-          rejectionReason: `QR Code Sudah Digunakan (Sudah Scan Masuk Pukul ${recordedTime} WITA)`
+          isDuplicate: true,
+          rejectionReason
         });
 
         return;
@@ -914,16 +922,24 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
         </div>
       )}
 
-      {/* Prominent Scan Success / Rejected Banner Notification */}
+      {/* Prominent Scan Success / Rejected / Duplicate (Biru Tua) Banner Notification */}
       {scanNotification && (
-        <div className={`border-2 rounded-3xl p-4 sm:p-5 shadow-lg flex items-start sm:items-center justify-between gap-4 animate-bounce-short ${
-          scanNotification.type === 'REJECTED'
-            ? 'bg-rose-600 text-white border-rose-400'
-            : 'bg-emerald-600 text-white border-emerald-400'
+        <div className={`border-2 rounded-3xl p-4 sm:p-5 shadow-xl flex items-start sm:items-center justify-between gap-4 animate-bounce-short ${
+          scanNotification.type === 'DUPLICATE'
+            ? 'bg-blue-950 text-white border-blue-500 ring-1 ring-blue-400/30 shadow-blue-950/40'
+            : scanNotification.type === 'REJECTED'
+              ? 'bg-rose-600 text-white border-rose-400 shadow-rose-950/20'
+              : 'bg-emerald-600 text-white border-emerald-400 shadow-emerald-950/20'
         }`}>
           <div className="flex items-center gap-3.5">
-            <div className="w-12 h-12 rounded-2xl bg-white/20 flex items-center justify-center shrink-0 ring-4 ring-white/10">
-              {scanNotification.type === 'REJECTED' ? (
+            <div className={`w-12 h-12 rounded-2xl flex items-center justify-center shrink-0 ring-4 ${
+              scanNotification.type === 'DUPLICATE'
+                ? 'bg-blue-900/90 text-blue-200 ring-blue-500/25 border border-blue-400/30'
+                : 'bg-white/20 text-white ring-white/10'
+            }`}>
+              {scanNotification.type === 'DUPLICATE' ? (
+                <Info className="w-7 h-7 text-blue-200" />
+              ) : scanNotification.type === 'REJECTED' ? (
                 <XCircle className="w-7 h-7 text-white" />
               ) : (
                 <CheckCircle2 className="w-7 h-7 text-white" />
@@ -932,39 +948,67 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
             <div>
               <div className="flex items-center gap-2 flex-wrap">
                 <span className={`text-[11px] font-black px-2.5 py-0.5 rounded-full uppercase tracking-wider shadow-xs ${
-                  scanNotification.type === 'REJECTED'
-                    ? 'bg-white text-rose-900'
-                    : 'bg-white text-emerald-900'
+                  scanNotification.type === 'DUPLICATE'
+                    ? 'bg-blue-100 text-blue-950'
+                    : scanNotification.type === 'REJECTED'
+                      ? 'bg-white text-rose-900'
+                      : 'bg-white text-emerald-900'
                 }`}>
-                  {scanNotification.badgeText || (scanNotification.type === 'REJECTED' ? '❌ SCAN DITOLAK' : '✅ QR CODE BERHASIL DI-SCAN!')}
+                  {scanNotification.badgeText || (
+                    scanNotification.type === 'DUPLICATE'
+                      ? 'ℹ️ SUDAH PERNAH SCAN'
+                      : scanNotification.type === 'REJECTED'
+                        ? '❌ SCAN DITOLAK'
+                        : '✅ QR CODE BERHASIL DI-SCAN!'
+                  )}
                 </span>
                 <span className={`text-xs font-mono font-bold px-2 py-0.5 rounded-md ${
-                  scanNotification.type === 'REJECTED' ? 'bg-rose-800/80 text-rose-100' : 'bg-emerald-800/60 text-emerald-100'
+                  scanNotification.type === 'DUPLICATE'
+                    ? 'bg-blue-900 text-blue-200 border border-blue-700/80'
+                    : scanNotification.type === 'REJECTED'
+                      ? 'bg-rose-800/80 text-rose-100'
+                      : 'bg-emerald-800/60 text-emerald-100'
                 }`}>
                   {scanNotification.time} WITA
                 </span>
               </div>
               <h3 className="text-base sm:text-lg font-black mt-1 text-white tracking-tight">
-                {scanNotification.title || (scanNotification.type === 'REJECTED'
-                  ? 'Scan QR Ditolak'
-                  : 'Data Presensi Siswa Berhasil Terdeteksi & Dicatat!')}
+                {scanNotification.title || (
+                  scanNotification.type === 'DUPLICATE'
+                    ? 'Presensi Siswa Sudah Pernah Tercatat'
+                    : scanNotification.type === 'REJECTED'
+                      ? 'Scan QR Ditolak'
+                      : 'Data Presensi Siswa Berhasil Terdeteksi & Dicatat!'
+                )}
               </h3>
-              <p className={`text-xs sm:text-sm font-medium mt-0.5 ${
-                scanNotification.type === 'REJECTED' ? 'text-rose-100 font-semibold' : 'text-emerald-100'
+              <div className={`text-xs sm:text-sm font-medium mt-1 ${
+                scanNotification.type === 'DUPLICATE'
+                  ? 'text-blue-100'
+                  : scanNotification.type === 'REJECTED'
+                    ? 'text-rose-100 font-semibold'
+                    : 'text-emerald-100'
               }`}>
-                {scanNotification.type === 'REJECTED' ? (
+                {scanNotification.type === 'DUPLICATE' ? (
+                  <p className="bg-blue-900/70 border border-blue-700/80 px-3 py-1.5 rounded-xl text-white font-bold leading-relaxed shadow-2xs">
+                    {scanNotification.reason}
+                  </p>
+                ) : scanNotification.type === 'REJECTED' ? (
                   <span>{scanNotification.reason}</span>
                 ) : (
                   <span>
                     Siswa: <strong className="text-white underline font-bold">{scanNotification.studentName}</strong> ({scanNotification.className}) • Presensi: <strong className="text-white uppercase font-bold bg-emerald-800/80 px-1.5 py-0.5 rounded">{scanNotification.mode}</strong>
                   </span>
                 )}
-              </p>
+              </div>
             </div>
           </div>
           <button
             onClick={() => setScanNotification(null)}
-            className="text-white/80 hover:text-white bg-white/10 hover:bg-white/20 p-2 rounded-xl text-xs font-bold cursor-pointer transition-colors shrink-0"
+            className={`p-2 rounded-xl text-xs font-bold cursor-pointer transition-colors shrink-0 ${
+              scanNotification.type === 'DUPLICATE'
+                ? 'text-blue-200 hover:text-white bg-blue-900/80 hover:bg-blue-800 border border-blue-700/60'
+                : 'text-white/80 hover:text-white bg-white/10 hover:bg-white/20'
+            }`}
             title="Tutup Notifikasi"
           >
             ✕ Tutup
@@ -1270,22 +1314,34 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
         <div className="lg:col-span-5 space-y-6">
           {lastScannedResult ? (
             <div className={`rounded-3xl p-5 border shadow-md transition-all duration-300 bg-white ${
-              lastScannedResult.isRejected
-                ? 'border-rose-300 ring-2 ring-rose-500/20 bg-rose-50/20'
-                : lastScannedResult.record.status === 'HADIR' 
-                  ? 'border-emerald-200 ring-2 ring-emerald-500/10' 
-                  : 'border-amber-200 ring-2 ring-amber-500/10'
+              lastScannedResult.isDuplicate
+                ? 'border-blue-400 ring-2 ring-blue-500/20 bg-blue-50/20'
+                : lastScannedResult.isRejected
+                  ? 'border-rose-300 ring-2 ring-rose-500/20 bg-rose-50/20'
+                  : lastScannedResult.record.status === 'HADIR' 
+                    ? 'border-emerald-200 ring-2 ring-emerald-500/10' 
+                    : 'border-amber-200 ring-2 ring-amber-500/10'
             }`}>
 
               {/* Scan Alert Banner inside card */}
-              {lastScannedResult.isRejected ? (
+              {lastScannedResult.isDuplicate ? (
+                <div className="bg-blue-950 text-white font-extrabold text-xs px-3.5 py-2.5 rounded-2xl mb-4 flex items-center justify-between shadow-xs border border-blue-700">
+                  <span className="flex items-center gap-2">
+                    <Info className="w-4 h-4 text-blue-300 shrink-0" />
+                    ℹ️ SCAN QR CODE DITOLAK!
+                  </span>
+                  <span className="text-[10px] bg-blue-800 text-blue-100 px-2 py-0.5 rounded-md font-mono uppercase font-black border border-blue-600">
+                    DUPLIKAT SCAN (BIRU TUA)
+                  </span>
+                </div>
+              ) : lastScannedResult.isRejected ? (
                 <div className="bg-rose-600 text-white font-extrabold text-xs px-3.5 py-2.5 rounded-2xl mb-4 flex items-center justify-between shadow-xs border border-rose-500">
                   <span className="flex items-center gap-2">
                     <XCircle className="w-4 h-4 text-rose-200 shrink-0" />
                     ⛔ SCAN QR CODE DITOLAK!
                   </span>
                   <span className="text-[10px] bg-white/20 px-2 py-0.5 rounded-md font-mono uppercase">
-                    DUPLIKAT SCAN
+                    TERTOLAK
                   </span>
                 </div>
               ) : (
@@ -1303,7 +1359,11 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
               {/* Header Badge */}
               <div className="flex items-center justify-between border-b border-slate-100 pb-3 mb-4">
                 <div className="flex items-center gap-2">
-                  {lastScannedResult.isRejected ? (
+                  {lastScannedResult.isDuplicate ? (
+                    <div className="w-8 h-8 rounded-xl bg-blue-100 text-blue-900 flex items-center justify-center font-bold">
+                      <Info className="w-5 h-5" />
+                    </div>
+                  ) : lastScannedResult.isRejected ? (
                     <div className="w-8 h-8 rounded-xl bg-rose-100 text-rose-700 flex items-center justify-center font-bold">
                       <XCircle className="w-5 h-5" />
                     </div>
@@ -1325,17 +1385,21 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
                       Hasil Scan Presensi {lastScannedResult.mode === 'PULANG' ? 'Pulang' : 'Masuk'}
                     </h3>
                     <span className={`text-xs font-bold ${
-                      lastScannedResult.isRejected
-                        ? 'text-rose-700'
-                        : lastScannedResult.mode === 'PULANG'
-                          ? 'text-emerald-700'
-                          : lastScannedResult.record.status === 'HADIR' ? 'text-emerald-700' : 'text-amber-700'
+                      lastScannedResult.isDuplicate
+                        ? 'text-blue-950 font-black'
+                        : lastScannedResult.isRejected
+                          ? 'text-rose-700'
+                          : lastScannedResult.mode === 'PULANG'
+                            ? 'text-emerald-700'
+                            : lastScannedResult.record.status === 'HADIR' ? 'text-emerald-700' : 'text-amber-700'
                     }`}>
-                      {lastScannedResult.isRejected
-                        ? `⛔ SCAN DITOLAK`
-                        : lastScannedResult.mode === 'PULANG' 
-                          ? '🏠 SUDAH SCAN PULANG' 
-                          : lastScannedResult.record.status === 'HADIR' ? '✓ TEPAT WAKTU' : '⚠️ TERLAMBAT'}
+                      {lastScannedResult.isDuplicate
+                        ? `ℹ️ DITOLAK (SUDAH PERNAH SCAN)`
+                        : lastScannedResult.isRejected
+                          ? `⛔ SCAN DITOLAK`
+                          : lastScannedResult.mode === 'PULANG' 
+                            ? '🏠 SUDAH SCAN PULANG' 
+                            : lastScannedResult.record.status === 'HADIR' ? '✓ TEPAT WAKTU' : '⚠️ TERLAMBAT'}
                     </span>
                   </div>
                 </div>
@@ -1379,7 +1443,25 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
               </div>
 
               {/* Attendance Verification Confirmation Card / Rejection Box */}
-              {lastScannedResult.isRejected ? (
+              {lastScannedResult.isDuplicate ? (
+                <div className="bg-blue-50/90 p-4 rounded-2xl border border-blue-300 space-y-2 text-xs">
+                  <div className="flex items-center justify-between text-blue-950 font-bold">
+                    <span className="flex items-center gap-1.5">
+                      <Info className="w-4 h-4 text-blue-700" />
+                      Keterangan Penolakan Scan:
+                    </span>
+                    <span className="text-[10px] bg-blue-200 text-blue-950 px-2.5 py-0.5 rounded-full font-black">
+                      ALREADY SCANNED
+                    </span>
+                  </div>
+                  <p className="text-blue-950 bg-white p-3 rounded-xl border border-blue-200 leading-relaxed font-bold shadow-2xs">
+                    {lastScannedResult.rejectionReason}
+                  </p>
+                  <p className="text-[11px] text-blue-700 font-semibold">
+                    Sistem menerapkan Aturan 1-Kali Scan Per Sesi (1x Sesi Masuk & 1x Sesi Pulang) untuk mencegah entri presensi ganda.
+                  </p>
+                </div>
+              ) : lastScannedResult.isRejected ? (
                 <div className="bg-rose-50 p-4 rounded-2xl border border-rose-200 space-y-2 text-xs">
                   <div className="flex items-center justify-between text-rose-900 font-bold">
                     <span className="flex items-center gap-1.5">
@@ -1387,7 +1469,7 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
                       Keterangan Penolakan Scan:
                     </span>
                     <span className="text-[10px] bg-rose-200 text-rose-800 px-2 py-0.5 rounded-full font-black">
-                      ALREADY SCANNED
+                      REJECTED
                     </span>
                   </div>
                   <p className="text-rose-800 bg-white p-3 rounded-xl border border-rose-200/80 leading-relaxed font-semibold">

@@ -709,10 +709,12 @@ export default function App() {
   // Update session role changes
   const handleRoleChange = (role: UserRole) => {
     setCurrentRole(role);
+    currentRoleRef.current = role;
     if (userSession) {
       const updatedSession: UserSession = {
         ...userSession,
-        role
+        role,
+        originalRole: userSession.originalRole || (userSession.role === 'ADMIN' ? 'ADMIN' : userSession.role)
       };
       setUserSessionState(updatedSession);
       saveUserSession(updatedSession);
@@ -725,8 +727,11 @@ export default function App() {
     setUserSessionState(session);
     saveUserSession(session);
     setCurrentRole(session.role);
+    currentRoleRef.current = session.role;
     if (session.role === 'PARENT' && session.studentId) {
       setSelectedChildId(session.studentId);
+    } else {
+      setSelectedChildId('');
     }
     const targetTab = session.role === 'SCANNER_POS' ? 'scanner' : 'dashboard';
     handleTabChange(targetTab, true);
@@ -735,13 +740,41 @@ export default function App() {
   const handleLogout = () => {
     setUserSessionState(null);
     saveUserSession(null);
+    setCurrentRole('ADMIN');
+    currentRoleRef.current = 'ADMIN';
+    setSelectedChildId('');
   };
 
   // Pemeriksaan Hak Akses & Jadwal Login Orang Tua (Otomatis Log Off jika dinonaktifkan Admin atau di luar jadwal)
+  // KEBIJAKAN KEAMANAN: Akun Administrator (role 'ADMIN', originalRole 'ADMIN', atau username 'admin')
+  // TIDAK AKAN PERNAH dikeluarkan / di-log off meski pengaturan akses orang tua ditutup atau di luar jam operasional.
   useEffect(() => {
-    if (userSession?.role !== 'PARENT') return;
+    // 1. Abaikan pemeriksaan jika tidak ada sesi login aktif
+    if (!userSession || !userSession.isLoggedIn) return;
+
+    // 2. KEKEBALAN ADMIN: Akun Admin mutlak diizinkan dan tidak boleh di-log off oleh aturan portal wali murid
+    const isAdminAccount = 
+      userSession.role === 'ADMIN' ||
+      userSession.originalRole === 'ADMIN' ||
+      String(userSession.username || '').toLowerCase() === 'admin' ||
+      String(userSession.displayName || '').toLowerCase().includes('administrator') ||
+      String(userSession.displayName || '').toLowerCase().includes('admin sekolah');
+
+    if (isAdminAccount) return;
+
+    // 3. Hanya akun orang tua murni (PARENT) yang tunduk pada batasan akses portal
+    if (userSession.role !== 'PARENT') return;
 
     const performParentAccessValidation = () => {
+      // Verifikasi ulang bahwa akun yang sedang berjalan bukan admin
+      if (
+        userSession.role === 'ADMIN' ||
+        userSession.originalRole === 'ADMIN' ||
+        String(userSession.username || '').toLowerCase() === 'admin'
+      ) {
+        return;
+      }
+
       const accessCheck = checkParentLoginAccess(schoolProfile);
       const forceLogoutTime = Number(schoolProfile.parentPortalForceLogoutTimestamp) || 0;
       const userLoginTime = Number(userSession.loginTimestamp) || 0;
@@ -1601,6 +1634,7 @@ export default function App() {
 
   // Character Points Log Handlers
   const handleAddCharacterLog = (newLog: StudentCharacterLog) => {
+    if (newLog?.id) unmarkCharacterLogDeleted(newLog.id);
     const updated = [newLog, ...characterLogs];
     setCharacterLogsState(updated);
     saveStudentCharacterLogs(updated);

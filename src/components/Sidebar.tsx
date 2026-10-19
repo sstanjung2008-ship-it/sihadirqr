@@ -568,8 +568,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
             </button>
           </div>
 
-          {/* Role Switcher Box (Only shown for Admin) */}
-          {currentRole === 'ADMIN' && (
+          {/* Role Switcher Box (Hanya untuk akun Admin atau yang memiliki hak akses Admin) */}
+          {(currentRole === 'ADMIN' || userSession?.originalRole === 'ADMIN' || userSession?.username === 'admin') && (
             <div className="bg-slate-800/90 rounded-2xl p-2.5 border border-slate-700/80 space-y-1.5 shadow-inner">
               <div className="flex items-center justify-between text-[11px] text-slate-400 font-semibold px-1">
                 <span>Akses Hak Akses:</span>

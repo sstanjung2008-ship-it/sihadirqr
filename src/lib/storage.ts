@@ -4177,6 +4177,14 @@ export function deduplicateCharacterLogs(logs: StudentCharacterLog[]): StudentCh
     // 1. Cegah ID kembar
     if (idMap.has(cleanId)) continue;
 
+    // CATATAN PENILAIAN KARAKTER MANUAL GURU:
+    // Seluruh input nilai karakter oleh guru yang memiliki ID berbeda WAJIB disimpan & dimunculkan
+    // Jangan dieliminasi oleh aturan pembatasan semantik otomatis presensi/jurnal!
+    if (isManualCharacterLog(log)) {
+      idMap.set(cleanId, { ...log, id: cleanId, isManual: true });
+      continue;
+    }
+
     const studentIdentifier = (log.studentId || log.nisn || log.studentName || '').trim().toLowerCase();
     const dateStr = (log.date || (log.timestamp ? log.timestamp.split(' ')[0] : '')).trim();
     const traitKey = (log.traitName || log.traitId || '').trim().toLowerCase();
@@ -4306,8 +4314,8 @@ export function isLogForStudent(
   const lNis = ((log as any).nis || '').trim();
   if (sNis && lNis && sNis !== '-' && lNis !== '-' && sNis === lNis) return true;
 
-  const sName = (student.name || '').trim().toLowerCase();
-  const lName = (log.studentName || '').trim().toLowerCase();
+  const sName = (student.name || '').trim().toLowerCase().replace(/\s+/g, ' ');
+  const lName = (log.studentName || '').trim().toLowerCase().replace(/\s+/g, ' ');
   if (sName && lName && sName === lName) return true;
 
   return false;
@@ -4329,8 +4337,8 @@ export function isAttendanceForStudent(
   const rNisn = (rec.nisn || '').trim();
   if (sNisn && rNisn && sNisn !== '-' && rNisn !== '-' && sNisn === rNisn) return true;
 
-  const sName = (student.name || '').trim().toLowerCase();
-  const rName = (rec.studentName || '').trim().toLowerCase();
+  const sName = (student.name || '').trim().toLowerCase().replace(/\s+/g, ' ');
+  const rName = (rec.studentName || '').trim().toLowerCase().replace(/\s+/g, ' ');
   if (sName && rName && sName === rName) return true;
 
   return false;
@@ -4368,25 +4376,39 @@ export function calculateStudentCharacterSummary(
   unreturnedDates: string[];
 } {
   // Saring log karakter siswa (kecualikan log auto presensi statis lama agar tidak terjadi duplikasi nilai dengan kalkulasi dinamis presensi)
-  const rawLogs = (logs || []).filter(l => 
-    isLogForStudent(l, student) &&
-    !l.id?.startsWith('auto-ontime-') &&
-    !l.id?.startsWith('saved-auto-ontime-') &&
-    !(l.traitType === 'POSITIF' && (l.notes?.toLowerCase().includes('kali hadir tepat waktu') || l.notes?.toLowerCase().includes('datang tepat waktu kelipatan'))) &&
-    !l.id?.startsWith('auto-late-') &&
-    !l.id?.startsWith('saved-auto-late-') &&
-    !(l.traitType === 'NEGATIF' && (l.notes?.toLowerCase().includes('scan hadir terlambat') || l.notes?.toLowerCase().includes('penilaian otomatis presensi: scan hadir terlambat'))) &&
-    !l.id?.startsWith('auto-alpa-') &&
-    !l.id?.startsWith('saved-auto-alpa-') &&
-    !(l.traitType === 'NEGATIF' && (l.notes?.toLowerCase().includes('terekam alpa') || l.notes?.toLowerCase().includes('penilaian otomatis presensi: terekam alpa'))) &&
-    !l.id?.startsWith('auto-unscanned-') &&
-    !l.id?.startsWith('saved-auto-unscanned-') &&
-    !(l.traitType === 'NEGATIF' && (l.notes?.toLowerCase().includes('jam masuk belum scan') || l.notes?.toLowerCase().includes('belum melakukan scan presensi'))) &&
-    !l.id?.startsWith('auto-unreturned-') &&
-    !l.id?.startsWith('saved-auto-unreturned-') &&
-    !(l.traitType === 'NEGATIF' && (l.notes?.toLowerCase().includes('belum scan kepulangan') || l.notes?.toLowerCase().includes('belum melakukan scan pulang') || l.notes?.toLowerCase().includes('belum pulang')))
-  );
+  const rawLogs = (logs || []).filter(l => {
+    if (!isLogForStudent(l, student)) return false;
+
+    // CATATAN MANUAL GURU: WAJIB SELALU DITAMPILKAN DI DETAIL KARAKTER & TIDAK BOLEH DISARING OLEH FILTER OTOMATIS!
+    if (isManualCharacterLog(l)) return true;
+
+    // Saring log otomatis presensi statis lama (hanya berlaku untuk log otomatis sistem):
+    return (
+      !l.id?.startsWith('auto-ontime-') &&
+      !l.id?.startsWith('saved-auto-ontime-') &&
+      !(l.traitType === 'POSITIF' && (l.notes?.toLowerCase().includes('kali hadir tepat waktu') || l.notes?.toLowerCase().includes('datang tepat waktu kelipatan'))) &&
+      !l.id?.startsWith('auto-late-') &&
+      !l.id?.startsWith('saved-auto-late-') &&
+      !(l.traitType === 'NEGATIF' && (l.notes?.toLowerCase().includes('scan hadir terlambat') || l.notes?.toLowerCase().includes('penilaian otomatis presensi: scan hadir terlambat'))) &&
+      !l.id?.startsWith('auto-alpa-') &&
+      !l.id?.startsWith('saved-auto-alpa-') &&
+      !(l.traitType === 'NEGATIF' && (l.notes?.toLowerCase().includes('terekam alpa') || l.notes?.toLowerCase().includes('penilaian otomatis presensi: terekam alpa'))) &&
+      !l.id?.startsWith('auto-unscanned-') &&
+      !l.id?.startsWith('saved-auto-unscanned-') &&
+      !(l.traitType === 'NEGATIF' && (l.notes?.toLowerCase().includes('jam masuk belum scan') || l.notes?.toLowerCase().includes('belum melakukan scan presensi'))) &&
+      !l.id?.startsWith('auto-unreturned-') &&
+      !l.id?.startsWith('saved-auto-unreturned-') &&
+      !(l.traitType === 'NEGATIF' && (l.notes?.toLowerCase().includes('belum scan kepulangan') || l.notes?.toLowerCase().includes('belum melakukan scan pulang') || l.notes?.toLowerCase().includes('belum pulang')))
+    );
+  });
   const studentLogs = deduplicateCharacterLogs(rawLogs);
+
+  // Urutkan studentLogs dari yang terbaru ke terlama (timestamp/date Descending)
+  studentLogs.sort((a, b) => {
+    const timeA = (a.timestamp || a.date || '').trim();
+    const timeB = (b.timestamp || b.date || '').trim();
+    return timeB.localeCompare(timeA);
+  });
 
   let positivePoints = 0;
   let negativePoints = 0;

@@ -213,7 +213,7 @@ export const SchoolSettingsView: React.FC<SchoolSettingsViewProps> = ({
       type: enable ? 'success' : 'warning',
       msg: enable 
         ? '✓ Portal Orang Tua berhasil DIAKTIFKAN. Wali murid kini dapat login kembali.'
-        : '✓ Portal Orang Tua berhasil DINONAKTIFKAN. Seluruh akun orang tua otomatis di-log off dan login baru akan ditolak.'
+        : '✓ Portal Orang Tua berhasil DINONAKTIFKAN. Seluruh akun orang tua otomatis di-log off dan ditolak (Akun Admin tetap diizinkan login normal).'
     });
     setTimeout(() => setParentPortalFeedback(null), 6000);
   };
@@ -3392,7 +3392,7 @@ export const SchoolSettingsView: React.FC<SchoolSettingsViewProps> = ({
                 <p className="text-xs text-slate-600 leading-relaxed">
                   {formData.parentPortalLoginEnabled !== false
                     ? 'Saat ini tombol dalam posisi AKTIF. Wali murid dapat melakukan login dengan NISN anak untuk melihat riwayat kehadiran, rekap nilai karakter, jadwal pelajaran, dan mengajukan surat izin/sakit.'
-                    : 'Saat ini tombol dalam posisi NON-AKTIF. Seluruh akun wali murid yang sedang membuka aplikasi telah di-log off secara otomatis. Setiap upaya login dari wali murid akan ditolak oleh sistem sampai Administrator mengaktifkannya kembali.'}
+                    : 'Saat ini tombol dalam posisi NON-AKTIF. Seluruh akun wali murid yang sedang membuka aplikasi telah di-log off secara otomatis dan upaya login orang tua akan ditolak. Akun Admin Utama dan Guru tetap diizinkan login dan masuk normal.'}
                 </p>
               </div>
 
@@ -4480,7 +4480,7 @@ export const SchoolSettingsView: React.FC<SchoolSettingsViewProps> = ({
             <span>
               {formData.parentPortalLoginEnabled !== false
                 ? 'Portal Orang Tua saat ini AKTIF. Jika Anda menekan "Nonaktifkan Akses", seluruh orang tua akan seketika di-log off dan login baru akan ditolak.'
-                : 'Portal Orang Tua saat ini NON-AKTIF. Semua akun orang tua sedang di-log off dan ditolak hingga tombol Aktifkan ditekan kembali.'}
+                : 'Portal Orang Tua saat ini NON-AKTIF. Semua akun orang tua sedang di-log off dan ditolak hingga tombol Aktifkan ditekan kembali (Akun Admin Utama tetap diizinkan login normal).'}
             </span>
             <button
               type="button"

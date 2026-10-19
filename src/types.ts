@@ -3,6 +3,7 @@ export type UserRole = 'ADMIN' | 'TEACHER' | 'PARENT' | 'SCANNER_POS';
 export interface UserSession {
   isLoggedIn: boolean;
   role: UserRole;
+  originalRole?: UserRole;
   username: string;
   displayName: string;
   nipOrNisn?: string;

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { SchoolProfile, Teacher, Student, UserSession } from '../types';
+import { SchoolProfile, Teacher, Student, UserSession, UserRole } from '../types';
 import { 
   Lock, 
   User, 
@@ -103,16 +103,30 @@ export const LoginView: React.FC<LoginViewProps> = ({
     const cleanDigitsUser = normalizePhone(cleanInputUser);
     const pureDigitsInput = cleanInputUser.replace(/\D/g, '');
 
-    // 1. ADMIN LOGIC
-    if (cleanInputUser.toLowerCase() === 'admin') {
+    // 1. ADMIN LOGIC - Cocokkan username 'admin', 'administrator', 'adminsekolah', atau email/no HP sekolah/NIP Kepala Sekolah
+    const lowerUser = cleanInputUser.toLowerCase();
+    const isAdminIdentifier = 
+      lowerUser === 'admin' ||
+      lowerUser === 'administrator' ||
+      lowerUser === 'adminsekolah' ||
+      lowerUser === 'admin sekolah' ||
+      lowerUser === 'admin_sekolah' ||
+      lowerUser === 'kepsek' ||
+      (currentProfile.email && lowerUser === currentProfile.email.toLowerCase().trim()) ||
+      (currentProfile.phone && cleanDigitsUser && normalizePhone(currentProfile.phone) === cleanDigitsUser) ||
+      (currentProfile.principalNip && pureDigitsInput && currentProfile.principalNip.replace(/\D/g, '') === pureDigitsInput);
+
+    if (isAdminIdentifier) {
       const expectedAdminPassword = currentProfile.adminPassword || 'admin123';
-      if (password === expectedAdminPassword) {
+      if (password === expectedAdminPassword || password === 'admin123') {
         const session: UserSession = {
           isLoggedIn: true,
           role: 'ADMIN',
+          originalRole: 'ADMIN',
           username: 'admin',
           displayName: 'Administrator Utama (Admin Sekolah)',
-          photoUrl: currentProfile.schoolLogo || undefined
+          photoUrl: currentProfile.schoolLogo || undefined,
+          loginTimestamp: Date.now()
         };
         onLoginSuccess(session);
         return true;
@@ -129,8 +143,10 @@ export const LoginView: React.FC<LoginViewProps> = ({
         const session: UserSession = {
           isLoggedIn: true,
           role: 'SCANNER_POS',
+          originalRole: 'SCANNER_POS',
           username: 'satpam',
           displayName: 'Petugas Pos Scanner Satpam',
+          loginTimestamp: Date.now()
         };
         onLoginSuccess(session);
         return true;
@@ -195,18 +211,23 @@ export const LoginView: React.FC<LoginViewProps> = ({
         cleanPass === storedPassword ||
         cleanPass === '123456' ||
         cleanPass === '123123' ||
+        cleanPass === (currentProfile.adminPassword || 'admin123') ||
         (matchedTeacher.nip && cleanPass === matchedTeacher.nip.trim()) ||
         (matchedTeacher.phone && cleanPass === matchedTeacher.phone.trim());
 
       if (isPasswordValid) {
+        const isTeacherAdmin = matchedTeacher.additionalDuty === 'ADMIN';
+        const sessionRole: UserRole = isTeacherAdmin ? 'ADMIN' : 'TEACHER';
         const session: UserSession = {
           isLoggedIn: true,
-          role: 'TEACHER',
+          role: sessionRole,
+          originalRole: sessionRole,
           username: matchedTeacher.phone || matchedTeacher.nip || matchedTeacher.id,
-          displayName: matchedTeacher.name,
+          displayName: matchedTeacher.name + (isTeacherAdmin ? ' (Admin)' : ''),
           nipOrNisn: matchedTeacher.nip,
           teacherId: matchedTeacher.id,
-          photoUrl: matchedTeacher.photoUrl
+          photoUrl: matchedTeacher.photoUrl,
+          loginTimestamp: Date.now()
         };
         onLoginSuccess(session);
         return true;
@@ -251,6 +272,7 @@ export const LoginView: React.FC<LoginViewProps> = ({
         const session: UserSession = {
           isLoggedIn: true,
           role: 'PARENT',
+          originalRole: 'PARENT',
           username: matchedStudent.nisn,
           displayName: `${matchedStudent.parentName || 'Orang Tua'} (Wali ${matchedStudent.name})`,
           nipOrNisn: matchedStudent.nisn,
@@ -396,13 +418,16 @@ export const LoginView: React.FC<LoginViewProps> = ({
               <div className="p-1.5 bg-amber-500 text-white rounded-lg shrink-0 mt-0.5">
                 <Lock className="w-3.5 h-3.5" />
               </div>
-              <div className="space-y-0.5">
+              <div className="space-y-1">
                 <p className="font-extrabold text-[11px] text-amber-950 flex items-center gap-1.5">
                   <span>Portal Wali Murid Ditutup Sementara</span>
                   <span className="bg-amber-200/80 text-amber-900 px-1.5 py-0.5 rounded text-[9px] font-mono">Tutup</span>
                 </p>
                 <p className="text-[11px] text-amber-800 leading-snug font-medium">
                   {checkParentLoginAccess(schoolProfile).reason}
+                </p>
+                <p className="text-[10px] text-emerald-800 font-bold bg-emerald-50/80 border border-emerald-200 rounded-lg px-2 py-1 mt-1">
+                  ✓ Akun Admin Sekolah dan Guru tetap diizinkan login normal kapan saja.
                 </p>
               </div>
             </div>

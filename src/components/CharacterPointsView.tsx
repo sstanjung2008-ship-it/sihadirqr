@@ -460,7 +460,7 @@ export const CharacterPointsView: React.FC<CharacterPointsViewProps> = ({
   const handleSubmitLog = (e: React.FormEvent) => {
     e.preventDefault();
 
-    const selectedStudent = students.find(s => s.id === inputStudentId);
+    const selectedStudent = students.find(s => s.id === inputStudentId) || (detailStudent?.id === inputStudentId ? detailStudent : undefined) || detailStudent;
     const selectedTrait = traits.find(t => t.id === inputTraitId);
 
     if (!selectedStudent) {
@@ -499,6 +499,7 @@ export const CharacterPointsView: React.FC<CharacterPointsViewProps> = ({
     };
 
     onAddLog(newLog);
+    setHighlightedLogId(newLog.id);
     setShowAddModal(false);
   };
 

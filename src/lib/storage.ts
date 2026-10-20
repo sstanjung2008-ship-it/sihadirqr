@@ -4687,7 +4687,7 @@ export function calculateBatchStudentCharacterSummaries(
     const l = safeLogs[i];
     if (!l) continue;
     if (l.studentId) {
-      const idKey = l.studentId.trim();
+      const idKey = l.studentId.trim().toLowerCase();
       let arr = logsByStudentId.get(idKey);
       if (!arr) {
         arr = [];
@@ -4696,7 +4696,7 @@ export function calculateBatchStudentCharacterSummaries(
       arr.push(l);
     }
     if (l.nisn && l.nisn !== '-') {
-      const nisnKey = l.nisn.trim();
+      const nisnKey = l.nisn.trim().toLowerCase();
       let arr = logsByNisn.get(nisnKey);
       if (!arr) {
         arr = [];
@@ -4729,19 +4729,30 @@ export function calculateBatchStudentCharacterSummaries(
     if (!s || !s.id) continue;
 
     const sId = (s.id || '').trim();
+    const sIdLower = sId.toLowerCase();
     const sNisn = (s.nisn || '').trim();
+    const sNisnLower = sNisn.toLowerCase();
     const sName = (s.name || '').trim().toLowerCase().replace(/\s+/g, ' ');
 
-    // Fast lookup student logs
+    // Fast lookup student logs with case-insensitive matching & key safety
     const logMap = new Map<string, StudentCharacterLog>();
-    if (sId && logsByStudentId.has(sId)) {
-      logsByStudentId.get(sId)!.forEach(l => logMap.set(l.id, l));
+    if (sIdLower && logsByStudentId.has(sIdLower)) {
+      logsByStudentId.get(sIdLower)!.forEach((l, idx) => {
+        const k = l.id ? l.id.trim() : `log_${sId}_${idx}`;
+        logMap.set(k, l);
+      });
     }
-    if (sNisn && sNisn !== '-' && logsByNisn.has(sNisn)) {
-      logsByNisn.get(sNisn)!.forEach(l => logMap.set(l.id, l));
+    if (sNisnLower && sNisnLower !== '-' && logsByNisn.has(sNisnLower)) {
+      logsByNisn.get(sNisnLower)!.forEach((l, idx) => {
+        const k = l.id ? l.id.trim() : `log_${sNisn}_${idx}`;
+        logMap.set(k, l);
+      });
     }
     if (sName && logsByName.has(sName)) {
-      logsByName.get(sName)!.forEach(l => logMap.set(l.id, l));
+      logsByName.get(sName)!.forEach((l, idx) => {
+        const k = l.id ? l.id.trim() : `log_${sName}_${idx}`;
+        logMap.set(k, l);
+      });
     }
     const matchedLogs = Array.from(logMap.values());
 
@@ -4767,6 +4778,9 @@ export function calculateBatchStudentCharacterSummaries(
 
     const summary = computeStudentCharacterSummaryFromData(s, matchedLogs, studentAtt, activeDates);
     resultMap.set(s.id, summary);
+    if (sId) resultMap.set(sId, summary);
+    if (sIdLower) resultMap.set(sIdLower, summary);
+    if (sNisn && sNisn !== '-') resultMap.set(sNisn, summary);
   }
 
   return resultMap;

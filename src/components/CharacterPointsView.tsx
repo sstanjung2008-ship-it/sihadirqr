@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { Student, SchoolClass, CharacterTrait, StudentCharacterLog, Teacher, SchoolProfile, CharacterPredicateSettings, UserSession, AttendanceRecord, LearningJournal } from '../types';
-import { isManualCharacterLog, deduplicateCharacterLogs, calculateStudentCharacterSummary, calculateBatchStudentCharacterSummaries, getLocalDateString, isRealPhotoProof } from '../lib/storage';
+import { isManualCharacterLog, deduplicateCharacterLogs, calculateStudentCharacterSummary, calculateBatchStudentCharacterSummaries, getLocalDateString, isRealPhotoProof, getPermanentManualCharacterLogs } from '../lib/storage';
 import { getWitaDateTime, setAutoAssessmentBatchDone } from '../lib/autoCharacterScheduler';
 import { 
   Plus, 
@@ -280,10 +280,17 @@ export const CharacterPointsView: React.FC<CharacterPointsViewProps> = ({
   const [scoreFilterOp, setScoreFilterOp] = useState<'ALL' | 'GTE' | 'LTE'>('ALL');
   const [scoreFilterVal, setScoreFilterVal] = useState<number>(0);
 
+  // Gabungkan logs dari props dengan brankas manual permanen agar 100% catatan perilaku spesifik yang diinput guru dari tombol +isi nilai selalu terambil dan tampil
+  const allLogs = useMemo(() => {
+    const permanentManuals = getPermanentManualCharacterLogs();
+    if (!permanentManuals || permanentManuals.length === 0) return logs || [];
+    return deduplicateCharacterLogs([...permanentManuals, ...(logs || [])]);
+  }, [logs]);
+
   // Pre-calculate/memoize character summary map for fast lookup and filtering using optimized batch index
   const studentScoresMap = useMemo(() => {
-    return calculateBatchStudentCharacterSummaries(students, logs, attendanceRecords);
-  }, [students, logs, attendanceRecords]);
+    return calculateBatchStudentCharacterSummaries(students, allLogs, attendanceRecords);
+  }, [students, allLogs, attendanceRecords]);
 
   // Filter students based on Class, Search, and Score Filter (sorted Ascending by student name)
   const filteredStudents = useMemo(() => {
@@ -340,7 +347,7 @@ export const CharacterPointsView: React.FC<CharacterPointsViewProps> = ({
     return pages;
   }, [currentPage, totalPages]);
 
-  // Calculate character score summary for a student (using memoized cache)
+  // Calculate character score summary for a student (using memoized cache with robust multi-field lookup)
   const getStudentScoreSummary = useCallback((studentId: string) => {
     if (!studentId) {
       return {
@@ -367,9 +374,17 @@ export const CharacterPointsView: React.FC<CharacterPointsViewProps> = ({
       };
     }
     const cleanId = studentId.trim();
-    const cached = studentScoresMap.get(cleanId) || studentScoresMap.get(studentId);
+    const cached = studentScoresMap.get(cleanId) || 
+                   studentScoresMap.get(studentId) || 
+                   studentScoresMap.get(cleanId.toLowerCase());
     if (cached) return cached;
-    const student = students.find(s => s.id === studentId || s.id === cleanId || s.nisn === studentId);
+
+    const student = students.find(s => 
+      s.id === studentId || 
+      s.id?.trim() === cleanId || 
+      s.id?.trim().toLowerCase() === cleanId.toLowerCase() || 
+      (s.nisn && s.nisn !== '-' && s.nisn.trim() === cleanId)
+    );
     if (!student) {
       return {
         positivePoints: 0,
@@ -394,12 +409,14 @@ export const CharacterPointsView: React.FC<CharacterPointsViewProps> = ({
         unreturnedDates: []
       };
     }
-    const computed = calculateStudentCharacterSummary(student, logs, attendanceRecords);
+    const computed = calculateStudentCharacterSummary(student, allLogs, attendanceRecords);
     if (student.id) {
       studentScoresMap.set(student.id, computed);
+      studentScoresMap.set(student.id.trim(), computed);
+      studentScoresMap.set(student.id.trim().toLowerCase(), computed);
     }
     return computed;
-  }, [studentScoresMap, students, logs, attendanceRecords]);
+  }, [studentScoresMap, students, allLogs, attendanceRecords]);
 
   // Memoized character score summary for currently viewed detail student (prevents redundant recomputations)
   const detailStudentScore = useMemo(() => {
@@ -1482,235 +1499,51 @@ export const CharacterPointsView: React.FC<CharacterPointsViewProps> = ({
                 </span>
               </div>
 
-              {/* 1. Card Akumulasi Hadir Tepat Waktu */}
-              {detailStudentScore.onTimeDays > 0 && (
-                <div className="p-3 rounded-2xl border border-emerald-200 bg-white hover:border-emerald-300 shadow-2xs space-y-1.5 transition-all">
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="flex items-center gap-2.5 min-w-0">
-                      <div className="p-1.5 sm:p-2 bg-emerald-100 text-emerald-700 rounded-xl shrink-0">
-                        <CheckCircle2 className="w-4 h-4" />
-                      </div>
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-1.5 flex-wrap">
-                          <p className="font-bold text-slate-800 text-xs sm:text-sm truncate">
-                            Hadir Tepat Waktu
-                          </p>
-                          <span className="px-1.5 py-0.2 rounded bg-emerald-50 text-emerald-700 border border-emerald-200 font-extrabold text-[9px] sm:text-[10px]">
-                            Presensi Otomatis
-                          </span>
-                        </div>
-                        {/* Deskripsi ringkas */}
-                        <p className="text-[11px] text-slate-500 mt-0.5">
-                          {detailStudentScore.onTimeDays}x tepat waktu • Bonus +1 tiap 3x
-                        </p>
-                      </div>
-                    </div>
-                    <span className="px-2.5 py-1 bg-emerald-600 text-white font-black text-xs rounded-xl shadow-2xs shrink-0">
-                      +{detailStudentScore.onTimeBonusPoints} Poin
+              {/* Kotak Ringkasan Akumulasi Poin di Bawah Bagian Rincian Penilaian & Riwayat Karakter */}
+              <div className="grid grid-cols-3 gap-2 p-2.5 sm:p-3 bg-white rounded-2xl border border-slate-200 shadow-2xs">
+                {/* 1. Total Poin Positif */}
+                <div className="flex flex-col items-center justify-center p-2 rounded-xl bg-emerald-50/80 border border-emerald-100 text-center">
+                  <span className="text-[10px] sm:text-xs font-bold text-emerald-800 flex items-center gap-1">
+                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                    Poin Positif
+                  </span>
+                  <span className="font-black text-sm sm:text-lg text-emerald-600 mt-0.5">
+                    +{detailStudentScore.positivePoints}
+                  </span>
+                  <span className="text-[9px] text-slate-400 font-medium hidden sm:inline">Input guru & presensi</span>
+                </div>
+
+                {/* 2. Total Poin Negatif */}
+                <div className="flex flex-col items-center justify-center p-2 rounded-xl bg-rose-50/80 border border-rose-100 text-center">
+                  <span className="text-[10px] sm:text-xs font-bold text-rose-800 flex items-center gap-1">
+                    <XCircle className="w-3.5 h-3.5 text-rose-600 shrink-0" />
+                    Poin Negatif
+                  </span>
+                  <span className="font-black text-sm sm:text-lg text-rose-600 mt-0.5">
+                    -{detailStudentScore.negativePoints}
+                  </span>
+                  <span className="text-[9px] text-slate-400 font-medium hidden sm:inline">Pelanggaran & alpa</span>
+                </div>
+
+                {/* 3. Skor Akhir Siswa & Predikat */}
+                <div className="flex flex-col items-center justify-center p-2 rounded-xl bg-indigo-50/80 border border-indigo-100 text-center">
+                  <span className="text-[10px] sm:text-xs font-bold text-indigo-900 flex items-center gap-1">
+                    <Award className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
+                    Skor Akhir
+                  </span>
+                  <div className="flex items-center gap-1 mt-0.5 flex-wrap justify-center">
+                    <span className={`font-black text-sm sm:text-lg ${
+                      detailStudentScore.netScore >= 0 ? 'text-indigo-700' : 'text-rose-600'
+                    }`}>
+                      {detailStudentScore.netScore > 0 ? `+${detailStudentScore.netScore}` : detailStudentScore.netScore}
+                    </span>
+                    <span className={`px-1.5 py-0.2 rounded text-[9px] font-extrabold border ${getPredicate(detailStudentScore.netScore).color}`}>
+                      {getPredicate(detailStudentScore.netScore).label.split(' ')[0]}
                     </span>
                   </div>
-
-                  {detailStudentScore.onTimeDates && detailStudentScore.onTimeDates.length > 0 && (
-                    <div className="pt-1.5 border-t border-slate-100 flex items-center gap-1 flex-wrap text-[10px]">
-                      <span className="text-slate-400 font-medium">Tanggal:</span>
-                      {detailStudentScore.onTimeDates.slice(0, 6).map((dateStr, i) => (
-                        <span key={i} className="px-1.5 py-0.5 bg-slate-100 text-slate-700 rounded font-mono text-[9px] sm:text-[10px] font-semibold">
-                          {dateStr}
-                        </span>
-                      ))}
-                      {detailStudentScore.onTimeDates.length > 6 && (
-                        <span className="text-slate-400 font-bold text-[9px] sm:text-[10px]">
-                          +{detailStudentScore.onTimeDates.length - 6} lainnya
-                        </span>
-                      )}
-                    </div>
-                  )}
+                  <span className="text-[9px] text-slate-400 font-medium hidden sm:inline">Skor Karakter Bersih</span>
                 </div>
-              )}
-
-              {/* 2. Card Akumulasi Hadir Terlambat */}
-              {detailStudentScore.lateDays > 0 && (
-                <div className="p-3 rounded-2xl border border-rose-200 bg-white hover:border-rose-300 shadow-2xs space-y-1.5 transition-all">
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="flex items-center gap-2.5 min-w-0">
-                      <div className="p-1.5 sm:p-2 bg-rose-100 text-rose-700 rounded-xl shrink-0">
-                        <Clock className="w-4 h-4" />
-                      </div>
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-1.5 flex-wrap">
-                          <p className="font-bold text-slate-800 text-xs sm:text-sm truncate">
-                            Hadir Terlambat
-                          </p>
-                          <span className="px-1.5 py-0.2 rounded bg-rose-50 text-rose-700 border border-rose-200 font-extrabold text-[9px] sm:text-[10px]">
-                            Presensi Otomatis
-                          </span>
-                        </div>
-                        {/* Deskripsi ringkas */}
-                        <p className="text-[11px] text-slate-500 mt-0.5">
-                          {detailStudentScore.lateDays}x terlambat • -1 poin/hari
-                        </p>
-                      </div>
-                    </div>
-                    <span className="px-2.5 py-1 bg-rose-600 text-white font-black text-xs rounded-xl shadow-2xs shrink-0">
-                      -{detailStudentScore.latePenaltyPoints} Poin
-                    </span>
-                  </div>
-
-                  {detailStudentScore.lateDates && detailStudentScore.lateDates.length > 0 && (
-                    <div className="pt-1.5 border-t border-slate-100 flex items-center gap-1 flex-wrap text-[10px]">
-                      <span className="text-slate-400 font-medium">Tanggal:</span>
-                      {detailStudentScore.lateDates.slice(0, 6).map((dateStr, i) => (
-                        <span key={i} className="px-1.5 py-0.5 bg-slate-100 text-slate-700 rounded font-mono text-[9px] sm:text-[10px] font-semibold">
-                          {dateStr}
-                        </span>
-                      ))}
-                      {detailStudentScore.lateDates.length > 6 && (
-                        <span className="text-slate-400 font-bold text-[9px] sm:text-[10px]">
-                          +{detailStudentScore.lateDates.length - 6} lainnya
-                        </span>
-                      )}
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {/* 3. Card Akumulasi Siswa Alpa */}
-              {detailStudentScore.alpaDays > 0 && (
-                <div className="p-3 rounded-2xl border border-red-200 bg-white hover:border-red-300 shadow-2xs space-y-1.5 transition-all">
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="flex items-center gap-2.5 min-w-0">
-                      <div className="p-1.5 sm:p-2 bg-red-100 text-red-700 rounded-xl shrink-0">
-                        <UserX className="w-4 h-4" />
-                      </div>
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-1.5 flex-wrap">
-                          <p className="font-bold text-slate-800 text-xs sm:text-sm truncate">
-                            Alpa (Tanpa Keterangan)
-                          </p>
-                          <span className="px-1.5 py-0.2 rounded bg-red-50 text-red-700 border border-red-200 font-extrabold text-[9px] sm:text-[10px]">
-                            Presensi Otomatis
-                          </span>
-                        </div>
-                        {/* Deskripsi ringkas */}
-                        <p className="text-[11px] text-slate-500 mt-0.5">
-                          {detailStudentScore.alpaDays}x alpa • -5 poin/hari
-                        </p>
-                      </div>
-                    </div>
-                    <span className="px-2.5 py-1 bg-red-600 text-white font-black text-xs rounded-xl shadow-2xs shrink-0">
-                      -{detailStudentScore.alpaPenaltyPoints} Poin
-                    </span>
-                  </div>
-
-                  {detailStudentScore.alpaDates && detailStudentScore.alpaDates.length > 0 && (
-                    <div className="pt-1.5 border-t border-slate-100 flex items-center gap-1 flex-wrap text-[10px]">
-                      <span className="text-slate-400 font-medium">Tanggal:</span>
-                      {detailStudentScore.alpaDates.slice(0, 6).map((dateStr, i) => (
-                        <span key={i} className="px-1.5 py-0.5 bg-slate-100 text-slate-700 rounded font-mono text-[9px] sm:text-[10px] font-semibold">
-                          {dateStr}
-                        </span>
-                      ))}
-                      {detailStudentScore.alpaDates.length > 6 && (
-                        <span className="text-slate-400 font-bold text-[9px] sm:text-[10px]">
-                          +{detailStudentScore.alpaDates.length - 6} lainnya
-                        </span>
-                      )}
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {/* 4. Card Akumulasi Belum Scan Presensi Masuk */}
-              {detailStudentScore.unscannedInDays > 0 && (
-                <div className="p-3 rounded-2xl border border-orange-200 bg-white hover:border-orange-300 shadow-2xs space-y-1.5 transition-all">
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="flex items-center gap-2.5 min-w-0">
-                      <div className="p-1.5 sm:p-2 bg-orange-100 text-orange-700 rounded-xl shrink-0">
-                        <Clock className="w-4 h-4" />
-                      </div>
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-1.5 flex-wrap">
-                          <p className="font-bold text-slate-800 text-xs sm:text-sm truncate">
-                            Belum Scan Presensi Masuk
-                          </p>
-                          <span className="px-1.5 py-0.2 rounded bg-orange-50 text-orange-700 border border-orange-200 font-extrabold text-[9px] sm:text-[10px]">
-                            Presensi Otomatis
-                          </span>
-                        </div>
-                        {/* Deskripsi ringkas */}
-                        <p className="text-[11px] text-slate-500 mt-0.5">
-                          {detailStudentScore.unscannedInDays}x belum scan masuk • -2 poin/kejadian
-                        </p>
-                      </div>
-                    </div>
-                    <span className="px-2.5 py-1 bg-orange-600 text-white font-black text-xs rounded-xl shadow-2xs shrink-0">
-                      -{detailStudentScore.unscannedInPenaltyPoints} Poin
-                    </span>
-                  </div>
-
-                  {detailStudentScore.unscannedInDates && detailStudentScore.unscannedInDates.length > 0 && (
-                    <div className="pt-1.5 border-t border-slate-100 flex items-center gap-1 flex-wrap text-[10px]">
-                      <span className="text-slate-400 font-medium">Tanggal:</span>
-                      {detailStudentScore.unscannedInDates.slice(0, 6).map((dateStr, i) => (
-                        <span key={i} className="px-1.5 py-0.5 bg-slate-100 text-slate-700 rounded font-mono text-[9px] sm:text-[10px] font-semibold">
-                          {dateStr}
-                        </span>
-                      ))}
-                      {detailStudentScore.unscannedInDates.length > 6 && (
-                        <span className="text-slate-400 font-bold text-[9px] sm:text-[10px]">
-                          +{detailStudentScore.unscannedInDates.length - 6} lainnya
-                        </span>
-                      )}
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {/* 5. Card Akumulasi Belum Scan Pulang */}
-              {detailStudentScore.unreturnedDays > 0 && (
-                <div className="p-3 rounded-2xl border border-amber-200 bg-white hover:border-amber-300 shadow-2xs space-y-1.5 transition-all">
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="flex items-center gap-2.5 min-w-0">
-                      <div className="p-1.5 sm:p-2 bg-amber-100 text-amber-700 rounded-xl shrink-0">
-                        <Clock className="w-4 h-4" />
-                      </div>
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-1.5 flex-wrap">
-                          <p className="font-bold text-slate-800 text-xs sm:text-sm truncate">
-                            Belum Scan Pulang
-                          </p>
-                          <span className="px-1.5 py-0.2 rounded bg-amber-50 text-amber-700 border border-amber-200 font-extrabold text-[9px] sm:text-[10px]">
-                            Presensi Otomatis
-                          </span>
-                        </div>
-                        {/* Deskripsi ringkas */}
-                        <p className="text-[11px] text-slate-500 mt-0.5">
-                          {detailStudentScore.unreturnedDays}x belum scan pulang • -2 poin/kejadian
-                        </p>
-                      </div>
-                    </div>
-                    <span className="px-2.5 py-1 bg-amber-600 text-white font-black text-xs rounded-xl shadow-2xs shrink-0">
-                      -{detailStudentScore.unreturnedPenaltyPoints} Poin
-                    </span>
-                  </div>
-
-                  {detailStudentScore.unreturnedDates && detailStudentScore.unreturnedDates.length > 0 && (
-                    <div className="pt-1.5 border-t border-slate-100 flex items-center gap-1 flex-wrap text-[10px]">
-                      <span className="text-slate-400 font-medium">Tanggal:</span>
-                      {detailStudentScore.unreturnedDates.slice(0, 6).map((dateStr, i) => (
-                        <span key={i} className="px-1.5 py-0.5 bg-slate-100 text-slate-700 rounded font-mono text-[9px] sm:text-[10px] font-semibold">
-                          {dateStr}
-                        </span>
-                      ))}
-                      {detailStudentScore.unreturnedDates.length > 6 && (
-                        <span className="text-slate-400 font-bold text-[9px] sm:text-[10px]">
-                          +{detailStudentScore.unreturnedDates.length - 6} lainnya
-                        </span>
-                      )}
-                    </div>
-                  )}
-                </div>
-              )}
+              </div>
 
               {/* State Kosong jika belum ada catatan apapun */}
               {detailStudentScore.logs.length === 0 && 
@@ -1720,140 +1553,400 @@ export const CharacterPointsView: React.FC<CharacterPointsViewProps> = ({
                detailStudentScore.unscannedInDays === 0 &&
                detailStudentScore.unreturnedDays === 0 ? (
                 <div className="p-8 text-center text-slate-400 border border-dashed border-slate-200 rounded-2xl bg-white">
-                  Belum ada catatan nilai karakter untuk siswa ini.
+                  Belum ada catatan nilai karakter atau presensi untuk siswa ini.
                 </div>
               ) : (
-                <div className="space-y-2.5">
-                  {detailStudentScore.logs.map((log, idx) => {
-                    const isHighlighted = log.id === highlightedLogId;
-                    return (
-                      <div
-                        key={`${log.id}_${idx}`}
-                        id={`char-log-${log.id}`}
-                        className={`p-3 rounded-2xl border transition-all space-y-2 ${
-                          isHighlighted
-                            ? 'border-indigo-400 bg-indigo-50/50 ring-2 ring-indigo-500 shadow-sm'
-                            : 'border-slate-200 bg-white hover:border-slate-300 shadow-2xs'
-                        }`}
-                      >
-                        <div className="flex items-start justify-between gap-2">
-                          <div className="flex items-start gap-2.5 min-w-0">
-                            <div className="shrink-0 mt-0.5">
-                              {log.traitType === 'POSITIF' ? (
-                                <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-xl bg-blue-100 text-blue-700 flex items-center justify-center font-bold">
-                                  <CheckCircle2 className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+                <div className="space-y-3">
+                  {/* Bagian 1: Catatan Perilaku Siswa yang Diinput Guru dari Tombol + Isi Nilai & Penilaian Karakter */}
+                  {detailStudentScore.logs.length > 0 && (
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between pt-1">
+                        <span className="text-xs font-extrabold text-slate-700 flex items-center gap-1.5">
+                          <CheckCircle2 className="w-3.5 h-3.5 text-indigo-600" />
+                          Catatan Perilaku Khusus Siswa (Input Guru)
+                        </span>
+                        <span className="text-[10px] font-bold text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-md border border-indigo-200">
+                          {detailStudentScore.logs.length} perilaku
+                        </span>
+                      </div>
+
+                      <div className="space-y-2">
+                        {detailStudentScore.logs.map((log, idx) => {
+                          const isHighlighted = log.id === highlightedLogId;
+                          return (
+                            <div
+                              key={`${log.id}_${idx}`}
+                              id={`char-log-${log.id}`}
+                              className={`p-3 rounded-2xl border transition-all space-y-2 ${
+                                isHighlighted
+                                  ? 'border-indigo-400 bg-indigo-50/50 ring-2 ring-indigo-500 shadow-sm'
+                                  : 'border-slate-200 bg-white hover:border-slate-300 shadow-2xs'
+                              }`}
+                            >
+                              <div className="flex items-start justify-between gap-2">
+                                <div className="flex items-start gap-2.5 min-w-0">
+                                  <div className="shrink-0 mt-0.5">
+                                    {log.traitType === 'POSITIF' ? (
+                                      <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-xl bg-blue-100 text-blue-700 flex items-center justify-center font-bold">
+                                        <CheckCircle2 className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+                                      </div>
+                                    ) : (
+                                      <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-xl bg-rose-100 text-rose-700 flex items-center justify-center font-bold">
+                                        <XCircle className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+                                      </div>
+                                    )}
+                                  </div>
+
+                                  <div className="min-w-0 space-y-0.5">
+                                    <div className="flex items-center gap-1.5 flex-wrap">
+                                      <span className="font-bold text-slate-800 text-xs sm:text-sm">
+                                        {log.traitName}
+                                      </span>
+                                      <span className={`px-2 py-0.2 rounded-md text-[9px] sm:text-[10px] font-black ${
+                                        log.traitType === 'POSITIF' ? 'bg-blue-100 text-blue-800' : 'bg-rose-100 text-rose-800'
+                                      }`}>
+                                        {log.traitType === 'POSITIF' ? `+${log.points}` : `-${log.points}`} Poin
+                                      </span>
+                                      {isManualCharacterLog(log) && (
+                                        <span className="bg-emerald-50 text-emerald-800 border border-emerald-300 text-[9px] font-extrabold px-1.5 py-0.2 rounded inline-flex items-center gap-0.5">
+                                          <ShieldCheck className="w-2.5 h-2.5 text-emerald-600" />
+                                          Input Guru
+                                        </span>
+                                      )}
+                                      {isHighlighted && (
+                                        <span className="bg-indigo-600 text-white text-[9px] font-black px-1.5 py-0.2 rounded-full animate-pulse">
+                                          Terpilih
+                                        </span>
+                                      )}
+                                    </div>
+
+                                    <p className="text-[10px] sm:text-[11px] text-slate-500 flex items-center gap-1.5 flex-wrap">
+                                      <span>Oleh: <strong className="text-slate-700">{log.evaluatorName || 'Guru'}</strong></span>
+                                      <span>•</span>
+                                      <span>{log.timestamp || log.date}</span>
+                                    </p>
+                                  </div>
                                 </div>
-                              ) : (
-                                <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-xl bg-rose-100 text-rose-700 flex items-center justify-center font-bold">
-                                  <XCircle className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+
+                                {/* Action Buttons: Foto Bukti, Tindak Lanjut, Hapus */}
+                                <div className="flex items-center gap-1 shrink-0">
+                                  {log.photoProofUrl && isRealPhotoProof(log.photoProofUrl) && (
+                                    <button
+                                      onClick={() => setPreviewPhotoModalUrl(log.photoProofUrl || null)}
+                                      className="group relative rounded-xl overflow-hidden border border-slate-200 hover:border-indigo-500 transition-all cursor-pointer shrink-0"
+                                      title="Lihat Foto Bukti"
+                                    >
+                                      <img
+                                        src={log.photoProofUrl}
+                                        alt="Bukti"
+                                        loading="lazy"
+                                        className="w-7 h-7 sm:w-8 sm:h-8 object-cover group-hover:scale-105 transition-transform"
+                                      />
+                                    </button>
+                                  )}
+
+                                  <button
+                                    onClick={() => handleOpenFollowUpModal(log)}
+                                    className="px-2 sm:px-2.5 py-1 rounded-xl bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 text-[10px] sm:text-[11px] font-bold transition-all flex items-center gap-1 shrink-0 cursor-pointer shadow-2xs"
+                                    title="Tindak Lanjut"
+                                  >
+                                    <FileText className="w-3 h-3" />
+                                    <span className="hidden sm:inline">{log.followUpNotes ? 'Edit' : 'Tindak Lanjut'}</span>
+                                  </button>
+
+                                  {currentUserRole === 'ADMIN' && (
+                                    <button
+                                      type="button"
+                                      onClick={() => setDeleteConfirmLog(log)}
+                                      className="p-1 sm:p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer shrink-0"
+                                      title="Hapus Catatan (Admin)"
+                                    >
+                                      <Trash2 className="w-3.5 h-3.5" />
+                                    </button>
+                                  )}
+                                </div>
+                              </div>
+
+                              {/* Deskripsi & Catatan Spesifik Perilaku */}
+                              {log.notes && (
+                                <div className="text-[11px] sm:text-xs text-slate-700 bg-slate-50 px-2.5 py-1.5 rounded-xl border border-slate-100 leading-snug font-normal line-clamp-2 hover:line-clamp-none transition-all">
+                                  "{log.notes}"
+                                </div>
+                              )}
+
+                              {/* Catatan Tindak Lanjut jika ada */}
+                              {(log.followUpNotes || log.followUpPhotoUrl) && (
+                                <div className="p-2 sm:p-2.5 rounded-xl bg-amber-50/90 border border-amber-200 text-xs text-amber-950 space-y-1">
+                                  <div className="flex items-center justify-between font-bold text-[10px] text-amber-800">
+                                    <span className="flex items-center gap-1">
+                                      <ShieldCheck className="w-3 h-3 text-amber-600" />
+                                      Tindak Lanjut: {log.followUpBy || 'Guru'}
+                                    </span>
+                                    {log.followUpDate && <span className="font-mono text-[10px]">{log.followUpDate}</span>}
+                                  </div>
+                                  {log.followUpNotes && (
+                                    <p className="text-[11px] text-slate-700 leading-snug line-clamp-2 hover:line-clamp-none">{log.followUpNotes}</p>
+                                  )}
+                                  {log.followUpPhotoUrl && isRealPhotoProof(log.followUpPhotoUrl) && (
+                                    <button
+                                      type="button"
+                                      onClick={() => setPreviewPhotoModalUrl(log.followUpPhotoUrl || null)}
+                                      className="inline-flex items-center gap-1 px-2 py-0.5 bg-white text-amber-900 rounded text-[10px] font-bold border border-amber-300 cursor-pointer shadow-2xs mt-1"
+                                    >
+                                      <FileImage className="w-3 h-3 text-amber-700" /> Lihat Bukti Foto
+                                    </button>
+                                  )}
                                 </div>
                               )}
                             </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
 
-                            <div className="min-w-0 space-y-0.5">
-                              <div className="flex items-center gap-1.5 flex-wrap">
-                                <span className="font-bold text-slate-800 text-xs sm:text-sm">
-                                  {log.traitName}
-                                </span>
-                                <span className={`px-2 py-0.2 rounded-md text-[9px] sm:text-[10px] font-black ${
-                                  log.traitType === 'POSITIF' ? 'bg-blue-100 text-blue-800' : 'bg-rose-100 text-rose-800'
-                                }`}>
-                                  {log.traitType === 'POSITIF' ? `+${log.points}` : `-${log.points}`} Poin
-                                </span>
-                                {isManualCharacterLog(log) && (
-                                  <span className="bg-emerald-50 text-emerald-800 border border-emerald-300 text-[9px] font-extrabold px-1.5 py-0.2 rounded inline-flex items-center gap-0.5">
-                                    <ShieldCheck className="w-2.5 h-2.5 text-emerald-600" />
-                                    Guru
+                  {/* Bagian 2: Akumulasi Rekapitulasi Presensi Otomatis Sistem */}
+                  {(detailStudentScore.onTimeDays > 0 || 
+                    detailStudentScore.lateDays > 0 || 
+                    detailStudentScore.alpaDays > 0 || 
+                    detailStudentScore.unscannedInDays > 0 || 
+                    detailStudentScore.unreturnedDays > 0) && (
+                    <div className="space-y-2 pt-1">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-extrabold text-slate-700 flex items-center gap-1.5">
+                          <Clock className="w-3.5 h-3.5 text-slate-500" />
+                          Rekapitulasi Presensi Otomatis Sistem
+                        </span>
+                      </div>
+
+                      <div className="space-y-2">
+                        {/* 1. Card Akumulasi Hadir Tepat Waktu */}
+                        {detailStudentScore.onTimeDays > 0 && (
+                          <div className="p-3 rounded-2xl border border-emerald-200 bg-white hover:border-emerald-300 shadow-2xs space-y-1.5 transition-all">
+                            <div className="flex items-center justify-between gap-2">
+                              <div className="flex items-center gap-2.5 min-w-0">
+                                <div className="p-1.5 sm:p-2 bg-emerald-100 text-emerald-700 rounded-xl shrink-0">
+                                  <CheckCircle2 className="w-4 h-4" />
+                                </div>
+                                <div className="min-w-0">
+                                  <div className="flex items-center gap-1.5 flex-wrap">
+                                    <p className="font-bold text-slate-800 text-xs sm:text-sm truncate">
+                                      Hadir Tepat Waktu
+                                    </p>
+                                    <span className="px-1.5 py-0.2 rounded bg-emerald-50 text-emerald-700 border border-emerald-200 font-extrabold text-[9px] sm:text-[10px]">
+                                      Presensi Otomatis
+                                    </span>
+                                  </div>
+                                  <p className="text-[11px] text-slate-500 mt-0.5">
+                                    {detailStudentScore.onTimeDays}x tepat waktu • Bonus +1 tiap 3x
+                                  </p>
+                                </div>
+                              </div>
+                              <span className="px-2.5 py-1 bg-emerald-600 text-white font-black text-xs rounded-xl shadow-2xs shrink-0">
+                                +{detailStudentScore.onTimeBonusPoints} Poin
+                              </span>
+                            </div>
+
+                            {detailStudentScore.onTimeDates && detailStudentScore.onTimeDates.length > 0 && (
+                              <div className="pt-1.5 border-t border-slate-100 flex items-center gap-1 flex-wrap text-[10px]">
+                                <span className="text-slate-400 font-medium">Tanggal:</span>
+                                {detailStudentScore.onTimeDates.slice(0, 6).map((dateStr, i) => (
+                                  <span key={i} className="px-1.5 py-0.5 bg-slate-100 text-slate-700 rounded font-mono text-[9px] sm:text-[10px] font-semibold">
+                                    {dateStr}
                                   </span>
-                                )}
-                                {isHighlighted && (
-                                  <span className="bg-indigo-600 text-white text-[9px] font-black px-1.5 py-0.2 rounded-full animate-pulse">
-                                    Terpilih
+                                ))}
+                                {detailStudentScore.onTimeDates.length > 6 && (
+                                  <span className="text-slate-400 font-bold text-[9px] sm:text-[10px]">
+                                    +{detailStudentScore.onTimeDates.length - 6} lainnya
                                   </span>
                                 )}
                               </div>
-
-                              <p className="text-[10px] sm:text-[11px] text-slate-500 flex items-center gap-1.5 flex-wrap">
-                                <span>Oleh: <strong className="text-slate-700">{log.evaluatorName || 'Guru'}</strong></span>
-                                <span>•</span>
-                                <span>{log.timestamp || log.date}</span>
-                              </p>
-                            </div>
-                          </div>
-
-                          {/* Action Buttons: Foto Bukti, Tindak Lanjut, Hapus */}
-                          <div className="flex items-center gap-1 shrink-0">
-                            {log.photoProofUrl && isRealPhotoProof(log.photoProofUrl) && (
-                              <button
-                                onClick={() => setPreviewPhotoModalUrl(log.photoProofUrl || null)}
-                                className="group relative rounded-xl overflow-hidden border border-slate-200 hover:border-indigo-500 transition-all cursor-pointer shrink-0"
-                                title="Lihat Foto Bukti"
-                              >
-                                <img
-                                  src={log.photoProofUrl}
-                                  alt="Bukti"
-                                  loading="lazy"
-                                  className="w-7 h-7 sm:w-8 sm:h-8 object-cover group-hover:scale-105 transition-transform"
-                                />
-                              </button>
                             )}
-
-                            <button
-                              onClick={() => handleOpenFollowUpModal(log)}
-                              className="px-2 sm:px-2.5 py-1 rounded-xl bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 text-[10px] sm:text-[11px] font-bold transition-all flex items-center gap-1 shrink-0 cursor-pointer shadow-2xs"
-                              title="Tindak Lanjut"
-                            >
-                              <FileText className="w-3 h-3" />
-                              <span className="hidden sm:inline">{log.followUpNotes ? 'Edit' : 'Tindak Lanjut'}</span>
-                            </button>
-
-                            {currentUserRole === 'ADMIN' && (
-                              <button
-                                type="button"
-                                onClick={() => setDeleteConfirmLog(log)}
-                                className="p-1 sm:p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer shrink-0"
-                                title="Hapus Catatan (Admin)"
-                              >
-                                <Trash2 className="w-3.5 h-3.5" />
-                              </button>
-                            )}
-                          </div>
-                        </div>
-
-                        {/* Ringkasan Catatan / Notes Ringkas & Rapi */}
-                        {log.notes && (
-                          <div className="text-[11px] sm:text-xs text-slate-700 bg-slate-50 px-2.5 py-1.5 rounded-xl border border-slate-100 leading-snug font-normal line-clamp-2 hover:line-clamp-none transition-all">
-                            "{log.notes}"
                           </div>
                         )}
 
-                        {/* Catatan Tindak Lanjut jika ada */}
-                        {(log.followUpNotes || log.followUpPhotoUrl) && (
-                          <div className="p-2 sm:p-2.5 rounded-xl bg-amber-50/90 border border-amber-200 text-xs text-amber-950 space-y-1">
-                            <div className="flex items-center justify-between font-bold text-[10px] text-amber-800">
-                              <span className="flex items-center gap-1">
-                                <ShieldCheck className="w-3 h-3 text-amber-600" />
-                                Tindak Lanjut: {log.followUpBy || 'Guru'}
+                        {/* 2. Card Akumulasi Hadir Terlambat */}
+                        {detailStudentScore.lateDays > 0 && (
+                          <div className="p-3 rounded-2xl border border-rose-200 bg-white hover:border-rose-300 shadow-2xs space-y-1.5 transition-all">
+                            <div className="flex items-center justify-between gap-2">
+                              <div className="flex items-center gap-2.5 min-w-0">
+                                <div className="p-1.5 sm:p-2 bg-rose-100 text-rose-700 rounded-xl shrink-0">
+                                  <Clock className="w-4 h-4" />
+                                </div>
+                                <div className="min-w-0">
+                                  <div className="flex items-center gap-1.5 flex-wrap">
+                                    <p className="font-bold text-slate-800 text-xs sm:text-sm truncate">
+                                      Hadir Terlambat
+                                    </p>
+                                    <span className="px-1.5 py-0.2 rounded bg-rose-50 text-rose-700 border border-rose-200 font-extrabold text-[9px] sm:text-[10px]">
+                                      Presensi Otomatis
+                                    </span>
+                                  </div>
+                                  <p className="text-[11px] text-slate-500 mt-0.5">
+                                    {detailStudentScore.lateDays}x terlambat • -1 poin/hari
+                                  </p>
+                                </div>
+                              </div>
+                              <span className="px-2.5 py-1 bg-rose-600 text-white font-black text-xs rounded-xl shadow-2xs shrink-0">
+                                -{detailStudentScore.latePenaltyPoints} Poin
                               </span>
-                              {log.followUpDate && <span className="font-mono text-[10px]">{log.followUpDate}</span>}
                             </div>
-                            {log.followUpNotes && (
-                              <p className="text-[11px] text-slate-700 leading-snug line-clamp-2 hover:line-clamp-none">{log.followUpNotes}</p>
+
+                            {detailStudentScore.lateDates && detailStudentScore.lateDates.length > 0 && (
+                              <div className="pt-1.5 border-t border-slate-100 flex items-center gap-1 flex-wrap text-[10px]">
+                                <span className="text-slate-400 font-medium">Tanggal:</span>
+                                {detailStudentScore.lateDates.slice(0, 6).map((dateStr, i) => (
+                                  <span key={i} className="px-1.5 py-0.5 bg-slate-100 text-slate-700 rounded font-mono text-[9px] sm:text-[10px] font-semibold">
+                                    {dateStr}
+                                  </span>
+                                ))}
+                                {detailStudentScore.lateDates.length > 6 && (
+                                  <span className="text-slate-400 font-bold text-[9px] sm:text-[10px]">
+                                    +{detailStudentScore.lateDates.length - 6} lainnya
+                                  </span>
+                                )}
+                              </div>
                             )}
-                            {log.followUpPhotoUrl && isRealPhotoProof(log.followUpPhotoUrl) && (
-                              <button
-                                type="button"
-                                onClick={() => setPreviewPhotoModalUrl(log.followUpPhotoUrl || null)}
-                                className="inline-flex items-center gap-1 px-2 py-0.5 bg-white text-amber-900 rounded text-[10px] font-bold border border-amber-300 cursor-pointer shadow-2xs mt-1"
-                              >
-                                <FileImage className="w-3 h-3 text-amber-700" /> Lihat Bukti Foto
-                              </button>
+                          </div>
+                        )}
+
+                        {/* 3. Card Akumulasi Siswa Alpa */}
+                        {detailStudentScore.alpaDays > 0 && (
+                          <div className="p-3 rounded-2xl border border-red-200 bg-white hover:border-red-300 shadow-2xs space-y-1.5 transition-all">
+                            <div className="flex items-center justify-between gap-2">
+                              <div className="flex items-center gap-2.5 min-w-0">
+                                <div className="p-1.5 sm:p-2 bg-red-100 text-red-700 rounded-xl shrink-0">
+                                  <UserX className="w-4 h-4" />
+                                </div>
+                                <div className="min-w-0">
+                                  <div className="flex items-center gap-1.5 flex-wrap">
+                                    <p className="font-bold text-slate-800 text-xs sm:text-sm truncate">
+                                      Alpa (Tanpa Keterangan)
+                                    </p>
+                                    <span className="px-1.5 py-0.2 rounded bg-red-50 text-red-700 border border-red-200 font-extrabold text-[9px] sm:text-[10px]">
+                                      Presensi Otomatis
+                                    </span>
+                                  </div>
+                                  <p className="text-[11px] text-slate-500 mt-0.5">
+                                    {detailStudentScore.alpaDays}x alpa • -5 poin/hari
+                                  </p>
+                                </div>
+                              </div>
+                              <span className="px-2.5 py-1 bg-red-600 text-white font-black text-xs rounded-xl shadow-2xs shrink-0">
+                                -{detailStudentScore.alpaPenaltyPoints} Poin
+                              </span>
+                            </div>
+
+                            {detailStudentScore.alpaDates && detailStudentScore.alpaDates.length > 0 && (
+                              <div className="pt-1.5 border-t border-slate-100 flex items-center gap-1 flex-wrap text-[10px]">
+                                <span className="text-slate-400 font-medium">Tanggal:</span>
+                                {detailStudentScore.alpaDates.slice(0, 6).map((dateStr, i) => (
+                                  <span key={i} className="px-1.5 py-0.5 bg-slate-100 text-slate-700 rounded font-mono text-[9px] sm:text-[10px] font-semibold">
+                                    {dateStr}
+                                  </span>
+                                ))}
+                                {detailStudentScore.alpaDates.length > 6 && (
+                                  <span className="text-slate-400 font-bold text-[9px] sm:text-[10px]">
+                                    +{detailStudentScore.alpaDates.length - 6} lainnya
+                                  </span>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        )}
+
+                        {/* 4. Card Akumulasi Belum Scan Presensi Masuk */}
+                        {detailStudentScore.unscannedInDays > 0 && (
+                          <div className="p-3 rounded-2xl border border-orange-200 bg-white hover:border-orange-300 shadow-2xs space-y-1.5 transition-all">
+                            <div className="flex items-center justify-between gap-2">
+                              <div className="flex items-center gap-2.5 min-w-0">
+                                <div className="p-1.5 sm:p-2 bg-orange-100 text-orange-700 rounded-xl shrink-0">
+                                  <Clock className="w-4 h-4" />
+                                </div>
+                                <div className="min-w-0">
+                                  <div className="flex items-center gap-1.5 flex-wrap">
+                                    <p className="font-bold text-slate-800 text-xs sm:text-sm truncate">
+                                      Belum Scan Presensi Masuk
+                                    </p>
+                                    <span className="px-1.5 py-0.2 rounded bg-orange-50 text-orange-700 border border-orange-200 font-extrabold text-[9px] sm:text-[10px]">
+                                      Presensi Otomatis
+                                    </span>
+                                  </div>
+                                  <p className="text-[11px] text-slate-500 mt-0.5">
+                                    {detailStudentScore.unscannedInDays}x belum scan masuk • -2 poin/kejadian
+                                  </p>
+                                </div>
+                              </div>
+                              <span className="px-2.5 py-1 bg-orange-600 text-white font-black text-xs rounded-xl shadow-2xs shrink-0">
+                                -{detailStudentScore.unscannedInPenaltyPoints} Poin
+                              </span>
+                            </div>
+
+                            {detailStudentScore.unscannedInDates && detailStudentScore.unscannedInDates.length > 0 && (
+                              <div className="pt-1.5 border-t border-slate-100 flex items-center gap-1 flex-wrap text-[10px]">
+                                <span className="text-slate-400 font-medium">Tanggal:</span>
+                                {detailStudentScore.unscannedInDates.slice(0, 6).map((dateStr, i) => (
+                                  <span key={i} className="px-1.5 py-0.5 bg-slate-100 text-slate-700 rounded font-mono text-[9px] sm:text-[10px] font-semibold">
+                                    {dateStr}
+                                  </span>
+                                ))}
+                                {detailStudentScore.unscannedInDates.length > 6 && (
+                                  <span className="text-slate-400 font-bold text-[9px] sm:text-[10px]">
+                                    +{detailStudentScore.unscannedInDates.length - 6} lainnya
+                                  </span>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        )}
+
+                        {/* 5. Card Akumulasi Belum Scan Pulang */}
+                        {detailStudentScore.unreturnedDays > 0 && (
+                          <div className="p-3 rounded-2xl border border-amber-200 bg-white hover:border-amber-300 shadow-2xs space-y-1.5 transition-all">
+                            <div className="flex items-center justify-between gap-2">
+                              <div className="flex items-center gap-2.5 min-w-0">
+                                <div className="p-1.5 sm:p-2 bg-amber-100 text-amber-700 rounded-xl shrink-0">
+                                  <Clock className="w-4 h-4" />
+                                </div>
+                                <div className="min-w-0">
+                                  <div className="flex items-center gap-1.5 flex-wrap">
+                                    <p className="font-bold text-slate-800 text-xs sm:text-sm truncate">
+                                      Belum Scan Pulang
+                                    </p>
+                                    <span className="px-1.5 py-0.2 rounded bg-amber-50 text-amber-700 border border-amber-200 font-extrabold text-[9px] sm:text-[10px]">
+                                      Presensi Otomatis
+                                    </span>
+                                  </div>
+                                  <p className="text-[11px] text-slate-500 mt-0.5">
+                                    {detailStudentScore.unreturnedDays}x belum scan pulang • -2 poin/kejadian
+                                  </p>
+                                </div>
+                              </div>
+                              <span className="px-2.5 py-1 bg-amber-600 text-white font-black text-xs rounded-xl shadow-2xs shrink-0">
+                                -{detailStudentScore.unreturnedPenaltyPoints} Poin
+                              </span>
+                            </div>
+
+                            {detailStudentScore.unreturnedDates && detailStudentScore.unreturnedDates.length > 0 && (
+                              <div className="pt-1.5 border-t border-slate-100 flex items-center gap-1 flex-wrap text-[10px]">
+                                <span className="text-slate-400 font-medium">Tanggal:</span>
+                                {detailStudentScore.unreturnedDates.slice(0, 6).map((dateStr, i) => (
+                                  <span key={i} className="px-1.5 py-0.5 bg-slate-100 text-slate-700 rounded font-mono text-[9px] sm:text-[10px] font-semibold">
+                                    {dateStr}
+                                  </span>
+                                ))}
+                                {detailStudentScore.unreturnedDates.length > 6 && (
+                                  <span className="text-slate-400 font-bold text-[9px] sm:text-[10px]">
+                                    +{detailStudentScore.unreturnedDates.length - 6} lainnya
+                                  </span>
+                                )}
+                              </div>
                             )}
                           </div>
                         )}
                       </div>
-                    );
-                  })}
+                    </div>
+                  )}
                 </div>
               )}
             </div>

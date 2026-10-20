@@ -4142,6 +4142,60 @@ export function isManualCharacterLog(log: StudentCharacterLog): boolean {
 }
 
 /**
+ * Menentukan apakah sebuah log penilaian karakter berasal dari Penilaian KBM (Jurnal KBM Guru)
+ * Sesuai aturan:
+ * - Sangat Aktif KBM = +1 poin (Positif)
+ * - Tidak Hadir di Kelas (KBM) = -2 poin (Negatif)
+ * - Mengganggu KBM = -1 poin (Negatif)
+ */
+export function isKbmCharacterLog(log: StudentCharacterLog): boolean {
+  if (!log) return false;
+  const idLower = (log.id || '').toLowerCase();
+  if (
+    idLower.startsWith('auto-kbm-') ||
+    idLower.startsWith('saved-auto-kbm-') ||
+    idLower.startsWith('auto-active-kbm-') ||
+    idLower.startsWith('saved-auto-active-kbm-') ||
+    idLower.startsWith('auto-absent-kbm-') ||
+    idLower.startsWith('saved-auto-absent-kbm-') ||
+    idLower.startsWith('auto-disruptive-') ||
+    idLower.startsWith('saved-auto-disruptive-') ||
+    idLower.startsWith('journal-kbm-')
+  ) {
+    return true;
+  }
+
+  const traitLower = (log.traitName || '').toLowerCase();
+  if (
+    traitLower.includes('kbm') ||
+    traitLower.includes('sangat aktif kbm') ||
+    traitLower.includes('tidak hadir di kelas saat kbm') ||
+    traitLower.includes('tidak hadir di kelas (kbm)') ||
+    traitLower.includes('mengganggu kbm') ||
+    traitLower.includes('saat kbm')
+  ) {
+    return true;
+  }
+
+  const notesLower = (log.notes || '').toLowerCase();
+  if (
+    notesLower.includes('jurnal kbm') ||
+    notesLower.includes('saat kbm') ||
+    notesLower.includes('dalam kbm') ||
+    notesLower.includes('penilaian kbm') ||
+    notesLower.includes('mengganggu kbm')
+  ) {
+    return true;
+  }
+
+  if ((log as any).sourceType === 'JURNAL_KBM') {
+    return true;
+  }
+
+  return false;
+}
+
+/**
  * Mengambil seluruh catatan karakter manual dari cadangan permanen aman.
  */
 export function getPermanentManualCharacterLogs(): StudentCharacterLog[] {

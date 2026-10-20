@@ -3,7 +3,7 @@ import autoTable from 'jspdf-autotable';
 import * as XLSX from 'xlsx';
 import QRCode from 'qrcode';
 import { SchoolProfile, Student, AttendanceRecord, LearningJournal, SchoolClass, CharacterTrait, StudentCharacterLog, CharacterPredicateSettings, StudentGradeAssessment, LessonPeriod, ClassScheduleSlot, Teacher } from '../types';
-import { getSchoolClasses, getTeachers, calculateStudentCharacterSummary } from './storage';
+import { getSchoolClasses, getTeachers, calculateStudentCharacterSummary, isKbmCharacterLog } from './storage';
 
 /**
  * Resolves Homeroom Teacher (Wali Kelas) details automatically from Class Management data (classes)
@@ -2136,12 +2136,15 @@ export async function exportStudentCharacterDetailPdf(
       log.followUpDate ? `Tgl: ${log.followUpDate}` : ''
     ].filter(Boolean).join('\n');
 
+    const isKbm = isKbmCharacterLog(log);
+    const categoryTag = isKbm ? '[PENILAIAN KBM]' : (log.traitType === 'POSITIF' ? '[POSITIF (+)]' : '[NEGATIF (-)]');
+
     return [
       (presenceRows.length + idx + 1).toString(),
-      log.timestamp || '-',
-      `${log.traitName}\n[${log.traitType === 'POSITIF' ? 'POSITIF (+)' : 'NEGATIF (-)'}]`,
+      log.timestamp || log.date || '-',
+      `${log.traitName}\n${categoryTag}`,
       log.traitType === 'POSITIF' ? `+${log.points}` : `-${log.points}`,
-      log.evaluatorName || '-',
+      log.evaluatorName || (isKbm ? 'Guru Mapel' : '-'),
       log.notes ? log.notes : '-',
       followUpText || 'Belum ada tindak lanjut'
     ];

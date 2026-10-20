@@ -4347,13 +4347,8 @@ export function isAttendanceForStudent(
 /**
  * Menghitung rekapitulasi poin karakter positif, negatif, skor bersih, daftar log siswa,
  * serta menghitung akumulasi Hadir Tepat Waktu (setiap 3 hari = 1 poin, 6 hari = 2 poin, dst.)
- * secara seragam dan konsisten untuk seluruh komponen (Admin, Guru, Wali Murid, Laporan PDF).
  */
-export function calculateStudentCharacterSummary(
-  student: { id?: string; nisn?: string; nis?: string; name?: string; className?: string; classId?: string },
-  logs: StudentCharacterLog[],
-  attendanceRecords?: AttendanceRecord[]
-): {
+export type StudentCharacterSummary = {
   positivePoints: number;
   negativePoints: number;
   netScore: number;
@@ -4374,11 +4369,19 @@ export function calculateStudentCharacterSummary(
   unreturnedDays: number;
   unreturnedPenaltyPoints: number;
   unreturnedDates: string[];
-} {
-  // Saring log karakter siswa (kecualikan log auto presensi statis lama agar tidak terjadi duplikasi nilai dengan kalkulasi dinamis presensi)
-  const rawLogs = (logs || []).filter(l => {
-    if (!isLogForStudent(l, student)) return false;
+};
 
+/**
+ * Komputasi ringkasan karakter dari data yang telah disaring (O(1) lookups)
+ */
+export function computeStudentCharacterSummaryFromData(
+  student: { id?: string; nisn?: string; nis?: string; name?: string; className?: string; classId?: string },
+  studentRawLogs: StudentCharacterLog[],
+  studentAtt: AttendanceRecord[],
+  activeAttendanceDates: string[]
+): StudentCharacterSummary {
+  // Saring log karakter siswa (kecualikan log auto presensi statis lama agar tidak terjadi duplikasi nilai dengan kalkulasi dinamis presensi)
+  const studentLogs = (studentRawLogs || []).filter(l => {
     // CATATAN MANUAL GURU: WAJIB SELALU DITAMPILKAN DI DETAIL KARAKTER & TIDAK BOLEH DISARING OLEH FILTER OTOMATIS!
     if (isManualCharacterLog(l)) return true;
 
@@ -4401,7 +4404,6 @@ export function calculateStudentCharacterSummary(
       !(l.traitType === 'NEGATIF' && (l.notes?.toLowerCase().includes('belum scan kepulangan') || l.notes?.toLowerCase().includes('belum melakukan scan pulang') || l.notes?.toLowerCase().includes('belum pulang')))
     );
   });
-  const studentLogs = deduplicateCharacterLogs(rawLogs);
 
   // Urutkan studentLogs dari yang terbaru ke terlama (timestamp/date Descending)
   studentLogs.sort((a, b) => {
@@ -4422,63 +4424,47 @@ export function calculateStudentCharacterSummary(
     }
   });
 
-  // Ambil seluruh data rekap presensi siswa
-  const allAtt = (attendanceRecords && attendanceRecords.length > 0) 
-    ? attendanceRecords 
-    : getAttendanceRecords();
+  // Rekapitulasi Presensi
+  const distinctOnTimeDatesSet = new Set<string>();
+  const distinctLateDatesSet = new Set<string>();
+  const distinctAlpaDatesSet = new Set<string>();
+  const attByDate = new Map<string, AttendanceRecord>();
 
-  // 1. Hitung jumlah hadir tepat waktu dari presensi (status HADIR)
-  const matchingHadir = allAtt.filter(r => r && (r.status || '').toUpperCase() === 'HADIR' && isAttendanceForStudent(r, student));
-  const distinctOnTimeDates = Array.from(new Set(matchingHadir.map(r => r.date))).sort();
-  const onTimeDays = distinctOnTimeDates.length;
+  for (let i = 0; i < studentAtt.length; i++) {
+    const r = studentAtt[i];
+    if (!r || !r.date) continue;
+    attByDate.set(r.date, r);
+    const st = (r.status || '').toUpperCase().trim();
+    if (st === 'HADIR') {
+      distinctOnTimeDatesSet.add(r.date);
+    } else if (st === 'TERLAMBAT') {
+      distinctLateDatesSet.add(r.date);
+    } else if (st === 'ALPA') {
+      distinctAlpaDatesSet.add(r.date);
+    }
+  }
 
-  // Aturan Hadir Tepat Waktu: Setiap kelipatan 3 hari beri nilai 1 poin (3 hari = 1 poin, 6 hari = 2 poin, dst.)
+  const distinctOnTimeDates = Array.from(distinctOnTimeDatesSet);
+  const onTimeDays = distinctOnTimeDatesSet.size;
   const onTimeBonusPoints = Math.floor(onTimeDays / 3);
   positivePoints += onTimeBonusPoints;
 
-  // 2. Hitung jumlah hadir terlambat dari presensi (status TERLAMBAT)
-  const matchingTerlambat = allAtt.filter(r => r && (r.status || '').toUpperCase() === 'TERLAMBAT' && isAttendanceForStudent(r, student));
-  const distinctLateDates = Array.from(new Set(matchingTerlambat.map(r => r.date))).sort();
-  const lateDays = distinctLateDates.length;
-
-  // Aturan Hadir Terlambat: Setiap hadir terlambat selama melakukan scan diberi penalti nilai -1 poin
+  const distinctLateDates = Array.from(distinctLateDatesSet);
+  const lateDays = distinctLateDatesSet.size;
   const latePenaltyPoints = lateDays * 1;
   negativePoints += latePenaltyPoints;
 
-  // 3. Hitung AKUMULASI TOTAL ALPA SELURUHNYA:
-  // Aturan Alpa: Beri nilai karakter setiap 1 kali Alpa = -5 poin
-  const matchingAlpa = allAtt.filter(r => r && (r.status || '').toUpperCase() === 'ALPA' && isAttendanceForStudent(r, student));
-  const distinctAlpaDates = Array.from(new Set(matchingAlpa.map(r => r.date))).sort();
-  const alpaDays = distinctAlpaDates.length;
+  const distinctAlpaDates = Array.from(distinctAlpaDatesSet);
+  const alpaDays = distinctAlpaDatesSet.size;
   const alpaPenaltyPoints = alpaDays * 5;
   negativePoints += alpaPenaltyPoints;
-
-  // 4. Hitung AKUMULASI BELUM SCAN PRESENSI & BELUM PULANG DARI SELURUH DATA PRESENSI SISWA:
-  // Kriteria: Status Masuk HADIR dan BELUM ABSEN
-  // - Nilai -2 jika jam masuk belum scan
-  // - Nilai -2 jika status pulang belum pulang
-  const studentAtt = allAtt.filter(r => r && isAttendanceForStudent(r, student));
-  
-  // Seluruh tanggal sekolah aktif yang berlaku bagi siswa (dari rekaman siswa atau teman sekelasnya)
-  const normalizeCls = (c?: string) => (c || '').trim().toLowerCase().replace(/^kelas\s*/i, '');
-  const sNormClass = normalizeCls(student.className);
-
-  const studentClassDates = allAtt
-    .filter(r => r && (
-      isAttendanceForStudent(r, student) ||
-      (sNormClass && normalizeCls(r.className) === sNormClass)
-    ))
-    .map(r => r.date);
-
-  const activeAttendanceDates = Array.from(new Set(
-    studentClassDates.length > 0 ? studentClassDates : allAtt.map(r => r?.date)
-  )).filter(Boolean).sort();
 
   const unscannedInDateSet = new Set<string>();
   const unreturnedDateSet = new Set<string>();
 
-  activeAttendanceDates.forEach(dateStr => {
-    const rec = studentAtt.find(r => r.date === dateStr);
+  for (let d = 0; d < activeAttendanceDates.length; d++) {
+    const dateStr = activeAttendanceDates[d];
+    const rec = attByDate.get(dateStr);
     const rawStatus = rec ? (rec.status || '').toUpperCase().trim() : 'BELUM_ABSEN';
 
     const isHadir = rawStatus === 'HADIR';
@@ -4486,12 +4472,7 @@ export function calculateStudentCharacterSummary(
                          rawStatus === 'BELUM ABSEN' || 
                          (rec?.notes || '').toLowerCase().includes('belum absen');
 
-    // Hanya evaluasi jika status masuk adalah HADIR atau BELUM ABSEN
-    // (Jika Alpa dinilai -5 pada aturan Alpa, jika Izin/Sakit tidak dinilai penalti)
     if (isHadir || isBelumAbsen) {
-      // A. Jam Masuk Belum Scan (-2 Poin):
-      // Jika status Belum Absen, otomatis belum scan jam masuk.
-      // Jika status Hadir, dinilai -2 jika kolom jam belum terisi / '-' / bertuliskan 'belum'
       const isEntryUnscanned = isBelumAbsen || (isHadir && (
         !rec?.time || 
         rec.time === '-' || 
@@ -4502,9 +4483,6 @@ export function calculateStudentCharacterSummary(
         unscannedInDateSet.add(dateStr);
       }
 
-      // B. Status Pulang Belum Pulang (-2 Poin):
-      // Jika status Belum Absen, otomatis belum scan pulang.
-      // Jika status Hadir, dinilai -2 jika belum pulang (returnTime kosong / '-' / 'belum' atau returnStatus bukan PULANG)
       const hasReturned = isHadir && !!(
         (rec?.returnTime && rec.returnTime !== '-' && rec.returnTime.trim() !== '' && !rec.returnTime.toLowerCase().includes('belum')) || 
         rec?.returnStatus === 'PULANG' || 
@@ -4515,11 +4493,11 @@ export function calculateStudentCharacterSummary(
         unreturnedDateSet.add(dateStr);
       }
     }
-  });
+  }
 
-  // Tambahkan juga pemeriksaan langsung rekaman individual siswa jika ada tanggal di luar activeAttendanceDates
-  studentAtt.forEach(rec => {
-    if (!rec || !rec.date) return;
+  // Periksa juga jika ada tanggal presensi individual siswa yang belum ada di activeAttendanceDates
+  attByDate.forEach((rec, dateStr) => {
+    if (unscannedInDateSet.has(dateStr) && unreturnedDateSet.has(dateStr)) return;
     const rawStatus = (rec.status || '').toUpperCase().trim();
     const isHadir = rawStatus === 'HADIR';
     const isBelumAbsen = rawStatus === 'BELUM_ABSEN' || 
@@ -4527,35 +4505,39 @@ export function calculateStudentCharacterSummary(
                          (rec.notes || '').toLowerCase().includes('belum absen');
 
     if (isHadir || isBelumAbsen) {
-      const isEntryUnscanned = isBelumAbsen || (isHadir && (
-        !rec.time || 
-        rec.time === '-' || 
-        rec.time.trim() === '' || 
-        rec.time.toLowerCase().includes('belum')
-      ));
-      if (isEntryUnscanned) {
-        unscannedInDateSet.add(rec.date);
+      if (!unscannedInDateSet.has(dateStr)) {
+        const isEntryUnscanned = isBelumAbsen || (isHadir && (
+          !rec.time || 
+          rec.time === '-' || 
+          rec.time.trim() === '' || 
+          rec.time.toLowerCase().includes('belum')
+        ));
+        if (isEntryUnscanned) {
+          unscannedInDateSet.add(dateStr);
+        }
       }
 
-      const hasReturned = isHadir && !!(
-        (rec.returnTime && rec.returnTime !== '-' && rec.returnTime.trim() !== '' && !rec.returnTime.toLowerCase().includes('belum')) || 
-        rec.returnStatus === 'PULANG' || 
-        rec.returnStatus === 'PULANG_TEPAT' || 
-        rec.returnStatus === 'PULANG_CEPAT'
-      );
-      if (!hasReturned) {
-        unreturnedDateSet.add(rec.date);
+      if (!unreturnedDateSet.has(dateStr)) {
+        const hasReturned = isHadir && !!(
+          (rec.returnTime && rec.returnTime !== '-' && rec.returnTime.trim() !== '' && !rec.returnTime.toLowerCase().includes('belum')) || 
+          rec.returnStatus === 'PULANG' || 
+          rec.returnStatus === 'PULANG_TEPAT' || 
+          rec.returnStatus === 'PULANG_CEPAT'
+        );
+        if (!hasReturned) {
+          unreturnedDateSet.add(dateStr);
+        }
       }
     }
   });
 
-  const distinctUnscannedInDates = Array.from(unscannedInDateSet).sort();
-  const unscannedInDays = distinctUnscannedInDates.length;
+  const distinctUnscannedInDates = Array.from(unscannedInDateSet);
+  const unscannedInDays = unscannedInDateSet.size;
   const unscannedInPenaltyPoints = unscannedInDays * 2;
   negativePoints += unscannedInPenaltyPoints;
 
-  const distinctUnreturnedDates = Array.from(unreturnedDateSet).sort();
-  const unreturnedDays = distinctUnreturnedDates.length;
+  const distinctUnreturnedDates = Array.from(unreturnedDateSet);
+  const unreturnedDays = unreturnedDateSet.size;
   const unreturnedPenaltyPoints = unreturnedDays * 2;
   negativePoints += unreturnedPenaltyPoints;
 
@@ -4584,18 +4566,235 @@ export function calculateStudentCharacterSummary(
 }
 
 /**
+ * Menghitung rekapitulasi poin karakter positif, negatif, skor bersih, daftar log siswa,
+ * serta menghitung akumulasi Hadir Tepat Waktu (setiap 3 hari = 1 poin, 6 hari = 2 poin, dst.)
+ * secara seragam dan konsisten untuk seluruh komponen (Admin, Guru, Wali Murid, Laporan PDF).
+ */
+export function calculateStudentCharacterSummary(
+  student: { id?: string; nisn?: string; nis?: string; name?: string; className?: string; classId?: string },
+  logs: StudentCharacterLog[],
+  attendanceRecords?: AttendanceRecord[]
+): StudentCharacterSummary {
+  const allAtt = (attendanceRecords && attendanceRecords.length > 0) 
+    ? attendanceRecords 
+    : getAttendanceRecords();
+
+  const normalizeCls = (c?: string) => (c || '').trim().toLowerCase().replace(/^kelas\s*/i, '');
+  const sNormClass = normalizeCls(student.className);
+
+  const studentAtt: AttendanceRecord[] = [];
+  const classDatesSet = new Set<string>();
+  const allDatesSet = new Set<string>();
+
+  for (let i = 0; i < allAtt.length; i++) {
+    const r = allAtt[i];
+    if (!r) continue;
+    if (r.date) allDatesSet.add(r.date);
+    if (isAttendanceForStudent(r, student)) {
+      studentAtt.push(r);
+    }
+    if (sNormClass && normalizeCls(r.className) === sNormClass && r.date) {
+      classDatesSet.add(r.date);
+    }
+  }
+
+  const activeDates = classDatesSet.size > 0 
+    ? Array.from(classDatesSet).sort() 
+    : (studentAtt.length > 0 ? Array.from(new Set(studentAtt.map(r => r.date))).sort() : Array.from(allDatesSet).sort());
+
+  const studentRawLogs = deduplicateCharacterLogs((logs || []).filter(l => isLogForStudent(l, student)));
+
+  return computeStudentCharacterSummaryFromData(student, studentRawLogs, studentAtt, activeDates);
+}
+
+/**
+ * Menghitung batch rekapitulasi karakter untuk seluruh siswa secara instan & efisien (O(N) bukannya O(N*A))
+ * Menggunakan indeks Map memori untuk mengeliminasi freeze & lag saat halaman nilai karakter dibuka.
+ */
+export function calculateBatchStudentCharacterSummaries(
+  students: { id?: string; nisn?: string; nis?: string; name?: string; className?: string; classId?: string }[],
+  logs: StudentCharacterLog[],
+  attendanceRecords?: AttendanceRecord[]
+): Map<string, StudentCharacterSummary> {
+  const allAtt = (attendanceRecords && attendanceRecords.length > 0) 
+    ? attendanceRecords 
+    : getAttendanceRecords();
+
+  const normalizeCls = (c?: string) => (c || '').trim().toLowerCase().replace(/^kelas\s*/i, '');
+
+  // 1. Group attendance by student & class
+  const attByStudentId = new Map<string, AttendanceRecord[]>();
+  const attByNisn = new Map<string, AttendanceRecord[]>();
+  const attByName = new Map<string, AttendanceRecord[]>();
+  const datesByClass = new Map<string, Set<string>>();
+  const allDatesSet = new Set<string>();
+
+  for (let i = 0; i < allAtt.length; i++) {
+    const r = allAtt[i];
+    if (!r) continue;
+    if (r.date) allDatesSet.add(r.date);
+
+    if (r.className) {
+      const clsKey = normalizeCls(r.className);
+      if (clsKey) {
+        let set = datesByClass.get(clsKey);
+        if (!set) {
+          set = new Set<string>();
+          datesByClass.set(clsKey, set);
+        }
+        if (r.date) set.add(r.date);
+      }
+    }
+
+    if (r.studentId) {
+      const idKey = r.studentId.trim();
+      let arr = attByStudentId.get(idKey);
+      if (!arr) {
+        arr = [];
+        attByStudentId.set(idKey, arr);
+      }
+      arr.push(r);
+    }
+    if (r.nisn && r.nisn !== '-') {
+      const nisnKey = r.nisn.trim();
+      let arr = attByNisn.get(nisnKey);
+      if (!arr) {
+        arr = [];
+        attByNisn.set(nisnKey, arr);
+      }
+      arr.push(r);
+    }
+    if (r.studentName) {
+      const nameKey = r.studentName.trim().toLowerCase().replace(/\s+/g, ' ');
+      if (nameKey) {
+        let arr = attByName.get(nameKey);
+        if (!arr) {
+          arr = [];
+          attByName.set(nameKey, arr);
+        }
+        arr.push(r);
+      }
+    }
+  }
+
+  // 2. Group logs by student (pre-deduplicated once for all students in O(L) instead of O(N*L))
+  const logsByStudentId = new Map<string, StudentCharacterLog[]>();
+  const logsByNisn = new Map<string, StudentCharacterLog[]>();
+  const logsByName = new Map<string, StudentCharacterLog[]>();
+
+  const safeLogs = deduplicateCharacterLogs(logs || []);
+  for (let i = 0; i < safeLogs.length; i++) {
+    const l = safeLogs[i];
+    if (!l) continue;
+    if (l.studentId) {
+      const idKey = l.studentId.trim();
+      let arr = logsByStudentId.get(idKey);
+      if (!arr) {
+        arr = [];
+        logsByStudentId.set(idKey, arr);
+      }
+      arr.push(l);
+    }
+    if (l.nisn && l.nisn !== '-') {
+      const nisnKey = l.nisn.trim();
+      let arr = logsByNisn.get(nisnKey);
+      if (!arr) {
+        arr = [];
+        logsByNisn.set(nisnKey, arr);
+      }
+      arr.push(l);
+    }
+    if (l.studentName) {
+      const nameKey = l.studentName.trim().toLowerCase().replace(/\s+/g, ' ');
+      if (nameKey) {
+        let arr = logsByName.get(nameKey);
+        if (!arr) {
+          arr = [];
+          logsByName.set(nameKey, arr);
+        }
+        arr.push(l);
+      }
+    }
+  }
+
+  const allDatesArray = Array.from(allDatesSet).sort();
+  const sortedDatesByClass = new Map<string, string[]>();
+  datesByClass.forEach((set, cls) => {
+    sortedDatesByClass.set(cls, Array.from(set).sort());
+  });
+  const resultMap = new Map<string, StudentCharacterSummary>();
+
+  for (let sIdx = 0; sIdx < students.length; sIdx++) {
+    const s = students[sIdx];
+    if (!s || !s.id) continue;
+
+    const sId = (s.id || '').trim();
+    const sNisn = (s.nisn || '').trim();
+    const sName = (s.name || '').trim().toLowerCase().replace(/\s+/g, ' ');
+
+    // Fast lookup student logs
+    const logMap = new Map<string, StudentCharacterLog>();
+    if (sId && logsByStudentId.has(sId)) {
+      logsByStudentId.get(sId)!.forEach(l => logMap.set(l.id, l));
+    }
+    if (sNisn && sNisn !== '-' && logsByNisn.has(sNisn)) {
+      logsByNisn.get(sNisn)!.forEach(l => logMap.set(l.id, l));
+    }
+    if (sName && logsByName.has(sName)) {
+      logsByName.get(sName)!.forEach(l => logMap.set(l.id, l));
+    }
+    const matchedLogs = Array.from(logMap.values());
+
+    // Fast lookup student attendance
+    const attMap = new Map<string, AttendanceRecord>();
+    if (sId && attByStudentId.has(sId)) {
+      attByStudentId.get(sId)!.forEach(r => attMap.set(r.id || `${r.date}_${r.studentId}`, r));
+    }
+    if (sNisn && sNisn !== '-' && attByNisn.has(sNisn)) {
+      attByNisn.get(sNisn)!.forEach(r => attMap.set(r.id || `${r.date}_${r.studentId}`, r));
+    }
+    if (sName && attByName.has(sName)) {
+      attByName.get(sName)!.forEach(r => attMap.set(r.id || `${r.date}_${r.studentId}`, r));
+    }
+    const studentAtt = Array.from(attMap.values());
+
+    // Class dates
+    const sNormClass = normalizeCls(s.className);
+    const preSortedDates = sNormClass ? sortedDatesByClass.get(sNormClass) : undefined;
+    const activeDates = (preSortedDates && preSortedDates.length > 0)
+      ? preSortedDates
+      : (studentAtt.length > 0 ? Array.from(new Set(studentAtt.map(r => r.date))).sort() : allDatesArray);
+
+    const summary = computeStudentCharacterSummaryFromData(s, matchedLogs, studentAtt, activeDates);
+    resultMap.set(s.id, summary);
+  }
+
+  return resultMap;
+}
+
+let cachedDeletedCharacterLogIds: Set<string> | null = null;
+
+/**
  * Mengambil daftar ID catatan karakter yang telah dihapus oleh pengguna/sistem
  * sehingga tidak dibangkitkan kembali oleh sinkronisasi Cloud Firestore.
  */
 export function getDeletedCharacterLogIds(): Set<string> {
   if (typeof window === 'undefined') return new Set();
+  if (cachedDeletedCharacterLogIds !== null) {
+    return cachedDeletedCharacterLogIds;
+  }
   try {
     const raw = localStorage.getItem(DELETED_CHARACTER_LOGS_KEY);
-    if (!raw) return new Set();
+    if (!raw) {
+      cachedDeletedCharacterLogIds = new Set();
+      return cachedDeletedCharacterLogIds;
+    }
     const arr = JSON.parse(raw);
-    return new Set(Array.isArray(arr) ? arr : []);
+    cachedDeletedCharacterLogIds = new Set(Array.isArray(arr) ? arr : []);
+    return cachedDeletedCharacterLogIds;
   } catch {
-    return new Set();
+    cachedDeletedCharacterLogIds = new Set();
+    return cachedDeletedCharacterLogIds;
   }
 }
 
@@ -4608,6 +4807,7 @@ export function markCharacterLogDeleted(logId: string): void {
   const cleanId = logId.trim();
   if (!current.has(cleanId)) {
     current.add(cleanId);
+    cachedDeletedCharacterLogIds = current;
     const arr = Array.from(current).slice(-1000);
     safeSetLocalStorage(DELETED_CHARACTER_LOGS_KEY, JSON.stringify(arr));
     syncToCloud(DELETED_CHARACTER_LOGS_KEY, arr, false);
@@ -4624,6 +4824,7 @@ export function unmarkCharacterLogDeletedLocally(logId: string): void {
   const cleanId = logId.trim();
   if (current.has(cleanId)) {
     current.delete(cleanId);
+    cachedDeletedCharacterLogIds = current;
     const arr = Array.from(current);
     safeSetLocalStorage(DELETED_CHARACTER_LOGS_KEY, JSON.stringify(arr));
   }
@@ -4638,6 +4839,7 @@ export function unmarkCharacterLogDeleted(logId: string): void {
   const cleanId = logId.trim();
   if (current.has(cleanId)) {
     current.delete(cleanId);
+    cachedDeletedCharacterLogIds = current;
     const arr = Array.from(current);
     safeSetLocalStorage(DELETED_CHARACTER_LOGS_KEY, JSON.stringify(arr));
     syncToCloud(DELETED_CHARACTER_LOGS_KEY, arr, false);

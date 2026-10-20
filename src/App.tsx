@@ -449,6 +449,22 @@ export default function App() {
     };
   }, [currentRole, refreshDataFromStorage]);
 
+  // Prefetch modul Nilai Karakter di latar belakang saat browser idle
+  // sehingga ketika pengguna mengklik tab "Nilai Karakter", halaman langsung terbuka instan tanpa jeda unduh
+  useEffect(() => {
+    const prefetchModules = () => {
+      import('./components/CharacterPointsView');
+    };
+    if (typeof window !== 'undefined') {
+      if ('requestIdleCallback' in window) {
+        (window as any).requestIdleCallback(prefetchModules);
+      } else {
+        const timer = setTimeout(prefetchModules, 2000);
+        return () => clearTimeout(timer);
+      }
+    }
+  }, []);
+
   // Penilaian Karakter Otomatis Secara Batching Pukul 16:00 WITA:
   // (Belum Scan, Belum Pulang, & Hadir Tepat Waktu 3 Hari = 1 Poin dievaluasi bersamaan hanya pada jam 16:00 WITA)
   // Menghapus interval 30 detik untuk mencegah loop write antar-perangkat dan melindungi kuota Firebase

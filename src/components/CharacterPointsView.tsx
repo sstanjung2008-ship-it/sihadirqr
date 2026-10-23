@@ -429,162 +429,15 @@ export const CharacterPointsView: React.FC<CharacterPointsViewProps> = ({
     return getStudentScoreSummary(detailStudent.id);
   }, [detailStudent, getStudentScoreSummary]);
 
-  // Memoized separation of Penilaian KBM vs Catatan Perilaku Guru & KBM Points Summary
-  const detailStudentKbmData = useMemo(() => {
-    if (!detailStudent || !detailStudentScore) {
-      return {
-        kbmLogs: [] as StudentCharacterLog[],
-        generalLogs: [] as StudentCharacterLog[],
-        kbmSummary: {
-          positivePoints: 0,
-          negativePoints: 0,
-          netScore: 0,
-          sangatAktifCount: 0,
-          tidakHadirCount: 0,
-          menggangguCount: 0,
-          veryActivePts: 1,
-          absentPts: 2,
-          disruptivePts: 1
-        }
-      };
-    }
-
-    const veryActivePts = schoolProfile?.autoCharacterPoints?.veryActiveKbmPoints ?? 1;
-    const absentPts = schoolProfile?.autoCharacterPoints?.absentKbmPoints ?? 2;
-    const disruptivePts = schoolProfile?.autoCharacterPoints?.disruptivePoints ?? 1;
-
-    const allStudentLogs = detailStudentScore.logs || [];
-    const kbmLogs: StudentCharacterLog[] = [];
-    const generalLogs: StudentCharacterLog[] = [];
-    const existingKbmKeys = new Set<string>();
-
-    allStudentLogs.forEach(log => {
-      if (isKbmCharacterLog(log)) {
-        kbmLogs.push(log);
-        if (log.id) existingKbmKeys.add(log.id.toLowerCase());
-        if (log.date) existingKbmKeys.add(`${log.date}_${(log.traitName || '').toLowerCase()}`);
-      } else {
-        generalLogs.push(log);
-      }
-    });
-
-    // Periksa apakah ada evaluasi di Jurnal KBM yang belum tersimpan di log karakter siswa
-    if (learningJournals && learningJournals.length > 0) {
-      const sId = (detailStudent.id || '').toLowerCase().trim();
-      const sNisn = (detailStudent.nisn || '').trim();
-      const sName = (detailStudent.name || '').toLowerCase().trim();
-
-      learningJournals.forEach(j => {
-        if (!j || !j.studentAttendances || !Array.isArray(j.studentAttendances)) return;
-
-        j.studentAttendances.forEach(att => {
-          if (!att) return;
-          const matchId = att.studentId && sId && att.studentId.toLowerCase().trim() === sId;
-          const matchNisn = att.nisn && att.nisn !== '-' && sNisn && sNisn !== '-' && att.nisn.trim() === sNisn;
-          const matchName = att.studentName && sName && att.studentName.toLowerCase().trim() === sName;
-
-          if (matchId || matchNisn || matchName) {
-            const status = att.status;
-            if (status === 'Sangat aktif' || status === 'Tidak hadir di kelas' || status === 'Mengganggu') {
-              const syntheticId = `journal-kbm-${j.id}-${att.studentId || sId}`;
-              const isAlready = 
-                existingKbmKeys.has(syntheticId.toLowerCase()) ||
-                existingKbmKeys.has(`auto-kbm-active-${j.id}-${att.studentId || sId}`.toLowerCase()) ||
-                existingKbmKeys.has(`auto-active-kbm-${j.id}-${att.studentId || sId}`.toLowerCase()) ||
-                existingKbmKeys.has(`auto-kbm-absent-${j.id}-${att.studentId || sId}`.toLowerCase()) ||
-                existingKbmKeys.has(`auto-absent-kbm-${j.id}-${att.studentId || sId}`.toLowerCase()) ||
-                existingKbmKeys.has(`auto-kbm-disruptive-${j.id}-${att.studentId || sId}`.toLowerCase()) ||
-                existingKbmKeys.has(`auto-disruptive-${j.id}-${att.studentId || sId}`.toLowerCase()) ||
-                kbmLogs.some(l => l.date === j.date && (
-                  (status === 'Sangat aktif' && l.traitType === 'POSITIF') ||
-                  (status !== 'Sangat aktif' && l.traitType === 'NEGATIF')
-                ));
-
-              if (!isAlready) {
-                const isPos = status === 'Sangat aktif';
-                const pts = isPos 
-                  ? veryActivePts 
-                  : status === 'Tidak hadir di kelas' 
-                  ? absentPts 
-                  : disruptivePts;
-
-                const traitName = isPos 
-                  ? 'Sangat Aktif KBM' 
-                  : status === 'Tidak hadir di kelas' 
-                  ? 'Tidak Hadir di Kelas (KBM)' 
-                  : 'Mengganggu KBM';
-
-                kbmLogs.push({
-                  id: syntheticId,
-                  studentId: detailStudent.id,
-                  studentName: detailStudent.name,
-                  nisn: detailStudent.nisn || '-',
-                  classId: detailStudent.classId,
-                  className: detailStudent.className,
-                  traitId: isPos ? 'trait-013' : status === 'Tidak hadir di kelas' ? 'trait-014' : 'trait-009',
-                  traitName,
-                  traitType: isPos ? 'POSITIF' : 'NEGATIF',
-                  points: pts,
-                  evaluatorName: j.teacherName || 'Guru Mapel',
-                  timestamp: `${j.date} 08:00:00`,
-                  date: j.date,
-                  notes: `Penilaian Jurnal KBM: ${status} dalam KBM Mapel ${j.subject}${j.material ? ` (${j.material})` : ''}${att.notes ? ` - Catatan: ${att.notes}` : ''}`,
-                  isManual: true
-                });
-              }
-            }
-          }
-        });
-      });
-    }
-
-    // Urutkan catatan KBM dari yang terbaru ke terlama
-    kbmLogs.sort((a, b) => {
+  // Memoized character logs for currently viewed detail student (sorted newest first)
+  const studentDetailLogs = useMemo(() => {
+    if (!detailStudentScore?.logs) return [] as StudentCharacterLog[];
+    return [...detailStudentScore.logs].sort((a, b) => {
       const timeA = (a.timestamp || a.date || '').trim();
       const timeB = (b.timestamp || b.date || '').trim();
       return timeB.localeCompare(timeA);
     });
-
-    let kbmPos = 0;
-    let kbmNeg = 0;
-    let sangatAktifCount = 0;
-    let tidakHadirCount = 0;
-    let menggangguCount = 0;
-
-    kbmLogs.forEach(log => {
-      const pts = Math.abs(log.points || 0);
-      const nameLower = (log.traitName || '').toLowerCase();
-      const notesLower = (log.notes || '').toLowerCase();
-
-      if (log.traitType === 'POSITIF') {
-        kbmPos += pts;
-        sangatAktifCount++;
-      } else {
-        kbmNeg += pts;
-        if (nameLower.includes('tidak hadir') || notesLower.includes('tidak hadir')) {
-          tidakHadirCount++;
-        } else {
-          menggangguCount++;
-        }
-      }
-    });
-
-    return {
-      kbmLogs,
-      generalLogs,
-      kbmSummary: {
-        positivePoints: kbmPos,
-        negativePoints: kbmNeg,
-        netScore: kbmPos - kbmNeg,
-        sangatAktifCount,
-        tidakHadirCount,
-        menggangguCount,
-        veryActivePts,
-        absentPts,
-        disruptivePts
-      }
-    };
-  }, [detailStudent, detailStudentScore, learningJournals, schoolProfile?.autoCharacterPoints]);
+  }, [detailStudentScore]);
 
   // Handle Photo File Upload
   const handlePhotoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -804,6 +657,7 @@ export const CharacterPointsView: React.FC<CharacterPointsViewProps> = ({
   };
 
   // Export PDF Handler
+  // Export PDF Handler
   const handleDownloadPdf = async () => {
     if (!schoolProfile) {
       alert('Data profil sekolah belum dimuat.');
@@ -815,16 +669,30 @@ export const CharacterPointsView: React.FC<CharacterPointsViewProps> = ({
         ? 'ALL'
         : (classes.find(c => c.id === selectedClassId)?.name || 'ALL');
 
+      const scoreFilterDescription = scoreFilterOp === 'ALL'
+        ? 'Semua Nilai'
+        : scoreFilterOp === 'GTE'
+        ? `Lebih Besar (≥) ${scoreFilterVal}`
+        : `Kurang Dari (≤) ${scoreFilterVal}`;
+
       const { exportCharacterPointsPdf } = await import('../lib/exportUtils');
       await exportCharacterPointsPdf(
         schoolProfile,
-        students,
+        filteredStudents, // Data siswa yang telah difilter sesuai parameter kelas & nilai karakter yang sedang aktif
         classes,
         traits,
-        logs,
+        allLogs,
         selectedClassFilter,
         undefined,
-        predicateSettings
+        predicateSettings,
+        teachers,
+        undefined,
+        {
+          scoreFilterLabel: scoreFilterDescription,
+          attendanceRecords,
+          studentScoresMap,
+          searchQuery: searchQuery.trim() || undefined
+        }
       );
     } catch (err) {
       console.error('Failed to export PDF:', err);
@@ -848,8 +716,6 @@ export const CharacterPointsView: React.FC<CharacterPointsViewProps> = ({
     if (netScore >= minE) return { label: 'Tidak Naik Kelas (E)', color: 'bg-rose-100 text-rose-800 border-rose-300' };
     return { label: 'Pindah Sekolah (F)', color: 'bg-purple-100 text-purple-800 border-purple-300' };
   };
-
-  const { kbmLogs, generalLogs, kbmSummary } = detailStudentKbmData;
 
   return (
     <div className="p-4 sm:p-6 max-w-7xl mx-auto space-y-6">
@@ -1970,309 +1836,7 @@ export const CharacterPointsView: React.FC<CharacterPointsViewProps> = ({
                   </div>
 
                   {/* ========================================================================= */}
-                  {/* KELOMPOK SESI 3: SISTEM PENILAIAN KBM */}
-                  {/* ========================================================================= */}
-                  <div className="space-y-2.5 pt-2 border-t border-slate-200">
-                    {/* Header Sesi Sistem Penilaian KBM */}
-                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1.5 pt-1">
-                      <div className="flex items-start sm:items-center gap-2">
-                        <div className="p-1.5 sm:p-2 bg-gradient-to-br from-indigo-600 to-indigo-800 text-white rounded-xl shadow-xs shrink-0 mt-0.5 sm:mt-0">
-                          <BookOpen className="w-4 h-4" />
-                        </div>
-                        <div>
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <h5 className="font-black text-slate-800 text-xs sm:text-sm">
-                              Sistem Penilaian KBM
-                            </h5>
-                            <span className="px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-900 border border-indigo-200 text-[10px] font-black">
-                              Jurnal KBM
-                            </span>
-                          </div>
-                          <p className="text-[11px] text-slate-500 font-medium">
-                            Penilaian keaktifan, kedisiplinan, & fokus saat KBM dari Jurnal Guru sesuai Pengaturan Poin Aturan Otomatis
-                          </p>
-                        </div>
-                      </div>
-                      <span className="text-[10px] sm:text-[11px] font-extrabold text-indigo-700 bg-indigo-50 border border-indigo-200 px-2.5 py-1 rounded-xl self-start sm:self-center shrink-0">
-                        {kbmLogs.length} Catatan KBM
-                      </span>
-                    </div>
-
-                    {/* Ringkasan Jumlah Poin KBM di Bagian Seksi Penilaian KBM */}
-                    <div className="p-3 sm:p-3.5 bg-gradient-to-br from-indigo-50/80 via-white to-purple-50/60 rounded-2xl border border-indigo-200 shadow-2xs space-y-2.5">
-                      <div className="flex items-center justify-between pb-1.5 border-b border-indigo-100/80">
-                        <div className="flex items-center gap-1.5 text-xs font-black text-indigo-950 uppercase tracking-wider">
-                          <Layers className="w-3.5 h-3.5 text-indigo-600" />
-                          <span>Ringkasan Jumlah Poin KBM</span>
-                        </div>
-                        <div className="flex items-center gap-1.5">
-                          <span className="text-[10px] text-slate-500 font-bold hidden sm:inline">Poin Bersih KBM:</span>
-                          <span className={`px-2.5 py-0.5 rounded-lg text-xs font-black shadow-2xs ${
-                            kbmSummary.netScore > 0 
-                              ? 'bg-emerald-600 text-white' 
-                              : kbmSummary.netScore < 0 
-                              ? 'bg-rose-600 text-white' 
-                              : 'bg-slate-200 text-slate-700'
-                          }`}>
-                            {kbmSummary.netScore > 0 ? `+${kbmSummary.netScore}` : kbmSummary.netScore} Poin
-                          </span>
-                        </div>
-                      </div>
-
-                      {/* 4 Cards Grid: Ringkasan Nilai KBM */}
-                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                        {/* 1. Sangat Aktif KBM (+1 Poin) */}
-                        <div className="p-2 sm:p-2.5 bg-white rounded-xl border border-emerald-200 shadow-2xs flex flex-col justify-between">
-                          <div className="flex items-center justify-between">
-                            <span className="text-[10px] font-extrabold text-emerald-800 flex items-center gap-1 truncate">
-                              <Flame className="w-3 h-3 text-emerald-600 shrink-0" />
-                              Sangat Aktif
-                            </span>
-                            <span className="text-[9px] font-black text-emerald-700 bg-emerald-50 px-1.5 py-0.2 rounded border border-emerald-200 shrink-0">
-                              +{kbmSummary.veryActivePts}
-                            </span>
-                          </div>
-                          <div className="mt-1 flex items-baseline justify-between">
-                            <span className="text-base sm:text-lg font-black text-emerald-600">
-                              +{kbmSummary.sangatAktifCount * kbmSummary.veryActivePts}
-                            </span>
-                            <span className="text-[10px] text-slate-500 font-bold">
-                              {kbmSummary.sangatAktifCount}x KBM
-                            </span>
-                          </div>
-                          <span className="text-[9px] text-slate-400 mt-0.5 font-medium truncate">Aturan Otomatis (+{kbmSummary.veryActivePts})</span>
-                        </div>
-
-                        {/* 2. Tidak Hadir di Kelas (-2 Poin) */}
-                        <div className="p-2 sm:p-2.5 bg-white rounded-xl border border-rose-200 shadow-2xs flex flex-col justify-between">
-                          <div className="flex items-center justify-between">
-                            <span className="text-[10px] font-extrabold text-rose-800 flex items-center gap-1 truncate">
-                              <UserX className="w-3 h-3 text-rose-600 shrink-0" />
-                              Tidak Hadir
-                            </span>
-                            <span className="text-[9px] font-black text-rose-700 bg-rose-50 px-1.5 py-0.2 rounded border border-rose-200 shrink-0">
-                              -{kbmSummary.absentPts}
-                            </span>
-                          </div>
-                          <div className="mt-1 flex items-baseline justify-between">
-                            <span className="text-base sm:text-lg font-black text-rose-600">
-                              -{kbmSummary.tidakHadirCount * kbmSummary.absentPts}
-                            </span>
-                            <span className="text-[10px] text-slate-500 font-bold">
-                              {kbmSummary.tidakHadirCount}x KBM
-                            </span>
-                          </div>
-                          <span className="text-[9px] text-slate-400 mt-0.5 font-medium truncate">Aturan Otomatis (-{kbmSummary.absentPts})</span>
-                        </div>
-
-                        {/* 3. Mengganggu KBM (-1 Poin) */}
-                        <div className="p-2 sm:p-2.5 bg-white rounded-xl border border-amber-200 shadow-2xs flex flex-col justify-between">
-                          <div className="flex items-center justify-between">
-                            <span className="text-[10px] font-extrabold text-amber-800 flex items-center gap-1 truncate">
-                              <VolumeX className="w-3 h-3 text-amber-600 shrink-0" />
-                              Mengganggu
-                            </span>
-                            <span className="text-[9px] font-black text-amber-700 bg-amber-50 px-1.5 py-0.2 rounded border border-amber-200 shrink-0">
-                              -{kbmSummary.disruptivePts}
-                            </span>
-                          </div>
-                          <div className="mt-1 flex items-baseline justify-between">
-                            <span className="text-base sm:text-lg font-black text-amber-600">
-                              -{kbmSummary.menggangguCount * kbmSummary.disruptivePts}
-                            </span>
-                            <span className="text-[10px] text-slate-500 font-bold">
-                              {kbmSummary.menggangguCount}x KBM
-                            </span>
-                          </div>
-                          <span className="text-[9px] text-slate-400 mt-0.5 font-medium truncate">Aturan Otomatis (-{kbmSummary.disruptivePts})</span>
-                        </div>
-
-                        {/* 4. Total Poin KBM Bersih */}
-                        <div className="p-2 sm:p-2.5 bg-white rounded-xl border border-indigo-200 shadow-2xs flex flex-col justify-between">
-                          <div className="flex items-center justify-between">
-                            <span className="text-[10px] font-extrabold text-indigo-900 flex items-center gap-1 truncate">
-                              <Award className="w-3 h-3 text-indigo-600 shrink-0" />
-                              Total KBM
-                            </span>
-                            <span className="text-[9px] font-black text-indigo-700 bg-indigo-50 px-1.5 py-0.2 rounded border border-indigo-200 shrink-0">
-                              Net
-                            </span>
-                          </div>
-                          <div className="mt-1 flex items-baseline justify-between">
-                            <span className={`text-base sm:text-lg font-black ${
-                              kbmSummary.netScore > 0 ? 'text-emerald-600' : kbmSummary.netScore < 0 ? 'text-rose-600' : 'text-slate-700'
-                            }`}>
-                              {kbmSummary.netScore > 0 ? `+${kbmSummary.netScore}` : kbmSummary.netScore}
-                            </span>
-                            <span className="text-[10px] text-slate-500 font-bold">
-                              Poin
-                            </span>
-                          </div>
-                          <span className="text-[9px] text-slate-400 mt-0.5 font-medium truncate">{kbmLogs.length} total catatan</span>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Daftar Catatan Penilaian KBM */}
-                    {kbmLogs.length === 0 ? (
-                      <div className="p-4 sm:p-5 rounded-2xl bg-white border border-dashed border-indigo-200 text-center text-slate-400 space-y-1">
-                        <BookOpen className="w-6 h-6 text-indigo-300 mx-auto" />
-                        <p className="text-xs font-bold text-slate-600">Belum ada catatan Penilaian KBM untuk siswa ini.</p>
-                        <p className="text-[11px] text-slate-400 max-w-md mx-auto">
-                          Penilaian KBM dicatat otomatis dari evaluasi keaktifan siswa (Sangat Aktif +1, Tidak Hadir di Kelas -2, Mengganggu -1) pada form Jurnal KBM Guru.
-                        </p>
-                      </div>
-                    ) : (
-                      <div className="space-y-2">
-                        {kbmLogs.map((log, idx) => {
-                          const isHighlighted = log.id === highlightedLogId;
-                          const isVeryActive = log.traitType === 'POSITIF';
-                          const isAbsent = !isVeryActive && ((log.traitName || '').toLowerCase().includes('tidak hadir') || (log.notes || '').toLowerCase().includes('tidak hadir'));
-
-                          return (
-                            <div
-                              key={`${log.id}_kbm_${idx}`}
-                              id={`char-log-${log.id}`}
-                              className={`p-3 rounded-2xl border transition-all space-y-2 ${
-                                isHighlighted
-                                  ? 'border-indigo-400 bg-indigo-50/50 ring-2 ring-indigo-500 shadow-sm'
-                                  : isVeryActive
-                                  ? 'border-emerald-200/80 bg-white hover:border-emerald-300 shadow-2xs'
-                                  : isAbsent
-                                  ? 'border-rose-200/80 bg-white hover:border-rose-300 shadow-2xs'
-                                  : 'border-amber-200/80 bg-white hover:border-amber-300 shadow-2xs'
-                              }`}
-                            >
-                              <div className="flex items-start justify-between gap-2">
-                                <div className="flex items-start gap-2.5 min-w-0">
-                                  <div className="shrink-0 mt-0.5">
-                                    {isVeryActive ? (
-                                      <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-xl bg-emerald-100 text-emerald-700 flex items-center justify-center font-bold">
-                                        <Flame className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-emerald-600" />
-                                      </div>
-                                    ) : isAbsent ? (
-                                      <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-xl bg-rose-100 text-rose-700 flex items-center justify-center font-bold">
-                                        <UserX className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-rose-600" />
-                                      </div>
-                                    ) : (
-                                      <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-xl bg-amber-100 text-amber-800 flex items-center justify-center font-bold">
-                                        <VolumeX className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-amber-600" />
-                                      </div>
-                                    )}
-                                  </div>
-
-                                  <div className="min-w-0 space-y-0.5">
-                                    <div className="flex items-center gap-1.5 flex-wrap">
-                                      <span className="font-bold text-slate-800 text-xs sm:text-sm">
-                                        {log.traitName}
-                                      </span>
-                                      <span className={`px-2 py-0.2 rounded-md text-[9px] sm:text-[10px] font-black ${
-                                        isVeryActive
-                                          ? 'bg-emerald-100 text-emerald-800'
-                                          : isAbsent
-                                          ? 'bg-rose-100 text-rose-800'
-                                          : 'bg-amber-100 text-amber-900'
-                                      }`}>
-                                        {isVeryActive ? `+${log.points}` : `-${log.points}`} Poin
-                                      </span>
-                                      <span className="bg-indigo-50 text-indigo-800 border border-indigo-200 text-[9px] font-extrabold px-1.5 py-0.2 rounded inline-flex items-center gap-0.5">
-                                        <BookOpen className="w-2.5 h-2.5 text-indigo-600" />
-                                        Jurnal KBM
-                                      </span>
-                                      {isHighlighted && (
-                                        <span className="bg-indigo-600 text-white text-[9px] font-black px-1.5 py-0.2 rounded-full animate-pulse">
-                                          Terpilih
-                                        </span>
-                                      )}
-                                    </div>
-
-                                    <p className="text-[10px] sm:text-[11px] text-slate-500 flex items-center gap-1.5 flex-wrap">
-                                      <span>Guru Penilai: <strong className="text-slate-700">{log.evaluatorName || 'Guru Mapel'}</strong></span>
-                                      <span>•</span>
-                                      <span>Tanggal: <strong>{log.date || log.timestamp}</strong></span>
-                                    </p>
-                                  </div>
-                                </div>
-
-                                {/* Action Buttons: Foto Bukti, Tindak Lanjut, Hapus */}
-                                <div className="flex items-center gap-1 shrink-0">
-                                  {log.photoProofUrl && isRealPhotoProof(log.photoProofUrl) && (
-                                    <button
-                                      onClick={() => setPreviewPhotoModalUrl(log.photoProofUrl || null)}
-                                      className="group relative rounded-xl overflow-hidden border border-slate-200 hover:border-indigo-500 transition-all cursor-pointer shrink-0"
-                                      title="Lihat Foto Bukti"
-                                    >
-                                      <img
-                                        src={log.photoProofUrl}
-                                        alt="Bukti"
-                                        loading="lazy"
-                                        className="w-7 h-7 sm:w-8 sm:h-8 object-cover group-hover:scale-105 transition-transform"
-                                      />
-                                    </button>
-                                  )}
-
-                                  <button
-                                    onClick={() => handleOpenFollowUpModal(log)}
-                                    className="px-2 sm:px-2.5 py-1 rounded-xl bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 text-[10px] sm:text-[11px] font-bold transition-all flex items-center gap-1 shrink-0 cursor-pointer shadow-2xs"
-                                    title="Tindak Lanjut"
-                                  >
-                                    <FileText className="w-3 h-3" />
-                                    <span className="hidden sm:inline">{log.followUpNotes ? 'Edit' : 'Tindak Lanjut'}</span>
-                                  </button>
-
-                                  {currentUserRole === 'ADMIN' && (
-                                    <button
-                                      type="button"
-                                      onClick={() => setDeleteConfirmLog(log)}
-                                      className="p-1 sm:p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer shrink-0"
-                                      title="Hapus Catatan (Admin)"
-                                    >
-                                      <Trash2 className="w-3.5 h-3.5" />
-                                    </button>
-                                  )}
-                                </div>
-                              </div>
-
-                              {/* Deskripsi & Catatan Spesifik Perilaku KBM */}
-                              {log.notes && (
-                                <div className="text-[11px] sm:text-xs text-slate-700 bg-slate-50/80 px-2.5 py-1.5 rounded-xl border border-slate-100 leading-snug font-normal">
-                                  "{log.notes}"
-                                </div>
-                              )}
-
-                              {/* Catatan Tindak Lanjut jika ada */}
-                              {(log.followUpNotes || log.followUpPhotoUrl) && (
-                                <div className="p-2 sm:p-2.5 rounded-xl bg-amber-50/90 border border-amber-200 text-xs text-amber-950 space-y-1">
-                                  <div className="flex items-center justify-between font-bold text-[10px] text-amber-800">
-                                    <span className="flex items-center gap-1">
-                                      <ShieldCheck className="w-3 h-3 text-amber-600" />
-                                      Tindak Lanjut: {log.followUpBy || 'Guru'}
-                                    </span>
-                                    {log.followUpDate && <span className="font-mono text-[10px]">{log.followUpDate}</span>}
-                                  </div>
-                                  {log.followUpNotes && (
-                                    <p className="text-[11px] text-slate-700 leading-snug">{log.followUpNotes}</p>
-                                  )}
-                                  {log.followUpPhotoUrl && isRealPhotoProof(log.followUpPhotoUrl) && (
-                                    <button
-                                      type="button"
-                                      onClick={() => setPreviewPhotoModalUrl(log.followUpPhotoUrl || null)}
-                                      className="inline-flex items-center gap-1 px-2 py-0.5 bg-white text-amber-900 rounded text-[10px] font-bold border border-amber-300 cursor-pointer shadow-2xs mt-1"
-                                    >
-                                      <FileImage className="w-3 h-3 text-amber-700" /> Lihat Bukti Foto
-                                    </button>
-                                  )}
-                                </div>
-                              )}
-                            </div>
-                          );
-                        })}
-                      </div>
-                    )}
-                  </div>
-
-                  {/* ========================================================================= */}
-                  {/* KELOMPOK SESI 4: CATATAN PERILAKU KHUSUS SISWA (INPUT GURU) */}
+                  {/* KELOMPOK SESI: CATATAN PERILAKU KHUSUS SISWA (INPUT GURU) */}
                   {/* ========================================================================= */}
                   <div className="space-y-2 pt-2 border-t border-slate-200">
                     <div className="flex items-center justify-between pt-1">
@@ -2290,13 +1854,13 @@ export const CharacterPointsView: React.FC<CharacterPointsViewProps> = ({
                         </div>
                       </div>
                       <span className="text-[10px] font-bold text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-md border border-indigo-200">
-                        {generalLogs.length} perilaku
+                        {studentDetailLogs.length} catatan
                       </span>
                     </div>
 
-                    {generalLogs.length > 0 ? (
+                    {studentDetailLogs.length > 0 ? (
                       <div className="space-y-2">
-                        {generalLogs.map((log, idx) => {
+                        {studentDetailLogs.map((log, idx) => {
                           const isHighlighted = log.id === highlightedLogId;
                           return (
                             <div

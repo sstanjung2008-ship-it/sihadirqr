@@ -2744,40 +2744,7 @@ export const RecapExportView: React.FC<RecapExportViewProps> = ({
                 const summary = calculateStudentCharacterSummary(selectedCharacterStudentDetail, characterLogs, attendanceRecords);
                 const allLogs = [...summary.logs].sort((a, b) => new Date(b.date || b.timestamp).getTime() - new Date(a.date || a.timestamp).getTime());
 
-                const kbmLogs = allLogs.filter(l => isKbmCharacterLog(l));
-                const generalLogs = allLogs.filter(l => !isKbmCharacterLog(l));
-
-                const veryActivePts = (selectedCharacterStudentDetail as any)?.autoCharacterPoints?.veryActiveKbmPoints ?? 1;
-                const absentPts = (selectedCharacterStudentDetail as any)?.autoCharacterPoints?.absentKbmPoints ?? 2;
-                const disruptivePts = (selectedCharacterStudentDetail as any)?.autoCharacterPoints?.disruptivePoints ?? 1;
-
-                let kbmPos = 0;
-                let kbmNeg = 0;
-                let sangatAktifCount = 0;
-                let tidakHadirCount = 0;
-                let menggangguCount = 0;
-
-                kbmLogs.forEach(log => {
-                  const pts = Math.abs(log.points || 0);
-                  const nameLower = (log.traitName || '').toLowerCase();
-                  const notesLower = (log.notes || '').toLowerCase();
-
-                  if (log.traitType === 'POSITIF') {
-                    kbmPos += pts;
-                    sangatAktifCount++;
-                  } else {
-                    kbmNeg += pts;
-                    if (nameLower.includes('tidak hadir') || notesLower.includes('tidak hadir')) {
-                      tidakHadirCount++;
-                    } else {
-                      menggangguCount++;
-                    }
-                  }
-                });
-
-                const kbmNet = kbmPos - kbmNeg;
-
-                if (kbmLogs.length === 0 && generalLogs.length === 0 && summary.onTimeDays === 0 && summary.lateDays === 0) {
+                if (allLogs.length === 0 && summary.onTimeDays === 0 && summary.lateDays === 0) {
                   return (
                     <div className="p-8 text-center text-slate-400 border border-dashed rounded-2xl">
                       Belum ada catatan nilai karakter untuk siswa ini.
@@ -2787,155 +2754,21 @@ export const RecapExportView: React.FC<RecapExportViewProps> = ({
 
                 return (
                   <div className="space-y-4">
-                    {/* Sesi Khusus: Penilaian KBM */}
-                    <div className="space-y-2.5">
+                    {/* Catatan Perilaku Khusus Siswa (Input Guru) */}
+                    <div className="space-y-2 pt-1">
                       <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                          <div className="p-1.5 bg-indigo-600 text-white rounded-xl shadow-xs">
-                            <BookOpen className="w-4 h-4" />
-                          </div>
-                          <div>
-                            <span className="text-xs sm:text-sm font-black text-slate-800 flex items-center gap-1.5">
-                              Penilaian KBM
-                              <span className="px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-900 border border-indigo-200 text-[10px] font-black">
-                                Jurnal KBM
-                              </span>
-                            </span>
-                          </div>
-                        </div>
-                        <span className="text-[10px] font-bold text-indigo-700 bg-indigo-50 border border-indigo-200 px-2 py-0.5 rounded-lg">
-                          {kbmLogs.length} Catatan
+                        <span className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
+                          <CheckCircle2 className="w-3.5 h-3.5 text-indigo-600" />
+                          Catatan Perilaku Khusus Siswa (Input Guru)
+                        </span>
+                        <span className="text-[10px] font-bold text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-md border border-indigo-200">
+                          {allLogs.length} Catatan
                         </span>
                       </div>
 
-                      {/* Ringkasan Jumlah Poin KBM */}
-                      <div className="p-3 bg-gradient-to-br from-indigo-50/80 via-white to-purple-50/60 rounded-2xl border border-indigo-200 shadow-2xs space-y-2">
-                        <div className="flex items-center justify-between pb-1 border-b border-indigo-100">
-                          <span className="text-[11px] font-black text-indigo-950 uppercase tracking-wider flex items-center gap-1.5">
-                            <Layers className="w-3.5 h-3.5 text-indigo-600" />
-                            Ringkasan Jumlah Poin KBM
-                          </span>
-                          <span className={`px-2 py-0.5 rounded-md text-[11px] font-black ${
-                            kbmNet > 0 ? 'bg-emerald-600 text-white' : kbmNet < 0 ? 'bg-rose-600 text-white' : 'bg-slate-200 text-slate-700'
-                          }`}>
-                            Net: {kbmNet > 0 ? `+${kbmNet}` : kbmNet} Poin
-                          </span>
-                        </div>
-
-                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-center">
-                          <div className="p-2 bg-white rounded-xl border border-emerald-200 shadow-2xs">
-                            <span className="text-[10px] font-bold text-emerald-800 flex items-center justify-center gap-1">
-                              <Flame className="w-3 h-3 text-emerald-600" /> Sangat Aktif
-                            </span>
-                            <div className="font-black text-emerald-600 text-sm mt-0.5">+{sangatAktifCount * veryActivePts}</div>
-                            <span className="text-[9px] text-slate-400">{sangatAktifCount}x (+{veryActivePts} poin)</span>
-                          </div>
-                          <div className="p-2 bg-white rounded-xl border border-rose-200 shadow-2xs">
-                            <span className="text-[10px] font-bold text-rose-800 flex items-center justify-center gap-1">
-                              <UserX className="w-3 h-3 text-rose-600" /> Tidak Hadir
-                            </span>
-                            <div className="font-black text-rose-600 text-sm mt-0.5">-{tidakHadirCount * absentPts}</div>
-                            <span className="text-[9px] text-slate-400">{tidakHadirCount}x (-{absentPts} poin)</span>
-                          </div>
-                          <div className="p-2 bg-white rounded-xl border border-amber-200 shadow-2xs">
-                            <span className="text-[10px] font-bold text-amber-800 flex items-center justify-center gap-1">
-                              <VolumeX className="w-3 h-3 text-amber-600" /> Mengganggu
-                            </span>
-                            <div className="font-black text-amber-600 text-sm mt-0.5">-{menggangguCount * disruptivePts}</div>
-                            <span className="text-[9px] text-slate-400">{menggangguCount}x (-{disruptivePts} poin)</span>
-                          </div>
-                          <div className="p-2 bg-white rounded-xl border border-indigo-200 shadow-2xs">
-                            <span className="text-[10px] font-bold text-indigo-900 flex items-center justify-center gap-1">
-                              <Award className="w-3 h-3 text-indigo-600" /> Skor KBM
-                            </span>
-                            <div className={`font-black text-sm mt-0.5 ${kbmNet >= 0 ? 'text-indigo-700' : 'text-rose-600'}`}>
-                              {kbmNet > 0 ? `+${kbmNet}` : kbmNet}
-                            </div>
-                            <span className="text-[9px] text-slate-400">Poin Bersih</span>
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* List KBM Logs */}
-                      {kbmLogs.length === 0 ? (
-                        <div className="p-4 bg-white border border-dashed rounded-xl text-center text-xs text-slate-400">
-                          Belum ada catatan Penilaian KBM untuk siswa ini.
-                        </div>
-                      ) : (
+                      {allLogs.length > 0 ? (
                         <div className="space-y-2">
-                          {kbmLogs.map((log) => {
-                            const isVeryActive = log.traitType === 'POSITIF';
-                            const isAbsent = !isVeryActive && ((log.traitName || '').toLowerCase().includes('tidak hadir') || (log.notes || '').toLowerCase().includes('tidak hadir'));
-
-                            return (
-                              <div
-                                key={log.id}
-                                className={`p-3 rounded-2xl border bg-white shadow-2xs transition-all space-y-2 ${
-                                  isVeryActive ? 'border-emerald-200' : isAbsent ? 'border-rose-200' : 'border-amber-200'
-                                }`}
-                              >
-                                <div className="flex items-center justify-between gap-2">
-                                  <div className="flex items-center gap-2">
-                                    <div className="shrink-0">
-                                      {isVeryActive ? (
-                                        <div className="w-7 h-7 rounded-xl bg-emerald-100 text-emerald-700 flex items-center justify-center font-bold">
-                                          <Flame className="w-4 h-4 text-emerald-600" />
-                                        </div>
-                                      ) : isAbsent ? (
-                                        <div className="w-7 h-7 rounded-xl bg-rose-100 text-rose-700 flex items-center justify-center font-bold">
-                                          <UserX className="w-4 h-4 text-rose-600" />
-                                        </div>
-                                      ) : (
-                                        <div className="w-7 h-7 rounded-xl bg-amber-100 text-amber-800 flex items-center justify-center font-bold">
-                                          <VolumeX className="w-4 h-4 text-amber-600" />
-                                        </div>
-                                      )}
-                                    </div>
-                                    <div>
-                                      <div className="flex items-center gap-1.5 flex-wrap">
-                                        <span className="font-bold text-slate-800 text-xs sm:text-sm">{log.traitName}</span>
-                                        <span className={`px-2 py-0.2 rounded-md text-[9px] font-black ${
-                                          isVeryActive ? 'bg-emerald-100 text-emerald-800' : isAbsent ? 'bg-rose-100 text-rose-800' : 'bg-amber-100 text-amber-900'
-                                        }`}>
-                                          {isVeryActive ? `+${log.points}` : `-${log.points}`} Poin
-                                        </span>
-                                        <span className="bg-indigo-50 text-indigo-800 border border-indigo-200 text-[9px] font-bold px-1.5 py-0.2 rounded">
-                                          Jurnal KBM
-                                        </span>
-                                      </div>
-                                      <p className="text-[10px] text-slate-500 mt-0.5">
-                                        Oleh: <strong className="text-slate-700">{log.evaluatorName || 'Guru Mapel'}</strong> • {log.date || log.timestamp}
-                                      </p>
-                                    </div>
-                                  </div>
-                                </div>
-                                {log.notes && (
-                                  <div className="p-2.5 bg-slate-50 rounded-xl text-xs text-slate-700 border border-slate-100 leading-snug">
-                                    "{log.notes}"
-                                  </div>
-                                )}
-                              </div>
-                            );
-                          })}
-                        </div>
-                      )}
-                    </div>
-
-                    {/* Sesi Khusus: Catatan Perilaku Khusus Siswa (Input Guru) */}
-                    {generalLogs.length > 0 && (
-                      <div className="space-y-2 pt-2 border-t border-slate-200">
-                        <div className="flex items-center justify-between">
-                          <span className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
-                            <CheckCircle2 className="w-3.5 h-3.5 text-indigo-600" />
-                            Catatan Perilaku Khusus Siswa (Input Guru)
-                          </span>
-                          <span className="text-[10px] font-bold text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-md border border-indigo-200">
-                            {generalLogs.length} Catatan
-                          </span>
-                        </div>
-
-                        <div className="space-y-2">
-                          {generalLogs.map((log) => (
+                          {allLogs.map((log) => (
                             <div
                               key={log.id}
                               className="p-3 rounded-2xl border border-slate-200 bg-white hover:border-slate-300 transition-all space-y-2 shadow-2xs"
@@ -2976,8 +2809,12 @@ export const RecapExportView: React.FC<RecapExportViewProps> = ({
                             </div>
                           ))}
                         </div>
-                      </div>
-                    )}
+                      ) : (
+                        <div className="p-4 bg-white border border-dashed rounded-xl text-center text-xs text-slate-400">
+                          Belum ada catatan perilaku khusus untuk siswa ini.
+                        </div>
+                      )}
+                    </div>
                   </div>
                 );
               })()}

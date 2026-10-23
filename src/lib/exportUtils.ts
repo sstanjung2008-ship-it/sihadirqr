@@ -1771,7 +1771,13 @@ export async function exportCharacterPointsPdf(
   homeroomTeacherName?: string,
   predicateSettings: CharacterPredicateSettings = { minA: 30, minB: 10, minC: 0, minD: -20, minE: -50 },
   teachers?: Teacher[],
-  periodTitle?: string
+  periodTitle?: string,
+  options?: {
+    scoreFilterLabel?: string;
+    attendanceRecords?: AttendanceRecord[];
+    studentScoresMap?: Map<string, any>;
+    searchQuery?: string;
+  }
 ) {
   const doc = new jsPDF({
     orientation: 'portrait',
@@ -1826,10 +1832,12 @@ export async function exportCharacterPointsPdf(
   doc.setLineWidth(0.2);
   doc.line(14, 29, 196, 29);
 
-  // Filter students based on class selection
-  const filteredStudents = selectedClassFilter === 'ALL'
-    ? students
-    : students.filter(s => s.className === selectedClassFilter);
+  // Determine students to render:
+  // If caller already filtered students (e.g. from CharacterPointsView), use students directly.
+  // Otherwise, filter students based on class selection if not ALL.
+  const studentsToRender = (selectedClassFilter !== 'ALL' && students.some(s => s.className && s.className !== selectedClassFilter))
+    ? students.filter(s => s.className === selectedClassFilter)
+    : students;
 
   const todayFormatted = new Date().toLocaleDateString('id-ID', {
     day: 'numeric',
@@ -1842,20 +1850,47 @@ export async function exportCharacterPointsPdf(
   doc.setFontSize(12);
   doc.text('LAPORAN PENILAIAN KARAKTER SISWA', 105, 36, { align: 'center' });
 
+  // Active filter labels
+  const classLabel = selectedClassFilter === 'ALL' ? 'Semua Kelas' : `Kelas ${selectedClassFilter.replace(/^Kelas\s+/i, '')}`;
+  const scoreFilterLabel = options?.scoreFilterLabel && options.scoreFilterLabel.trim() !== ''
+    ? options.scoreFilterLabel
+    : 'Semua Nilai';
+  const searchFilterText = options?.searchQuery
+    ? `   |   Pencarian: "${options.searchQuery}"`
+    : '';
+  const periodSubText = periodTitle ? `   |   Periode: ${periodTitle}` : '';
+
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(8.5);
-  const periodSubText = periodTitle ? `   |   Periode: ${periodTitle}` : '';
   doc.text(
-    `Kelas: ${selectedClassFilter === 'ALL' ? 'Semua Kelas' : selectedClassFilter}   |   Jumlah Siswa: ${filteredStudents.length} Siswa${periodSubText}   |   Tanggal: ${todayFormatted}`,
+    `Filter Kelas: ${classLabel}   |   Filter Nilai: ${scoreFilterLabel}${searchFilterText}   |   Jumlah: ${studentsToRender.length} Siswa${periodSubText}`,
     105, 41, { align: 'center' }
   );
+  doc.text(
+    `Tanggal Cetak: ${todayFormatted}`,
+    105, 45, { align: 'center' }
+  );
 
-  // Table Data
-  const tableData = filteredStudents.map((std, idx) => {
-    const summary = calculateStudentCharacterSummary(std, logs);
-    const posPoints = summary.positivePoints;
-    const negPoints = summary.negativePoints;
-    const netPoints = summary.netScore;
+  // Table Data with accurate score matching the active table
+  const tableData = studentsToRender.map((std, idx) => {
+    let posPoints = 0;
+    let negPoints = 0;
+    let netPoints = 0;
+
+    const cached = options?.studentScoresMap?.get(std.id) ||
+      options?.studentScoresMap?.get(std.id?.trim()) ||
+      options?.studentScoresMap?.get(std.id?.toLowerCase());
+
+    if (cached) {
+      posPoints = cached.positivePoints ?? 0;
+      negPoints = cached.negativePoints ?? 0;
+      netPoints = cached.netScore ?? 0;
+    } else {
+      const summary = calculateStudentCharacterSummary(std, logs, options?.attendanceRecords);
+      posPoints = summary.positivePoints ?? 0;
+      negPoints = summary.negativePoints ?? 0;
+      netPoints = summary.netScore ?? 0;
+    }
 
     const minA = predicateSettings.minA ?? 30;
     const minB = predicateSettings.minB ?? 10;
@@ -1884,9 +1919,11 @@ export async function exportCharacterPointsPdf(
   });
 
   autoTable(doc, {
-    startY: 46,
+    startY: 49,
     head: [['No', 'NISN', 'Nama Siswa', 'Kelas', 'Poin (+)', 'Poin (-)', 'Total Poin', 'Predikat Karakter']],
-    body: tableData.length > 0 ? tableData : [['-', '-', '-', '-', '-', '-', '-', 'Tidak ada data siswa']],
+    body: tableData.length > 0 
+      ? tableData 
+      : [['-', '-', 'Tidak ada data siswa yang sesuai dengan filter yang aktif', '-', '-', '-', '-', '-']],
     theme: 'grid',
     headStyles: { fillColor: [30, 58, 138], textColor: 255, fontSize: 8.5, halign: 'center', fontStyle: 'bold' },
     bodyStyles: { fontSize: 8, valign: 'middle' },
@@ -1944,7 +1981,10 @@ export async function exportCharacterPointsPdf(
   doc.text(homeroom.nip ? `NIP. ${homeroom.nip}` : 'NIP. ....................................', 135, finalY + 30);
 
   const sanitizedClassName = selectedClassFilter.replace(/[^a-zA-Z0-9]/g, '_');
-  doc.save(`Laporan_Nilai_Karakter_Siswa_${sanitizedClassName}.pdf`);
+  const sanitizedScoreFilter = options?.scoreFilterLabel && options.scoreFilterLabel !== 'Semua Nilai'
+    ? `_${options.scoreFilterLabel.replace(/[^a-zA-Z0-9]/g, '_')}`
+    : '';
+  doc.save(`Laporan_Nilai_Karakter_Siswa_${sanitizedClassName}${sanitizedScoreFilter}.pdf`);
 }
 
 // Export Single Student Detailed Character Log (Detail Nilai Karakter Siswa) PDF with Kop Surat & Logo

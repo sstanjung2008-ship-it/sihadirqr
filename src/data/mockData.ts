@@ -142,7 +142,7 @@ export const INITIAL_SCHOOL_PROFILE: SchoolProfile = {
   subjects: ["Matematika", "Bahasa Indonesia", "Bahasa Inggris", "IPA", "IPS", "Pendidikan Agama", "PJOK", "Seni Budaya", "Informatika", "PPKn"]
 };
 
-export const INITIAL_CLASSES: SchoolClass[] = [
+export const SAMPLE_CLASSES: SchoolClass[] = [
   { id: "c7a", grade: "Kelas 7", name: "7-A", homeroomTeacher: "Siti Rahmawati, S.Pd.", totalStudents: 4 },
   { id: "c7b", grade: "Kelas 7", name: "7-B", homeroomTeacher: "Budi Santoso, M.Pd.", totalStudents: 3 },
   { id: "c8a", grade: "Kelas 8", name: "8-A", homeroomTeacher: "Dewi Lestari, S.Si.", totalStudents: 3 },
@@ -150,6 +150,8 @@ export const INITIAL_CLASSES: SchoolClass[] = [
   { id: "c9a", grade: "Kelas 9", name: "9-A", homeroomTeacher: "Nurul Hidayah, S.Ag.", totalStudents: 2 },
   { id: "c9b", grade: "Kelas 9", name: "9-B", homeroomTeacher: "Eko Prasetyo, M.T.", totalStudents: 2 },
 ];
+
+export const INITIAL_CLASSES: SchoolClass[] = [];
 
 export const INITIAL_STUDENTS: Student[] = [
   {

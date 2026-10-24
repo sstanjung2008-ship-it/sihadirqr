@@ -2,6 +2,7 @@ import { SchoolProfile, SchoolClass, Student, AttendanceRecord, LeaveRequest, Te
 import { 
   INITIAL_SCHOOL_PROFILE, 
   INITIAL_CLASSES, 
+  SAMPLE_CLASSES,
   INITIAL_STUDENTS, 
   generateInitialAttendanceHistory, 
   INITIAL_LEAVE_REQUESTS, 
@@ -334,6 +335,8 @@ export function validateAndSanitizeAttendanceRecords(records: any[]): Attendance
     if (r.returnStatus) cleanRecord.returnStatus = r.returnStatus;
     if (r.returnScannedBy) cleanRecord.returnScannedBy = String(r.returnScannedBy).trim();
     if (r.notes) cleanRecord.notes = String(r.notes).trim();
+    if (r.updatedAt) cleanRecord.updatedAt = Number(r.updatedAt);
+    if (r.returnUpdatedAt) cleanRecord.returnUpdatedAt = Number(r.returnUpdatedAt);
 
     cleanList.push(cleanRecord);
   }
@@ -1141,6 +1144,36 @@ export const DEMO_TEACHER_NIPS = new Set([
 ]);
 
 export const DEMO_DATA_CLEARED_KEY = 'sihadir_demo_data_cleared';
+export const DEMO_CLASSES_CLEARED_KEY = 'sihadir_demo_classes_cleaned';
+
+export const DEMO_CLASS_IDS = new Set([
+  'c7a', 'c7b', 'c8a', 'c8b', 'c9a', 'c9b'
+]);
+
+export const DEMO_CLASS_NAMES = new Set([
+  '7-a', '7-b', '8-a', '8-b', '9-a', '9-b'
+]);
+
+export function isDemoClass(c: SchoolClass): boolean {
+  if (!c) return false;
+  if (c.id && DEMO_CLASS_IDS.has(c.id)) return true;
+  const nameNorm = (c.name || '').trim().toLowerCase();
+  const demoHomerooms = new Set([
+    'siti rahmawati, s.pd.',
+    'budi santoso, m.pd.',
+    'dewi lestari, s.si.',
+    'agus pratama, s.kom.',
+    'nurul hidayah, s.ag.',
+    'eko prasetyo, m.t.'
+  ]);
+  if (DEMO_CLASS_NAMES.has(nameNorm) && (
+    demoHomerooms.has((c.homeroomTeacher || '').trim().toLowerCase()) ||
+    c.id.startsWith('c7') || c.id.startsWith('c8') || c.id.startsWith('c9')
+  )) {
+    return true;
+  }
+  return false;
+}
 
 // Intelligent entity mergers to ensure no data is lost across multiple devices
 export function mergeStudentLists(local: Student[], cloud: Student[]): Student[] {
@@ -1220,9 +1253,19 @@ export function mergeStudentLists(local: Student[], cloud: Student[]): Student[]
 }
 
 export function mergeClassLists(local: SchoolClass[], cloud: SchoolClass[]): SchoolClass[] {
+  const isDemoCleared = (typeof window !== 'undefined' && (
+    localStorage.getItem(DEMO_DATA_CLEARED_KEY) === 'true' ||
+    localStorage.getItem(DEMO_CLASSES_CLEARED_KEY) === 'true'
+  ));
+  const hasRealClasses = local.some(c => !isDemoClass(c)) || cloud.some(c => !isDemoClass(c));
+  const filterDemo = isDemoCleared || hasRealClasses;
+
+  const effectiveCloud = filterDemo ? cloud.filter(c => !isDemoClass(c)) : cloud;
+  const effectiveLocal = filterDemo ? local.filter(c => !isDemoClass(c)) : local;
+
   const map = new Map<string, SchoolClass>();
-  cloud.forEach(c => map.set(c.id || c.name.toLowerCase().trim(), c));
-  local.forEach(c => map.set(c.id || c.name.toLowerCase().trim(), c));
+  effectiveCloud.forEach(c => map.set(c.id || c.name.toLowerCase().trim(), c));
+  effectiveLocal.forEach(c => map.set(c.id || c.name.toLowerCase().trim(), c));
   return Array.from(map.values());
 }
 
@@ -1867,95 +1910,131 @@ export function mergeSingleAttendanceRecord(a: AttendanceRecord, b: AttendanceRe
   const isRealA = isRealAttendance(a);
   const isRealB = isRealAttendance(b);
 
-  // 1. Evaluasi Waktu Masuk (Entry Time):
-  // Jika salah satu memiliki jam scan masuk valid (bukan '-'), pertahankan jam tersebut.
-  const getEntryTime = (): string => {
-    const aValid = !!(a.time && a.time !== '-' && a.time.trim() && !a.time.toLowerCase().includes('belum'));
-    const bValid = !!(b.time && b.time !== '-' && b.time.trim() && !b.time.toLowerCase().includes('belum'));
-    if (aValid && bValid) {
-      if (a.method === 'QR_SCAN' && b.method !== 'QR_SCAN') return a.time;
-      if (b.method === 'QR_SCAN' && a.method !== 'QR_SCAN') return b.time;
-      return a.time <= b.time ? a.time : b.time;
+  const aUpdated = Number(a.updatedAt) || 0;
+  const bUpdated = Number(b.updatedAt) || 0;
+  const aReturnUpdated = Number(a.returnUpdatedAt) || 0;
+  const bReturnUpdated = Number(b.returnUpdatedAt) || 0;
+
+  // 1. Evaluasi Status & Waktu Masuk (Entry)
+  let finalStatus: AttendanceRecord['status'];
+  let finalTime: string;
+  let finalMethod: AttendanceRecord['method'];
+  let finalScannedBy: string;
+  let finalNotes: string;
+  let finalEntryUpdated: number;
+
+  if (bUpdated > aUpdated) {
+    // b adalah update yang lebih baru secara eksplisit (misal: ubah massal / edit admin terbaru)
+    finalStatus = b.status || 'HADIR';
+    finalTime = (b.time && b.time !== '-') ? b.time : (finalStatus === 'HADIR' || finalStatus === 'TERLAMBAT' ? '07:00' : '-');
+    finalMethod = b.method || 'MANUAL';
+    finalScannedBy = b.scannedBy || a.scannedBy || 'Admin';
+    finalNotes = b.notes !== undefined ? b.notes : (a.notes || '');
+    finalEntryUpdated = bUpdated;
+  } else if (aUpdated > bUpdated) {
+    // a adalah update yang lebih baru
+    finalStatus = a.status || 'HADIR';
+    finalTime = (a.time && a.time !== '-') ? a.time : (finalStatus === 'HADIR' || finalStatus === 'TERLAMBAT' ? '07:00' : '-');
+    finalMethod = a.method || 'MANUAL';
+    finalScannedBy = a.scannedBy || b.scannedBy || 'Admin';
+    finalNotes = a.notes !== undefined ? a.notes : (b.notes || '');
+    finalEntryUpdated = aUpdated;
+  } else {
+    // Keduanya tidak memiliki updatedAt atau sama:
+    const bIsAdminManual = b.method === 'MANUAL' && (b.scannedBy?.includes('Admin') || b.notes?.includes('Admin'));
+    const aIsAdminManual = a.method === 'MANUAL' && (a.scannedBy?.includes('Admin') || a.notes?.includes('Admin'));
+
+    if (bIsAdminManual && !aIsAdminManual) {
+      finalStatus = b.status || 'HADIR';
+      finalTime = b.time || '-';
+      finalMethod = 'MANUAL';
+      finalScannedBy = b.scannedBy;
+      finalNotes = b.notes || '';
+      finalEntryUpdated = Date.now();
+    } else if (aIsAdminManual && !bIsAdminManual) {
+      finalStatus = a.status || 'HADIR';
+      finalTime = a.time || '-';
+      finalMethod = 'MANUAL';
+      finalScannedBy = a.scannedBy;
+      finalNotes = a.notes || '';
+      finalEntryUpdated = Date.now();
+    } else if (isRealB && !isRealA) {
+      finalStatus = b.status || 'HADIR';
+      finalTime = b.time || '07:00';
+      finalMethod = b.method || 'QR_SCAN';
+      finalScannedBy = b.scannedBy;
+      finalNotes = b.notes || '';
+      finalEntryUpdated = bUpdated || Date.now();
+    } else if (isRealA && !isRealB) {
+      finalStatus = a.status || 'HADIR';
+      finalTime = a.time || '07:00';
+      finalMethod = a.method || 'QR_SCAN';
+      finalScannedBy = a.scannedBy;
+      finalNotes = a.notes || '';
+      finalEntryUpdated = aUpdated || Date.now();
+    } else {
+      finalStatus = b.status || a.status || 'HADIR';
+      finalTime = (b.time && b.time !== '-') ? b.time : ((a.time && a.time !== '-') ? a.time : '-');
+      finalMethod = b.method || a.method || 'MANUAL';
+      finalScannedBy = b.scannedBy || a.scannedBy;
+      finalNotes = (b.notes && b.notes.trim()) ? b.notes : (a.notes || '');
+      finalEntryUpdated = Math.max(aUpdated, bUpdated) || Date.now();
     }
-    if (aValid) return a.time;
-    if (bValid) return b.time;
-    return '-';
-  };
+  }
 
-  // 2. Evaluasi Status Kehadiran (Status):
-  // Siswa 1 di-scan Perangkat A (HADIR/TERLAMBAT) vs Perangkat B yang belum refresh (ALPA/-):
-  // STATUS RIIL HASIL SCAN MUTLAK MENANG DAN TIDAK BOLEH DITIMPA OLEH ALPA!
-  const getStatus = (): AttendanceRecord['status'] => {
-    if (isRealA && !isRealB) return a.status || 'HADIR';
-    if (!isRealA && isRealB) return b.status || 'HADIR';
+  // 2. Evaluasi Status & Jam Pulang (Return)
+  let returnTime: string | undefined = undefined;
+  let returnStatus: AttendanceRecord['returnStatus'] | undefined = undefined;
+  let returnScannedBy: string | undefined = undefined;
+  let finalReturnUpdated: number | undefined = undefined;
 
-    if (isRealA && isRealB) {
-      if (a.method === 'QR_SCAN' && b.method !== 'QR_SCAN') return a.status || 'HADIR';
-      if (b.method === 'QR_SCAN' && a.method !== 'QR_SCAN') return b.status || 'HADIR';
-      if ((a.status === 'IZIN' || a.status === 'SAKIT') && (a.notes && a.notes.trim())) return a.status;
-      if ((b.status === 'IZIN' || b.status === 'SAKIT') && (b.notes && b.notes.trim())) return b.status;
-      return a.status || b.status || 'HADIR';
-    }
-
-    return 'ALPA';
-  };
-
-  // 3. Evaluasi Kepulangan (Return Scan):
-  // Jangan pernah menghilangkan scan kepulangan jika Perangkat B scan pulang setelah Perangkat A scan datang!
-  const getReturnInfo = () => {
+  if (bReturnUpdated > aReturnUpdated) {
+    // b secara eksplisit memperbarui return info (termasuk reset ke BELUM_PULANG / undefined)
+    returnTime = (b.returnTime && b.returnTime !== '-') ? b.returnTime : undefined;
+    returnStatus = b.returnStatus;
+    returnScannedBy = b.returnScannedBy;
+    finalReturnUpdated = bReturnUpdated;
+  } else if (aReturnUpdated > bReturnUpdated) {
+    // a secara eksplisit memperbarui return info
+    returnTime = (a.returnTime && a.returnTime !== '-') ? a.returnTime : undefined;
+    returnStatus = a.returnStatus;
+    returnScannedBy = a.returnScannedBy;
+    finalReturnUpdated = aReturnUpdated;
+  } else {
+    // Keduanya tidak memiliki returnUpdatedAt atau sama:
     const isCompleted = (s?: string) => s === 'PULANG' || s === 'PULANG_CEPAT' || s === 'PULANG_TEPAT';
     const aHasReturn = !!(a.returnTime && a.returnTime !== '-' && a.returnTime.trim()) || isCompleted(a.returnStatus);
     const bHasReturn = !!(b.returnTime && b.returnTime !== '-' && b.returnTime.trim()) || isCompleted(b.returnStatus);
 
-    let returnTime: string | undefined = undefined;
-    let returnStatus: AttendanceRecord['returnStatus'] | undefined = undefined;
-    let returnScannedBy: string | undefined = undefined;
-
-    if (aHasReturn && !bHasReturn) {
-      returnTime = (a.returnTime && a.returnTime !== '-') ? a.returnTime : undefined;
-      returnStatus = a.returnStatus;
-      returnScannedBy = a.returnScannedBy;
-    } else if (!aHasReturn && bHasReturn) {
+    if (bHasReturn && !aHasReturn) {
       returnTime = (b.returnTime && b.returnTime !== '-') ? b.returnTime : undefined;
       returnStatus = b.returnStatus;
       returnScannedBy = b.returnScannedBy;
+      finalReturnUpdated = bReturnUpdated || Date.now();
+    } else if (aHasReturn && !bHasReturn) {
+      returnTime = (a.returnTime && a.returnTime !== '-') ? a.returnTime : undefined;
+      returnStatus = a.returnStatus;
+      returnScannedBy = a.returnScannedBy;
+      finalReturnUpdated = aReturnUpdated || Date.now();
     } else if (aHasReturn && bHasReturn) {
-      // Keduanya memiliki info kepulangan: prioritaskan returnTime yang valid & terbaru
-      const aTime = (a.returnTime && a.returnTime !== '-') ? a.returnTime.trim() : '';
-      const bTime = (b.returnTime && b.returnTime !== '-') ? b.returnTime.trim() : '';
-      returnTime = (aTime && bTime) ? (aTime >= bTime ? aTime : bTime) : (aTime || bTime || undefined);
-      returnStatus = isCompleted(a.returnStatus) ? a.returnStatus : (isCompleted(b.returnStatus) ? b.returnStatus : (a.returnStatus || b.returnStatus));
-      returnScannedBy = (a.returnScannedBy && !a.returnScannedBy.includes('Sistem Otomatis')) ? a.returnScannedBy : (b.returnScannedBy || a.returnScannedBy);
+      returnTime = (b.returnTime && b.returnTime !== '-') ? b.returnTime : ((a.returnTime && a.returnTime !== '-') ? a.returnTime : undefined);
+      returnStatus = b.returnStatus || a.returnStatus;
+      returnScannedBy = b.returnScannedBy || a.returnScannedBy;
+      finalReturnUpdated = Math.max(aReturnUpdated, bReturnUpdated) || Date.now();
     } else {
-      returnStatus = a.returnStatus || b.returnStatus;
+      returnStatus = b.returnStatus || a.returnStatus;
     }
-
-    return { returnTime, returnStatus, returnScannedBy };
-  };
-
-  const finalTime = getEntryTime();
-  const finalStatus = getStatus();
-  const { returnTime, returnStatus, returnScannedBy } = getReturnInfo();
-
-  const finalMethod = (a.method === 'QR_SCAN' || b.method === 'QR_SCAN') 
-    ? 'QR_SCAN' 
-    : (a.method || b.method || 'MANUAL');
-
-  const finalScannedBy = (a.scannedBy && !a.scannedBy.includes('Sistem Otomatis')) 
-    ? a.scannedBy 
-    : ((b.scannedBy && !b.scannedBy.includes('Sistem Otomatis')) ? b.scannedBy : (a.scannedBy || b.scannedBy));
-
-  const finalNotes = (a.notes && a.notes.trim()) ? a.notes : (b.notes || '');
+  }
 
   const merged: AttendanceRecord = {
     ...a,
     ...b,
-    id: a.id || b.id || `att-${a.date || b.date}-${a.studentId || b.studentId}`,
-    studentId: a.studentId || b.studentId,
-    studentName: (a.studentName && a.studentName !== 'Siswa') ? a.studentName : (b.studentName || a.studentName || 'Siswa'),
-    nisn: a.nisn || b.nisn || '',
-    className: a.className || b.className || '',
-    date: a.date || b.date,
+    id: b.id || a.id || `att-${b.date || a.date}-${b.studentId || a.studentId}`,
+    studentId: b.studentId || a.studentId,
+    studentName: (b.studentName && b.studentName !== 'Siswa') ? b.studentName : (a.studentName || 'Siswa'),
+    nisn: b.nisn || a.nisn || '',
+    className: b.className || a.className || '',
+    date: b.date || a.date,
     time: finalTime,
     status: finalStatus,
     method: finalMethod,
@@ -1964,6 +2043,8 @@ export function mergeSingleAttendanceRecord(a: AttendanceRecord, b: AttendanceRe
     returnTime: returnTime || undefined,
     returnStatus: returnStatus || undefined,
     returnScannedBy: returnScannedBy || undefined,
+    updatedAt: finalEntryUpdated,
+    returnUpdatedAt: finalReturnUpdated,
   };
 
   if ((finalStatus === 'HADIR' || finalStatus === 'TERLAMBAT') && (!merged.time || merged.time === '-')) {
@@ -3195,18 +3276,47 @@ export function saveSchoolProfile(profile: SchoolProfile): void {
 
 export function getSchoolClasses(): SchoolClass[] {
   const data = localStorage.getItem(KEYS.CLASSES);
-  let parsed: SchoolClass[] = INITIAL_CLASSES;
-  if (data) {
-    try {
-      parsed = JSON.parse(data);
-    } catch {
-      parsed = INITIAL_CLASSES;
+  if (data === null) {
+    if (typeof window !== 'undefined' && (
+      localStorage.getItem(DEMO_DATA_CLEARED_KEY) === 'true' ||
+      localStorage.getItem(DEMO_CLASSES_CLEARED_KEY) === 'true'
+    )) {
+      safeSetLocalStorage(KEYS.CLASSES, JSON.stringify([]));
+      safeSetLocalStorage(KEYS.CLASSES + '_updatedAt', '1');
+      return [];
     }
-  } else {
-    safeSetLocalStorage(KEYS.CLASSES, JSON.stringify(INITIAL_CLASSES));
+    safeSetLocalStorage(KEYS.CLASSES, JSON.stringify([]));
     safeSetLocalStorage(KEYS.CLASSES + '_updatedAt', '1');
+    return [];
   }
-  return [...parsed].sort((a, b) => a.name.localeCompare(b.name, 'id', { numeric: true, sensitivity: 'base' }));
+  try {
+    const parsed = JSON.parse(data);
+    if (!Array.isArray(parsed)) return [];
+    const isDemoCleared = typeof window !== 'undefined' && (
+      localStorage.getItem(DEMO_DATA_CLEARED_KEY) === 'true' ||
+      localStorage.getItem(DEMO_CLASSES_CLEARED_KEY) === 'true'
+    );
+    if (isDemoCleared && parsed.some(c => isDemoClass(c))) {
+      const cleaned = parsed.filter(c => !isDemoClass(c));
+      safeSetLocalStorage(KEYS.CLASSES, JSON.stringify(cleaned));
+      return cleaned.sort((a, b) => a.name.localeCompare(b.name, 'id', { numeric: true, sensitivity: 'base' }));
+    }
+    return [...parsed].sort((a, b) => a.name.localeCompare(b.name, 'id', { numeric: true, sensitivity: 'base' }));
+  } catch {
+    return [];
+  }
+}
+
+export function cleanDemoClasses(): { removedCount: number; remainingClasses: SchoolClass[] } {
+  const current = getSchoolClasses();
+  const remaining = current.filter(c => !isDemoClass(c));
+  const removedCount = current.length - remaining.length;
+  if (typeof window !== 'undefined') {
+    localStorage.setItem(DEMO_DATA_CLEARED_KEY, 'true');
+    localStorage.setItem(DEMO_CLASSES_CLEARED_KEY, 'true');
+  }
+  saveSchoolClasses(remaining);
+  return { removedCount, remainingClasses: remaining };
 }
 
 export function saveSchoolClasses(classes: SchoolClass[]): void {
@@ -3268,12 +3378,13 @@ export function ensureCompleteAttendanceHistory(records: AttendanceRecord[], stu
   const missingOctoberDates = targetOctoberDates.filter(d => !existingDates.has(d));
 
   if (missingOctoberDates.length === 0 && records.length > 0) {
+    inMemoryAttendanceRecords = records;
     return records;
   }
 
   const activeStudents = (students && students.length > 0) ? students : getStudents();
   const studentsToUse = activeStudents.length > 0 ? activeStudents : INITIAL_STUDENTS;
-  const baseline = generateInitialAttendanceHistory(studentsToUse);
+  const baseline = generateInitialAttendanceHistory(studentsToUse).filter(r => missingOctoberDates.includes(r.date));
   const merged = mergeAttendanceLists(records, baseline);
   const sanitized = validateAndSanitizeAttendanceRecords(merged);
 
@@ -3382,7 +3493,7 @@ export async function restoreComprehensiveSchoolData(syncToCloud: boolean = true
 
     let activeClasses = getSchoolClasses();
     if (activeClasses.length === 0) {
-      activeClasses = INITIAL_CLASSES;
+      activeClasses = SAMPLE_CLASSES;
       saveSchoolClasses(activeClasses);
     }
 
@@ -3658,6 +3769,7 @@ export function saveAttendanceRecords(records: AttendanceRecord[], instant: bool
 
   const cleanRecords = validateAndSanitizeAttendanceRecords(records);
   const now = Date.now();
+  inMemoryAttendanceRecords = cleanRecords;
   const dataStr = JSON.stringify(cleanRecords);
   safeSetLocalStorage(KEYS.ATTENDANCE, dataStr);
   safeSetLocalStorage(KEYS.ATTENDANCE + '_updatedAt', String(now));
@@ -3671,6 +3783,7 @@ export function saveAttendanceRecords(records: AttendanceRecord[], instant: bool
         const cloudRecords = typeof cloudDoc.data === 'string' ? JSON.parse(cloudDoc.data) : cloudDoc.data;
         if (Array.isArray(cloudRecords) && cloudRecords.length > 0) {
           finalRecords = mergeAttendanceLists(cloudRecords, cleanRecords);
+          inMemoryAttendanceRecords = finalRecords;
           safeSetLocalStorage(KEYS.ATTENDANCE, JSON.stringify(finalRecords));
           safeSetLocalStorage(KEYS.ATTENDANCE + '_updatedAt', String(now));
           notifyStorageUpdated();
@@ -3687,6 +3800,7 @@ export function saveAttendanceRecords(records: AttendanceRecord[], instant: bool
 export function saveAttendanceRecordsLocally(records: AttendanceRecord[]): void {
   const cleanRecords = validateAndSanitizeAttendanceRecords(records);
   const now = Date.now();
+  inMemoryAttendanceRecords = cleanRecords;
   const dataStr = JSON.stringify(cleanRecords);
   safeSetLocalStorage(KEYS.ATTENDANCE, dataStr);
   safeSetLocalStorage(KEYS.ATTENDANCE + '_updatedAt', String(now));

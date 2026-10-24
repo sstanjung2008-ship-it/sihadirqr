@@ -17,7 +17,7 @@ import {
   exportMonthlyAttendanceMatrixPdf,
   exportMonthlyAttendanceMatrixExcel
 } from '../lib/exportUtils';
-import { getLocalDateString, calculateStudentCharacterSummary } from '../lib/storage';
+import { getLocalDateString, calculateStudentCharacterSummary, isDemoClass } from '../lib/storage';
 
 const INDONESIAN_MONTH_OPTIONS = [
   { value: 1, name: 'Januari' },
@@ -47,6 +47,7 @@ interface ClassManagementViewProps {
   onAddClass: (newClass: SchoolClass) => void;
   onUpdateClass: (updatedClass: SchoolClass) => void;
   onDeleteClass: (classId: string) => void;
+  onBatchDeleteClasses?: (classIds: string[]) => void;
 }
 
 export const ClassManagementView: React.FC<ClassManagementViewProps> = ({
@@ -62,10 +63,38 @@ export const ClassManagementView: React.FC<ClassManagementViewProps> = ({
   onAddClass,
   onUpdateClass,
   onDeleteClass,
+  onBatchDeleteClasses,
 }) => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingClass, setEditingClass] = useState<SchoolClass | null>(null);
   const [classToDelete, setClassToDelete] = useState<SchoolClass | null>(null);
+
+  // Deteksi kelas demo bawaan contoh (misal: 7-A, 7-B, 8-A, 8-B, 9-A, 9-B)
+  const demoClasses = useMemo(() => {
+    return classes.filter(c => isDemoClass(c));
+  }, [classes]);
+
+  const handleCleanDemoClasses = () => {
+    if (demoClasses.length === 0) {
+      alert('Database kelas sudah bersih. Tidak ada kelas contoh demo yang ditemukan.');
+      return;
+    }
+
+    const demoNames = demoClasses.map(c => c.name).join(', ');
+    if (window.confirm(`Hapus permanen ${demoClasses.length} data kelas contoh bawaan demo (${demoNames})? Data kelas dan siswa asli sekolah Anda akan tetap aman 100%.`)) {
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('sihadir_demo_data_cleared', 'true');
+        localStorage.setItem('sihadir_demo_classes_cleaned', 'true');
+      }
+      const demoIds = demoClasses.map(c => c.id);
+      if (onBatchDeleteClasses) {
+        onBatchDeleteClasses(demoIds);
+      } else {
+        demoIds.forEach(id => onDeleteClass(id));
+      }
+      alert(`Berhasil menghapus permanen ${demoClasses.length} kelas demo (${demoNames})! Database kelas Anda sekarang bersih.`);
+    }
+  };
 
   // Teachers sorted alphabetically ascending by name (A-Z)
   const sortedTeachers = useMemo(() => {
@@ -2076,17 +2105,51 @@ export const ClassManagementView: React.FC<ClassManagementViewProps> = ({
           </p>
         </div>
 
-        <button
-          onClick={handleOpenAdd}
-          className="bg-blue-600 hover:bg-blue-500 text-white font-bold px-4 py-2.5 rounded-xl shadow-lg shadow-blue-600/30 flex items-center gap-2 text-xs transition-all cursor-pointer self-start sm:self-auto"
-        >
-          <Plus className="w-4 h-4" />
-          Tambah Kelas Baru
-        </button>
+        <div className="flex items-center gap-2 self-start sm:self-auto flex-wrap">
+          {/* Tombol Hapus Kelas Demo */}
+          <button
+            onClick={handleCleanDemoClasses}
+            className={`font-bold px-3.5 py-2.5 rounded-xl shadow-lg flex items-center gap-2 text-xs transition-all cursor-pointer border ${
+              demoClasses.length > 0
+                ? 'bg-rose-600 hover:bg-rose-500 text-white shadow-rose-600/30 border-rose-500/40 animate-pulse'
+                : 'bg-slate-800/80 hover:bg-slate-800 text-slate-300 hover:text-white shadow-slate-900/50 border-slate-700/60'
+            }`}
+            title={demoClasses.length > 0 ? `Hapus ${demoClasses.length} kelas contoh demo bawaan secara permanen` : 'Database kelas bersih dari kelas demo'}
+          >
+            <Trash2 className={`w-4 h-4 ${demoClasses.length > 0 ? 'text-white' : 'text-rose-400'}`} />
+            <span>{demoClasses.length > 0 ? `Hapus ${demoClasses.length} Kelas Demo` : 'Hapus Kelas Demo'}</span>
+          </button>
+
+          <button
+            onClick={handleOpenAdd}
+            className="bg-blue-600 hover:bg-blue-500 text-white font-bold px-4 py-2.5 rounded-xl shadow-lg shadow-blue-600/30 flex items-center gap-2 text-xs transition-all cursor-pointer"
+          >
+            <Plus className="w-4 h-4" />
+            Tambah Kelas Baru
+          </button>
+        </div>
       </div>
 
-      {/* Classes Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+      {/* Classes Grid or Empty State */}
+      {sortedClasses.length === 0 ? (
+        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-12 text-center space-y-3">
+          <div className="w-12 h-12 rounded-full bg-blue-500/10 text-blue-400 flex items-center justify-center mx-auto">
+            <Building2 className="w-6 h-6" />
+          </div>
+          <h3 className="text-base font-bold text-white">Belum Ada Data Kelas</h3>
+          <p className="text-xs text-slate-400 max-w-md mx-auto">
+            Database kelas bersih dari kelas contoh demo. Silakan tambahkan rombel resmi sekolah Anda menggunakan tombol "Tambah Kelas Baru" di atas.
+          </p>
+          <button
+            onClick={handleOpenAdd}
+            className="inline-flex items-center gap-2 bg-blue-600 hover:bg-blue-500 text-white font-bold px-4 py-2 rounded-xl text-xs transition-all cursor-pointer shadow-lg shadow-blue-600/20"
+          >
+            <Plus className="w-4 h-4" />
+            Tambah Kelas Baru
+          </button>
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         {sortedClasses.map((c) => {
           const classStudentsCount = students.filter(s => s.classId === c.id || s.className === c.name).length;
           const classJournalsCount = journals.filter(j => j.classId === c.id || j.className === c.name).length;
@@ -2246,7 +2309,8 @@ export const ClassManagementView: React.FC<ClassManagementViewProps> = ({
             </div>
           );
         })}
-      </div>
+        </div>
+      )}
 
       {/* Add / Edit Class Modal */}
       {isModalOpen && (

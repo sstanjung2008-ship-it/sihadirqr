@@ -57,6 +57,8 @@ export interface AttendanceRecord {
   returnTime?: string; // HH:mm:ss (Waktu Pulang)
   returnStatus?: 'PULANG' | 'PULANG_CEPAT' | 'PULANG_TEPAT' | 'BELUM_PULANG';
   returnScannedBy?: string;
+  updatedAt?: number; // Timestamp pembaruan data masuk (untuk anti-revert multi-perangkat)
+  returnUpdatedAt?: number; // Timestamp pembaruan data kepulangan (untuk anti-revert multi-perangkat)
 }
 
 export type LeaveType = 'SAKIT' | 'IZIN' | 'DESAK';

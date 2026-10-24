@@ -69,6 +69,7 @@ import {
   isFirestoreSyncActive,
   reconcileTeachersAndClasses,
   checkParentLoginAccess,
+  isDemoClass,
   KEYS
 } from './lib/storage';
 import { ShieldCheck, CheckCircle2, WifiOff, RefreshCw, Wifi, X, Cloud } from 'lucide-react';
@@ -415,15 +416,25 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    // 1. Inisialisasi rekonsiliasi awal memori
-    const initialRawClasses = getSchoolClasses();
+    // 1. Inisialisasi rekonsiliasi awal memori & pembersihan kelas demo bawaan
+    let initialRawClasses = getSchoolClasses();
     const initialRawTeachers = getTeachers();
+
+    if (typeof window !== 'undefined' && localStorage.getItem('sihadir_demo_classes_cleaned_v1') !== 'true') {
+      localStorage.setItem('sihadir_demo_classes_cleaned_v1', 'true');
+      localStorage.setItem('sihadir_demo_classes_cleaned', 'true');
+      if (initialRawClasses.some(c => isDemoClass(c))) {
+        initialRawClasses = initialRawClasses.filter(c => !isDemoClass(c));
+        saveSchoolClasses(initialRawClasses);
+      }
+    }
+
     const { updatedTeachers, updatedClasses, teachersChanged, classesChanged } = reconcileTeachersAndClasses(initialRawTeachers, initialRawClasses);
     if (teachersChanged) {
       safeSetLocalStorage(KEYS.TEACHERS, JSON.stringify(updatedTeachers));
       setTeachersState(updatedTeachers);
     }
-    if (classesChanged) {
+    if (classesChanged || initialRawClasses.length !== getSchoolClasses().length) {
       safeSetLocalStorage(KEYS.CLASSES, JSON.stringify(updatedClasses));
       setClassesState(updatedClasses);
     }
@@ -948,7 +959,9 @@ export default function App() {
           time: fullRecord?.time !== undefined ? fullRecord.time : r.time,
           notes: notes !== undefined ? notes : r.notes,
           returnTime: returnTime !== undefined ? (returnTime || undefined) : r.returnTime,
-          returnStatus: returnTime !== undefined ? (returnTime ? (returnStatus || 'PULANG') : undefined) : r.returnStatus
+          returnStatus: returnTime !== undefined ? (returnTime ? (returnStatus || 'PULANG') : undefined) : r.returnStatus,
+          updatedAt: Date.now(),
+          returnUpdatedAt: returnTime !== undefined ? Date.now() : r.returnUpdatedAt,
         };
       }
       return r;
@@ -962,7 +975,9 @@ export default function App() {
         status: newStatus,
         notes: notes !== undefined ? notes : fullRecord.notes,
         returnTime: returnTime && returnTime.trim() ? returnTime.trim() : undefined,
-        returnStatus: returnTime && returnTime.trim() ? (returnStatus || 'PULANG') : undefined
+        returnStatus: returnTime && returnTime.trim() ? (returnStatus || 'PULANG') : undefined,
+        updatedAt: Date.now(),
+        returnUpdatedAt: returnTime && returnTime.trim() ? Date.now() : undefined,
       };
       updated.unshift(createdRecord);
     }
@@ -1072,6 +1087,7 @@ export default function App() {
       existingRecordId?: string;
     }[]
   ) => {
+    const updateTimestamp = Date.now();
     setAttendanceRecordsState(prev => {
       const updated = [...prev];
       const nowTime = new Date().toTimeString().substring(0, 5);
@@ -1079,37 +1095,59 @@ export default function App() {
       updates.forEach(u => {
         const existingIdx = updated.findIndex(r => 
           (u.existingRecordId && r.id === u.existingRecordId) || 
-          (r.studentId === u.studentId && r.date === u.date)
+          (r.studentId === u.studentId && r.date === u.date) ||
+          (u.nisn && u.nisn !== '-' && r.nisn === u.nisn && r.date === u.date)
         );
 
         if (existingIdx >= 0) {
+          const currentRec = updated[existingIdx];
+          let entryTime = currentRec.time;
+          if (u.newStatus === 'HADIR' || u.newStatus === 'TERLAMBAT') {
+            entryTime = (currentRec.time && currentRec.time !== '-') ? currentRec.time : nowTime;
+          } else if (u.newStatus === 'ALPA') {
+            entryTime = '-';
+          } else if (u.newStatus === 'IZIN' || u.newStatus === 'SAKIT') {
+            entryTime = (currentRec.time && currentRec.time !== '-') ? currentRec.time : '07:00';
+          }
+
           updated[existingIdx] = {
-            ...updated[existingIdx],
+            ...currentRec,
             status: u.newStatus,
-            notes: u.notes !== undefined ? u.notes : updated[existingIdx].notes,
-            time: u.newStatus === 'HADIR' ? (updated[existingIdx].time && updated[existingIdx].time !== '-' ? updated[existingIdx].time : nowTime) : updated[existingIdx].time,
+            time: entryTime,
+            method: 'MANUAL',
+            scannedBy: userSession?.displayName ? `Admin (${userSession.displayName})` : 'Admin (Update Massal)',
+            notes: u.notes !== undefined ? u.notes : currentRec.notes,
+            updatedAt: updateTimestamp,
           };
         } else {
           // Create new record
+          let entryTime = '-';
+          if (u.newStatus === 'HADIR' || u.newStatus === 'TERLAMBAT') {
+            entryTime = nowTime;
+          } else if (u.newStatus === 'IZIN' || u.newStatus === 'SAKIT') {
+            entryTime = '07:00';
+          }
+
           const newRecord: AttendanceRecord = {
-            id: `att-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`,
+            id: `att-${updateTimestamp}-${Math.random().toString(36).substr(2, 6)}`,
             studentId: u.studentId,
             studentName: u.studentName,
             nisn: u.nisn,
             className: u.className,
             date: u.date,
-            time: u.newStatus === 'HADIR' ? nowTime : '-',
+            time: entryTime,
             status: u.newStatus,
             method: 'MANUAL',
-            scannedBy: userSession?.displayName ? `Admin (${userSession.displayName})` : 'Admin Sekolah',
+            scannedBy: userSession?.displayName ? `Admin (${userSession.displayName})` : 'Admin (Update Massal)',
             notes: u.notes,
-            parentNotified: false
+            parentNotified: false,
+            updatedAt: updateTimestamp,
           };
           updated.unshift(newRecord);
         }
       });
 
-      saveAttendanceRecords(updated);
+      saveAttendanceRecords(updated, true);
       return updated;
     });
 
@@ -1159,6 +1197,7 @@ export default function App() {
   // Bulk update return status (e.g. mark multiple students as Pulang / Pulang Cepat or reset return status)
   const handleBulkUpdateReturnStatus = (updates: BulkReturnUpdatePayload[]) => {
     const nowTime = new Date().toTimeString().substring(0, 5);
+    const updateTimestamp = Date.now();
 
     setAttendanceRecordsState(prev => {
       const updated = [...prev];
@@ -1166,31 +1205,37 @@ export default function App() {
       updates.forEach(u => {
         const existingIdx = updated.findIndex(r =>
           (u.existingRecordId && r.id === u.existingRecordId) ||
-          (r.studentId === u.studentId && r.date === u.date)
+          (r.studentId === u.studentId && r.date === u.date) ||
+          (u.nisn && u.nisn !== '-' && r.nisn === u.nisn && r.date === u.date)
         );
 
         if (existingIdx >= 0) {
+          const currentRec = updated[existingIdx];
           if (u.newReturnStatus === 'BELUM_PULANG') {
             updated[existingIdx] = {
-              ...updated[existingIdx],
+              ...currentRec,
               returnTime: undefined,
               returnStatus: undefined,
               returnScannedBy: undefined,
+              returnUpdatedAt: updateTimestamp,
+              updatedAt: updateTimestamp,
             };
           } else {
             updated[existingIdx] = {
-              ...updated[existingIdx],
+              ...currentRec,
               returnTime: u.newReturnTime || nowTime,
               returnStatus: u.newReturnStatus,
-              returnScannedBy: userSession?.displayName ? `Admin (${userSession.displayName})` : 'Admin (Update Massal)',
-              notes: u.notes !== undefined ? u.notes : updated[existingIdx].notes,
+              returnScannedBy: userSession?.displayName ? `Admin (${userSession.displayName})` : 'Admin (Pulang Massal)',
+              notes: u.notes !== undefined ? u.notes : currentRec.notes,
+              returnUpdatedAt: updateTimestamp,
+              updatedAt: updateTimestamp,
             };
           }
         } else {
           // If record does not exist yet for this student on this date:
           if (u.newReturnStatus !== 'BELUM_PULANG') {
             const newRecord: AttendanceRecord = {
-              id: `att-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`,
+              id: `att-${updateTimestamp}-${Math.random().toString(36).substr(2, 6)}`,
               studentId: u.studentId,
               studentName: u.studentName,
               nisn: u.nisn,
@@ -1199,19 +1244,21 @@ export default function App() {
               time: '-',
               status: 'HADIR',
               method: 'MANUAL',
-              scannedBy: userSession?.displayName ? `Admin (${userSession.displayName})` : 'Admin Sekolah',
+              scannedBy: userSession?.displayName ? `Admin (${userSession.displayName})` : 'Admin (Pulang Massal)',
               returnTime: u.newReturnTime || nowTime,
               returnStatus: u.newReturnStatus,
-              returnScannedBy: userSession?.displayName ? `Admin (${userSession.displayName})` : 'Admin (Update Massal)',
+              returnScannedBy: userSession?.displayName ? `Admin (${userSession.displayName})` : 'Admin (Pulang Massal)',
               notes: u.notes,
               parentNotified: false,
+              returnUpdatedAt: updateTimestamp,
+              updatedAt: updateTimestamp,
             };
             updated.unshift(newRecord);
           }
         }
       });
 
-      saveAttendanceRecords(updated);
+      saveAttendanceRecords(updated, true);
       return updated;
     });
 
@@ -1380,6 +1427,20 @@ export default function App() {
     setTeachersState(updatedTeachers);
     saveSchoolClasses(updatedClasses);
     saveTeachers(updatedTeachers);
+  };
+
+  const handleBatchDeleteClasses = (classIds: string[]) => {
+    const idSet = new Set(classIds);
+    const updated = classes.filter(c => !idSet.has(c.id));
+    const { updatedTeachers, updatedClasses } = reconcileTeachersAndClasses(teachers, updated);
+    setClassesState(updatedClasses);
+    setTeachersState(updatedTeachers);
+    saveSchoolClasses(updatedClasses);
+    saveTeachers(updatedTeachers);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('sihadir_demo_data_cleared', 'true');
+      localStorage.setItem('sihadir_demo_classes_cleaned', 'true');
+    }
   };
 
   // Leave Request Handlers
@@ -2029,6 +2090,7 @@ export default function App() {
               onAddClass={handleAddClass}
               onUpdateClass={handleUpdateClass}
               onDeleteClass={handleDeleteClass}
+              onBatchDeleteClasses={handleBatchDeleteClasses}
             />
           )}
 

@@ -564,6 +564,10 @@ export const AttendanceDashboard: React.FC<AttendanceDashboardProps> = ({
                         <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
                         Portal Pintar Wali Murid
                       </span>
+                      <span className="bg-sky-50 text-sky-800 text-[11px] font-bold px-2 py-0.5 rounded-md border border-sky-200 flex items-center gap-1">
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                        Cloud Tersinkron: {lastRefreshedAt} WITA
+                      </span>
                       <span className="bg-indigo-50 text-indigo-700 text-[11px] font-bold px-2 py-0.5 rounded-md border border-indigo-200">
                         {schoolProfile?.academicYear || 'Tahun Ajaran Aktif'}
                       </span>
@@ -1281,10 +1285,17 @@ export const AttendanceDashboard: React.FC<AttendanceDashboardProps> = ({
                 </div>
               )}
 
-              <h1 className="text-2xl font-extrabold text-slate-800 tracking-tight flex items-center gap-2">
-                <Zap className="w-6 h-6 text-indigo-600" />
-                Dasbor Kehadiran Siswa {selectedDate === todayStr ? 'Hari Ini' : ''}
-              </h1>
+              <div className="flex items-center gap-2.5 flex-wrap">
+                <h1 className="text-2xl font-extrabold text-slate-800 tracking-tight flex items-center gap-2">
+                  <Zap className="w-6 h-6 text-indigo-600" />
+                  Dasbor Kehadiran Siswa {selectedDate === todayStr ? 'Hari Ini' : ''}
+                </h1>
+                <div className="inline-flex items-center gap-1.5 px-3 py-1 bg-sky-50 text-sky-800 border border-sky-200/90 rounded-full text-xs font-bold shadow-2xs">
+                  <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                  <span>Cloud Tersinkron</span>
+                  <span className="text-slate-400 font-mono text-[11px]">• {lastRefreshedAt} WITA</span>
+                </div>
+              </div>
               <p className="text-xs text-slate-500 mt-1 flex items-center gap-2 flex-wrap">
                 <span>Tanggal: <strong className="font-semibold text-slate-700">{displayDateFormatted}</strong></span>
                 {selectedDate !== todayStr && (

@@ -26,7 +26,14 @@ import {
   exportStudentGradesExcel,
   exportStudentCharacterDetailPdf
 } from '../lib/exportUtils';
-import { getStudentGradeAssessments, getTeachers, getLocalDateString, calculateStudentCharacterSummary, isKbmCharacterLog } from '../lib/storage';
+import { 
+  getStudentGradeAssessments, 
+  getTeachers, 
+  getLocalDateString, 
+  calculateStudentCharacterSummary, 
+  isKbmCharacterLog,
+  refreshCloudData
+} from '../lib/storage';
 import { 
   FileText, 
   Download, 
@@ -53,6 +60,8 @@ import {
   Clock,
   XCircle,
   RotateCcw,
+  RefreshCw,
+  Cloud,
   Flame,
   UserX,
   VolumeX
@@ -98,6 +107,31 @@ export const RecapExportView: React.FC<RecapExportViewProps> = ({
   const [selectedAssessmentDetail, setSelectedAssessmentDetail] = useState<StudentGradeAssessment | null>(null);
   const [selectedCharacterStudentDetail, setSelectedCharacterStudentDetail] = useState<Student | null>(null);
   const [isExportingCharacterDetail, setIsExportingCharacterDetail] = useState<boolean>(false);
+
+  // Status Sinkronisasi On-Demand ke Cloud Firestore
+  const [isRefreshingCloud, setIsRefreshingCloud] = useState<boolean>(false);
+  const [cloudSyncFeedback, setCloudSyncFeedback] = useState<string | null>(null);
+  const [lastRefreshedAt, setLastRefreshedAt] = useState<string>(() => {
+    return new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }) + ' WITA';
+  });
+
+  const handleManualCloudRefresh = async () => {
+    setIsRefreshingCloud(true);
+    setCloudSyncFeedback(null);
+    try {
+      const res = await refreshCloudData(true);
+      const now = new Date();
+      const timeStr = now.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }) + ' WITA';
+      setLastRefreshedAt(timeStr);
+      setCloudSyncFeedback(`Data Rekap & Presensi Berhasil Disinkronkan (${timeStr}) • ${res.attendanceCount} data presensi terupdate.`);
+      setTimeout(() => setCloudSyncFeedback(null), 6000);
+    } catch {
+      setCloudSyncFeedback('Gagal menyinkronkan data dengan Cloud. Periksa koneksi internet.');
+      setTimeout(() => setCloudSyncFeedback(null), 5000);
+    } finally {
+      setIsRefreshingCloud(false);
+    }
+  };
 
   // Grade assessments state (loaded from prop or localStorage)
   const [assessmentsList, setAssessmentsList] = useState<StudentGradeAssessment[]>(() => {
@@ -794,8 +828,15 @@ export const RecapExportView: React.FC<RecapExportViewProps> = ({
       {/* Header Banner */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 p-6 rounded-3xl text-white shadow-xl">
         <div>
-          <div className="inline-flex items-center gap-2 bg-indigo-500/30 text-indigo-200 px-3 py-1 rounded-full text-xs font-bold border border-indigo-400/30 mb-2">
-            <Layers className="w-4 h-4 text-indigo-400" /> Pusat Rekapitulasi & Laporan Sekolah
+          <div className="flex items-center gap-2 flex-wrap mb-2">
+            <div className="inline-flex items-center gap-2 bg-indigo-500/30 text-indigo-200 px-3 py-1 rounded-full text-xs font-bold border border-indigo-400/30">
+              <Layers className="w-4 h-4 text-indigo-400" /> Pusat Rekapitulasi & Laporan Sekolah
+            </div>
+            <div className="inline-flex items-center gap-1.5 bg-sky-400/20 text-sky-200 border border-sky-400/30 px-2.5 py-0.5 rounded-full text-[11px] font-bold">
+              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+              <span>Cloud Tersinkron</span>
+              <span className="text-sky-300 font-mono text-[10px]">• {lastRefreshedAt}</span>
+            </div>
           </div>
           <h1 className="text-2xl sm:text-3xl font-black tracking-tight flex items-center gap-2.5">
             <FileText className="w-7 h-7 text-amber-400" />
@@ -806,8 +847,22 @@ export const RecapExportView: React.FC<RecapExportViewProps> = ({
           </p>
         </div>
 
-        {/* Export Buttons */}
-        <div className="flex items-center gap-3 shrink-0">
+        {/* Action Buttons: Segarkan Cloud, Unduh Excel, Unduh PDF */}
+        <div className="flex flex-wrap items-center gap-2.5 shrink-0">
+          <button
+            type="button"
+            onClick={handleManualCloudRefresh}
+            disabled={isRefreshingCloud}
+            className="bg-white/10 hover:bg-white/20 border border-white/20 text-white font-extrabold px-3.5 py-3 rounded-2xl shadow-sm flex items-center gap-2 text-xs transition-all transform active:scale-95 cursor-pointer disabled:opacity-60 backdrop-blur-xs"
+            title="Sinkronkan data presensi & nilai terbaru dari Cloud Firestore sebelum mengunduh laporan"
+          >
+            <RefreshCw className={`w-4 h-4 text-sky-300 ${isRefreshingCloud ? 'animate-spin' : ''}`} />
+            <span>{isRefreshingCloud ? 'Menyinkronkan...' : 'Segarkan Cloud'}</span>
+            <span className="text-[10px] font-mono text-indigo-200 hidden sm:inline">
+              ({lastRefreshedAt})
+            </span>
+          </button>
+
           <button
             onClick={handleExportExcel}
             className="bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-extrabold px-4 py-3 rounded-2xl shadow-lg flex items-center gap-2 text-xs transition-all transform active:scale-95 cursor-pointer"
@@ -825,6 +880,24 @@ export const RecapExportView: React.FC<RecapExportViewProps> = ({
           </button>
         </div>
       </div>
+
+      {/* Cloud Sync Feedback Banner */}
+      {cloudSyncFeedback && (
+        <div className="bg-emerald-50 border border-emerald-300 text-emerald-900 px-4 py-3 rounded-2xl text-xs font-bold flex items-center justify-between gap-3 shadow-2xs animate-in fade-in">
+          <div className="flex items-center gap-2">
+            <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+            <span>{cloudSyncFeedback}</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setCloudSyncFeedback(null)}
+            className="text-emerald-700 hover:text-emerald-950 p-1 cursor-pointer shrink-0"
+            title="Tutup"
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
 
       {/* Sub Menu Selector Tabs - 4 Columns */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 bg-slate-100 p-2 rounded-2xl border border-slate-200/80 shadow-inner">

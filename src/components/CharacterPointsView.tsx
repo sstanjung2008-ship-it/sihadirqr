@@ -1,6 +1,16 @@
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { Student, SchoolClass, CharacterTrait, StudentCharacterLog, Teacher, SchoolProfile, CharacterPredicateSettings, UserSession, AttendanceRecord, LearningJournal } from '../types';
-import { isManualCharacterLog, isKbmCharacterLog, deduplicateCharacterLogs, calculateStudentCharacterSummary, calculateBatchStudentCharacterSummaries, getLocalDateString, isRealPhotoProof, getPermanentManualCharacterLogs } from '../lib/storage';
+import { 
+  isManualCharacterLog, 
+  isKbmCharacterLog, 
+  deduplicateCharacterLogs, 
+  calculateStudentCharacterSummary, 
+  calculateBatchStudentCharacterSummaries, 
+  getLocalDateString, 
+  isRealPhotoProof, 
+  getPermanentManualCharacterLogs,
+  refreshCloudData
+} from '../lib/storage';
 import { getWitaDateTime, setAutoAssessmentBatchDone } from '../lib/autoCharacterScheduler';
 import { 
   Plus, 
@@ -78,6 +88,31 @@ export const CharacterPointsView: React.FC<CharacterPointsViewProps> = ({
   const [selectedClassId, setSelectedClassId] = useState<string>('ALL');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [isExporting, setIsExporting] = useState<boolean>(false);
+
+  // Status Sinkronisasi On-Demand ke Cloud Firestore
+  const [isRefreshingCloud, setIsRefreshingCloud] = useState<boolean>(false);
+  const [cloudSyncFeedback, setCloudSyncFeedback] = useState<string | null>(null);
+  const [lastRefreshedAt, setLastRefreshedAt] = useState<string>(() => {
+    return new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }) + ' WITA';
+  });
+
+  const handleManualCloudRefresh = async () => {
+    setIsRefreshingCloud(true);
+    setCloudSyncFeedback(null);
+    try {
+      const res = await refreshCloudData(true);
+      const now = new Date();
+      const timeStr = now.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }) + ' WITA';
+      setLastRefreshedAt(timeStr);
+      setCloudSyncFeedback(`Data Nilai Karakter & Presensi Berhasil Disinkronkan (${timeStr}) • Data terbaru tersinkron dengan Cloud.`);
+      setTimeout(() => setCloudSyncFeedback(null), 6000);
+    } catch {
+      setCloudSyncFeedback('Gagal menyinkronkan data karakter dengan Cloud. Periksa koneksi internet.');
+      setTimeout(() => setCloudSyncFeedback(null), 5000);
+    } finally {
+      setIsRefreshingCloud(false);
+    }
+  };
 
   // Auto detect initial evaluator name from logged in user session
   const initialEvaluatorName = useMemo(() => {
@@ -722,8 +757,15 @@ export const CharacterPointsView: React.FC<CharacterPointsViewProps> = ({
       {/* Top Banner Header */}
       <div className="bg-gradient-to-r from-indigo-900 via-indigo-800 to-slate-900 rounded-3xl p-6 text-white shadow-xl flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
-          <div className="inline-flex items-center gap-2 bg-amber-400/20 text-amber-300 px-3 py-1 rounded-full text-xs font-bold border border-amber-400/30 mb-2">
-            <Award className="w-4 h-4 text-amber-400" /> Laporan Penilaian Karakter
+          <div className="flex items-center gap-2 flex-wrap mb-2">
+            <div className="inline-flex items-center gap-2 bg-amber-400/20 text-amber-300 px-3 py-1 rounded-full text-xs font-bold border border-amber-400/30">
+              <Award className="w-4 h-4 text-amber-400" /> Laporan Penilaian Karakter
+            </div>
+            <div className="inline-flex items-center gap-1.5 bg-sky-400/20 text-sky-200 border border-sky-400/30 px-2.5 py-0.5 rounded-full text-[11px] font-bold">
+              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+              <span>Cloud Tersinkron</span>
+              <span className="text-sky-300 font-mono text-[10px]">• {lastRefreshedAt}</span>
+            </div>
           </div>
           <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight">
             Nilai Karakter Siswa
@@ -735,6 +777,20 @@ export const CharacterPointsView: React.FC<CharacterPointsViewProps> = ({
 
         <div className="flex flex-wrap items-center gap-2.5 shrink-0">
           <button
+            type="button"
+            onClick={handleManualCloudRefresh}
+            disabled={isRefreshingCloud}
+            className="inline-flex items-center justify-center gap-2 px-3.5 py-2.5 bg-white/10 hover:bg-white/20 border border-white/20 text-white font-extrabold rounded-2xl shadow-sm transition-all transform active:scale-95 cursor-pointer shrink-0 text-xs disabled:opacity-60 backdrop-blur-xs"
+            title="Segarkan data nilai karakter & presensi siswa terbaru dari Cloud Firestore"
+          >
+            <RefreshCw className={`w-4 h-4 text-sky-300 ${isRefreshingCloud ? 'animate-spin' : ''}`} />
+            <span>{isRefreshingCloud ? 'Menyinkronkan...' : 'Segarkan Cloud'}</span>
+            <span className="text-[10px] font-mono text-indigo-200 hidden sm:inline">
+              ({lastRefreshedAt})
+            </span>
+          </button>
+
+          <button
             onClick={handleDownloadPdf}
             disabled={isExporting}
             className="inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-emerald-500 hover:bg-emerald-400 disabled:bg-slate-500 text-white font-extrabold rounded-2xl shadow-lg transition-all transform active:scale-95 cursor-pointer shrink-0 text-xs"
@@ -744,6 +800,24 @@ export const CharacterPointsView: React.FC<CharacterPointsViewProps> = ({
           </button>
         </div>
       </div>
+
+      {/* Cloud Sync Feedback Banner */}
+      {cloudSyncFeedback && (
+        <div className="bg-emerald-50 border border-emerald-300 text-emerald-900 px-4 py-3 rounded-2xl text-xs font-bold flex items-center justify-between gap-3 shadow-2xs animate-in fade-in">
+          <div className="flex items-center gap-2">
+            <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+            <span>{cloudSyncFeedback}</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setCloudSyncFeedback(null)}
+            className="text-emerald-700 hover:text-emerald-950 p-1 cursor-pointer shrink-0"
+            title="Tutup"
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
 
       {/* Filters and Search Bar */}
       <div className="bg-white rounded-2xl p-4 border border-slate-200 shadow-xs space-y-3">

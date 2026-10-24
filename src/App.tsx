@@ -70,7 +70,7 @@ import {
   checkParentLoginAccess,
   KEYS
 } from './lib/storage';
-import { ShieldCheck, CheckCircle2, WifiOff, RefreshCw, Wifi } from 'lucide-react';
+import { ShieldCheck, CheckCircle2, WifiOff, RefreshCw, Wifi, X, Cloud } from 'lucide-react';
 
 import { Sidebar } from './components/Sidebar';
 import { AttendanceDashboard } from './components/AttendanceDashboard';
@@ -384,6 +384,10 @@ export default function App() {
     message: string;
   } | null>(null);
 
+  // Status Sinkronisasi Awal Aplikasi (Startup / Refresh)
+  const [initialSyncState, setInitialSyncState] = useState<'syncing' | 'completed' | 'offline' | 'hidden'>('syncing');
+  const [initialSyncTime, setInitialSyncTime] = useState<string>('');
+
   // Sinkronisasi status state seketika dari storage lokal & cloud tanpa penundaan (zero delay)
   const refreshDataFromStorage = useCallback(() => {
     const rawProfile = getSchoolProfile();
@@ -424,11 +428,23 @@ export default function App() {
     }
 
     // 2. Pembacaan Cloud Firestore Seketika: Read 1 kali round-trip cepat saat membuka awal dan refresh halaman
+    setInitialSyncState('syncing');
     initFirestoreAppSession(currentRole).then(() => {
       // Langsung mutasikan seluruh data cloud ke antarmuka aplikasi begitu data selesai diunduh
       refreshDataFromStorage();
+      const now = new Date();
+      const timeStr = now.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }) + ' WITA';
+      setInitialSyncTime(timeStr);
+      setInitialSyncState('completed');
+      setTimeout(() => {
+        setInitialSyncState(prev => (prev === 'completed' ? 'hidden' : prev));
+      }, 4000);
     }).catch(() => {
       refreshDataFromStorage();
+      setInitialSyncState('offline');
+      setTimeout(() => {
+        setInitialSyncState(prev => (prev === 'offline' ? 'hidden' : prev));
+      }, 4500);
     });
 
     const handleNetworkToast = (e: any) => {
@@ -1784,6 +1800,57 @@ export default function App() {
         
         {/* PWA In-App Install Prompt Banner (Visible on browser and not installed) */}
         <PWAInstallBanner />
+
+        {/* Startup / Refresh Cloud Sync Floating Status Bar */}
+        {initialSyncState === 'syncing' && (
+          <div className="bg-sky-50 border-b border-sky-200/90 text-sky-950 px-4 py-2 text-xs font-semibold flex items-center justify-between gap-3 shadow-2xs">
+            <div className="flex items-center gap-2">
+              <RefreshCw className="w-3.5 h-3.5 text-sky-600 animate-spin shrink-0" />
+              <span>Menyinkronkan data dengan Cloud Firestore... Memperbarui presensi, rekap & nilai karakter.</span>
+            </div>
+            <span className="text-[10px] text-sky-700 font-mono font-bold bg-sky-100/90 px-2.5 py-0.5 rounded-full shrink-0">
+              Sinkronisasi Awal
+            </span>
+          </div>
+        )}
+
+        {initialSyncState === 'completed' && (
+          <div className="bg-emerald-50 border-b border-emerald-200/90 text-emerald-950 px-4 py-2 text-xs font-semibold flex items-center justify-between gap-3 shadow-2xs transition-all animate-in fade-in duration-300">
+            <div className="flex items-center gap-2">
+              <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+              <span>
+                <strong>Cloud Database Terhubung ({initialSyncTime})</strong> • Data scan hadir, pulang, rekapitulasi laporan, dan nilai karakter otomatis terupdate.
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setInitialSyncState('hidden')}
+              className="text-emerald-700 hover:text-emerald-950 p-1 cursor-pointer shrink-0"
+              title="Tutup pemberitahuan"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        )}
+
+        {initialSyncState === 'offline' && (
+          <div className="bg-amber-50 border-b border-amber-200/90 text-amber-950 px-4 py-2 text-xs font-semibold flex items-center justify-between gap-3 shadow-2xs">
+            <div className="flex items-center gap-2">
+              <WifiOff className="w-4 h-4 text-amber-600 shrink-0" />
+              <span>
+                <strong>Mode Offline Aktif</strong> • Menampilkan data lokal tersimpan. Perubahan scan akan otomatis disinkronkan saat online kembali.
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setInitialSyncState('hidden')}
+              className="text-amber-700 hover:text-amber-950 p-1 cursor-pointer shrink-0"
+              title="Tutup"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        )}
         
         {/* Parent Student Info Banner (Automatic by Logged-in NISN, No Selection) */}
         {currentRole === 'PARENT' && parentStudent && (

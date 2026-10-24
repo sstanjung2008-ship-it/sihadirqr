@@ -1838,13 +1838,7 @@ export function reconcileTeachersAndClasses(
 
 export function isRealAttendance(rec?: AttendanceRecord | null): boolean {
   if (!rec) return false;
-  // If return scan happened, it's definitely real
-  if (rec.returnTime && rec.returnTime !== '-') return true;
-  // If QR code was scanned, it's definitely real
-  if (rec.method === 'QR_SCAN') return true;
-  // If status is not ALPA, it's a real status (HADIR, TERLAMBAT, SAKIT, IZIN, DISPENSASI, etc.)
-  if (rec.status && rec.status !== 'ALPA') return true;
-  // If it is explicitly marked as auto-alpa, it's NOT a real scan
+  // If explicitly marked as auto-alpa or system auto alpa, it's NOT a real scan
   if (
     rec.id?.startsWith('att-autoalpa-') ||
     rec.scannedBy?.includes('Sistem Otomatis') ||
@@ -1853,8 +1847,20 @@ export function isRealAttendance(rec?: AttendanceRecord | null): boolean {
   ) {
     return false;
   }
-  // Otherwise, only real if non-alpa or time is present
-  return rec.status !== 'ALPA' || (!!rec.time && rec.time !== '-');
+  // BELUM_ABSEN placeholder is not real presence
+  if ((rec.status as string) === 'BELUM_ABSEN') {
+    return false;
+  }
+  // If return scan happened with valid time, it's definitely real
+  if (rec.returnTime && rec.returnTime !== '-' && rec.returnTime.trim() !== '') return true;
+  // If QR code was scanned with valid entry time
+  if (rec.method === 'QR_SCAN' && rec.time && rec.time !== '-' && !rec.time.toLowerCase().includes('belum')) return true;
+  // If real presence status with non-alpa status
+  if (rec.status === 'HADIR' || rec.status === 'TERLAMBAT' || rec.status === 'IZIN' || rec.status === 'SAKIT') {
+    return true;
+  }
+  // Otherwise, only real if entry time is present and valid
+  return !!(rec.time && rec.time !== '-' && rec.time.trim() && !rec.time.toLowerCase().includes('belum'));
 }
 
 export function mergeSingleAttendanceRecord(a: AttendanceRecord, b: AttendanceRecord): AttendanceRecord {
@@ -1869,7 +1875,7 @@ export function mergeSingleAttendanceRecord(a: AttendanceRecord, b: AttendanceRe
     if (aValid && bValid) {
       if (a.method === 'QR_SCAN' && b.method !== 'QR_SCAN') return a.time;
       if (b.method === 'QR_SCAN' && a.method !== 'QR_SCAN') return b.time;
-      return a.time;
+      return a.time <= b.time ? a.time : b.time;
     }
     if (aValid) return a.time;
     if (bValid) return b.time;
@@ -1914,9 +1920,12 @@ export function mergeSingleAttendanceRecord(a: AttendanceRecord, b: AttendanceRe
       returnStatus = b.returnStatus;
       returnScannedBy = b.returnScannedBy;
     } else if (aHasReturn && bHasReturn) {
-      returnTime = (a.returnTime && a.returnTime !== '-') ? a.returnTime : b.returnTime;
-      returnStatus = isCompleted(a.returnStatus) ? a.returnStatus : (b.returnStatus || a.returnStatus);
-      returnScannedBy = (a.returnScannedBy && !a.returnScannedBy.includes('Sistem Otomatis')) ? a.returnScannedBy : b.returnScannedBy;
+      // Keduanya memiliki info kepulangan: prioritaskan returnTime yang valid & terbaru
+      const aTime = (a.returnTime && a.returnTime !== '-') ? a.returnTime.trim() : '';
+      const bTime = (b.returnTime && b.returnTime !== '-') ? b.returnTime.trim() : '';
+      returnTime = (aTime && bTime) ? (aTime >= bTime ? aTime : bTime) : (aTime || bTime || undefined);
+      returnStatus = isCompleted(a.returnStatus) ? a.returnStatus : (isCompleted(b.returnStatus) ? b.returnStatus : (a.returnStatus || b.returnStatus));
+      returnScannedBy = (a.returnScannedBy && !a.returnScannedBy.includes('Sistem Otomatis')) ? a.returnScannedBy : (b.returnScannedBy || a.returnScannedBy);
     } else {
       returnStatus = a.returnStatus || b.returnStatus;
     }
@@ -1941,6 +1950,12 @@ export function mergeSingleAttendanceRecord(a: AttendanceRecord, b: AttendanceRe
   const merged: AttendanceRecord = {
     ...a,
     ...b,
+    id: a.id || b.id || `att-${a.date || b.date}-${a.studentId || b.studentId}`,
+    studentId: a.studentId || b.studentId,
+    studentName: (a.studentName && a.studentName !== 'Siswa') ? a.studentName : (b.studentName || a.studentName || 'Siswa'),
+    nisn: a.nisn || b.nisn || '',
+    className: a.className || b.className || '',
+    date: a.date || b.date,
     time: finalTime,
     status: finalStatus,
     method: finalMethod,
@@ -1973,7 +1988,10 @@ export function mergeAttendanceLists(listA: AttendanceRecord[], listB: Attendanc
   const registerIndices = (idx: number, rec: AttendanceRecord) => {
     if (rec.id) indexById.set(rec.id, idx);
     if (rec.date && rec.studentId) indexByStudentDate.set(`${rec.date}__${rec.studentId}`, idx);
-    if (rec.date && rec.nisn) indexByNisnDate.set(`${rec.date}__${rec.nisn}`, idx);
+    if (rec.date && rec.nisn && rec.nisn !== '-') indexByNisnDate.set(`${rec.date}__${rec.nisn.trim()}`, idx);
+    if (rec.date && rec.studentName && rec.studentName.trim() && rec.studentName !== 'Siswa') {
+      indexByStudentDate.set(`${rec.date}__${rec.studentName.trim().toLowerCase()}`, idx);
+    }
   };
 
   const findIndexForRecord = (rec: AttendanceRecord): number => {
@@ -1983,8 +2001,11 @@ export function mergeAttendanceLists(listA: AttendanceRecord[], listB: Attendanc
     if (rec.date && rec.studentId && indexByStudentDate.has(`${rec.date}__${rec.studentId}`)) {
       return indexByStudentDate.get(`${rec.date}__${rec.studentId}`)!;
     }
-    if (rec.date && rec.nisn && indexByNisnDate.has(`${rec.date}__${rec.nisn}`)) {
-      return indexByNisnDate.get(`${rec.date}__${rec.nisn}`)!;
+    if (rec.date && rec.nisn && rec.nisn !== '-' && indexByNisnDate.has(`${rec.date}__${rec.nisn.trim()}`)) {
+      return indexByNisnDate.get(`${rec.date}__${rec.nisn.trim()}`)!;
+    }
+    if (rec.date && rec.studentName && rec.studentName.trim() && rec.studentName !== 'Siswa' && indexByStudentDate.has(`${rec.date}__${rec.studentName.trim().toLowerCase()}`)) {
+      return indexByStudentDate.get(`${rec.date}__${rec.studentName.trim().toLowerCase()}`)!;
     }
     return -1;
   };
@@ -1997,6 +2018,7 @@ export function mergeAttendanceLists(listA: AttendanceRecord[], listB: Attendanc
     if (idx >= 0) {
       recordsList[idx] = mergeSingleAttendanceRecord(recordsList[idx], item);
       registerIndices(idx, recordsList[idx]);
+      if (item.id) indexById.set(item.id, idx);
     } else {
       const newIdx = recordsList.length;
       recordsList.push({ ...item });
@@ -2012,6 +2034,7 @@ export function mergeAttendanceLists(listA: AttendanceRecord[], listB: Attendanc
     if (idx >= 0) {
       recordsList[idx] = mergeSingleAttendanceRecord(recordsList[idx], item);
       registerIndices(idx, recordsList[idx]);
+      if (item.id) indexById.set(item.id, idx);
     } else {
       const newIdx = recordsList.length;
       recordsList.push({ ...item });
@@ -2019,7 +2042,9 @@ export function mergeAttendanceLists(listA: AttendanceRecord[], listB: Attendanc
     }
   }
 
-  return validateAndSanitizeAttendanceRecords(recordsList);
+  const result = validateAndSanitizeAttendanceRecords(recordsList);
+  inMemoryAttendanceRecords = result;
+  return result;
 }
 
 export function mergeGenericListsById<T extends { id: string }>(local: T[], cloud: T[]): T[] {
@@ -2248,6 +2273,7 @@ export async function smartSyncAndMergeAllWithCloud(isInitialBoot: boolean = fal
       }
     }
 
+    inMemoryAttendanceRecords = finalAtt;
     const attUpdatedAt = Math.max(Number(attCloud?.updatedAt || 0), prevLocalTimestamps[KEYS.ATTENDANCE] || 0, now);
     const attJsonStr = JSON.stringify(finalAtt);
     safeSetLocalStorage(KEYS.ATTENDANCE, attJsonStr);
@@ -2821,12 +2847,17 @@ export async function initialLoadSyncFromCloud(role?: UserRole): Promise<{ succe
  * Fungsi eksplisit untuk tombol "Segarkan Data" / "Sync Cloud" di UI
  * Membaca snapshot Cloud terbaru secara on-demand (1 kali read)
  */
-export async function refreshCloudData(force: boolean = true): Promise<{ success: boolean; message: string }> {
+export async function refreshCloudData(force: boolean = true): Promise<{ success: boolean; message: string; lastSyncTime: string; attendanceCount: number }> {
   const res = await smartSyncAndMergeAllWithCloud(true);
   notifyStorageUpdated(true);
+  const now = new Date();
+  const timeStr = now.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
+  const count = getAttendanceRecords().length;
   return {
     success: res.success,
     message: res.message,
+    lastSyncTime: timeStr,
+    attendanceCount: count,
   };
 }
 

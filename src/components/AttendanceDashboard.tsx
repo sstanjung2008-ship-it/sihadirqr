@@ -53,7 +53,15 @@ import {
 } from 'lucide-react';
 import { BulkAlpaManagementModal } from './BulkAlpaManagementModal';
 import { BulkReturnManagementModal, BulkReturnUpdatePayload } from './BulkReturnManagementModal';
-import { getLocalDateString, refreshParentChildAttendance, calculateStudentCharacterSummary, isRealPhotoProof } from '../lib/storage';
+import { 
+  getLocalDateString, 
+  refreshParentChildAttendance, 
+  calculateStudentCharacterSummary, 
+  isRealPhotoProof,
+  refreshCloudData,
+  mergeSingleAttendanceRecord,
+  getCloudSyncStatus
+} from '../lib/storage';
 import { exportStudentCharacterDetailPdf } from '../lib/exportUtils';
 
 interface AttendanceDashboardProps {
@@ -137,12 +145,40 @@ export const AttendanceDashboard: React.FC<AttendanceDashboardProps> = ({
   const [isRefreshingParent, setIsRefreshingParent] = useState(false);
   const [parentRefreshNotice, setParentRefreshNotice] = useState<string | null>(null);
 
+  // Status Sinkronisasi On-Demand untuk Admin & Guru (Segarkan Data Cloud)
+  const [isRefreshingCloud, setIsRefreshingCloud] = useState(false);
+  const [cloudSyncFeedback, setCloudSyncFeedback] = useState<string | null>(null);
+  const [lastRefreshedAt, setLastRefreshedAt] = useState<string>(() => {
+    return new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
+  });
+
+  const handleManualCloudRefresh = async () => {
+    setIsRefreshingCloud(true);
+    setCloudSyncFeedback(null);
+    try {
+      const res = await refreshCloudData(true);
+      if (res.success) {
+        setLastRefreshedAt(res.lastSyncTime);
+        setCloudSyncFeedback(`Data scan hadir & pulang terbaru berhasil diperbarui (${res.lastSyncTime} WITA)`);
+      } else {
+        setCloudSyncFeedback(res.message || 'Gagal menyinkronkan data dari Cloud');
+      }
+      setTimeout(() => setCloudSyncFeedback(null), 4500);
+    } catch {
+      setCloudSyncFeedback('Gagal menyinkronkan data Cloud.');
+      setTimeout(() => setCloudSyncFeedback(null), 4500);
+    } finally {
+      setIsRefreshingCloud(false);
+    }
+  };
+
   const handleParentRefresh = async () => {
     setIsRefreshingParent(true);
     setParentRefreshNotice(null);
     try {
       const res = await refreshParentChildAttendance(true);
       setParentRefreshNotice(res.message);
+      setLastRefreshedAt(res.lastSyncTime);
       setTimeout(() => setParentRefreshNotice(null), 4000);
     } catch {
       setParentRefreshNotice('Gagal menyinkronkan status presensi.');
@@ -183,9 +219,14 @@ export const AttendanceDashboard: React.FC<AttendanceDashboardProps> = ({
 
   const studentDateStatusMap = new Map<string, AttendanceRecord>();
   dateRecords.forEach(r => {
-    if (r.studentId) studentDateStatusMap.set(r.studentId, r);
-    if (r.nisn && r.nisn !== '-') studentDateStatusMap.set(r.nisn.trim(), r);
-    if (r.studentName && r.studentName.trim() !== '') studentDateStatusMap.set(r.studentName.trim().toLowerCase(), r);
+    const existing = (r.studentId && studentDateStatusMap.get(r.studentId)) ||
+      (r.nisn && r.nisn !== '-' && studentDateStatusMap.get(r.nisn.trim())) ||
+      (r.studentName && studentDateStatusMap.get(r.studentName.trim().toLowerCase()));
+
+    const resolved = existing ? mergeSingleAttendanceRecord(existing, r) : r;
+    if (resolved.studentId) studentDateStatusMap.set(resolved.studentId, resolved);
+    if (resolved.nisn && resolved.nisn !== '-') studentDateStatusMap.set(resolved.nisn.trim(), resolved);
+    if (resolved.studentName && resolved.studentName.trim() !== '') studentDateStatusMap.set(resolved.studentName.trim().toLowerCase(), resolved);
   });
 
   const getRecordForStudent = (std: { id?: string; nisn?: string; name?: string }): AttendanceRecord | undefined => {
@@ -315,7 +356,7 @@ export const AttendanceDashboard: React.FC<AttendanceDashboardProps> = ({
 
   // Child's attendance record for the selected date
   const childRecord = targetStudent 
-    ? attendanceRecords.find(r => (r.studentId === targetStudent.id || r.nisn === targetStudent.nisn) && r.date === selectedDate)
+    ? (getRecordForStudent(targetStudent) || attendanceRecords.find(r => (r.studentId === targetStudent.id || r.nisn === targetStudent.nisn) && r.date === selectedDate))
     : undefined;
 
   // Compute Keaktifan KBM data for target child
@@ -1344,6 +1385,21 @@ export const AttendanceDashboard: React.FC<AttendanceDashboardProps> = ({
                 </select>
               </div>
 
+              {/* Tombol Segarkan Data Cloud On-Demand */}
+              <button
+                type="button"
+                onClick={handleManualCloudRefresh}
+                disabled={isRefreshingCloud}
+                className="bg-white hover:bg-sky-50 text-sky-700 hover:text-sky-900 border border-sky-300 hover:border-sky-400 font-extrabold px-3 py-1.5 rounded-xl text-xs flex items-center gap-1.5 transition-all cursor-pointer shadow-2xs active:scale-95 shrink-0 disabled:opacity-60"
+                title="Segarkan data scan hadir & pulang terbaru dari Cloud Firestore"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 text-sky-600 ${isRefreshingCloud ? 'animate-spin' : ''}`} />
+                <span>{isRefreshingCloud ? 'Menyinkronkan...' : 'Segarkan Cloud'}</span>
+                <span className="text-[10px] font-mono font-medium text-slate-400 hidden sm:inline">
+                  ({lastRefreshedAt})
+                </span>
+              </button>
+
               {/* Clear Filters Button */}
               {hasActiveFilters && (
                 <button
@@ -1399,6 +1455,23 @@ export const AttendanceDashboard: React.FC<AttendanceDashboardProps> = ({
               )}
             </div>
           </div>
+
+          {/* Feedback Banner Segarkan Data Cloud */}
+          {cloudSyncFeedback && (
+            <div className="bg-emerald-50 border border-emerald-300 text-emerald-900 px-4 py-2.5 rounded-2xl text-xs font-bold flex items-center justify-between gap-3 shadow-2xs">
+              <div className="flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                <span>{cloudSyncFeedback}</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setCloudSyncFeedback(null)}
+                className="text-emerald-700 hover:text-emerald-950 p-1 cursor-pointer"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          )}
 
           {/* Banner jika riwayat presensi kosong */}
           {attendanceRecords.length === 0 && (

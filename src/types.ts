@@ -285,6 +285,9 @@ export interface StudentCharacterLog {
   followUpDate?: string; // Waktu/tanggal tindak lanjut
   followUpBy?: string; // Petugas / Penindak Lanjut
   isManual?: boolean; // Penanda log diisi manual oleh guru/admin, permanen & terlindungi dari penghapusan sistem
+  sourceType?: string; // e.g. 'JURNAL_KBM'
+  subjectName?: string;
+  isAutoApplied?: boolean;
 }
 
 export interface StudentGradeItem {

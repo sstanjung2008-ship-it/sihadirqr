@@ -39,6 +39,7 @@ import {
   getStudentCharacterLogs,
   saveStudentCharacterLogs,
   saveStudentCharacterLogsLocally,
+  savePermanentManualCharacterLogs,
   deletePermanentManualCharacterLog,
   markCharacterLogDeleted,
   unmarkCharacterLogDeleted,
@@ -1667,27 +1668,36 @@ export default function App() {
   // Character Points Log Handlers
   const handleAddCharacterLog = (newLog: StudentCharacterLog) => {
     if (newLog?.id) unmarkCharacterLogDeleted(newLog.id);
-    const updated = [newLog, ...characterLogs];
-    setCharacterLogsState(updated);
-    saveStudentCharacterLogs(updated);
+    savePermanentManualCharacterLogs([newLog]);
+    setCharacterLogsState(prevLogs => {
+      const updated = deduplicateCharacterLogs([newLog, ...prevLogs]);
+      saveStudentCharacterLogs(updated, true);
+      return updated;
+    });
   };
 
   const handleAddMultipleCharacterLogs = (newLogs: StudentCharacterLog[]) => {
     if (!newLogs || newLogs.length === 0) return;
+    savePermanentManualCharacterLogs(newLogs.filter(isManualCharacterLog));
     setCharacterLogsState(prevLogs => {
       newLogs.forEach(l => {
         if (l?.id) unmarkCharacterLogDeleted(l.id);
       });
       const merged = deduplicateCharacterLogs([...newLogs, ...prevLogs]);
-      saveStudentCharacterLogs(merged);
+      saveStudentCharacterLogs(merged, true);
       return merged;
     });
   };
 
   const handleUpdateCharacterLog = (updatedLog: StudentCharacterLog) => {
-    const updated = characterLogs.map(l => l.id === updatedLog.id ? updatedLog : l);
-    setCharacterLogsState(updated);
-    saveStudentCharacterLogs(updated);
+    if (isManualCharacterLog(updatedLog)) {
+      savePermanentManualCharacterLogs([updatedLog]);
+    }
+    setCharacterLogsState(prevLogs => {
+      const updated = prevLogs.map(l => l.id === updatedLog.id ? updatedLog : l);
+      saveStudentCharacterLogs(updated, true);
+      return updated;
+    });
   };
 
   const handleDeleteCharacterLog = (logId: string) => {

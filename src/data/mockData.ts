@@ -355,22 +355,42 @@ export function generateInitialAttendanceHistory(students: Student[]): Attendanc
   const now = new Date();
   const todayStr = getWitaDateStr(now);
 
-  // 1. Tanggal 0 selalu HARI INI (todayStr) agar dasbor presensi hari ini aktif seketika dan tidak kosong
-  const dates: string[] = [todayStr];
+  const datesSet = new Set<string>();
+  datesSet.add(todayStr);
 
-  // 2. Tambahkan 14 hari sekolah sebelumnya (mundur ke belakang, lewati hari Minggu)
-  let daysBack = 1;
-  while (dates.length < 15 && daysBack < 45) {
-    const pastDate = new Date(now.getTime() - (daysBack * 86400000));
-    const dayOfWeek = pastDate.getDay();
-    if (dayOfWeek !== 0) { // Lewati hari Minggu
-      const dStr = getWitaDateStr(pastDate);
-      if (!dates.includes(dStr)) {
-        dates.push(dStr);
-      }
+  // 1. Pastikan SELURUH hari sekolah di bulan berjalan (mulai tanggal 1 s/d hari ini) selalu ada
+  const currentYear = now.getFullYear();
+  const currentMonth = now.getMonth();
+  const currentDate = now.getDate();
+
+  for (let day = 1; day <= currentDate; day++) {
+    const d = new Date(currentYear, currentMonth, day);
+    if (d.getDay() !== 0) { // Lewati hari Minggu
+      datesSet.add(getWitaDateStr(d));
     }
-    daysBack++;
   }
+
+  // JAMINAN KHUSUS: Pastikan seluruh tanggal 1 - 7 Oktober 2026 selalu terisi (kecuali Minggu 4 Okt)
+  const octoberGuaranteedDates = [
+    '2026-10-01', // Kamis
+    '2026-10-02', // Jumat
+    '2026-10-03', // Sabtu
+    '2026-10-05', // Senin (Upacara)
+    '2026-10-06', // Selasa
+    '2026-10-07', // Rabu
+  ];
+  octoberGuaranteedDates.forEach(d => datesSet.add(d));
+
+  // 2. Tambahkan hari sekolah sebelumnya (mundur hingga awal semester, minimal 35 hari sekolah ke belakang)
+  for (let daysBack = 1; daysBack <= 45; daysBack++) {
+    const pastDate = new Date(now.getTime() - (daysBack * 86400000));
+    if (pastDate.getDay() !== 0) { // Lewati hari Minggu
+      datesSet.add(getWitaDateStr(pastDate));
+    }
+  }
+
+  // Urutkan tanggal dari terbaru ke terlama
+  const dates = Array.from(datesSet).sort((a, b) => b.localeCompare(a));
 
   dates.forEach((dateStr, dayIdx) => {
     const isToday = dayIdx === 0;

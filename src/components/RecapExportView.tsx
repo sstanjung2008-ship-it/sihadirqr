@@ -32,6 +32,8 @@ import {
   getLocalDateString, 
   calculateStudentCharacterSummary, 
   isKbmCharacterLog,
+  getPermanentManualCharacterLogs,
+  deduplicateCharacterLogs,
   refreshCloudData
 } from '../lib/storage';
 import { 
@@ -386,9 +388,11 @@ export const RecapExportView: React.FC<RecapExportViewProps> = ({
     });
   }, [learningJournals, startDate, endDate, selectedClass, selectedKeaktifanSubject]);
 
-  // Filter character logs by date range
+  // Filter character logs by date range (selalu gabungkan brankas manual permanen agar nilai guru tidak pernah hilang)
   const filteredCharacterLogs = useMemo(() => {
-    return characterLogs.filter(l => {
+    const manuals = getPermanentManualCharacterLogs();
+    const sourceLogs = deduplicateCharacterLogs([...manuals, ...(characterLogs || [])]);
+    return sourceLogs.filter(l => {
       if (l.date) {
         return l.date >= startDate && l.date <= endDate;
       }

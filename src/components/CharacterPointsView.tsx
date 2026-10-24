@@ -9,6 +9,9 @@ import {
   getLocalDateString, 
   isRealPhotoProof, 
   getPermanentManualCharacterLogs,
+  savePermanentManualCharacterLogs,
+  saveStudentCharacterLogs,
+  getStudentCharacterLogs,
   refreshCloudData
 } from '../lib/storage';
 import { getWitaDateTime, setAutoAssessmentBatchDone } from '../lib/autoCharacterScheduler';
@@ -632,6 +635,15 @@ export const CharacterPointsView: React.FC<CharacterPointsViewProps> = ({
       isManual: true
     };
 
+    // 1. Simpan langsung ke brankas manual permanen (anti-hilang)
+    savePermanentManualCharacterLogs([newLog]);
+
+    // 2. Simpan juga ke storage dan sinkronkan ke cloud
+    const currentLogs = getStudentCharacterLogs();
+    const updated = deduplicateCharacterLogs([newLog, ...currentLogs]);
+    saveStudentCharacterLogs(updated, true);
+
+    // 3. Panggil callback props
     onAddLog(newLog);
     setHighlightedLogId(newLog.id);
     setShowAddModal(false);
@@ -902,104 +914,6 @@ export const CharacterPointsView: React.FC<CharacterPointsViewProps> = ({
           <div className="text-xs text-slate-500 font-medium shrink-0 self-end lg:self-center">
             Menampilkan <span className="font-bold text-slate-800">{filteredStudents.length}</span> dari <span className="font-bold text-slate-700">{students.length}</span> siswa
           </div>
-        </div>
-
-        {/* Quick Filter: Pilihan Lengkap Lebih Besar Dari (≥) & Kurang Dari (≤) untuk Nilai 50, 25, 0, -25, -50, -100 */}
-        <div className="pt-2.5 border-t border-slate-100 flex flex-wrap items-center gap-2 text-xs">
-          <div className="flex items-center gap-1.5 shrink-0">
-            <span className="text-[11px] font-extrabold text-slate-500 uppercase tracking-wider mr-1">
-              Filter Nilai:
-            </span>
-            <button
-              type="button"
-              onClick={() => setScoreFilterOp('ALL')}
-              className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                scoreFilterOp === 'ALL'
-                  ? 'bg-slate-800 text-white shadow-2xs ring-2 ring-slate-400'
-                  : 'bg-slate-100 hover:bg-slate-200 text-slate-600'
-              }`}
-            >
-              Semua Nilai
-            </button>
-          </div>
-
-          {/* Group: Lebih Besar Dari (≥) */}
-          <div className="flex items-center gap-1 flex-wrap">
-            <span className="text-[10px] font-black text-emerald-800 bg-emerald-100/80 px-2 py-1 rounded-lg border border-emerald-300 shrink-0">
-              Lebih Besar (≥):
-            </span>
-            {[50, 25, 0, -25, -50, -100].map((val) => {
-              const isSelected = scoreFilterOp === 'GTE' && scoreFilterVal === val;
-              return (
-                <button
-                  key={`gte-${val}`}
-                  type="button"
-                  onClick={() => {
-                    if (isSelected) {
-                      setScoreFilterOp('ALL');
-                    } else {
-                      setScoreFilterOp('GTE');
-                      setScoreFilterVal(val);
-                    }
-                  }}
-                  className={`px-2.5 py-1 rounded-lg text-xs font-black transition-all cursor-pointer border ${
-                    isSelected
-                      ? 'bg-emerald-600 text-white border-emerald-600 shadow-xs ring-2 ring-emerald-300 scale-105'
-                      : 'bg-white hover:bg-emerald-50 text-emerald-800 border-emerald-200 shadow-2xs'
-                  }`}
-                  title={`Filter siswa dengan Nilai Karakter Lebih Besar Dari atau Sama Dengan (≥) ${val}`}
-                >
-                  ≥ {val}
-                </button>
-              );
-            })}
-          </div>
-
-          {/* Group: Kurang Dari (≤) */}
-          <div className="flex items-center gap-1 flex-wrap">
-            <span className="text-[10px] font-black text-rose-800 bg-rose-100/80 px-2 py-1 rounded-lg border border-rose-300 shrink-0">
-              Kurang Dari (≤):
-            </span>
-            {[50, 25, 0, -25, -50, -100].map((val) => {
-              const isSelected = scoreFilterOp === 'LTE' && scoreFilterVal === val;
-              return (
-                <button
-                  key={`lte-${val}`}
-                  type="button"
-                  onClick={() => {
-                    if (isSelected) {
-                      setScoreFilterOp('ALL');
-                    } else {
-                      setScoreFilterOp('LTE');
-                      setScoreFilterVal(val);
-                    }
-                  }}
-                  className={`px-2.5 py-1 rounded-lg text-xs font-black transition-all cursor-pointer border ${
-                    isSelected
-                      ? 'bg-rose-600 text-white border-rose-600 shadow-xs ring-2 ring-rose-300 scale-105'
-                      : 'bg-white hover:bg-rose-50 text-rose-800 border-rose-200 shadow-2xs'
-                  }`}
-                  title={`Filter siswa dengan Nilai Karakter Kurang Dari atau Sama Dengan (≤) ${val}`}
-                >
-                  ≤ {val}
-                </button>
-              );
-            })}
-          </div>
-
-          {scoreFilterOp !== 'ALL' && (
-            <span className="ml-auto inline-flex items-center gap-1.5 text-[11px] font-black text-indigo-800 bg-indigo-50 border border-indigo-200 px-2.5 py-1 rounded-lg shadow-2xs">
-              <span>Aktif: Nilai {scoreFilterOp === 'GTE' ? '≥' : '≤'} {scoreFilterVal}</span>
-              <button
-                type="button"
-                onClick={() => setScoreFilterOp('ALL')}
-                className="hover:text-rose-600 cursor-pointer ml-1 font-black text-slate-400 hover:scale-110 transition-transform"
-                title="Hapus filter nilai"
-              >
-                ✕
-              </button>
-            </span>
-          )}
         </div>
       </div>
 

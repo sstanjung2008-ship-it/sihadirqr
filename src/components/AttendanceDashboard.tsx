@@ -1532,20 +1532,22 @@ export const AttendanceDashboard: React.FC<AttendanceDashboardProps> = ({
                 </select>
               </div>
 
-              {/* Tombol Segarkan Data Cloud On-Demand */}
-              <button
-                type="button"
-                onClick={handleManualCloudRefresh}
-                disabled={isRefreshingCloud}
-                className="bg-white hover:bg-sky-50 text-sky-700 hover:text-sky-900 border border-sky-300 hover:border-sky-400 font-extrabold px-3 py-1.5 rounded-xl text-xs flex items-center gap-1.5 transition-all cursor-pointer shadow-2xs active:scale-95 shrink-0 disabled:opacity-60"
-                title="Segarkan data scan hadir & pulang terbaru dari Cloud Firestore"
-              >
-                <RefreshCw className={`w-3.5 h-3.5 text-sky-600 ${isRefreshingCloud ? 'animate-spin' : ''}`} />
-                <span>{isRefreshingCloud ? 'Menyinkronkan...' : 'Segarkan Cloud'}</span>
-                <span className="text-[10px] font-mono font-medium text-slate-400 hidden sm:inline">
-                  ({lastRefreshedAt})
-                </span>
-              </button>
+              {/* Tombol Segarkan Data Cloud On-Demand (Khusus Role Admin, Sembunyi untuk Role Guru) */}
+              {currentRole === 'ADMIN' && (
+                <button
+                  type="button"
+                  onClick={handleManualCloudRefresh}
+                  disabled={isRefreshingCloud}
+                  className="bg-white hover:bg-sky-50 text-sky-700 hover:text-sky-900 border border-sky-300 hover:border-sky-400 font-extrabold px-3 py-1.5 rounded-xl text-xs flex items-center gap-1.5 transition-all cursor-pointer shadow-2xs active:scale-95 shrink-0 disabled:opacity-60"
+                  title="Segarkan data scan hadir & pulang terbaru dari Cloud Firestore"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 text-sky-600 ${isRefreshingCloud ? 'animate-spin' : ''}`} />
+                  <span>{isRefreshingCloud ? 'Menyinkronkan...' : 'Segarkan Cloud'}</span>
+                  <span className="text-[10px] font-mono font-medium text-slate-400 hidden sm:inline">
+                    ({lastRefreshedAt})
+                  </span>
+                </button>
+              )}
 
               {/* Clear Filters Button */}
               {hasActiveFilters && (

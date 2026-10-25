@@ -816,19 +816,21 @@ export const CharacterPointsView: React.FC<CharacterPointsViewProps> = ({
         </div>
 
         <div className="flex flex-wrap items-center gap-2.5 shrink-0">
-          <button
-            type="button"
-            onClick={handleManualCloudRefresh}
-            disabled={isRefreshingCloud}
-            className="inline-flex items-center justify-center gap-2 px-3.5 py-2.5 bg-white/10 hover:bg-white/20 border border-white/20 text-white font-extrabold rounded-2xl shadow-sm transition-all transform active:scale-95 cursor-pointer shrink-0 text-xs disabled:opacity-60 backdrop-blur-xs"
-            title="Segarkan data nilai karakter & presensi siswa terbaru dari Cloud Firestore"
-          >
-            <RefreshCw className={`w-4 h-4 text-sky-300 ${isRefreshingCloud ? 'animate-spin' : ''}`} />
-            <span>{isRefreshingCloud ? 'Menyinkronkan...' : 'Segarkan Cloud'}</span>
-            <span className="text-[10px] font-mono text-indigo-200 hidden sm:inline">
-              ({lastRefreshedAt})
-            </span>
-          </button>
+          {currentUserRole === 'ADMIN' && (
+            <button
+              type="button"
+              onClick={handleManualCloudRefresh}
+              disabled={isRefreshingCloud}
+              className="inline-flex items-center justify-center gap-2 px-3.5 py-2.5 bg-white/10 hover:bg-white/20 border border-white/20 text-white font-extrabold rounded-2xl shadow-sm transition-all transform active:scale-95 cursor-pointer shrink-0 text-xs disabled:opacity-60 backdrop-blur-xs"
+              title="Segarkan data nilai karakter & presensi siswa terbaru dari Cloud Firestore"
+            >
+              <RefreshCw className={`w-4 h-4 text-sky-300 ${isRefreshingCloud ? 'animate-spin' : ''}`} />
+              <span>{isRefreshingCloud ? 'Menyinkronkan...' : 'Segarkan Cloud'}</span>
+              <span className="text-[10px] font-mono text-indigo-200 hidden sm:inline">
+                ({lastRefreshedAt})
+              </span>
+            </button>
+          )}
 
           <button
             type="button"

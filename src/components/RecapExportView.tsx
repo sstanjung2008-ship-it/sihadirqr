@@ -9,7 +9,8 @@ import {
   StudentCharacterLog, 
   CharacterPredicateSettings,
   StudentGradeAssessment,
-  StudentGradeItem
+  StudentGradeItem,
+  UserRole
 } from '../types';
 import { 
   exportAttendancePdf, 
@@ -82,6 +83,7 @@ interface RecapExportViewProps {
   predicateSettings?: CharacterPredicateSettings;
   gradeAssessments?: StudentGradeAssessment[];
   onRestoreAttendance?: () => void;
+  currentRole?: UserRole;
 }
 
 type RecapMenuType = 'PRESENSI' | 'KEAKTIFAN' | 'KARAKTER' | 'NILAI';
@@ -97,6 +99,7 @@ export const RecapExportView: React.FC<RecapExportViewProps> = ({
   predicateSettings = { minA: 30, minB: 10, minC: 0, minD: -20, minE: -50 },
   gradeAssessments,
   onRestoreAttendance,
+  currentRole,
 }) => {
   const [activeMenu, setActiveMenu] = useState<RecapMenuType>('PRESENSI');
   const [selectedClass, setSelectedClass] = useState<string>('ALL');
@@ -932,21 +935,23 @@ export const RecapExportView: React.FC<RecapExportViewProps> = ({
           </p>
         </div>
 
-        {/* Action Buttons: Segarkan Cloud, Unduh Excel, Unduh PDF */}
+        {/* Action Buttons: Segarkan Cloud (Khusus Admin), Unduh Excel, Unduh PDF */}
         <div className="flex flex-wrap items-center gap-2.5 shrink-0">
-          <button
-            type="button"
-            onClick={handleManualCloudRefresh}
-            disabled={isRefreshingCloud}
-            className="bg-white/10 hover:bg-white/20 border border-white/20 text-white font-extrabold px-3.5 py-3 rounded-2xl shadow-sm flex items-center gap-2 text-xs transition-all transform active:scale-95 cursor-pointer disabled:opacity-60 backdrop-blur-xs"
-            title="Sinkronkan data presensi & nilai terbaru dari Cloud Firestore sebelum mengunduh laporan"
-          >
-            <RefreshCw className={`w-4 h-4 text-sky-300 ${isRefreshingCloud ? 'animate-spin' : ''}`} />
-            <span>{isRefreshingCloud ? 'Menyinkronkan...' : 'Segarkan Cloud'}</span>
-            <span className="text-[10px] font-mono text-indigo-200 hidden sm:inline">
-              ({lastRefreshedAt})
-            </span>
-          </button>
+          {currentRole === 'ADMIN' && (
+            <button
+              type="button"
+              onClick={handleManualCloudRefresh}
+              disabled={isRefreshingCloud}
+              className="bg-white/10 hover:bg-white/20 border border-white/20 text-white font-extrabold px-3.5 py-3 rounded-2xl shadow-sm flex items-center gap-2 text-xs transition-all transform active:scale-95 cursor-pointer disabled:opacity-60 backdrop-blur-xs"
+              title="Sinkronkan data presensi & nilai terbaru dari Cloud Firestore sebelum mengunduh laporan"
+            >
+              <RefreshCw className={`w-4 h-4 text-sky-300 ${isRefreshingCloud ? 'animate-spin' : ''}`} />
+              <span>{isRefreshingCloud ? 'Menyinkronkan...' : 'Segarkan Cloud'}</span>
+              <span className="text-[10px] font-mono text-indigo-200 hidden sm:inline">
+                ({lastRefreshedAt})
+              </span>
+            </button>
+          )}
 
           <button
             onClick={handleExportExcel}

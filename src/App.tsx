@@ -2207,6 +2207,7 @@ export default function App() {
               predicateSettings={predicateSettings}
               gradeAssessments={grades}
               onRestoreAttendance={handleRestoreAttendance}
+              currentRole={currentRole}
             />
           )}
 

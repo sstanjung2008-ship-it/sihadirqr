@@ -17,7 +17,7 @@ import {
   exportMonthlyAttendanceMatrixPdf,
   exportMonthlyAttendanceMatrixExcel
 } from '../lib/exportUtils';
-import { getLocalDateString, calculateStudentCharacterSummary, isDemoClass } from '../lib/storage';
+import { getLocalDateString, calculateStudentCharacterSummary, calculateBatchStudentCharacterSummaries, isDemoClass } from '../lib/storage';
 
 const INDONESIAN_MONTH_OPTIONS = [
   { value: 1, name: 'Januari' },
@@ -482,38 +482,134 @@ export const ClassManagementView: React.FC<ClassManagementViewProps> = ({
     });
   }, [classCharacterRecapPerStudent, characterSearchQuery, characterPredicateFilter]);
 
-  // Helper function to get summary character score for ANY class card in the main list
-  const getClassCharacterSummary = (classId: string, className: string) => {
-    const classStd = students.filter(s => s.classId === classId || s.className === className);
-    if (classStd.length === 0) return { avgScore: 0, countA: 0, countB: 0, countC: 0, countD: 0, countE: 0, countF: 0, totalLogs: 0 };
-
-    const classStdIds = new Set(classStd.map(s => s.id));
-    const classStdNisns = new Set(classStd.map(s => s.nisn).filter(Boolean));
-    const classStdNames = new Set(classStd.map(s => s.name.trim().toLowerCase()));
-    const logs = characterLogs.filter(l => 
-      classStdIds.has(l.studentId) || 
-      (l.nisn && classStdNisns.has(l.nisn)) || 
-      (l.studentName && classStdNames.has(l.studentName.trim().toLowerCase()))
-    );
-
-    let sumNet = 0;
-    let countA = 0, countB = 0, countC = 0, countD = 0, countE = 0, countF = 0;
-
-    classStd.forEach(std => {
-      const summary = calculateStudentCharacterSummary(std, characterLogs);
-      sumNet += summary.netScore;
-
-      const pred = getCharacterPredicate(summary.netScore);
-      if (pred.code === 'A') countA++;
-      else if (pred.code === 'B') countB++;
-      else if (pred.code === 'C') countC++;
-      else if (pred.code === 'D') countD++;
-      else if (pred.code === 'E') countE++;
-      else if (pred.code === 'F') countF++;
+  // Pre-compute fast index maps for all classes in a single pass O(N) instead of O(Classes * Students * Logs)
+  const classMetricsMap = useMemo(() => {
+    // 1. Group students by class
+    const studentsByClassId = new Map<string, Student[]>();
+    const studentsByClassName = new Map<string, Student[]>();
+    students.forEach(s => {
+      if (s.classId) {
+        const list = studentsByClassId.get(s.classId) || [];
+        list.push(s);
+        studentsByClassId.set(s.classId, list);
+      }
+      if (s.className) {
+        const list = studentsByClassName.get(s.className) || [];
+        list.push(s);
+        studentsByClassName.set(s.className, list);
+      }
     });
 
-    const avgScore = Math.round((sumNet / classStd.length) * 10) / 10;
-    return { avgScore, countA, countB, countC, countD, countE, countF, totalLogs: logs.length };
+    // 2. Count journals by class
+    const journalsCountByClassId = new Map<string, number>();
+    const journalsCountByClassName = new Map<string, number>();
+    journals.forEach(j => {
+      if (j.classId) {
+        journalsCountByClassId.set(j.classId, (journalsCountByClassId.get(j.classId) || 0) + 1);
+      }
+      if (j.className) {
+        journalsCountByClassName.set(j.className, (journalsCountByClassName.get(j.className) || 0) + 1);
+      }
+    });
+
+    // 3. Batch character summaries for all students once!
+    const batchStudentCharSummaries = calculateBatchStudentCharacterSummaries(students, characterLogs, attendanceRecords);
+
+    // 4. Index attendance records by studentId and nisn
+    const attRecordsByStudentKey = new Map<string, AttendanceRecord[]>();
+    attendanceRecords.forEach(r => {
+      if (r.studentId) {
+        const list = attRecordsByStudentKey.get(r.studentId) || [];
+        list.push(r);
+        attRecordsByStudentKey.set(r.studentId, list);
+      }
+      if (r.nisn && r.nisn !== '-') {
+        const list = attRecordsByStudentKey.get(r.nisn) || [];
+        list.push(r);
+        attRecordsByStudentKey.set(r.nisn, list);
+      }
+    });
+
+    // 5. Build summary metrics for each class
+    const metrics = new Map<string, {
+      classStudentsCount: number;
+      classJournalsCount: number;
+      charSummary: { avgScore: number; countA: number; countB: number; countC: number; countD: number; countE: number; countF: number; totalLogs: number };
+      attSummary: { hadir: number; terlambat: number; izin: number; sakit: number; alpa: number; todayPresent: number; totalStudents: number; pct: number };
+    }>();
+
+    classes.forEach(c => {
+      const classStd = studentsByClassId.get(c.id) || studentsByClassName.get(c.name) || [];
+      const classStudentsCount = classStd.length;
+      const classJournalsCount = journalsCountByClassId.get(c.id) || journalsCountByClassName.get(c.name) || 0;
+
+      // Character summary
+      let sumNet = 0;
+      let countA = 0, countB = 0, countC = 0, countD = 0, countE = 0, countF = 0;
+      let classTotalLogs = 0;
+
+      classStd.forEach(std => {
+        const summary = batchStudentCharSummaries.get(std.id) || { netScore: 0, totalEntries: 0 };
+        sumNet += summary.netScore;
+        classTotalLogs += summary.totalEntries;
+
+        const pred = getCharacterPredicate(summary.netScore);
+        if (pred.code === 'A') countA++;
+        else if (pred.code === 'B') countB++;
+        else if (pred.code === 'C') countC++;
+        else if (pred.code === 'D') countD++;
+        else if (pred.code === 'E') countE++;
+        else if (pred.code === 'F') countF++;
+      });
+
+      const avgScore = classStudentsCount > 0 ? Math.round((sumNet / classStudentsCount) * 10) / 10 : 0;
+      const charSummary = { avgScore, countA, countB, countC, countD, countE, countF, totalLogs: classTotalLogs };
+
+      // Attendance summary
+      let hadir = 0, terlambat = 0, izin = 0, sakit = 0, alpa = 0, totalRec = 0;
+      const seenRecordIds = new Set<string>();
+
+      classStd.forEach(std => {
+        const recs = attRecordsByStudentKey.get(std.id) || (std.nisn ? attRecordsByStudentKey.get(std.nisn) : undefined) || [];
+        recs.forEach(r => {
+          if (!seenRecordIds.has(r.id)) {
+            seenRecordIds.add(r.id);
+            totalRec++;
+            if (r.status === 'HADIR') hadir++;
+            else if (r.status === 'TERLAMBAT') terlambat++;
+            else if (r.status === 'IZIN') izin++;
+            else if (r.status === 'SAKIT') sakit++;
+            else if (r.status === 'ALPA') alpa++;
+          }
+        });
+      });
+
+      const pct = totalRec > 0 ? Math.round(((hadir + terlambat) / totalRec) * 100) : 0;
+      const attSummary = {
+        hadir,
+        terlambat,
+        izin,
+        sakit,
+        alpa,
+        todayPresent: hadir + terlambat,
+        totalStudents: classStudentsCount,
+        pct
+      };
+
+      metrics.set(c.id, {
+        classStudentsCount,
+        classJournalsCount,
+        charSummary,
+        attSummary
+      });
+    });
+
+    return metrics;
+  }, [classes, students, journals, characterLogs, attendanceRecords, predicateSettings]);
+
+  // Helper function to get summary character score for ANY class card in the main list (O(1) lookup)
+  const getClassCharacterSummary = (classId: string, className: string) => {
+    return classMetricsMap.get(classId)?.charSummary || { avgScore: 0, countA: 0, countB: 0, countC: 0, countD: 0, countE: 0, countF: 0, totalLogs: 0 };
   };
 
   const handleDownloadClassPdf = async () => {
@@ -843,32 +939,9 @@ export const ClassManagementView: React.FC<ClassManagementViewProps> = ({
     }
   };
 
-  // Helper function to get summary attendance score for ANY class card in the main list
+  // Helper function to get summary attendance score for ANY class card in the main list (O(1) lookup)
   const getClassAttendanceSummary = (classId: string, className: string) => {
-    const classStd = students.filter(s => s.classId === classId || s.className === className);
-    if (classStd.length === 0) return { hadir: 0, terlambat: 0, izin: 0, sakit: 0, alpa: 0, todayPresent: 0, totalStudents: 0, pct: 0 };
-    
-    const stdIds = new Set(classStd.map(s => s.id));
-    const classRecords = attendanceRecords.filter(r => stdIds.has(r.studentId));
-    
-    const hadir = classRecords.filter(r => r.status === 'HADIR').length;
-    const terlambat = classRecords.filter(r => r.status === 'TERLAMBAT').length;
-    const izin = classRecords.filter(r => r.status === 'IZIN').length;
-    const sakit = classRecords.filter(r => r.status === 'SAKIT').length;
-    const alpa = classRecords.filter(r => r.status === 'ALPA').length;
-    const totalRec = classRecords.length;
-    const pct = totalRec > 0 ? Math.round(((hadir + terlambat) / totalRec) * 100) : 0;
-
-    return {
-      hadir,
-      terlambat,
-      izin,
-      sakit,
-      alpa,
-      todayPresent: hadir + terlambat,
-      totalStudents: classStd.length,
-      pct
-    };
+    return classMetricsMap.get(classId)?.attSummary || { hadir: 0, terlambat: 0, izin: 0, sakit: 0, alpa: 0, todayPresent: 0, totalStudents: 0, pct: 0 };
   };
 
   // If a class is selected for Rekap, display full recap view
@@ -2151,10 +2224,11 @@ export const ClassManagementView: React.FC<ClassManagementViewProps> = ({
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         {sortedClasses.map((c) => {
-          const classStudentsCount = students.filter(s => s.classId === c.id || s.className === c.name).length;
-          const classJournalsCount = journals.filter(j => j.classId === c.id || j.className === c.name).length;
-          const charSummary = getClassCharacterSummary(c.id, c.name);
-          const attSummary = getClassAttendanceSummary(c.id, c.name);
+          const metrics = classMetricsMap.get(c.id);
+          const classStudentsCount = metrics?.classStudentsCount ?? 0;
+          const classJournalsCount = metrics?.classJournalsCount ?? 0;
+          const charSummary = metrics?.charSummary ?? { avgScore: 0, countA: 0, countB: 0, countC: 0, countD: 0, countE: 0, countF: 0, totalLogs: 0 };
+          const attSummary = metrics?.attSummary ?? { hadir: 0, terlambat: 0, izin: 0, sakit: 0, alpa: 0, todayPresent: 0, totalStudents: 0, pct: 0 };
 
           return (
             <div

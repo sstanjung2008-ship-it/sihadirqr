@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect, useCallback } from 'react';
+import React, { useState, useMemo, useEffect, useCallback, useDeferredValue } from 'react';
 import { Student, SchoolClass, CharacterTrait, StudentCharacterLog, Teacher, SchoolProfile, CharacterPredicateSettings, UserSession, AttendanceRecord, LearningJournal } from '../types';
 import { 
   isManualCharacterLog, 
@@ -315,9 +315,13 @@ export const CharacterPointsView: React.FC<CharacterPointsViewProps> = ({
   const [followUpPhotoPreview, setFollowUpPhotoPreview] = useState<string | null>(null);
   const [followUpBy, setFollowUpBy] = useState<string>('');
 
-  const sortedClasses = [...classes].sort((a, b) =>
-    (a.name || '').localeCompare(b.name || '', 'id', { numeric: true, sensitivity: 'base' })
-  );
+  const deferredSearchQuery = useDeferredValue(searchQuery);
+
+  const sortedClasses = useMemo(() => {
+    return [...classes].sort((a, b) =>
+      (a.name || '').localeCompare(b.name || '', 'id', { numeric: true, sensitivity: 'base' })
+    );
+  }, [classes]);
 
   // Filter Nilai Karakter Siswa (Lebih besar dari / Kurang dari)
   const [scoreFilterOp, setScoreFilterOp] = useState<'ALL' | 'GTE' | 'LTE'>('ALL');
@@ -337,12 +341,14 @@ export const CharacterPointsView: React.FC<CharacterPointsViewProps> = ({
 
   // Filter students based on Class, Search, and Score Filter (sorted Ascending by student name)
   const filteredStudents = useMemo(() => {
+    const q = deferredSearchQuery.toLowerCase().trim();
     return students
       .filter(student => {
         const matchesClass = selectedClassId === 'ALL' || student.classId === selectedClassId;
-        const matchesSearch = (student.name || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
-          String(student.nisn || '').includes(searchQuery) ||
-          (student.className || '').toLowerCase().includes(searchQuery.toLowerCase());
+        const matchesSearch = !q ||
+          (student.name || '').toLowerCase().includes(q) ||
+          String(student.nisn || '').includes(q) ||
+          (student.className || '').toLowerCase().includes(q);
         if (!matchesClass || !matchesSearch) return false;
 
         if (scoreFilterOp !== 'ALL') {
@@ -354,7 +360,7 @@ export const CharacterPointsView: React.FC<CharacterPointsViewProps> = ({
         return true;
       })
       .sort((a, b) => (a.name || '').localeCompare(b.name || '', 'id', { numeric: true, sensitivity: 'base' }));
-  }, [students, selectedClassId, searchQuery, scoreFilterOp, scoreFilterVal, studentScoresMap]);
+  }, [students, selectedClassId, deferredSearchQuery, scoreFilterOp, scoreFilterVal, studentScoresMap]);
 
   // Pagination State for fast, lag-free DOM rendering
   const [currentPage, setCurrentPage] = useState<number>(1);

@@ -76,22 +76,51 @@ const setCloudSyncStatus = (status: CloudSyncStatus) => {
 };
 
 let notifyStorageUpdatedTimer: any = null;
+let isDispatchingStorageUpdated = false;
+let pendingStorageUpdatedAfterDispatch = false;
+
 export const notifyStorageUpdated = (immediate: boolean = false) => {
+  if (typeof window === 'undefined') return;
+
+  // Anti-loop shield: If an event listener or subscriber triggers notifyStorageUpdated
+  // during the dispatch of sihadir_storage_updated, defer it to avoid a stack overflow loop.
+  if (isDispatchingStorageUpdated) {
+    pendingStorageUpdatedAfterDispatch = true;
+    return;
+  }
+
   if (immediate) {
     if (notifyStorageUpdatedTimer) {
       clearTimeout(notifyStorageUpdatedTimer);
       notifyStorageUpdatedTimer = null;
     }
-    if (typeof window !== 'undefined') {
+    try {
+      isDispatchingStorageUpdated = true;
       window.dispatchEvent(new Event('sihadir_storage_updated'));
+    } finally {
+      isDispatchingStorageUpdated = false;
+      if (pendingStorageUpdatedAfterDispatch) {
+        pendingStorageUpdatedAfterDispatch = false;
+        notifyStorageUpdated(false);
+      }
     }
     return;
   }
+
   if (notifyStorageUpdatedTimer) return;
   notifyStorageUpdatedTimer = setTimeout(() => {
     notifyStorageUpdatedTimer = null;
     if (typeof window !== 'undefined') {
-      window.dispatchEvent(new Event('sihadir_storage_updated'));
+      try {
+        isDispatchingStorageUpdated = true;
+        window.dispatchEvent(new Event('sihadir_storage_updated'));
+      } finally {
+        isDispatchingStorageUpdated = false;
+        if (pendingStorageUpdatedAfterDispatch) {
+          pendingStorageUpdatedAfterDispatch = false;
+          notifyStorageUpdated(false);
+        }
+      }
     }
   }, 10);
 };
@@ -662,8 +691,10 @@ export async function writeCloudDocument(key: string, dataStr: string, timestamp
   inFlightKeys.add(key);
   try {
     let currentPayload: { dataStr: string; timestamp: number } | undefined = { dataStr: sanitizedDataStr, timestamp };
+    let writeLoopCount = 0;
 
-    while (currentPayload) {
+    while (currentPayload && writeLoopCount < 10) {
+      writeLoopCount++;
       if (isFirestoreQuotaExceeded()) break;
 
       const releaseSlot = await acquireFirestoreWriteSlot();
@@ -2978,6 +3009,8 @@ export async function refreshCloudData(force: boolean = true): Promise<{ success
   };
 }
 
+let isNetworkListenersRegistered = false;
+
 /**
  * Inisialisasi Sesi Aplikasi & Arsitektur Hemat Kuota Harian Firebase:
  * 
@@ -3017,8 +3050,9 @@ export function initFirestoreAppSession(role?: UserRole): Promise<{ success: boo
     }, 4000);
   } catch {}
 
-  // Daftarkan listener koneksi Online & Offline hemat kuota
-  if (typeof window !== 'undefined') {
+  // Daftarkan listener koneksi Online & Offline hemat kuota (hanya 1 kali per lifecycle tab)
+  if (typeof window !== 'undefined' && !isNetworkListenersRegistered) {
+    isNetworkListenersRegistered = true;
     window.addEventListener('online', () => {
       console.log('[Network] Koneksi online terdeteksi.');
       setCloudSyncStatus('connected');

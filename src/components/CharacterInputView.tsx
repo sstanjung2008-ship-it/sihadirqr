@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { 
   CharacterTrait, 
   CharacterType, 
@@ -182,15 +182,25 @@ export const CharacterInputView: React.FC<CharacterInputViewProps> = ({
   };
 
   // Filter traits
-  const filteredTraits = traits.filter(trait => {
-    const matchesSearch = trait.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      (trait.category && trait.category.toLowerCase().includes(searchQuery.toLowerCase()));
-    const matchesType = filterType === 'ALL' || trait.type === filterType;
-    return matchesSearch && matchesType;
-  });
+  const filteredTraits = useMemo(() => {
+    const q = searchQuery.toLowerCase().trim();
+    return traits.filter(trait => {
+      const matchesSearch = !q || (trait.name || '').toLowerCase().includes(q) ||
+        (trait.category && trait.category.toLowerCase().includes(q));
+      const matchesType = filterType === 'ALL' || trait.type === filterType;
+      return matchesSearch && matchesType;
+    });
+  }, [traits, searchQuery, filterType]);
 
-  const positiveCount = traits.filter(t => t.type === 'POSITIF').length;
-  const negativeCount = traits.filter(t => t.type === 'NEGATIF').length;
+  const { positiveCount, negativeCount } = useMemo(() => {
+    let pos = 0;
+    let neg = 0;
+    traits.forEach(t => {
+      if (t.type === 'POSITIF') pos++;
+      else if (t.type === 'NEGATIF') neg++;
+    });
+    return { positiveCount: pos, negativeCount: neg };
+  }, [traits]);
 
   return (
     <div className="p-4 sm:p-6 max-w-7xl mx-auto space-y-6">

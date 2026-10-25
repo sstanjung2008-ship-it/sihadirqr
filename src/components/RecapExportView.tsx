@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useCallback, useDeferredValue } from 'react';
 import { 
   AttendanceRecord, 
   Student, 
@@ -43,30 +43,32 @@ import {
   Filter, 
   Calendar, 
   CheckCircle2, 
-  Users,
-  Search,
-  BookOpen,
-  Award,
-  UserCheck,
-  Sparkles,
-  Layers,
-  GraduationCap,
-  Calculator,
-  Eye,
-  X,
-  BookOpenCheck,
-  CheckCircle,
-  AlertCircle,
-  TrendingUp,
-  User,
-  Clock,
-  XCircle,
-  RotateCcw,
-  RefreshCw,
-  Cloud,
-  Flame,
-  UserX,
-  VolumeX
+  Users, 
+  Search, 
+  BookOpen, 
+  Award, 
+  UserCheck, 
+  Sparkles, 
+  Layers, 
+  GraduationCap, 
+  Calculator, 
+  Eye, 
+  X, 
+  BookOpenCheck, 
+  CheckCircle, 
+  AlertCircle, 
+  TrendingUp, 
+  User, 
+  Clock, 
+  XCircle, 
+  RotateCcw, 
+  RefreshCw, 
+  Cloud, 
+  Flame, 
+  UserX, 
+  VolumeX,
+  ChevronLeft,
+  ChevronRight
 } from 'lucide-react';
 
 interface RecapExportViewProps {
@@ -257,20 +259,22 @@ export const RecapExportView: React.FC<RecapExportViewProps> = ({
     return days;
   }, [filterPeriod, selectedYear, selectedMonth, schoolProfile?.activeDays, schoolProfile?.holidays]);
 
+  const deferredSearchQuery = useDeferredValue(searchQuery);
+
   // Filter students by class and search query (sorted Ascending by student name)
   const filteredStudents = useMemo(() => {
+    const q = deferredSearchQuery.toLowerCase().trim();
     return students
       .filter(s => {
         const matchesClass = selectedClass === 'ALL' || s.className === selectedClass;
-        const q = searchQuery.toLowerCase().trim();
         const matchesSearch = !q || 
-          s.name.toLowerCase().includes(q) || 
+          (s.name || '').toLowerCase().includes(q) || 
           (s.nis && s.nis.toLowerCase().includes(q)) || 
           (s.nisn && s.nisn.toLowerCase().includes(q));
         return matchesClass && matchesSearch;
       })
-      .sort((a, b) => a.name.localeCompare(b.name, 'id', { numeric: true, sensitivity: 'base' }));
-  }, [students, selectedClass, searchQuery]);
+      .sort((a, b) => (a.name || '').localeCompare(b.name || '', 'id', { numeric: true, sensitivity: 'base' }));
+  }, [students, selectedClass, deferredSearchQuery]);
 
   // Filter attendance records by date range
   const filteredRecords = useMemo(() => {
@@ -279,7 +283,68 @@ export const RecapExportView: React.FC<RecapExportViewProps> = ({
     });
   }, [attendanceRecords, startDate, endDate]);
 
-  // Overall monthly statistics
+  // Pre-index filtered attendance records into fast Hash Maps (O(1) lookups)
+  const studentRecordsMap = useMemo(() => {
+    const byStudentId = new Map<string, AttendanceRecord[]>();
+    const byNisn = new Map<string, AttendanceRecord[]>();
+    const byName = new Map<string, AttendanceRecord[]>();
+    const byStudentDateKey = new Map<string, AttendanceRecord>();
+
+    filteredRecords.forEach(r => {
+      if (r.studentId) {
+        const list = byStudentId.get(r.studentId) || [];
+        list.push(r);
+        byStudentId.set(r.studentId, list);
+        if (r.date) byStudentDateKey.set(`${r.studentId}_${r.date}`, r);
+      }
+      if (r.nisn && r.nisn !== '-') {
+        const cleanNisn = r.nisn.trim();
+        const list = byNisn.get(cleanNisn) || [];
+        list.push(r);
+        byNisn.set(cleanNisn, list);
+        if (r.date) byStudentDateKey.set(`${cleanNisn}_${r.date}`, r);
+      }
+      if (r.studentName && r.studentName.trim() !== '') {
+        const cleanName = r.studentName.trim().toLowerCase();
+        const list = byName.get(cleanName) || [];
+        list.push(r);
+        byName.set(cleanName, list);
+        if (r.date) byStudentDateKey.set(`${cleanName}_${r.date}`, r);
+      }
+    });
+
+    return { byStudentId, byNisn, byName, byStudentDateKey };
+  }, [filteredRecords]);
+
+  const getRecordsForStudent = useCallback((std: { id?: string; nisn?: string; name?: string }): AttendanceRecord[] => {
+    if (!std) return [];
+    if (std.id && studentRecordsMap.byStudentId.has(std.id)) {
+      return studentRecordsMap.byStudentId.get(std.id)!;
+    }
+    if (std.nisn && std.nisn !== '-' && studentRecordsMap.byNisn.has(std.nisn.trim())) {
+      return studentRecordsMap.byNisn.get(std.nisn.trim())!;
+    }
+    if (std.name && studentRecordsMap.byName.has(std.name.trim().toLowerCase())) {
+      return studentRecordsMap.byName.get(std.name.trim().toLowerCase())!;
+    }
+    return [];
+  }, [studentRecordsMap]);
+
+  const getRecordForStudentDate = useCallback((std: { id?: string; nisn?: string; name?: string }, dateStr: string): AttendanceRecord | undefined => {
+    if (!std || !dateStr) return undefined;
+    if (std.id && studentRecordsMap.byStudentDateKey.has(`${std.id}_${dateStr}`)) {
+      return studentRecordsMap.byStudentDateKey.get(`${std.id}_${dateStr}`);
+    }
+    if (std.nisn && std.nisn !== '-' && studentRecordsMap.byStudentDateKey.has(`${std.nisn.trim()}_${dateStr}`)) {
+      return studentRecordsMap.byStudentDateKey.get(`${std.nisn.trim()}_${dateStr}`);
+    }
+    if (std.name && studentRecordsMap.byStudentDateKey.has(`${std.name.trim().toLowerCase()}_${dateStr}`)) {
+      return studentRecordsMap.byStudentDateKey.get(`${std.name.trim().toLowerCase()}_${dateStr}`);
+    }
+    return undefined;
+  }, [studentRecordsMap]);
+
+  // Overall monthly statistics (runs in a single pass O(Students) using indexed lookups)
   const monthlyOverallSummary = useMemo(() => {
     let totalHadir = 0;
     let totalTerlambat = 0;
@@ -289,17 +354,18 @@ export const RecapExportView: React.FC<RecapExportViewProps> = ({
     let totalAlpa = 0;
 
     filteredStudents.forEach(std => {
-      const stdRecords = filteredRecords.filter(r => 
-        r.studentId === std.id || 
-        (std.nisn && std.nisn !== '-' && r.nisn === std.nisn) ||
-        (std.name && r.studentName && r.studentName.trim().toLowerCase() === std.name.trim().toLowerCase())
-      );
-      totalHadir += stdRecords.filter(r => r.status === 'HADIR').length;
-      totalTerlambat += stdRecords.filter(r => r.status === 'TERLAMBAT').length;
-      totalPulang += stdRecords.filter(r => r.returnTime || r.returnStatus === 'PULANG' || r.returnStatus === 'PULANG_TEPAT' || r.returnStatus === 'PULANG_CEPAT').length;
-      totalIzin += stdRecords.filter(r => r.status === 'IZIN').length;
-      totalSakit += stdRecords.filter(r => r.status === 'SAKIT').length;
-      totalAlpa += stdRecords.filter(r => r.status === 'ALPA').length;
+      const stdRecords = getRecordsForStudent(std);
+      stdRecords.forEach(r => {
+        if (r.status === 'HADIR') totalHadir++;
+        else if (r.status === 'TERLAMBAT') totalTerlambat++;
+        else if (r.status === 'IZIN') totalIzin++;
+        else if (r.status === 'SAKIT') totalSakit++;
+        else if (r.status === 'ALPA') totalAlpa++;
+
+        if (r.returnTime || r.returnStatus === 'PULANG' || r.returnStatus === 'PULANG_TEPAT' || r.returnStatus === 'PULANG_CEPAT') {
+          totalPulang++;
+        }
+      });
     });
 
     const totalDaysRecorded = totalHadir + totalTerlambat + totalIzin + totalSakit + totalAlpa;
@@ -317,7 +383,22 @@ export const RecapExportView: React.FC<RecapExportViewProps> = ({
       avgAttendancePct,
       totalStudents: filteredStudents.length
     };
-  }, [filteredStudents, filteredRecords]);
+  }, [filteredStudents, getRecordsForStudent]);
+
+  // Pagination State for ultra-responsive matrix and summary rendering
+  const [recapPage, setRecapPage] = useState<number>(1);
+  const [recapPageSize, setRecapPageSize] = useState<number>(30); // 30, 60, 100, or -1 (Semua)
+
+  useEffect(() => {
+    setRecapPage(1);
+  }, [selectedClass, deferredSearchQuery, filterPeriod, selectedMonth, selectedYear, recapPageSize]);
+
+  const totalRecapPages = recapPageSize === -1 ? 1 : Math.max(1, Math.ceil(filteredStudents.length / recapPageSize));
+  const paginatedStudents = useMemo(() => {
+    if (recapPageSize === -1) return filteredStudents;
+    const start = (recapPage - 1) * recapPageSize;
+    return filteredStudents.slice(start, start + recapPageSize);
+  }, [filteredStudents, recapPage, recapPageSize]);
 
   // Adjust dates when period preset changes
   const handlePeriodChange = (p: 'SEMESTER_GANJIL' | 'MONTHLY' | 'CUSTOM' | 'WEEKLY' | 'YEARLY') => {
@@ -1359,13 +1440,8 @@ export const RecapExportView: React.FC<RecapExportViewProps> = ({
                         </td>
                       </tr>
                     ) : (
-                      filteredStudents.map((std, idx) => {
-                        const stdRecords = filteredRecords.filter(r => 
-                          r.studentId === std.id || 
-                          (std.nisn && std.nisn !== '-' && r.nisn === std.nisn) ||
-                          (std.name && r.studentName && r.studentName.trim().toLowerCase() === std.name.trim().toLowerCase())
-                        );
-                        
+                      paginatedStudents.map((std, idx) => {
+                        const globalIdx = recapPageSize === -1 ? idx + 1 : (recapPage - 1) * recapPageSize + idx + 1;
                         let hadirCount = 0;
                         let terlambatCount = 0;
                         let pulangCount = 0;
@@ -1375,14 +1451,14 @@ export const RecapExportView: React.FC<RecapExportViewProps> = ({
 
                         return (
                           <tr key={std.id} className="hover:bg-indigo-50/30 transition-colors">
-                            <td className="py-2.5 px-3 text-center text-slate-400 font-semibold border-r border-slate-100">{idx + 1}</td>
+                            <td className="py-2.5 px-3 text-center text-slate-400 font-semibold border-r border-slate-100">{globalIdx}</td>
                             <td className="py-2.5 px-3 text-center text-slate-600 font-semibold border-r border-slate-100">{std.nisn || '-'}</td>
                             <td className="py-2.5 px-4 font-sans font-extrabold text-slate-900 border-r border-slate-100 whitespace-nowrap">{std.name}</td>
                             <td className="py-2.5 px-3 text-center text-indigo-600 font-bold border-r border-slate-100">{std.className}</td>
                             
-                            {/* Day Cells */}
+                            {/* Day Cells (O(1) indexed lookup) */}
                             {monthlyCalendarDays.map((d) => {
-                              const rec = stdRecords.find(r => r.date === d.dateStr);
+                              const rec = getRecordForStudentDate(std, d.dateStr);
 
                               if (rec) {
                                 if (rec.status === 'HADIR') {
@@ -1521,18 +1597,27 @@ export const RecapExportView: React.FC<RecapExportViewProps> = ({
                         </td>
                       </tr>
                     ) : (
-                      filteredStudents.map((std, idx) => {
-                        const stdRecords = filteredRecords.filter(r => 
-                          r.studentId === std.id || 
-                          (std.nisn && std.nisn !== '-' && r.nisn === std.nisn) ||
-                          (std.name && r.studentName && r.studentName.trim().toLowerCase() === std.name.trim().toLowerCase())
-                        );
-                        const hadir = stdRecords.filter(r => r.status === 'HADIR').length;
-                        const terlambat = stdRecords.filter(r => r.status === 'TERLAMBAT').length;
-                        const pulang = stdRecords.filter(r => r.returnTime || r.returnStatus === 'PULANG' || r.returnStatus === 'PULANG_TEPAT' || r.returnStatus === 'PULANG_CEPAT').length;
-                        const izin = stdRecords.filter(r => r.status === 'IZIN').length;
-                        const sakit = stdRecords.filter(r => r.status === 'SAKIT').length;
-                        const alpa = stdRecords.filter(r => r.status === 'ALPA').length;
+                      paginatedStudents.map((std, idx) => {
+                        const globalIdx = recapPageSize === -1 ? idx + 1 : (recapPage - 1) * recapPageSize + idx + 1;
+                        const stdRecords = getRecordsForStudent(std);
+                        let hadir = 0;
+                        let terlambat = 0;
+                        let pulang = 0;
+                        let izin = 0;
+                        let sakit = 0;
+                        let alpa = 0;
+
+                        stdRecords.forEach(r => {
+                          if (r.status === 'HADIR') hadir++;
+                          else if (r.status === 'TERLAMBAT') terlambat++;
+                          else if (r.status === 'IZIN') izin++;
+                          else if (r.status === 'SAKIT') sakit++;
+                          else if (r.status === 'ALPA') alpa++;
+
+                          if (r.returnTime || r.returnStatus === 'PULANG' || r.returnStatus === 'PULANG_TEPAT' || r.returnStatus === 'PULANG_CEPAT') {
+                            pulang++;
+                          }
+                        });
 
                         const totalDaysRecorded = hadir + terlambat + izin + sakit + alpa;
                         const presentCount = hadir + terlambat;
@@ -1540,7 +1625,7 @@ export const RecapExportView: React.FC<RecapExportViewProps> = ({
 
                         return (
                           <tr key={std.id} className="hover:bg-slate-50/80 transition-colors">
-                            <td className="py-3.5 px-4 text-slate-400 font-semibold">{idx + 1}</td>
+                            <td className="py-3.5 px-4 text-slate-400 font-semibold">{globalIdx}</td>
                             <td className="py-3.5 px-4 text-slate-600 font-semibold">{std.nisn || '-'}</td>
                             <td className="py-3.5 px-4 font-sans font-extrabold text-slate-900">{std.name}</td>
                             <td className="py-3.5 px-4 text-indigo-600 font-bold">{std.className}</td>
@@ -1557,6 +1642,62 @@ export const RecapExportView: React.FC<RecapExportViewProps> = ({
                     )}
                   </tbody>
                 </table>
+              </div>
+            )}
+
+            {/* Pagination Controls */}
+            {filteredStudents.length > 0 && (
+              <div className="px-5 py-3.5 border-t border-slate-200/80 flex flex-col sm:flex-row items-center justify-between gap-3 bg-slate-50/80 text-xs">
+                <div className="flex items-center gap-3 text-slate-500 font-medium text-xs">
+                  <span>
+                    Menampilkan <strong className="text-slate-800">{recapPageSize === -1 ? 1 : (recapPage - 1) * recapPageSize + 1}</strong> - <strong className="text-slate-800">{recapPageSize === -1 ? filteredStudents.length : Math.min(recapPage * recapPageSize, filteredStudents.length)}</strong> dari <strong className="text-slate-800">{filteredStudents.length}</strong> siswa
+                  </span>
+                  <span className="hidden sm:inline text-slate-300">|</span>
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-[11px] text-slate-500">Baris:</span>
+                    <select
+                      value={recapPageSize}
+                      onChange={(e) => {
+                        setRecapPageSize(Number(e.target.value));
+                        setRecapPage(1);
+                      }}
+                      className="bg-white border border-slate-200 rounded-lg px-2 py-1 text-xs font-bold text-slate-700 focus:outline-none cursor-pointer"
+                    >
+                      <option value={30}>30</option>
+                      <option value={60}>60</option>
+                      <option value={100}>100</option>
+                      <option value={-1}>Semua</option>
+                    </select>
+                  </div>
+                </div>
+
+                {recapPageSize !== -1 && totalRecapPages > 1 && (
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => setRecapPage(p => Math.max(1, p - 1))}
+                      disabled={recapPage === 1}
+                      className="px-2.5 py-1.5 rounded-xl border border-slate-200 bg-white font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer flex items-center gap-1 shadow-2xs transition-all active:scale-95"
+                    >
+                      <ChevronLeft className="w-3.5 h-3.5" />
+                      <span>Sebelumnya</span>
+                    </button>
+
+                    <span className="px-3 py-1 font-bold text-slate-700 bg-white border border-slate-200 rounded-xl shadow-2xs">
+                      {recapPage} / {totalRecapPages}
+                    </span>
+
+                    <button
+                      type="button"
+                      onClick={() => setRecapPage(p => Math.min(totalRecapPages, p + 1))}
+                      disabled={recapPage === totalRecapPages}
+                      className="px-2.5 py-1.5 rounded-xl border border-slate-200 bg-white font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer flex items-center gap-1 shadow-2xs transition-all active:scale-95"
+                    >
+                      <span>Berikutnya</span>
+                      <ChevronRight className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                )}
               </div>
             )}
 

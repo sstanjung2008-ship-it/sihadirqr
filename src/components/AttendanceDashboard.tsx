@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useDeferredValue } from 'react';
 import { 
   AttendanceRecord, 
   Student, 
@@ -37,6 +37,7 @@ import {
   UserCircle,
   ShieldCheck,
   QrCode,
+  ChevronLeft,
   ChevronRight,
   ArrowRight,
   ArrowLeft,
@@ -210,119 +211,184 @@ export const AttendanceDashboard: React.FC<AttendanceDashboardProps> = ({
     return () => window.removeEventListener('sihadir_open_character_detail', handleOpenCharDetail);
   }, [currentRole]);
 
-  const sortedClasses = [...classes].sort((a, b) =>
-    a.name.localeCompare(b.name, 'id', { numeric: true, sensitivity: 'base' })
-  );
+  const deferredSearchQuery = useDeferredValue(searchQuery);
+
+  // Pagination for fast rendering of large student lists
+  const [currentPage, setCurrentPage] = useState<number>(1);
+  const [pageSize, setPageSize] = useState<number>(30); // 30, 60, 100, or -1 (Semua)
+
+  // Reset page when filter or date changes
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [selectedClassFilter, selectedEntryStatusFilter, selectedReturnStatusFilter, deferredSearchQuery, selectedDate, pageSize]);
+
+  const sortedClasses = useMemo(() => {
+    return [...classes].sort((a, b) =>
+      a.name.localeCompare(b.name, 'id', { numeric: true, sensitivity: 'base' })
+    );
+  }, [classes]);
 
   // Filter records for selected date
-  const dateRecords = attendanceRecords.filter(r => r.date === selectedDate);
+  const dateRecords = useMemo(() => {
+    return attendanceRecords.filter(r => r.date === selectedDate);
+  }, [attendanceRecords, selectedDate]);
 
-  const studentDateStatusMap = new Map<string, AttendanceRecord>();
-  dateRecords.forEach(r => {
-    const existing = (r.studentId && studentDateStatusMap.get(r.studentId)) ||
-      (r.nisn && r.nisn !== '-' && studentDateStatusMap.get(r.nisn.trim())) ||
-      (r.studentName && studentDateStatusMap.get(r.studentName.trim().toLowerCase()));
+  const studentDateStatusMap = useMemo(() => {
+    const map = new Map<string, AttendanceRecord>();
+    dateRecords.forEach(r => {
+      const existing = (r.studentId && map.get(r.studentId)) ||
+        (r.nisn && r.nisn !== '-' && map.get(r.nisn.trim())) ||
+        (r.studentName && map.get(r.studentName.trim().toLowerCase()));
 
-    const resolved = existing ? mergeSingleAttendanceRecord(existing, r) : r;
-    if (resolved.studentId) studentDateStatusMap.set(resolved.studentId, resolved);
-    if (resolved.nisn && resolved.nisn !== '-') studentDateStatusMap.set(resolved.nisn.trim(), resolved);
-    if (resolved.studentName && resolved.studentName.trim() !== '') studentDateStatusMap.set(resolved.studentName.trim().toLowerCase(), resolved);
-  });
+      const resolved = existing ? mergeSingleAttendanceRecord(existing, r) : r;
+      if (resolved.studentId) map.set(resolved.studentId, resolved);
+      if (resolved.nisn && resolved.nisn !== '-') map.set(resolved.nisn.trim(), resolved);
+      if (resolved.studentName && resolved.studentName.trim() !== '') map.set(resolved.studentName.trim().toLowerCase(), resolved);
+    });
+    return map;
+  }, [dateRecords]);
 
-  const getRecordForStudent = (std: { id?: string; nisn?: string; name?: string }): AttendanceRecord | undefined => {
+  const getRecordForStudent = useCallback((std: { id?: string; nisn?: string; name?: string }): AttendanceRecord | undefined => {
     if (!std) return undefined;
     if (std.id && studentDateStatusMap.has(std.id)) return studentDateStatusMap.get(std.id);
     if (std.nisn && std.nisn !== '-' && studentDateStatusMap.has(std.nisn.trim())) return studentDateStatusMap.get(std.nisn.trim());
     if (std.name && std.name.trim() !== '' && studentDateStatusMap.has(std.name.trim().toLowerCase())) return studentDateStatusMap.get(std.name.trim().toLowerCase());
     return undefined;
-  };
+  }, [studentDateStatusMap]);
 
-  // Base student list based on role/class filter
-  let filteredStudents = students;
-  if (currentRole === 'PARENT' && selectedChildId) {
-    filteredStudents = students.filter(s => s.id === selectedChildId);
-  } else if (selectedClassFilter !== 'ALL') {
-    filteredStudents = students.filter(s => s.className === selectedClassFilter);
-  }
+  // Base student list based on role/class filter & search
+  const filteredStudents = useMemo(() => {
+    let list = students;
+    if (currentRole === 'PARENT' && selectedChildId) {
+      list = students.filter(s => s.id === selectedChildId);
+    } else if (selectedClassFilter !== 'ALL') {
+      list = students.filter(s => s.className === selectedClassFilter);
+    }
 
-  if (searchQuery.trim()) {
-    const q = searchQuery.toLowerCase();
-    filteredStudents = filteredStudents.filter(s => 
-      s.name.toLowerCase().includes(q) ||
-      s.nisn.includes(q) ||
-      s.className.toLowerCase().includes(q)
+    const q = deferredSearchQuery.trim().toLowerCase();
+    if (q) {
+      list = list.filter(s => 
+        (s.name || '').toLowerCase().includes(q) ||
+        (s.nisn || '').includes(q) ||
+        (s.className || '').toLowerCase().includes(q)
+      );
+    }
+
+    // Filter by Entry Status (Status Masuk)
+    if (selectedEntryStatusFilter !== 'ALL') {
+      list = list.filter(std => {
+        const rec = getRecordForStudent(std);
+        if (selectedEntryStatusFilter === 'BELUM_ABSEN') {
+          return !rec;
+        }
+        if (selectedEntryStatusFilter === 'ALPA') {
+          return rec?.status === 'ALPA';
+        }
+        return rec?.status === selectedEntryStatusFilter;
+      });
+    }
+
+    // Filter by Return Status (Status Pulang)
+    if (selectedReturnStatusFilter !== 'ALL') {
+      list = list.filter(std => {
+        const rec = getRecordForStudent(std);
+        const isPulang = !!(rec && (rec.returnTime || rec.returnStatus === 'PULANG' || rec.returnStatus === 'PULANG_TEPAT' || rec.returnStatus === 'PULANG_CEPAT'));
+        if (selectedReturnStatusFilter === 'PULANG') {
+          return isPulang;
+        } else if (selectedReturnStatusFilter === 'BELUM_PULANG') {
+          return !isPulang;
+        }
+        return true;
+      });
+    }
+
+    // Ensure students are sorted Ascending by name
+    return [...list].sort((a, b) => 
+      (a.name || '').localeCompare(b.name || '', 'id', { numeric: true, sensitivity: 'base' })
     );
-  }
+  }, [
+    students,
+    currentRole,
+    selectedChildId,
+    selectedClassFilter,
+    deferredSearchQuery,
+    selectedEntryStatusFilter,
+    selectedReturnStatusFilter,
+    getRecordForStudent
+  ]);
 
-  // Filter by Entry Status (Status Masuk)
-  if (selectedEntryStatusFilter !== 'ALL') {
-    filteredStudents = filteredStudents.filter(std => {
-      const rec = getRecordForStudent(std);
-      if (selectedEntryStatusFilter === 'BELUM_ABSEN') {
-        return !rec;
-      }
-      if (selectedEntryStatusFilter === 'ALPA') {
-        return rec?.status === 'ALPA';
-      }
-      return rec?.status === selectedEntryStatusFilter;
-    });
-  }
-
-  // Filter by Return Status (Status Pulang)
-  if (selectedReturnStatusFilter !== 'ALL') {
-    filteredStudents = filteredStudents.filter(std => {
-      const rec = getRecordForStudent(std);
-      const isPulang = !!(rec && (rec.returnTime || rec.returnStatus === 'PULANG' || rec.returnStatus === 'PULANG_TEPAT' || rec.returnStatus === 'PULANG_CEPAT'));
-      if (selectedReturnStatusFilter === 'PULANG') {
-        return isPulang;
-      } else if (selectedReturnStatusFilter === 'BELUM_PULANG') {
-        return !isPulang;
-      }
-      return true;
-    });
-  }
-
-  // Ensure students are sorted Ascending by name
-  filteredStudents = [...filteredStudents].sort((a, b) => 
-    a.name.localeCompare(b.name, 'id', { numeric: true, sensitivity: 'base' })
-  );
+  // Paginated students for ultra-fast DOM rendering
+  const totalPages = pageSize === -1 ? 1 : Math.max(1, Math.ceil(filteredStudents.length / pageSize));
+  const paginatedStudents = useMemo(() => {
+    if (pageSize === -1) return filteredStudents;
+    const start = (currentPage - 1) * pageSize;
+    return filteredStudents.slice(start, start + pageSize);
+  }, [filteredStudents, currentPage, pageSize]);
 
   // Calculate statistics for selected date
-  let baseStudentsForStats = students;
-  if (currentRole === 'PARENT' && selectedChildId) {
-    baseStudentsForStats = students.filter(s => s.id === selectedChildId);
-  } else if (selectedClassFilter !== 'ALL') {
-    baseStudentsForStats = students.filter(s => s.className === selectedClassFilter);
-  }
-
-  const totalStudentsCount = baseStudentsForStats.length;
-
-  let countHadir = 0;
-  let countTerlambat = 0;
-  let countSakit = 0;
-  let countIzin = 0;
-  let countAlpa = 0;
-  let countPulang = 0;
-  let countBelumAbsen = 0;
-
-  baseStudentsForStats.forEach(std => {
-    const rec = getRecordForStudent(std);
-    if (!rec) {
-      countBelumAbsen++;
-    } else if (rec.status === 'HADIR') countHadir++;
-    else if (rec.status === 'TERLAMBAT') countTerlambat++;
-    else if (rec.status === 'SAKIT') countSakit++;
-    else if (rec.status === 'IZIN') countIzin++;
-    else if (rec.status === 'ALPA') countAlpa++;
-
-    if (rec && (rec.returnTime || rec.returnStatus === 'PULANG' || rec.returnStatus === 'PULANG_TEPAT' || rec.returnStatus === 'PULANG_CEPAT')) {
-      countPulang++;
+  const {
+    totalStudentsCount,
+    countHadir,
+    countTerlambat,
+    countSakit,
+    countIzin,
+    countAlpa,
+    countPulang,
+    countBelumAbsen,
+    totalPresent,
+    countBelumPulang,
+    attendanceRate
+  } = useMemo(() => {
+    let baseStudentsForStats = students;
+    if (currentRole === 'PARENT' && selectedChildId) {
+      baseStudentsForStats = students.filter(s => s.id === selectedChildId);
+    } else if (selectedClassFilter !== 'ALL') {
+      baseStudentsForStats = students.filter(s => s.className === selectedClassFilter);
     }
-  });
 
-  const totalPresent = countHadir + countTerlambat;
-  const countBelumPulang = Math.max(0, totalStudentsCount - countPulang);
-  const attendanceRate = totalStudentsCount > 0 ? Math.round((totalPresent / totalStudentsCount) * 100) : 0;
+    const totalStudents = baseStudentsForStats.length;
+
+    let hadir = 0;
+    let terlambat = 0;
+    let sakit = 0;
+    let izin = 0;
+    let alpa = 0;
+    let pulang = 0;
+    let belumAbsen = 0;
+
+    baseStudentsForStats.forEach(std => {
+      const rec = getRecordForStudent(std);
+      if (!rec) {
+        belumAbsen++;
+      } else if (rec.status === 'HADIR') hadir++;
+      else if (rec.status === 'TERLAMBAT') terlambat++;
+      else if (rec.status === 'SAKIT') sakit++;
+      else if (rec.status === 'IZIN') izin++;
+      else if (rec.status === 'ALPA') alpa++;
+
+      if (rec && (rec.returnTime || rec.returnStatus === 'PULANG' || rec.returnStatus === 'PULANG_TEPAT' || rec.returnStatus === 'PULANG_CEPAT')) {
+        pulang++;
+      }
+    });
+
+    const present = hadir + terlambat;
+    const belum = Math.max(0, totalStudents - pulang);
+    const rate = totalStudents > 0 ? Math.round((present / totalStudents) * 100) : 0;
+
+    return {
+      totalStudentsCount: totalStudents,
+      countHadir: hadir,
+      countTerlambat: terlambat,
+      countSakit: sakit,
+      countIzin: izin,
+      countAlpa: alpa,
+      countPulang: pulang,
+      countBelumAbsen: belumAbsen,
+      totalPresent: present,
+      countBelumPulang: belum,
+      attendanceRate: rate
+    };
+  }, [students, currentRole, selectedChildId, selectedClassFilter, getRecordForStudent]);
 
   // Hitung batas waktu toleransi keterlambatan secara dinamis dari profil sekolah
   const { cutoffTimeStr, startTimeStr, toleranceMinutes } = React.useMemo(() => {
@@ -350,108 +416,179 @@ export const AttendanceDashboard: React.FC<AttendanceDashboardProps> = ({
   }, [selectedDate]);
 
   // Selected child for Parent Role
-  const targetStudent = currentRole === 'PARENT'
-    ? (students.find(s => s.id === selectedChildId) || filteredStudents[0])
-    : null;
+  const targetStudent = useMemo(() => {
+    if (currentRole !== 'PARENT') return null;
+    return students.find(s => s.id === selectedChildId) || filteredStudents[0] || null;
+  }, [currentRole, students, selectedChildId, filteredStudents]);
 
   // Child's attendance record for the selected date
-  const childRecord = targetStudent 
-    ? (getRecordForStudent(targetStudent) || attendanceRecords.find(r => (r.studentId === targetStudent.id || r.nisn === targetStudent.nisn) && r.date === selectedDate))
-    : undefined;
+  const childRecord = useMemo(() => {
+    if (!targetStudent) return undefined;
+    return getRecordForStudent(targetStudent) || attendanceRecords.find(r => (r.studentId === targetStudent.id || r.nisn === targetStudent.nisn) && r.date === selectedDate);
+  }, [targetStudent, getRecordForStudent, attendanceRecords, selectedDate]);
 
   // Compute Keaktifan KBM data for target child
-  const childJournals = learningJournals.filter(j => {
-    if (!targetStudent) return false;
-    return j.studentAttendances?.some(a => 
-      a.studentId === targetStudent.id || 
-      a.nisn === targetStudent.nisn || 
-      a.studentName === targetStudent.name
-    );
-  });
-
-  let sangAtifCount = 0;
-  let cukupAktifCount = 0;
-  let kurangAktifCount = 0;
-  let menggangguCount = 0;
-  let tidakHadirCount = 0;
-  let sakitIjinCount = 0;
-
-  childJournals.forEach(j => {
-    const att = j.studentAttendances?.find(a => 
-      a.studentId === targetStudent?.id || 
-      a.nisn === targetStudent?.nisn || 
-      a.studentName === targetStudent?.name
-    );
-    if (att) {
-      if (att.status === 'Sangat aktif') sangAtifCount++;
-      else if (att.status === 'Cukup aktif') cukupAktifCount++;
-      else if (att.status === 'Kurang aktif') kurangAktifCount++;
-      else if (att.status === 'Mengganggu') menggangguCount++;
-      else if (att.status === 'Tidak hadir di kelas') tidakHadirCount++;
-      else if (att.status === 'Sakit / Ijin' || att.status === 'Sakit/Ijin' || att.status === 'Sakit / Izin') sakitIjinCount++;
+  const {
+    childJournals,
+    overallKeaktifan,
+    totalKbmPertemuan,
+    sangAtifCount,
+    cukupAktifCount,
+    kurangAktifCount,
+    menggangguCount,
+    tidakHadirCount,
+    sakitIjinCount
+  } = useMemo(() => {
+    if (!targetStudent) {
+      return {
+        childJournals: [],
+        overallKeaktifan: { label: 'Belum Ada Data', color: 'bg-slate-100 text-slate-600 border-slate-300' },
+        totalKbmPertemuan: 0,
+        sangAtifCount: 0,
+        cukupAktifCount: 0,
+        kurangAktifCount: 0,
+        menggangguCount: 0,
+        tidakHadirCount: 0,
+        sakitIjinCount: 0
+      };
     }
-  });
 
-  const totalKbmPertemuan = childJournals.length;
+    const journals = learningJournals.filter(j => 
+      j.studentAttendances?.some(a => 
+        a.studentId === targetStudent.id || 
+        a.nisn === targetStudent.nisn || 
+        a.studentName === targetStudent.name
+      )
+    );
 
-  let overallKeaktifan = { label: 'Sangat Aktif', color: 'bg-emerald-100 text-emerald-800 border-emerald-300' };
-  if (totalKbmPertemuan === 0) {
-    overallKeaktifan = { label: 'Belum Ada Data', color: 'bg-slate-100 text-slate-600 border-slate-300' };
-  } else if (menggangguCount > 0 || kurangAktifCount > 2) {
-    overallKeaktifan = { label: 'Perlu Perhatian', color: 'bg-rose-100 text-rose-800 border-rose-300' };
-  } else if (sangAtifCount >= cukupAktifCount && sangAtifCount >= kurangAktifCount) {
-    overallKeaktifan = { label: 'Sangat Aktif', color: 'bg-emerald-100 text-emerald-800 border-emerald-300' };
-  } else if (cukupAktifCount >= kurangAktifCount) {
-    overallKeaktifan = { label: 'Cukup Aktif', color: 'bg-blue-100 text-blue-800 border-blue-300' };
-  } else {
-    overallKeaktifan = { label: 'Kurang Aktif', color: 'bg-amber-100 text-amber-800 border-amber-300' };
-  }
+    let sangAtif = 0;
+    let cukupAktif = 0;
+    let kurangAktif = 0;
+    let mengganggu = 0;
+    let tidakHadir = 0;
+    let sakitIjin = 0;
+
+    journals.forEach(j => {
+      const att = j.studentAttendances?.find(a => 
+        a.studentId === targetStudent?.id || 
+        a.nisn === targetStudent?.nisn || 
+        a.studentName === targetStudent?.name
+      );
+      if (att) {
+        if (att.status === 'Sangat aktif') sangAtif++;
+        else if (att.status === 'Cukup aktif') cukupAktif++;
+        else if (att.status === 'Kurang aktif') kurangAktif++;
+        else if (att.status === 'Mengganggu') mengganggu++;
+        else if (att.status === 'Tidak hadir di kelas') tidakHadir++;
+        else if (att.status === 'Sakit / Ijin' || att.status === 'Sakit/Ijin' || att.status === 'Sakit / Izin') sakitIjin++;
+      }
+    });
+
+    const total = journals.length;
+    let keaktifan = { label: 'Sangat Aktif', color: 'bg-emerald-100 text-emerald-800 border-emerald-300' };
+    if (total === 0) {
+      keaktifan = { label: 'Belum Ada Data', color: 'bg-slate-100 text-slate-600 border-slate-300' };
+    } else if (mengganggu > 0 || kurangAktif > 2) {
+      keaktifan = { label: 'Perlu Perhatian', color: 'bg-rose-100 text-rose-800 border-rose-300' };
+    } else if (sangAtif >= cukupAktif && sangAtif >= kurangAktif) {
+      keaktifan = { label: 'Sangat Aktif', color: 'bg-emerald-100 text-emerald-800 border-emerald-300' };
+    } else if (cukupAktif >= kurangAktif) {
+      keaktifan = { label: 'Cukup Aktif', color: 'bg-blue-100 text-blue-800 border-blue-300' };
+    } else {
+      keaktifan = { label: 'Kurang Aktif', color: 'bg-amber-100 text-amber-800 border-amber-300' };
+    }
+
+    return {
+      childJournals: journals,
+      overallKeaktifan: keaktifan,
+      totalKbmPertemuan: total,
+      sangAtifCount: sangAtif,
+      cukupAktifCount: cukupAktif,
+      kurangAktifCount: kurangAktif,
+      menggangguCount: mengganggu,
+      tidakHadirCount: tidakHadir,
+      sakitIjinCount: sakitIjin
+    };
+  }, [targetStudent, learningJournals]);
 
   // Compute Character Points data for target child
-  const charSummary = targetStudent 
-    ? calculateStudentCharacterSummary(targetStudent, characterLogs, attendanceRecords)
-    : { 
-        positivePoints: 0, 
-        negativePoints: 0, 
-        netScore: 0, 
-        totalEntries: 0, 
-        logs: [], 
-        onTimeDays: 0, 
-        onTimeBonusPoints: 0, 
-        onTimeDates: [], 
-        lateDays: 0, 
-        latePenaltyPoints: 0, 
-        lateDates: [],
-        alpaDays: 0,
-        alpaPenaltyPoints: 0,
-        alpaDates: [],
-        unscannedInDays: 0,
-        unscannedInPenaltyPoints: 0,
-        unscannedInDates: [],
-        unreturnedDays: 0,
-        unreturnedPenaltyPoints: 0,
-        unreturnedDates: []
+  const {
+    charSummary,
+    childCharacterLogs,
+    posLogs,
+    negLogs,
+    posPoints,
+    negPoints,
+    netPoints,
+    characterPred
+  } = useMemo(() => {
+    if (!targetStudent) {
+      return {
+        charSummary: { 
+          positivePoints: 0, 
+          negativePoints: 0, 
+          netScore: 0, 
+          totalEntries: 0, 
+          logs: [], 
+          onTimeDays: 0, 
+          onTimeBonusPoints: 0, 
+          onTimeDates: [], 
+          lateDays: 0, 
+          latePenaltyPoints: 0, 
+          lateDates: [],
+          alpaDays: 0,
+          alpaPenaltyPoints: 0,
+          alpaDates: [],
+          unscannedInDays: 0,
+          unscannedInPenaltyPoints: 0,
+          unscannedInDates: [],
+          unreturnedDays: 0,
+          unreturnedPenaltyPoints: 0,
+          unreturnedDates: []
+        },
+        childCharacterLogs: [],
+        posLogs: [],
+        negLogs: [],
+        posPoints: 0,
+        negPoints: 0,
+        netPoints: 0,
+        characterPred: { label: 'Baik (B)', color: 'bg-blue-100 text-blue-800 border-blue-300' }
       };
-  const childCharacterLogs = charSummary.logs;
-  const posLogs = childCharacterLogs.filter(l => l.traitType === 'POSITIF');
-  const negLogs = childCharacterLogs.filter(l => l.traitType === 'NEGATIF');
-  const posPoints = charSummary.positivePoints;
-  const negPoints = charSummary.negativePoints;
-  const netPoints = charSummary.netScore;
+    }
 
-  const minA = predicateSettings?.minA ?? 30;
-  const minB = predicateSettings?.minB ?? 10;
-  const minC = predicateSettings?.minC ?? 0;
-  const minD = predicateSettings?.minD ?? -20;
-  const minE = predicateSettings?.minE ?? -50;
+    const summary = calculateStudentCharacterSummary(targetStudent, characterLogs, attendanceRecords);
+    const logs = summary.logs;
+    const pLogs = logs.filter(l => l.traitType === 'POSITIF');
+    const nLogs = logs.filter(l => l.traitType === 'NEGATIF');
+    const pPoints = summary.positivePoints;
+    const nPoints = summary.negativePoints;
+    const net = summary.netScore;
 
-  let characterPred = { label: 'Baik (B)', color: 'bg-blue-100 text-blue-800 border-blue-300' };
-  if (netPoints >= minA) characterPred = { label: 'Sangat Baik (A)', color: 'bg-emerald-100 text-emerald-800 border-emerald-300' };
-  else if (netPoints >= minB) characterPred = { label: 'Baik (B)', color: 'bg-blue-100 text-blue-800 border-blue-300' };
-  else if (netPoints >= minC) characterPred = { label: 'Cukup (C)', color: 'bg-amber-100 text-amber-800 border-amber-300' };
-  else if (netPoints >= minD) characterPred = { label: 'Perlu Pembinaan (D)', color: 'bg-orange-100 text-orange-800 border-orange-300' };
-  else if (netPoints >= minE) characterPred = { label: 'Tidak Naik Kelas (E)', color: 'bg-rose-100 text-rose-800 border-rose-300' };
-  else characterPred = { label: 'Pindah Sekolah (F)', color: 'bg-purple-100 text-purple-800 border-purple-300' };
+    const minA = predicateSettings?.minA ?? 30;
+    const minB = predicateSettings?.minB ?? 10;
+    const minC = predicateSettings?.minC ?? 0;
+    const minD = predicateSettings?.minD ?? -20;
+    const minE = predicateSettings?.minE ?? -50;
+
+    let pred = { label: 'Baik (B)', color: 'bg-blue-100 text-blue-800 border-blue-300' };
+    if (net >= minA) pred = { label: 'Sangat Baik (A)', color: 'bg-emerald-100 text-emerald-800 border-emerald-300' };
+    else if (net >= minB) pred = { label: 'Baik (B)', color: 'bg-blue-100 text-blue-800 border-blue-300' };
+    else if (net >= minC) pred = { label: 'Cukup (C)', color: 'bg-amber-100 text-amber-800 border-amber-300' };
+    else if (net >= minD) pred = { label: 'Perlu Pembinaan (D)', color: 'bg-orange-100 text-orange-800 border-orange-300' };
+    else if (net >= minE) pred = { label: 'Tidak Naik Kelas (E)', color: 'bg-rose-100 text-rose-800 border-rose-300' };
+    else pred = { label: 'Pindah Sekolah (F)', color: 'bg-purple-100 text-purple-800 border-purple-300' };
+
+    return {
+      charSummary: summary,
+      childCharacterLogs: logs,
+      posLogs: pLogs,
+      negLogs: nLogs,
+      posPoints: pPoints,
+      negPoints: nPoints,
+      netPoints: net,
+      characterPred: pred
+    };
+  }, [targetStudent, characterLogs, attendanceRecords, predicateSettings]);
 
   const [isExportingCharPdf, setIsExportingCharPdf] = useState(false);
   const handleExportChildCharacterPdf = async () => {
@@ -1636,7 +1773,7 @@ export const AttendanceDashboard: React.FC<AttendanceDashboardProps> = ({
                     </td>
                   </tr>
                 ) : (
-                  filteredStudents.map((student) => {
+                  paginatedStudents.map((student) => {
                     const rec = getRecordForStudent(student);
                     const status = rec ? rec.status : 'BELUM_ABSEN';
 
@@ -1762,6 +1899,62 @@ export const AttendanceDashboard: React.FC<AttendanceDashboardProps> = ({
               </tbody>
             </table>
           </div>
+
+          {/* Pagination Footer */}
+          {filteredStudents.length > 0 && (
+            <div className="px-5 py-3.5 border-t border-slate-100 flex flex-col sm:flex-row items-center justify-between gap-3 bg-slate-50/60 text-xs">
+              <div className="flex items-center gap-3 text-slate-500 font-medium text-xs">
+                <span>
+                  Menampilkan <strong className="text-slate-800">{pageSize === -1 ? 1 : (currentPage - 1) * pageSize + 1}</strong> - <strong className="text-slate-800">{pageSize === -1 ? filteredStudents.length : Math.min(currentPage * pageSize, filteredStudents.length)}</strong> dari <strong className="text-slate-800">{filteredStudents.length}</strong> siswa
+                </span>
+                <span className="hidden sm:inline text-slate-300">|</span>
+                <div className="flex items-center gap-1.5">
+                  <span className="text-[11px] text-slate-500">Baris:</span>
+                  <select
+                    value={pageSize}
+                    onChange={(e) => {
+                      setPageSize(Number(e.target.value));
+                      setCurrentPage(1);
+                    }}
+                    className="bg-white border border-slate-200 rounded-lg px-2 py-1 text-xs font-bold text-slate-700 focus:outline-none cursor-pointer"
+                  >
+                    <option value={30}>30</option>
+                    <option value={60}>60</option>
+                    <option value={100}>100</option>
+                    <option value={-1}>Semua</option>
+                  </select>
+                </div>
+              </div>
+
+              {pageSize !== -1 && totalPages > 1 && (
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                    disabled={currentPage === 1}
+                    className="px-2.5 py-1.5 rounded-xl border border-slate-200 bg-white font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer flex items-center gap-1 shadow-2xs transition-all active:scale-95"
+                  >
+                    <ChevronLeft className="w-3.5 h-3.5" />
+                    <span>Sebelumnya</span>
+                  </button>
+
+                  <span className="px-3 py-1 font-bold text-slate-700 bg-white border border-slate-200 rounded-xl shadow-2xs">
+                    {currentPage} / {totalPages}
+                  </span>
+
+                  <button
+                    type="button"
+                    onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                    disabled={currentPage === totalPages}
+                    className="px-2.5 py-1.5 rounded-xl border border-slate-200 bg-white font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer flex items-center gap-1 shadow-2xs transition-all active:scale-95"
+                  >
+                    <span>Berikutnya</span>
+                    <ChevronRight className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       )}
 

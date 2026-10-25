@@ -234,6 +234,32 @@ export default function App() {
     };
   }, []);
 
+  // Preload primary lazy views during idle background time for instant, lag-free page navigation
+  useEffect(() => {
+    const preloadViews = () => {
+      try {
+        import('./components/ClassManagementView');
+        import('./components/RecapExportView');
+        import('./components/CharacterPointsView');
+        import('./components/CharacterInputView');
+        import('./components/StudentDirectoryView');
+        import('./components/LearningJournalView');
+        import('./components/TeacherDirectoryView');
+      } catch {
+        // Ignore preload errors
+      }
+    };
+
+    if (typeof window !== 'undefined') {
+      if ('requestIdleCallback' in window) {
+        (window as any).requestIdleCallback(preloadViews, { timeout: 1500 });
+      } else {
+        const timer = setTimeout(preloadViews, 300);
+        return () => clearTimeout(timer);
+      }
+    }
+  }, []);
+
   // Core Data States
   const [schoolProfile, setSchoolProfileState] = useState<SchoolProfile>(getSchoolProfile());
   const [students, setStudentsState] = useState<Student[]>(getStudents());
@@ -440,8 +466,10 @@ export default function App() {
     }
 
     // 2. Pembacaan Cloud Firestore Seketika: Read 1 kali round-trip cepat saat membuka awal dan refresh halaman
+    let isCancelled = false;
     setInitialSyncState('syncing');
     initFirestoreAppSession(currentRole).then(() => {
+      if (isCancelled) return;
       // Langsung mutasikan seluruh data cloud ke antarmuka aplikasi begitu data selesai diunduh
       refreshDataFromStorage();
       const now = new Date();
@@ -449,13 +477,18 @@ export default function App() {
       setInitialSyncTime(timeStr);
       setInitialSyncState('completed');
       setTimeout(() => {
-        setInitialSyncState(prev => (prev === 'completed' ? 'hidden' : prev));
+        if (!isCancelled) {
+          setInitialSyncState(prev => (prev === 'completed' ? 'hidden' : prev));
+        }
       }, 4000);
     }).catch(() => {
+      if (isCancelled) return;
       refreshDataFromStorage();
       setInitialSyncState('offline');
       setTimeout(() => {
-        setInitialSyncState(prev => (prev === 'offline' ? 'hidden' : prev));
+        if (!isCancelled) {
+          setInitialSyncState(prev => (prev === 'offline' ? 'hidden' : prev));
+        }
       }, 4500);
     });
 
@@ -472,6 +505,7 @@ export default function App() {
     window.addEventListener('sihadir_network_toast', handleNetworkToast);
 
     return () => {
+      isCancelled = true;
       window.removeEventListener('sihadir_storage_updated', refreshDataFromStorage);
       window.removeEventListener('sihadir_network_toast', handleNetworkToast);
     };
@@ -696,15 +730,18 @@ export default function App() {
 
             triggeredVoiceReminderKeysRef.current.add(voiceKey);
 
-            // Calculate consecutive JP count for this teaching session block
+            // Calculate consecutive JP count for this teaching session block (bounded at max 15 JP)
             let consecutiveJp = 1;
             let nextPeriodNum = slot.periodNumber + 1;
-            while (todaySchedules.some(s => 
-              s.periodNumber === nextPeriodNum && 
-              s.classId === slot.classId && 
-              ((slot.teacherId && s.teacherId === slot.teacherId) || (slot.teacherName && s.teacherName === slot.teacherName)) && 
-              s.subject === slot.subject
-            )) {
+            while (
+              consecutiveJp < 15 &&
+              todaySchedules.some(s => 
+                s.periodNumber === nextPeriodNum && 
+                s.classId === slot.classId && 
+                ((slot.teacherId && s.teacherId === slot.teacherId) || (slot.teacherName && s.teacherName === slot.teacherName)) && 
+                s.subject === slot.subject
+              )
+            ) {
               consecutiveJp++;
               nextPeriodNum++;
             }
@@ -1308,97 +1345,72 @@ export default function App() {
 
   // Student CRUD
   const handleAddStudent = (newStudent: Student) => {
-    setStudentsState(prev => {
-      const updated = [newStudent, ...prev];
-      setTimeout(() => saveStudents(updated, true), 0);
-      return updated;
-    });
+    const updated = [newStudent, ...students];
+    setStudentsState(updated);
+    saveStudents(updated, true);
   };
 
   const handleBatchAddStudents = (newStudents: Student[], newClasses?: SchoolClass[]) => {
-    setStudentsState(prev => {
-      const updated = [...newStudents, ...prev];
-      setTimeout(() => saveStudents(updated, true), 0);
-      return updated;
-    });
+    const updated = [...newStudents, ...students];
+    setStudentsState(updated);
+    saveStudents(updated, true);
 
     if (newClasses && newClasses.length > 0) {
-      setClassesState(prevClasses => {
-        const existingNames = new Set(prevClasses.map(c => c.name.trim().toLowerCase()));
-        const uniqueNew = newClasses.filter(c => !existingNames.has(c.name.trim().toLowerCase()));
-        if (uniqueNew.length > 0) {
-          const updatedClasses = [...prevClasses, ...uniqueNew];
-          setTimeout(() => saveSchoolClasses(updatedClasses), 0);
-          return updatedClasses;
-        }
-        return prevClasses;
-      });
+      const existingNames = new Set(classes.map(c => c.name.trim().toLowerCase()));
+      const uniqueNew = newClasses.filter(c => !existingNames.has(c.name.trim().toLowerCase()));
+      if (uniqueNew.length > 0) {
+        const updatedClasses = [...classes, ...uniqueNew];
+        setClassesState(updatedClasses);
+        saveSchoolClasses(updatedClasses);
+      }
     }
   };
 
   const handleUpdateStudent = (updatedStudent: Student) => {
-    setStudentsState(prev => {
-      const updated = prev.map(s => s.id === updatedStudent.id ? updatedStudent : s);
-      setTimeout(() => saveStudents(updated, true), 0);
-      return updated;
-    });
+    const updated = students.map(s => s.id === updatedStudent.id ? updatedStudent : s);
+    setStudentsState(updated);
+    saveStudents(updated, true);
   };
 
   const handleDeleteStudent = (id: string) => {
     // Filter students
-    setStudentsState(prev => {
-      const updated = prev.filter(s => s.id !== id);
-      setTimeout(() => saveStudents(updated, true), 0);
-      return updated;
-    });
+    const updatedStudents = students.filter(s => s.id !== id);
+    setStudentsState(updatedStudents);
+    saveStudents(updatedStudents, true);
 
     // Clean up related attendance records
-    setAttendanceRecordsState(prev => {
-      const updated = prev.filter(a => a.studentId !== id);
-      setTimeout(() => saveAttendanceRecords(updated), 0);
-      return updated;
-    });
+    const updatedAtt = attendanceRecords.filter(a => a.studentId !== id);
+    setAttendanceRecordsState(updatedAtt);
+    saveAttendanceRecords(updatedAtt);
 
     // Clean up related leave requests
-    setLeaveRequestsState(prev => {
-      const updated = prev.filter(l => l.studentId !== id);
-      setTimeout(() => saveLeaveRequests(updated), 0);
-      return updated;
-    });
+    const updatedLeaves = leaveRequests.filter(l => l.studentId !== id);
+    setLeaveRequestsState(updatedLeaves);
+    saveLeaveRequests(updatedLeaves);
 
     // Clean up related character logs
-    setCharacterLogsState(prev => {
-      const updated = prev.filter(l => l.studentId !== id);
-      setTimeout(() => saveStudentCharacterLogs(updated), 0);
-      return updated;
-    });
+    const updatedLogs = characterLogs.filter(l => l.studentId !== id);
+    setCharacterLogsState(updatedLogs);
+    saveStudentCharacterLogs(updatedLogs);
   };
 
   const handleBatchDeleteStudents = (ids: string[]) => {
     const idSet = new Set(ids);
-    setStudentsState(prev => {
-      const updated = prev.filter(s => !idSet.has(s.id));
-      setTimeout(() => saveStudents(updated, true), 0);
-      return updated;
-    });
+    const updatedStudents = students.filter(s => !idSet.has(s.id));
+    setStudentsState(updatedStudents);
+    saveStudents(updatedStudents, true);
 
-    setAttendanceRecordsState(prev => {
-      const updated = prev.filter(a => !idSet.has(a.studentId));
-      setTimeout(() => saveAttendanceRecords(updated), 0);
-      return updated;
-    });
+    const updatedAtt = attendanceRecords.filter(a => !idSet.has(a.studentId));
+    setAttendanceRecordsState(updatedAtt);
+    saveAttendanceRecords(updatedAtt);
 
-    setLeaveRequestsState(prev => {
-      const updated = prev.filter(l => !idSet.has(l.studentId));
-      setTimeout(() => saveLeaveRequests(updated), 0);
-      return updated;
-    });
+    const updatedLeaves = leaveRequests.filter(l => !idSet.has(l.studentId));
+    setLeaveRequestsState(updatedLeaves);
+    saveLeaveRequests(updatedLeaves);
 
-    setCharacterLogsState(prev => {
-      const updated = prev.filter(l => !idSet.has(l.studentId));
-      setTimeout(() => saveStudentCharacterLogs(updated), 0);
-      return updated;
-    });
+    const updatedLogs = characterLogs.filter(l => !idSet.has(l.studentId));
+    setCharacterLogsState(updatedLogs);
+    saveStudentCharacterLogs(updatedLogs);
   };
 
   // Class CRUD

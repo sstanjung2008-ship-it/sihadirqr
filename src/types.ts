@@ -150,7 +150,7 @@ export interface SchoolProfile {
   autoCharacterAssessmentEnabled?: boolean; // Saklar aktif/non-aktif Penilaian Karakter Otomatis
   auto16WitaBackgroundExecutionEnabled?: boolean; // Saklar eksekusi background otomatis 16:00 WITA tanpa konfirmasi (default: false)
   autoCharacterPoints?: AutoCharacterPointSettings; // Konfigurasi besaran nilai poin untuk aturan karakter otomatis
-  lateToleranceMinutes: number; // e.g. 15 -> after 07:15 is TERLAMBAT
+  lateToleranceMinutes: number; // e.g. 35 -> after 07:35 is TERLAMBAT
   educationLevel: string; // e.g. "SMP / MTs"
   gradeLevels: string[]; // e.g. ["Kelas 7", "Kelas 8", "Kelas 9"]
   academicYear?: string; // e.g. "2025/2026"

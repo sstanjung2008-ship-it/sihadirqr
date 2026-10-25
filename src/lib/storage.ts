@@ -1,4 +1,4 @@
-import { SchoolProfile, SchoolClass, Student, AttendanceRecord, LeaveRequest, Teacher, LearningJournal, CharacterTrait, StudentCharacterLog, CharacterPredicateSettings, UserSession, UserRole, StudentGradeAssessment, StudentGradeItem, LessonPeriod, ClassScheduleSlot } from '../types';
+import { SchoolProfile, SchoolClass, Student, AttendanceRecord, AttendanceStatus, LeaveRequest, Teacher, LearningJournal, CharacterTrait, StudentCharacterLog, CharacterPredicateSettings, UserSession, UserRole, StudentGradeAssessment, StudentGradeItem, LessonPeriod, ClassScheduleSlot } from '../types';
 import { 
   INITIAL_SCHOOL_PROFILE, 
   INITIAL_CLASSES, 
@@ -1957,7 +1957,7 @@ export function mergeSingleAttendanceRecord(a: AttendanceRecord, b: AttendanceRe
   if (bUpdated > aUpdated) {
     // b adalah update yang lebih baru secara eksplisit (misal: ubah massal / edit admin terbaru)
     finalStatus = b.status || 'HADIR';
-    finalTime = (b.time && b.time !== '-') ? b.time : (finalStatus === 'HADIR' || finalStatus === 'TERLAMBAT' ? '07:00' : '-');
+    finalTime = (b.time && b.time !== '-') ? b.time : (finalStatus === 'TERLAMBAT' ? '07:40' : (finalStatus === 'HADIR' ? '07:00' : '-'));
     finalMethod = b.method || 'MANUAL';
     finalScannedBy = b.scannedBy || a.scannedBy || 'Admin';
     finalNotes = b.notes !== undefined ? b.notes : (a.notes || '');
@@ -1965,7 +1965,7 @@ export function mergeSingleAttendanceRecord(a: AttendanceRecord, b: AttendanceRe
   } else if (aUpdated > bUpdated) {
     // a adalah update yang lebih baru
     finalStatus = a.status || 'HADIR';
-    finalTime = (a.time && a.time !== '-') ? a.time : (finalStatus === 'HADIR' || finalStatus === 'TERLAMBAT' ? '07:00' : '-');
+    finalTime = (a.time && a.time !== '-') ? a.time : (finalStatus === 'TERLAMBAT' ? '07:40' : (finalStatus === 'HADIR' ? '07:00' : '-'));
     finalMethod = a.method || 'MANUAL';
     finalScannedBy = a.scannedBy || b.scannedBy || 'Admin';
     finalNotes = a.notes !== undefined ? a.notes : (b.notes || '');
@@ -2079,7 +2079,7 @@ export function mergeSingleAttendanceRecord(a: AttendanceRecord, b: AttendanceRe
   };
 
   if ((finalStatus === 'HADIR' || finalStatus === 'TERLAMBAT') && (!merged.time || merged.time === '-')) {
-    merged.time = finalTime && finalTime !== '-' ? finalTime : '07:00';
+    merged.time = finalTime && finalTime !== '-' ? finalTime : (finalStatus === 'TERLAMBAT' ? '07:40' : '07:00');
   }
 
   return merged;
@@ -2233,7 +2233,11 @@ export function mergeSchoolProfile(local: SchoolProfile, cloud: SchoolProfile): 
       ...(local.autoCharacterPoints || {}),
       ...(cloud.autoCharacterPoints || {}),
     },
-    lateToleranceMinutes: typeof cloud.lateToleranceMinutes === 'number' ? cloud.lateToleranceMinutes : (typeof local.lateToleranceMinutes === 'number' ? local.lateToleranceMinutes : (INITIAL_SCHOOL_PROFILE.lateToleranceMinutes ?? 15)),
+    lateToleranceMinutes: typeof cloud.lateToleranceMinutes === 'number'
+      ? (cloud.lateToleranceMinutes === 15 ? 35 : cloud.lateToleranceMinutes)
+      : (typeof local.lateToleranceMinutes === 'number'
+        ? (local.lateToleranceMinutes === 15 ? 35 : local.lateToleranceMinutes)
+        : (INITIAL_SCHOOL_PROFILE.lateToleranceMinutes ?? 35)),
     parentPortalLoginEnabled: typeof cloud.parentPortalLoginEnabled === 'boolean'
       ? cloud.parentPortalLoginEnabled
       : (typeof local.parentPortalLoginEnabled === 'boolean' ? local.parentPortalLoginEnabled : (INITIAL_SCHOOL_PROFILE.parentPortalLoginEnabled !== false)),
@@ -3171,7 +3175,9 @@ export function getSchoolProfile(): SchoolProfile {
             unscannedPoints: 2,
             unreturnedPoints: 2,
           }),
-      lateToleranceMinutes: typeof parsed.lateToleranceMinutes === 'number' ? parsed.lateToleranceMinutes : (INITIAL_SCHOOL_PROFILE.lateToleranceMinutes ?? 15),
+      lateToleranceMinutes: typeof parsed.lateToleranceMinutes === 'number'
+        ? (parsed.lateToleranceMinutes === 15 ? 35 : parsed.lateToleranceMinutes)
+        : (INITIAL_SCHOOL_PROFILE.lateToleranceMinutes ?? 35),
       activeDays: parsed.activeDays && Array.isArray(parsed.activeDays) && parsed.activeDays.length > 0 ? parsed.activeDays : (INITIAL_SCHOOL_PROFILE.activeDays || ['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu']),
       holidays: parsed.holidays && Array.isArray(parsed.holidays) ? parsed.holidays : (INITIAL_SCHOOL_PROFILE.holidays || []),
       subjects: cleanSubjects.length > 0 ? cleanSubjects : ['Matematika', 'Bahasa Indonesia', 'Bahasa Inggris', 'IPA', 'IPS', 'Pendidikan Agama', 'PJOK', 'Seni Budaya', 'Informatika', 'PPKn'],
@@ -3255,6 +3261,125 @@ export function checkParentLoginAccess(profile?: SchoolProfile): { allowed: bool
   }
 
   return { allowed: true, reason: '' };
+}
+
+/**
+ * Menghitung waktu batas toleransi kehadiran tepat waktu dalam format "HH:mm".
+ * Contoh: Jam Masuk "07:00" dengan Toleransi 35 menit => "07:35".
+ */
+export function getLateCutoffTime(profile?: Partial<SchoolProfile> | null): string {
+  const startTime = profile?.startTime || INITIAL_SCHOOL_PROFILE?.startTime || '07:00';
+  const tolerance = typeof profile?.lateToleranceMinutes === 'number'
+    ? profile.lateToleranceMinutes
+    : (INITIAL_SCHOOL_PROFILE?.lateToleranceMinutes ?? 35);
+
+  const [hStr, mStr] = startTime.replace(/\./g, ':').split(':');
+  const h = parseInt(hStr, 10) || 7;
+  const m = parseInt(mStr, 10) || 0;
+  const total = h * 60 + m + tolerance;
+  const endH = Math.floor(total / 60) % 24;
+  const endM = total % 60;
+  return `${String(endH).padStart(2, '0')}:${String(endM).padStart(2, '0')}`;
+}
+
+/**
+ * Menentukan status presensi masuk siswa ('HADIR' tepat waktu vs 'TERLAMBAT')
+ * Sesuai jam masuk (default: '07:00' WITA) dengan toleransi keterlambatan (default: 35 menit, batas: 07:35 WITA).
+ *
+ * Logika Alur:
+ * - Sebelum atau sama dengan 07:35 (misal: <= 07:35:00 WITA) => status 'HADIR' (Hadir tepat waktu)
+ * - Lebih dari 07:35 (misal: > 07:35:00 WITA, contoh 07:35:01, 07:36) => status 'TERLAMBAT'
+ */
+export function calculateAttendanceStatus(
+  input: string | Date | { time?: string; date?: string; status?: AttendanceStatus } | null | undefined,
+  profileOrTolerance?: Partial<SchoolProfile> | number | string | null
+): AttendanceStatus {
+  // Resolusi konfigurasi jam masuk & toleransi menit
+  let startTime = '07:00';
+  let lateToleranceMinutes = 35;
+
+  if (typeof profileOrTolerance === 'number') {
+    lateToleranceMinutes = profileOrTolerance;
+  } else if (typeof profileOrTolerance === 'string') {
+    if (profileOrTolerance.includes(':') || profileOrTolerance.includes('.')) {
+      startTime = profileOrTolerance;
+    }
+  } else if (profileOrTolerance && typeof profileOrTolerance === 'object') {
+    if (profileOrTolerance.startTime) startTime = profileOrTolerance.startTime;
+    if (typeof profileOrTolerance.lateToleranceMinutes === 'number') {
+      lateToleranceMinutes = profileOrTolerance.lateToleranceMinutes;
+    }
+  } else {
+    try {
+      const activeProf = getSchoolProfile();
+      if (activeProf?.startTime) startTime = activeProf.startTime;
+      if (typeof activeProf?.lateToleranceMinutes === 'number') {
+        lateToleranceMinutes = activeProf.lateToleranceMinutes;
+      }
+    } catch {
+      startTime = INITIAL_SCHOOL_PROFILE?.startTime || '07:00';
+      lateToleranceMinutes = INITIAL_SCHOOL_PROFILE?.lateToleranceMinutes ?? 35;
+    }
+  }
+
+  if (!input) return 'HADIR';
+
+  // Jika input berupa objek record
+  if (typeof input === 'object' && !(input instanceof Date)) {
+    if (input.status === 'IZIN' || input.status === 'SAKIT' || input.status === 'ALPA') {
+      if (!input.time || input.time === '-') {
+        return input.status;
+      }
+    }
+    input = input.time || '';
+  }
+
+  let hours = 0;
+  let minutes = 0;
+  let seconds = 0;
+
+  if (input instanceof Date) {
+    if (isNaN(input.getTime())) return 'HADIR';
+    hours = input.getHours();
+    minutes = input.getMinutes();
+    seconds = input.getSeconds();
+  } else {
+    const str = String(input).trim();
+    if (!str || str === '-') return 'HADIR';
+
+    const normalized = str.replace(/\./g, ':');
+    const match = normalized.match(/(\d{1,2}):(\d{2})(?::(\d{2}))?/);
+    if (!match) return 'HADIR';
+
+    hours = parseInt(match[1], 10);
+    minutes = parseInt(match[2], 10);
+    seconds = match[3] ? parseInt(match[3], 10) : 0;
+  }
+
+  // Parse jam masuk patokan (default: 07:00 WITA)
+  const [startHStr, startMStr] = startTime.replace(/\./g, ':').split(':');
+  const startH = parseInt(startHStr, 10) || 7;
+  const startM = parseInt(startMStr, 10) || 0;
+
+  // Batas toleransi (misal 07:00 + 35 menit = 07:35 = 455 menit = 27300 detik)
+  const cutoffMinutes = startH * 60 + startM + lateToleranceMinutes;
+  const cutoffSeconds = cutoffMinutes * 60;
+
+  const scanTotalSeconds = hours * 3600 + minutes * 60 + seconds;
+
+  // Sebelum atau sama dengan 07:35:00 WITA => 'HADIR' (Tepat Waktu)
+  // Lebih dari 07:35:00 WITA => 'TERLAMBAT'
+  return scanTotalSeconds > cutoffSeconds ? 'TERLAMBAT' : 'HADIR';
+}
+
+// Alias fungsi agar persis sesuai nama di prompt pengguna ("calculateAttendaceStatus")
+export const calculateAttendaceStatus = calculateAttendanceStatus;
+
+// Pasang ke window browser untuk pengujian langsung & script eksternal
+if (typeof window !== 'undefined') {
+  (window as any).calculateAttendanceStatus = calculateAttendanceStatus;
+  (window as any).calculateAttendaceStatus = calculateAttendanceStatus;
+  (window as any).getLateCutoffTime = getLateCutoffTime;
 }
 
 /**
@@ -4394,14 +4519,39 @@ export function isManualCharacterLog(log: StudentCharacterLog): boolean {
  */
 export function getPermanentManualCharacterLogs(): StudentCharacterLog[] {
   if (typeof window === 'undefined') return [];
-  const raw = localStorage.getItem(SAFE_MANUAL_CHARACTER_LOGS_BACKUP_KEY);
-  if (!raw) return [];
-  try {
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
-  }
+  const map = new Map<string, StudentCharacterLog>();
+  const deletedIds = getDeletedCharacterLogIds();
+
+  // Periksa seluruh kemungkinan key penyimpanan lokal dan cadangan
+  const keysToInspect = [
+    SAFE_MANUAL_CHARACTER_LOGS_BACKUP_KEY,
+    'sihadir_manual_character_logs_permanent',
+    'sihadir_character_logs_backup',
+    'sihadir_manual_character_logs_backup',
+    'sihadir_character_logs_v2',
+    'sihadir_character_logs'
+  ];
+
+  keysToInspect.forEach(k => {
+    try {
+      const raw = localStorage.getItem(k);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) {
+          parsed.forEach(item => {
+            if (item && item.id && isManualCharacterLog(item)) {
+              const cleanId = String(item.id).trim();
+              if (!deletedIds.has(cleanId) && !map.has(cleanId)) {
+                map.set(cleanId, { ...item, isManual: true });
+              }
+            }
+          });
+        }
+      }
+    } catch {}
+  });
+
+  return Array.from(map.values());
 }
 
 /**

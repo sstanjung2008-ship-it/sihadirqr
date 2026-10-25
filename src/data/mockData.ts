@@ -39,7 +39,7 @@ export const INITIAL_SCHOOL_PROFILE: SchoolProfile = {
     unscannedPoints: 2,
     unreturnedPoints: 2,
   },
-  lateToleranceMinutes: 15,
+  lateToleranceMinutes: 35,
   educationLevel: "SMP / MTs",
   gradeLevels: ["Kelas 7", "Kelas 8", "Kelas 9"],
   waTemplateArrival: "Yth. Bpk/Ibu [ParentName], memberitahukan bahwa siswa [StudentName] ([ClassName]) telah Tiba di Sekolah pada [Time] WITA dalam keadaan TEPAT WAKTU.",
@@ -406,7 +406,7 @@ export function generateInitialAttendanceHistory(students: Student[]): Attendanc
 
       if (rand > 88) {
         status = 'TERLAMBAT';
-        time = "07:18:24";
+        time = "07:42:18";
       } else if (rand > 81 && rand <= 88) {
         status = 'IZIN';
         time = "07:00:00";

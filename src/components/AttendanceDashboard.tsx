@@ -61,7 +61,9 @@ import {
   isRealPhotoProof,
   refreshCloudData,
   mergeSingleAttendanceRecord,
-  getCloudSyncStatus
+  getCloudSyncStatus,
+  calculateAttendanceStatus,
+  getLateCutoffTime
 } from '../lib/storage';
 import { exportStudentCharacterDetailPdf } from '../lib/exportUtils';
 
@@ -390,16 +392,13 @@ export const AttendanceDashboard: React.FC<AttendanceDashboardProps> = ({
     };
   }, [students, currentRole, selectedChildId, selectedClassFilter, getRecordForStudent]);
 
-  // Hitung batas waktu toleransi keterlambatan secara dinamis dari profil sekolah
+  // Hitung batas waktu toleransi keterlambatan secara dinamis dari profil sekolah (07:00 WITA + 35 menit = 07:35 WITA)
   const { cutoffTimeStr, startTimeStr, toleranceMinutes } = React.useMemo(() => {
     const start = schoolProfile?.startTime || '07:00';
-    const tol = schoolProfile?.lateToleranceMinutes ?? 15;
-    const [startH, startM] = start.split(':').map(Number);
-    const totalMinutes = (isNaN(startH) ? 7 : startH) * 60 + (isNaN(startM) ? 0 : startM) + tol;
-    const endH = Math.floor(totalMinutes / 60) % 24;
-    const endM = totalMinutes % 60;
+    const rawTol = schoolProfile?.lateToleranceMinutes;
+    const tol = (typeof rawTol === 'number' && rawTol !== 15) ? rawTol : 35;
     return {
-      cutoffTimeStr: `${String(endH).padStart(2, '0')}:${String(endM).padStart(2, '0')}`,
+      cutoffTimeStr: getLateCutoffTime({ startTime: start, lateToleranceMinutes: tol }),
       startTimeStr: start,
       toleranceMinutes: tol,
     };
@@ -1992,10 +1991,19 @@ export const AttendanceDashboard: React.FC<AttendanceDashboardProps> = ({
                 <input
                   type="text"
                   value={editTime}
-                  onChange={(e) => setEditTime(e.target.value)}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    setEditTime(val);
+                    if (val.trim().length >= 4 && (editStatus === 'HADIR' || editStatus === 'TERLAMBAT')) {
+                      setEditStatus(calculateAttendanceStatus(val, schoolProfile));
+                    }
+                  }}
                   placeholder="Contoh: 06:45 atau kosongkan untuk 'Belum Scan'"
                   className="w-full bg-slate-50 border border-slate-200 text-slate-800 rounded-xl px-3 py-2 text-xs focus:ring-2 focus:ring-indigo-500 font-mono"
                 />
+                <p className="text-[11px] text-slate-500 mt-1">
+                  Batas Hadir Tepat Waktu: ≤ {cutoffTimeStr} WITA. Lewat dari {cutoffTimeStr} dihitung Terlambat.
+                </p>
               </div>
 
               <div>

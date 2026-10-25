@@ -8,6 +8,8 @@ import {
   flushAttendanceScanQueue,
   getAttendanceRecords,
   getLocalDateString,
+  calculateAttendanceStatus,
+  getLateCutoffTime,
   ScanQueueStatus
 } from '../lib/storage';
 import { 
@@ -686,12 +688,12 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
         return;
       }
 
-      const [startH, startM] = schoolProfile.startTime.split(':').map(Number);
-      const limitMinutes = startH * 60 + startM + (schoolProfile.lateToleranceMinutes || 15);
-      const currentMinutes = now.getHours() * 60 + now.getMinutes();
-
-      const isLate = currentMinutes > limitMinutes;
-      const status: AttendanceRecord['status'] = isLate ? 'TERLAMBAT' : 'HADIR';
+      // Menentukan status kehadiran masuk dengan calculateAttendanceStatus:
+      // Jam Masuk 07:00 WITA dengan Toleransi 35 menit (cutoff: 07:35 WITA)
+      // Sebelum / tepat 07:35:00 WITA => HADIR (Tepat Waktu)
+      // Lewat dari 07:35:00 WITA => TERLAMBAT
+      const status: AttendanceRecord['status'] = calculateAttendanceStatus(now, schoolProfile);
+      const isLate = status === 'TERLAMBAT';
 
       playScanSound(isLate ? 'LATE' : 'SUCCESS');
 
@@ -1541,7 +1543,7 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
               <div className="flex items-start gap-1.5 text-slate-700 font-medium">
                 <Sun className="w-3.5 h-3.5 text-amber-500 shrink-0 mt-0.5" />
                 <span>
-                  Jam Masuk: <strong className="text-slate-900">{schoolProfile.startTime} WITA</strong> (Toleransi {schoolProfile.lateToleranceMinutes} Menit)
+                  Jam Masuk: <strong className="text-slate-900">{schoolProfile.startTime} WITA</strong> (Toleransi {schoolProfile.lateToleranceMinutes || 35} Menit • Batas Tepat Waktu: ≤ {getLateCutoffTime(schoolProfile)} WITA)
                 </span>
               </div>
               <div className="flex items-start gap-1.5 text-slate-700 font-medium">

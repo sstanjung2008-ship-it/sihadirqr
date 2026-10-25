@@ -12,6 +12,7 @@ import {
   savePermanentManualCharacterLogs,
   saveStudentCharacterLogs,
   getStudentCharacterLogs,
+  restoreAllManualCharacterLogs,
   refreshCloudData
 } from '../lib/storage';
 import { getWitaDateTime, setAutoAssessmentBatchDone } from '../lib/autoCharacterScheduler';
@@ -114,6 +115,27 @@ export const CharacterPointsView: React.FC<CharacterPointsViewProps> = ({
       setTimeout(() => setCloudSyncFeedback(null), 5000);
     } finally {
       setIsRefreshingCloud(false);
+    }
+  };
+
+  // Handler untuk memulihkan seluruh catatan nilai karakter manual guru dari brankas lokal & Cloud
+  const [isRestoringManual, setIsRestoringManual] = useState<boolean>(false);
+  const handleRestoreManualLogs = async () => {
+    setIsRestoringManual(true);
+    setCloudSyncFeedback(null);
+    try {
+      // 1. Pulihkan dari seluruh brankas & cadangan lokal
+      restoreAllManualCharacterLogs();
+      // 2. Baca snapshot terbaru dari Cloud Firestore
+      await refreshCloudData(true);
+      const manualCount = getPermanentManualCharacterLogs().length;
+      setCloudSyncFeedback(`Berhasil memulihkan ${manualCount} catatan nilai karakter guru dari brankas lokal & Cloud! Seluruh nilai kini tampil di tabel.`);
+      setTimeout(() => setCloudSyncFeedback(null), 7000);
+    } catch {
+      setCloudSyncFeedback('Gagal memulihkan catatan karakter guru. Coba kembali beberapa saat lagi.');
+      setTimeout(() => setCloudSyncFeedback(null), 5000);
+    } finally {
+      setIsRestoringManual(false);
     }
   };
 
@@ -806,6 +828,17 @@ export const CharacterPointsView: React.FC<CharacterPointsViewProps> = ({
             <span className="text-[10px] font-mono text-indigo-200 hidden sm:inline">
               ({lastRefreshedAt})
             </span>
+          </button>
+
+          <button
+            type="button"
+            onClick={handleRestoreManualLogs}
+            disabled={isRestoringManual}
+            className="inline-flex items-center justify-center gap-2 px-3.5 py-2.5 bg-amber-500/20 hover:bg-amber-500/30 border border-amber-400/40 text-amber-200 font-extrabold rounded-2xl shadow-sm transition-all transform active:scale-95 cursor-pointer shrink-0 text-xs disabled:opacity-60 backdrop-blur-xs"
+            title="Pulihkan dan cari kembali seluruh catatan nilai karakter yang pernah diinput manual oleh guru dari seluruh brankas lokal & Cloud"
+          >
+            <ShieldCheck className={`w-4 h-4 text-amber-400 ${isRestoringManual ? 'animate-bounce' : ''}`} />
+            <span>{isRestoringManual ? 'Memulihkan...' : 'Pulihkan Nilai Guru'}</span>
           </button>
 
           <button

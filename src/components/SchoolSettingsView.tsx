@@ -48,7 +48,13 @@ export const SchoolSettingsView: React.FC<SchoolSettingsViewProps> = ({
   onBatchResetTeachersPassword,
   onBatchResetStudentsPassword,
 }) => {
-  const [formData, setFormData] = useState<SchoolProfile>({ ...schoolProfile });
+  const [formData, setFormData] = useState<SchoolProfile>(() => {
+    const rawTol = schoolProfile?.lateToleranceMinutes;
+    return {
+      ...schoolProfile,
+      lateToleranceMinutes: (rawTol === 15 || !rawTol) ? 35 : rawTol
+    };
+  });
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [showResetModal, setShowResetModal] = useState(false);
   const [confirmBatchTeacherModal, setConfirmBatchTeacherModal] = useState(false);
@@ -1843,7 +1849,18 @@ export const SchoolSettingsView: React.FC<SchoolSettingsViewProps> = ({
                 onChange={(e) => setFormData({ ...formData, lateToleranceMinutes: parseInt(e.target.value) || 0 })}
                 className="w-full bg-slate-50 border border-slate-200 text-slate-800 rounded-xl p-2.5 font-mono font-bold focus:ring-2 focus:ring-indigo-500"
               />
-              <p className="text-[11px] text-slate-500 mt-1">Siswa hadir setelah menit ini berstatus Terlambat.</p>
+              {(() => {
+                const [startH, startM] = (formData.startTime || '07:00').replace(/\./g, ':').split(':').map(Number);
+                const total = (isNaN(startH) ? 7 : startH) * 60 + (isNaN(startM) ? 0 : startM) + (Number(formData.lateToleranceMinutes) || 35);
+                const endH = Math.floor(total / 60) % 24;
+                const endM = total % 60;
+                const cutoffStr = `${String(endH).padStart(2, '0')}:${String(endM).padStart(2, '0')}`;
+                return (
+                  <p className="text-[11px] text-indigo-600 font-semibold mt-1">
+                    Batas scan Hadir Tepat Waktu: ≤ {cutoffStr} WITA (Lewat {cutoffStr} = Terlambat).
+                  </p>
+                );
+              })()}
             </div>
           </div>
 

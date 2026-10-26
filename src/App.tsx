@@ -2056,6 +2056,7 @@ export default function App() {
               attendanceRecords={attendanceRecords}
               onSaveJournal={handleSaveJournal}
               onDeleteJournal={handleDeleteJournal}
+              onUpdateAttendanceStatus={handleUpdateAttendanceStatus}
               userRole={currentRole}
               userSession={userSession}
             />

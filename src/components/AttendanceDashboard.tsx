@@ -1784,21 +1784,41 @@ export const AttendanceDashboard: React.FC<AttendanceDashboardProps> = ({
                         {/* Student Info */}
                         <td className="py-3.5 px-5">
                           <div className="flex items-center gap-3">
-                            <img
-                              src={student.photoUrl || (student.gender === 'P'
-                                ? 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=300&auto=format&fit=crop&q=80'
-                                : 'https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?w=300&auto=format&fit=crop&q=80')}
-                              alt={student.name}
-                              referrerPolicy="no-referrer"
-                              onError={(e) => {
-                                (e.target as HTMLImageElement).src = student.gender === 'P'
+                            <button
+                              type="button"
+                              onClick={() => currentRole !== 'PARENT' && handleOpenEdit(rec, student)}
+                              disabled={currentRole === 'PARENT'}
+                              title={currentRole !== 'PARENT' ? "Klik untuk ubah status kehadiran siswa" : undefined}
+                              className={`shrink-0 rounded-xl transition-all ${currentRole !== 'PARENT' ? 'cursor-pointer hover:ring-2 hover:ring-indigo-400' : 'cursor-default'}`}
+                            >
+                              <img
+                                src={student.photoUrl || (student.gender === 'P'
                                   ? 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=300&auto=format&fit=crop&q=80'
-                                  : 'https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?w=300&auto=format&fit=crop&q=80';
-                              }}
-                              className="w-9 h-9 rounded-xl object-cover ring-2 ring-indigo-100 shadow-sm bg-slate-100"
-                            />
+                                  : 'https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?w=300&auto=format&fit=crop&q=80')}
+                                alt={student.name}
+                                referrerPolicy="no-referrer"
+                                onError={(e) => {
+                                  (e.target as HTMLImageElement).src = student.gender === 'P'
+                                    ? 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=300&auto=format&fit=crop&q=80'
+                                    : 'https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?w=300&auto=format&fit=crop&q=80';
+                                }}
+                                className="w-9 h-9 rounded-xl object-cover ring-2 ring-indigo-100 shadow-sm bg-slate-100"
+                              />
+                            </button>
                             <div>
-                              <p className="font-bold text-slate-900">{student.name}</p>
+                              {currentRole !== 'PARENT' ? (
+                                <button
+                                  type="button"
+                                  onClick={() => handleOpenEdit(rec, student)}
+                                  title="Klik nama siswa untuk ubah status kehadiran"
+                                  className="font-bold text-slate-900 hover:text-indigo-600 hover:underline flex items-center gap-1.5 transition-colors cursor-pointer text-left group"
+                                >
+                                  <span>{student.name}</span>
+                                  <Edit3 className="w-3 h-3 text-slate-400 group-hover:text-indigo-600 opacity-60 group-hover:opacity-100 transition-opacity" />
+                                </button>
+                              ) : (
+                                <p className="font-bold text-slate-900">{student.name}</p>
+                              )}
                               <p className="text-[10px] text-slate-400 font-mono">NISN: {student.nisn}</p>
                             </div>
                           </div>

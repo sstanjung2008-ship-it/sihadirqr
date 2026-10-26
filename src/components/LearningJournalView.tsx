@@ -10,7 +10,13 @@ import {
   AttendanceRecord,
   UserSession
 } from '../types';
-import { getLocalDateString } from '../lib/storage';
+import { 
+  getLocalDateString, 
+  getAttendanceRecords, 
+  saveAttendanceRecords,
+  calculateAttendanceStatus,
+  getLateCutoffTime 
+} from '../lib/storage';
 import { 
   BookOpen, 
   Plus, 
@@ -42,7 +48,9 @@ import {
   Lock,
   Unlock,
   RotateCcw,
-  PlusCircle
+  PlusCircle,
+  HeartPulse,
+  UserX
 } from 'lucide-react';
 import { exportLearningJournalPdf, exportTeacherJournalPdf } from '../lib/exportUtils';
 import { StudentGradesSection } from './StudentGradesSection';
@@ -56,6 +64,14 @@ interface LearningJournalViewProps {
   attendanceRecords?: AttendanceRecord[];
   onSaveJournal: (journal: LearningJournal) => void;
   onDeleteJournal: (journalId: string) => void;
+  onUpdateAttendanceStatus?: (
+    recordId: string, 
+    newStatus: AttendanceRecord['status'], 
+    notes?: string,
+    returnTime?: string,
+    returnStatus?: AttendanceRecord['returnStatus'],
+    fullRecord?: AttendanceRecord
+  ) => void;
   userRole?: string;
   userSession?: UserSession | null;
 }
@@ -134,6 +150,7 @@ export const LearningJournalView: React.FC<LearningJournalViewProps> = ({
   attendanceRecords = [],
   onSaveJournal,
   onDeleteJournal,
+  onUpdateAttendanceStatus,
   userRole,
   userSession,
 }) => {
@@ -209,6 +226,111 @@ export const LearningJournalView: React.FC<LearningJournalViewProps> = ({
   const [savedJournalId, setSavedJournalId] = useState<string | null>(null);
   const [isSaved, setIsSaved] = useState<boolean>(false);
   const [isEditing, setIsEditing] = useState<boolean>(true);
+
+  // Attendance Edit State (allows quick edit of student attendance status directly from journal)
+  const [editingAttendanceStudent, setEditingAttendanceStudent] = useState<Student | null>(null);
+  const [editingAttendanceRecord, setEditingAttendanceRecord] = useState<AttendanceRecord | null>(null);
+  const [editAttStatus, setEditAttStatus] = useState<AttendanceRecord['status']>('HADIR');
+  const [editAttTime, setEditAttTime] = useState<string>('');
+  const [editAttNotes, setEditAttNotes] = useState<string>('');
+  const [editAttReturnTime, setEditAttReturnTime] = useState<string>('');
+  const [editAttReturnStatus, setEditAttReturnStatus] = useState<AttendanceRecord['returnStatus']>('PULANG');
+  const cutoffTimeStr = useMemo(() => {
+    const start = schoolProfile?.startTime || '07:00';
+    const rawTol = schoolProfile?.lateToleranceMinutes;
+    const tol = (typeof rawTol === 'number' && rawTol !== 15) ? rawTol : 35;
+    return getLateCutoffTime({ startTime: start, lateToleranceMinutes: tol });
+  }, [schoolProfile?.startTime, schoolProfile?.lateToleranceMinutes]);
+
+  const handleOpenAttendanceEdit = (student: Student, existingRec?: AttendanceRecord) => {
+    setEditingAttendanceStudent(student);
+    if (existingRec) {
+      setEditingAttendanceRecord(existingRec);
+      setEditAttStatus(existingRec.status);
+      setEditAttTime(existingRec.time && existingRec.time !== '-' ? existingRec.time : '');
+      setEditAttNotes(existingRec.notes || '');
+      setEditAttReturnTime(existingRec.returnTime || '');
+      setEditAttReturnStatus(existingRec.returnStatus || 'PULANG');
+    } else {
+      const newRec: AttendanceRecord = {
+        id: `att-${journalDate}-${student.id}`,
+        studentId: student.id,
+        studentName: student.name,
+        nisn: student.nisn,
+        className: student.className,
+        date: journalDate,
+        time: '-',
+        status: 'HADIR',
+        method: 'MANUAL',
+        scannedBy: userSession?.fullName || 'Guru Mata Pelajaran',
+        parentNotified: false
+      };
+      setEditingAttendanceRecord(newRec);
+      setEditAttStatus('HADIR');
+      setEditAttTime('');
+      setEditAttNotes('');
+      setEditAttReturnTime('');
+      setEditAttReturnStatus('PULANG');
+    }
+  };
+
+  const handleSaveAttendanceEdit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (editingAttendanceRecord && editingAttendanceStudent) {
+      const recordWithTime: AttendanceRecord = {
+        ...editingAttendanceRecord,
+        time: editAttTime.trim() ? editAttTime.trim() : '-',
+        status: editAttStatus,
+        notes: editAttNotes,
+        returnTime: editAttReturnTime.trim() ? editAttReturnTime.trim() : undefined,
+        returnStatus: editAttReturnTime.trim() ? editAttReturnStatus : undefined,
+      };
+
+      if (onUpdateAttendanceStatus) {
+        onUpdateAttendanceStatus(
+          editingAttendanceRecord.id,
+          editAttStatus,
+          editAttNotes,
+          editAttReturnTime.trim() ? editAttReturnTime.trim() : undefined,
+          editAttReturnTime.trim() ? editAttReturnStatus : undefined,
+          recordWithTime
+        );
+      } else {
+        const currentList = getAttendanceRecords();
+        const existingIdx = currentList.findIndex(r => r.id === editingAttendanceRecord.id);
+        let updatedList: AttendanceRecord[];
+        if (existingIdx >= 0) {
+          updatedList = [...currentList];
+          updatedList[existingIdx] = recordWithTime;
+        } else {
+          updatedList = [...currentList, recordWithTime];
+        }
+        saveAttendanceRecords(updatedList);
+      }
+
+      // Automatically sync student learning journal status if changed to SAKIT, IZIN, or ALPA
+      if (editAttStatus === 'SAKIT' || editAttStatus === 'IZIN') {
+        setStudentRatings(prev => ({
+          ...prev,
+          [editingAttendanceStudent.id]: {
+            status: 'Sakit / Ijin',
+            notes: editAttNotes ? `Presensi: ${editAttStatus} (${editAttNotes})` : `Presensi: ${editAttStatus}`
+          }
+        }));
+      } else if (editAttStatus === 'ALPA') {
+        setStudentRatings(prev => ({
+          ...prev,
+          [editingAttendanceStudent.id]: {
+            status: 'Tidak hadir di kelas',
+            notes: editAttNotes ? `Presensi: ALPA (${editAttNotes})` : 'Presensi: ALPA'
+          }
+        }));
+      }
+
+      setEditingAttendanceRecord(null);
+      setEditingAttendanceStudent(null);
+    }
+  };
 
   // Sync teacherName when logged in user session or teacher list changes
   React.useEffect(() => {
@@ -1294,44 +1416,66 @@ export const LearningJournalView: React.FC<LearningJournalViewProps> = ({
                           <span className="text-xs font-mono font-bold text-slate-400 w-5">
                             #{idx + 1}
                           </span>
-                          <img
-                            src={std.photoUrl}
-                            alt={std.name}
-                            className="w-10 h-10 rounded-xl object-cover ring-2 ring-indigo-200 shadow-xs"
-                          />
+                          <button
+                            type="button"
+                            onClick={() => handleOpenAttendanceEdit(std, studentAttendance)}
+                            title="Klik untuk ubah status kehadiran siswa"
+                            className="cursor-pointer hover:ring-2 hover:ring-indigo-400 rounded-xl transition-all shrink-0"
+                          >
+                            <img
+                              src={std.photoUrl}
+                              alt={std.name}
+                              className="w-10 h-10 rounded-xl object-cover ring-2 ring-indigo-200 shadow-xs"
+                            />
+                          </button>
                           <div>
-                            <div className="flex items-center gap-2">
-                              <h4 className="text-xs font-black text-slate-900">{std.name}</h4>
-                              {studentAttendance?.status === 'SAKIT' && (
-                                <span className="inline-flex items-center gap-1 text-[10px] font-bold bg-rose-100 text-rose-800 px-2 py-0.5 rounded-md border border-rose-200">
-                                  Sakit
-                                </span>
-                              )}
-                              {studentAttendance?.status === 'IZIN' && (
-                                <span className="inline-flex items-center gap-1 text-[10px] font-bold bg-purple-100 text-purple-800 px-2 py-0.5 rounded-md border border-purple-200">
-                                  Izin
-                                </span>
-                              )}
-                              {studentAttendance?.status === 'TERLAMBAT' && (
-                                <span className="inline-flex items-center gap-1 text-[10px] font-bold bg-amber-100 text-amber-800 px-2 py-0.5 rounded-md border border-amber-200">
-                                  Terlambat ({studentAttendance.time})
-                                </span>
-                              )}
-                              {studentAttendance?.status === 'HADIR' && (
-                                <span className="inline-flex items-center gap-1 text-[10px] font-bold bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-md border border-emerald-200">
-                                  Hadir ({studentAttendance.time})
-                                </span>
-                              )}
-                              {studentAttendance?.status === 'ALPA' && (
-                                <span className="inline-flex items-center gap-1 text-[10px] font-bold bg-slate-200 text-slate-700 px-2 py-0.5 rounded-md border border-slate-300">
-                                  Alpa
-                                </span>
-                              )}
-                              {!studentAttendance && (
-                                <span className="inline-flex items-center gap-1 text-[10px] font-bold bg-slate-100 text-slate-600 px-2 py-0.5 rounded-md border border-slate-200">
-                                  Belum Scan
-                                </span>
-                              )}
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <button
+                                type="button"
+                                onClick={() => handleOpenAttendanceEdit(std, studentAttendance)}
+                                title="Klik nama siswa untuk ubah status kehadiran siswa"
+                                className="text-xs font-black text-slate-900 hover:text-indigo-600 hover:underline flex items-center gap-1.5 transition-colors cursor-pointer text-left group"
+                              >
+                                <span>{std.name}</span>
+                                <Edit3 className="w-3 h-3 text-slate-400 group-hover:text-indigo-600 opacity-60 group-hover:opacity-100 transition-opacity" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleOpenAttendanceEdit(std, studentAttendance)}
+                                title="Klik untuk ubah status kehadiran siswa"
+                                className="cursor-pointer transition-transform hover:scale-105"
+                              >
+                                {studentAttendance?.status === 'SAKIT' && (
+                                  <span className="inline-flex items-center gap-1 text-[10px] font-bold bg-rose-100 text-rose-800 px-2 py-0.5 rounded-md border border-rose-200">
+                                    Sakit
+                                  </span>
+                                )}
+                                {studentAttendance?.status === 'IZIN' && (
+                                  <span className="inline-flex items-center gap-1 text-[10px] font-bold bg-purple-100 text-purple-800 px-2 py-0.5 rounded-md border border-purple-200">
+                                    Izin
+                                  </span>
+                                )}
+                                {studentAttendance?.status === 'TERLAMBAT' && (
+                                  <span className="inline-flex items-center gap-1 text-[10px] font-bold bg-amber-100 text-amber-800 px-2 py-0.5 rounded-md border border-amber-200">
+                                    Terlambat ({studentAttendance.time})
+                                  </span>
+                                )}
+                                {studentAttendance?.status === 'HADIR' && (
+                                  <span className="inline-flex items-center gap-1 text-[10px] font-bold bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-md border border-emerald-200">
+                                    Hadir ({studentAttendance.time})
+                                  </span>
+                                )}
+                                {studentAttendance?.status === 'ALPA' && (
+                                  <span className="inline-flex items-center gap-1 text-[10px] font-bold bg-slate-200 text-slate-700 px-2 py-0.5 rounded-md border border-slate-300">
+                                    Alpa
+                                  </span>
+                                )}
+                                {!studentAttendance && (
+                                  <span className="inline-flex items-center gap-1 text-[10px] font-bold bg-slate-100 text-slate-600 px-2 py-0.5 rounded-md border border-slate-200">
+                                    Belum Scan
+                                  </span>
+                                )}
+                              </button>
                             </div>
                             <p className="text-[11px] font-mono text-indigo-600 font-bold">
                               NISN: {std.nisn} • {std.gender === 'L' ? 'Laki-laki' : 'Perempuan'}
@@ -2087,6 +2231,126 @@ export const LearningJournalView: React.FC<LearningJournalViewProps> = ({
                 Ya, Hapus Jurnal
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Ubah Status Kehadiran Siswa dari Jurnal */}
+      {editingAttendanceStudent && editingAttendanceRecord && (
+        <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-xs z-[80] flex items-center justify-center p-4">
+          <div className="bg-white border border-slate-100 rounded-3xl max-w-md w-full p-6 shadow-2xl space-y-4 animate-in fade-in zoom-in-95 duration-150">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <div>
+                <h3 className="text-base font-bold text-slate-800">
+                  Ubah Status Kehadiran Siswa
+                </h3>
+                <p className="text-xs text-indigo-600 font-bold mt-0.5">
+                  {editingAttendanceStudent.name} • {editingAttendanceStudent.className}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setEditingAttendanceRecord(null);
+                  setEditingAttendanceStudent(null);
+                }}
+                className="text-slate-400 hover:text-slate-600 p-1.5 rounded-xl hover:bg-slate-100 transition-colors cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveAttendanceEdit} className="space-y-4">
+              <div className="p-3 bg-indigo-50/70 rounded-2xl border border-indigo-100 text-xs text-indigo-900 flex items-center gap-2">
+                <Calendar className="w-4 h-4 text-indigo-600 shrink-0" />
+                <span>Tanggal Presensi: <strong>{formatDateFormatted(journalDate)}</strong></span>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+                  Pilih Status Kehadiran Masuk
+                </label>
+                <select
+                  value={editAttStatus}
+                  onChange={(e) => setEditAttStatus(e.target.value as AttendanceRecord['status'])}
+                  className="w-full bg-slate-50 border border-slate-200 text-slate-800 rounded-xl px-3 py-2 text-xs focus:ring-2 focus:ring-indigo-500 font-semibold cursor-pointer"
+                >
+                  <option value="HADIR">HADIR (Tepat Waktu)</option>
+                  <option value="TERLAMBAT">TERLAMBAT</option>
+                  <option value="SAKIT">SAKIT</option>
+                  <option value="IZIN">IZIN</option>
+                  <option value="ALPA">ALPA (Tanpa Keterangan)</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1.5 flex items-center justify-between">
+                  <span>Jam Masuk (Format HH:MM)</span>
+                  <span className="text-[10px] text-slate-400 font-normal">Kosongkan jika Belum Scan</span>
+                </label>
+                <input
+                  type="text"
+                  value={editAttTime}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    setEditAttTime(val);
+                    if (val.trim().length >= 4 && (editAttStatus === 'HADIR' || editAttStatus === 'TERLAMBAT')) {
+                      setEditAttStatus(calculateAttendanceStatus(val, schoolProfile));
+                    }
+                  }}
+                  placeholder="Contoh: 06:45 atau kosongkan untuk 'Belum Scan'"
+                  className="w-full bg-slate-50 border border-slate-200 text-slate-800 rounded-xl px-3 py-2 text-xs focus:ring-2 focus:ring-indigo-500 font-mono"
+                />
+                <p className="text-[11px] text-slate-500 mt-1">
+                  Batas Hadir Tepat Waktu: ≤ {cutoffTimeStr} WITA. Lewat dari {cutoffTimeStr} dihitung Terlambat.
+                </p>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+                  Jam Pulang (Format HH:MM, Kosongkan jika belum pulang)
+                </label>
+                <input
+                  type="text"
+                  value={editAttReturnTime}
+                  onChange={(e) => setEditAttReturnTime(e.target.value)}
+                  placeholder="Contoh: 14:00"
+                  className="w-full bg-slate-50 border border-slate-200 text-slate-800 rounded-xl px-3 py-2 text-xs focus:ring-2 focus:ring-indigo-500 font-mono"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+                  Catatan Tambahan (Opsional)
+                </label>
+                <textarea
+                  value={editAttNotes}
+                  onChange={(e) => setEditAttNotes(e.target.value)}
+                  placeholder="Contoh: Surat dokter terlampir, izin acara keluarga..."
+                  rows={3}
+                  className="w-full bg-slate-50 border border-slate-200 text-slate-800 rounded-xl p-3 text-xs focus:ring-2 focus:ring-indigo-500"
+                />
+              </div>
+
+              <div className="flex justify-end gap-2 pt-2 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setEditingAttendanceRecord(null);
+                    setEditingAttendanceStudent(null);
+                  }}
+                  className="bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold px-4 py-2 rounded-xl text-xs cursor-pointer transition-colors"
+                >
+                  Batal
+                </button>
+                <button
+                  type="submit"
+                  className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold px-4 py-2 rounded-xl text-xs shadow-md shadow-indigo-600/20 cursor-pointer transition-all active:scale-95"
+                >
+                  Simpan Perubahan
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

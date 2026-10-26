@@ -219,10 +219,16 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
     timestamp: number;
     reason?: string;
   } | null>(null);
+  const isMobileDevice = useMemo(() => {
+    if (typeof window === 'undefined') return false;
+    return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) || 
+      (window.innerWidth <= 768 && ('ontouchstart' in window || navigator.maxTouchPoints > 0));
+  }, []);
+
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [activeCameraId, setActiveCameraId] = useState<string>('');
-  const [facingMode, setFacingMode] = useState<'environment' | 'user'>('environment');
-  const [isMirrorMode, setIsMirrorMode] = useState<boolean>(false);
+  const [facingMode, setFacingMode] = useState<'environment' | 'user'>(() => isMobileDevice ? 'environment' : 'user');
+  const [isMirrorMode, setIsMirrorMode] = useState<boolean>(!isMobileDevice);
   const [cameras, setCameras] = useState<Array<{ id: string; label: string }>>([]);
 
   const html5QrCodeRef = useRef<Html5Qrcode | null>(null);
@@ -234,38 +240,50 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
     Html5Qrcode.getCameras()
       .then((devices) => {
         if (devices && devices.length > 0) {
-          // Filter out secondary front cameras (such as 'camera 2, facing front')
+          // Filter out secondary front cameras on mobile
           const filtered = devices.filter(d => {
             const labelLower = (d.label || '').toLowerCase();
-            if (labelLower.includes('camera 2') && (labelLower.includes('front') || labelLower.includes('depan'))) {
+            if (isMobileDevice && labelLower.includes('camera 2') && (labelLower.includes('front') || labelLower.includes('depan'))) {
               return false;
             }
             return true;
           });
 
-          // Prioritize back camera ("camera 0, facing back", or any back/environment/rear camera)
-          const backCam = filtered.find(d => {
-            const labelLower = (d.label || '').toLowerCase();
-            return (
-              (labelLower.includes('camera 0') && (labelLower.includes('back') || labelLower.includes('rear') || labelLower.includes('belakang'))) ||
-              labelLower.includes('back') ||
-              labelLower.includes('belakang') ||
-              labelLower.includes('rear') ||
-              labelLower.includes('environment') ||
-              labelLower.includes('camera 0')
-            );
-          }) || filtered.find(d => {
-            const labelLower = (d.label || '').toLowerCase();
-            return !labelLower.includes('front') && !labelLower.includes('depan') && !labelLower.includes('user');
-          }) || filtered[0];
+          // Prioritize back camera for mobile phones, webcam for laptops/desktops
+          const defaultCam = isMobileDevice
+            ? (filtered.find(d => {
+                const labelLower = (d.label || '').toLowerCase();
+                return (
+                  labelLower.includes('camera 0') ||
+                  labelLower.includes('back') ||
+                  labelLower.includes('rear') ||
+                  labelLower.includes('belakang') ||
+                  labelLower.includes('environment')
+                );
+              }) || filtered.find(d => {
+                const labelLower = (d.label || '').toLowerCase();
+                return !labelLower.includes('front') && !labelLower.includes('depan') && !labelLower.includes('user');
+              }) || filtered[0])
+            : (filtered.find(d => {
+                const labelLower = (d.label || '').toLowerCase();
+                return (
+                  labelLower.includes('webcam') ||
+                  labelLower.includes('integrated') ||
+                  labelLower.includes('front') ||
+                  labelLower.includes('user') ||
+                  labelLower.includes('camera')
+                );
+              }) || filtered[0]);
 
           const formattedCameras = filtered.map(d => {
             const labelLower = (d.label || '').toLowerCase();
             let displayLabel = d.label || `Kamera ${d.id}`;
             if (labelLower.includes('camera 0') || labelLower.includes('back') || labelLower.includes('rear') || labelLower.includes('environment') || labelLower.includes('belakang')) {
-              displayLabel = `📷 Kamera Belakang`;
+              displayLabel = isMobileDevice ? `📷 Kamera Belakang` : `📷 Kamera Laptop / Webcam`;
             } else if (labelLower.includes('front') || labelLower.includes('depan') || labelLower.includes('user') || labelLower.includes('camera 1') || labelLower.includes('camera 2')) {
-              displayLabel = `🤳 Kamera Depan`;
+              displayLabel = isMobileDevice ? `🤳 Kamera Depan` : `📷 Webcam Laptop`;
+            } else if (labelLower.includes('integrated') || labelLower.includes('webcam')) {
+              displayLabel = `📷 Webcam Laptop (${d.label})`;
             }
             return {
               id: d.id,
@@ -274,8 +292,8 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
           });
 
           setCameras(formattedCameras);
-          if (backCam) {
-            setActiveCameraId(backCam.id);
+          if (defaultCam) {
+            setActiveCameraId(defaultCam.id);
           }
         }
       })
@@ -286,7 +304,7 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
     return () => {
       stopCamera();
     };
-  }, []);
+  }, [isMobileDevice]);
 
   // Auto-dismiss notification (2s for SUCCESS, 4s for REJECTED / DUPLICATE)
   useEffect(() => {
@@ -297,6 +315,22 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
       return () => clearTimeout(timer);
     }
   }, [scanNotification]);
+
+  const handleRequestPermissionAndStart = async () => {
+    setCameraError(null);
+    try {
+      if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+        // Explicitly trigger user-gesture permission request
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: isMobileDevice ? { facingMode: 'environment' } : true
+        });
+        stream.getTracks().forEach(t => t.stop());
+      }
+    } catch (e: any) {
+      console.warn("Direct getUserMedia test error:", e?.message || e);
+    }
+    await startCamera(activeCameraId, isMobileDevice ? 'environment' : 'user');
+  };
 
   const startCamera = async (cameraId?: string, overrideFacingMode?: 'environment' | 'user') => {
     setCameraError(null);
@@ -324,25 +358,23 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
       const html5QrCode = new Html5Qrcode(qrRegionId);
       html5QrCodeRef.current = html5QrCode;
 
-      const targetFacing = overrideFacingMode || facingMode || 'environment';
+      // On mobile phones, default to 'environment' (rear camera).
+      // On laptops / PCs, default to 'user' (front webcam) or explicit cameraId.
+      const targetFacing = overrideFacingMode || (isMobileDevice ? (facingMode || 'environment') : 'user');
 
-      // Automatically mirror video when front camera is used (selfie mirror view)
-      const selectedCamObj = cameras.find(c => c.id === cameraId);
-      const isSelectedCamFront = selectedCamObj && (
-        selectedCamObj.label.toLowerCase().includes('depan') || 
-        selectedCamObj.label.toLowerCase().includes('front') ||
-        selectedCamObj.label.toLowerCase().includes('user')
-      );
-      const isFront = targetFacing === 'user' || Boolean(isSelectedCamFront);
+      // Mirror mode on laptop webcam or front selfie camera
+      const isFront = targetFacing === 'user' || !isMobileDevice;
       setIsMirrorMode(isFront);
 
-      // On mobile phones, using { facingMode: 'environment' } is the most resilient
-      // and avoids OverconstrainedError from raw device IDs.
-      let cameraConfig: any = { facingMode: targetFacing };
+      // Preferred camera config:
+      // If on mobile: { facingMode: targetFacing }
+      // If on laptop/PC: prefer deviceId if known, else { facingMode: 'user' }
+      let cameraConfig: any = isMobileDevice ? { facingMode: targetFacing } : { facingMode: 'user' };
 
-      // If a specific device was explicitly selected from dropdown and not using standard facingMode
       if (cameraId && cameraId !== 'environment' && cameraId !== 'user') {
         cameraConfig = { deviceId: cameraId };
+      } else if (!isMobileDevice && activeCameraId) {
+        cameraConfig = { deviceId: activeCameraId };
       }
 
       const qrConfig = {
@@ -372,65 +404,69 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
 
         if (isPermDenied) {
           console.warn("Camera permission was not granted by user or browser:", firstErr?.message || firstErr);
-          setCameraError("Izin akses kamera belum diberikan atau ditolak oleh browser. Anda dapat mengizinkan akses kamera di pengaturan browser atau menggunakan simulasi presensi siswa di bawah.");
+          setCameraError(
+            isMobileDevice
+              ? "Izin akses kamera belum diberikan atau ditolak oleh browser HP. Silakan izinkan kamera di pengaturan browser atau gunakan simulasi presensi di bawah."
+              : "Izin akses kamera belum diizinkan oleh browser Laptop. Silakan klik ikon 🔒 Gembok di samping alamat web (URL) browser Anda, ubah izin Kamera menjadi 'Izinkan' (Allow), lalu klik tombol 'Buka Kamera Laptop'."
+          );
           setIsScanning(false);
           return;
         }
 
-        console.warn("Primary camera start failed, attempting facingMode: environment fallback...", firstErr);
-        
-        // Fallback 1: Try pure { facingMode: 'environment' } (Rear Camera)
-        try {
-          await html5QrCode.start(
-            { facingMode: 'environment' },
-            qrConfig,
-            (decodedText) => handleQrCodeDecoded(decodedText),
-            () => {}
-          );
-          setIsScanning(true);
-          setFacingMode('environment');
-          setIsMirrorMode(false);
-          return;
-        } catch (envErr: any) {
-          const isEnvPermDenied = envErr?.name === 'NotAllowedError' || 
-            String(envErr?.message || envErr).toLowerCase().includes('permission denied');
+        console.warn("Primary camera start failed, attempting fallback...", firstErr);
 
-          if (isEnvPermDenied) {
-            console.warn("Camera permission was not granted on fallback:", envErr?.message || envErr);
-            setCameraError("Izin akses kamera belum diberikan atau ditolak oleh browser.");
-            setIsScanning(false);
-            return;
-          }
+        // Fallback strategies tailored for laptop vs mobile
+        const fallbackConfigs = isMobileDevice
+          ? [{ facingMode: 'environment' }, { facingMode: 'user' }]
+          : [
+              { facingMode: 'user' },
+              ...(cameras[0]?.id ? [{ deviceId: cameras[0].id }] : []),
+              { facingMode: 'environment' }
+            ];
 
-          console.warn("Environment camera failed, attempting facingMode: user fallback...", envErr);
-          
-          // Fallback 2: Try pure { facingMode: 'user' } (Front Camera)
+        for (const cfg of fallbackConfigs) {
           try {
             await html5QrCode.start(
-              { facingMode: 'user' },
+              cfg,
               qrConfig,
               (decodedText) => handleQrCodeDecoded(decodedText),
               () => {}
             );
             setIsScanning(true);
-            setFacingMode('user');
-            setIsMirrorMode(true);
+            const resolvedFacing = (cfg as any).facingMode || (isMobileDevice ? 'environment' : 'user');
+            setFacingMode(resolvedFacing);
+            setIsMirrorMode(resolvedFacing === 'user' || !isMobileDevice);
             return;
-          } catch (userErr: any) {
-            console.warn("All camera constraints fallback completed:", userErr?.message || userErr);
-            throw userErr;
+          } catch (fallbackErr: any) {
+            const isFPermDenied = fallbackErr?.name === 'NotAllowedError' || 
+              String(fallbackErr?.message || fallbackErr).toLowerCase().includes('permission denied');
+            if (isFPermDenied) {
+              setCameraError(
+                isMobileDevice
+                  ? "Izin akses kamera belum diberikan di browser HP Anda."
+                  : "Izin akses kamera belum diizinkan di browser Laptop Anda. Klik ikon 🔒 Gembok di samping alamat web browser untuk mengizinkan."
+              );
+              setIsScanning(false);
+              return;
+            }
           }
         }
       }
     } catch (err: any) {
       console.warn("Camera start ended with warning:", err?.message || err);
-      let errMsg = "Gagal membuka kamera. Pastikan izin kamera telah diberikan di browser HP Anda.";
+      let errMsg = isMobileDevice
+        ? "Gagal membuka kamera HP. Pastikan izin kamera telah diberikan di browser."
+        : "Gagal membuka kamera Laptop. Pastikan izin kamera telah diizinkan di browser Anda.";
       if (err?.name === 'NotAllowedError' || err?.message?.includes('Permission') || String(err).includes('Permission denied')) {
-        errMsg = "Izin akses kamera belum diberikan atau ditolak oleh browser. Anda dapat mengizinkan akses kamera di pengaturan browser atau menggunakan fitur simulasi presensi siswa di bawah.";
+        errMsg = isMobileDevice
+          ? "Izin akses kamera belum diberikan atau ditolak oleh browser HP. Silakan izinkan kamera di pengaturan browser atau gunakan simulasi presensi di bawah."
+          : "Izin akses kamera belum diizinkan oleh browser Laptop. Silakan klik ikon 🔒 Gembok di samping alamat web (URL) browser Anda, ubah izin Kamera menjadi 'Izinkan' (Allow), lalu klik tombol 'Buka Kamera Laptop'.";
       } else if (err?.name === 'NotFoundError' || err?.name === 'DevicesNotFoundError') {
-        errMsg = "Tidak ada perangkat kamera yang terdeteksi di HP ini.";
+        errMsg = isMobileDevice
+          ? "Tidak ada perangkat kamera yang terdeteksi di HP ini."
+          : "Tidak ada webcam yang terdeteksi di laptop ini.";
       } else if (err?.name === 'NotReadableError') {
-        errMsg = "Kamera sedang digunakan oleh aplikasi lain. Tutup aplikasi kamera lain lalu coba lagi.";
+        errMsg = "Kamera/Webcam sedang digunakan oleh aplikasi lain (seperti Zoom/Meet). Tutup aplikasi lain lalu coba lagi.";
       }
       setCameraError(errMsg);
       setIsScanning(false);
@@ -909,34 +945,6 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
         </button>
       </div>
 
-      {scanMode === 'PULANG' && (
-        <div className="bg-emerald-50 border-2 border-emerald-300 text-emerald-950 p-4 rounded-2xl text-xs font-semibold flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-xs animate-fadeIn">
-          <div className="flex items-start gap-2.5">
-            <Home className="w-5 h-5 text-emerald-600 shrink-0 mt-0.5" />
-            <div>
-              <div className="flex items-center gap-2 flex-wrap">
-                <span className="font-black text-emerald-900 text-sm">
-                  🏠 MODE SCAN PULANG DIAKTIFKAN
-                </span>
-                <span className="bg-emerald-200 text-emerald-900 text-[10px] px-2 py-0.5 rounded-full font-black border border-emerald-300">
-                  {isTodayActiveDay ? `Hari Aktif Sekolah: ${todayName}` : `Hari: ${todayName}`}
-                </span>
-                <span className="bg-emerald-700 text-white text-[10px] px-2.5 py-0.5 rounded-full font-black">
-                  Mulai Jam Pulang: {todayEndTimeStr} WITA
-                </span>
-              </div>
-              <p className="text-emerald-800 text-xs mt-1 leading-relaxed">
-                Waktu pemindaian scan pulang disesuaikan dengan jam pulang sekolah hari <strong>{todayName} ({todayEndTimeStr} WITA)</strong>. Siswa yang memindai QR Code akan tercatat status kepulangannya ({isMasukClosedNow ? 'Pulang Tepat Waktu' : `Pulang Lebih Awal/Cepat sebelum ${todayEndTimeStr} WITA`}) beserta jam scan pulang secara otomatis ke database Cloud.
-              </p>
-            </div>
-          </div>
-          <div className="bg-white/90 border border-emerald-200 px-3 py-2 rounded-xl shrink-0 text-center shadow-2xs">
-            <span className="text-[10px] text-slate-500 uppercase tracking-wider block font-bold">Jadwal Pulang {todayName}</span>
-            <span className="text-sm font-mono font-black text-emerald-800">{todayEndTimeStr} WITA</span>
-          </div>
-        </div>
-      )}
-
       {scanMode === 'MASUK' && isMasukClosedNow && (
         <div className="bg-rose-50 border-2 border-rose-200 text-rose-950 p-4 rounded-2xl text-xs font-semibold flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-xs animate-fadeIn">
           <div className="flex items-start gap-2.5">
@@ -1193,57 +1201,73 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
                   </div>
                   <h3 className="text-white font-bold text-base">Kamera Sedang Nonaktif</h3>
                   <p className="text-slate-400 text-xs mt-1 max-w-xs leading-relaxed">
-                    Klik tombol "Aktifkan Kamera Sekarang" di bawah ini atau uji coba dengan menekan daftar tombol simulasi siswa di bawah.
+                    {isMobileDevice 
+                      ? 'Klik tombol "Aktifkan Kamera Sekarang" di bawah ini atau gunakan daftar simulasi siswa di bawah.'
+                      : 'Klik tombol "Aktifkan Kamera Laptop / Webcam" di bawah ini atau gunakan daftar simulasi siswa di bawah.'}
                   </p>
                   <button
-                    onClick={() => startCamera()}
+                    onClick={() => handleRequestPermissionAndStart()}
                     className="mt-4 bg-indigo-600 hover:bg-indigo-500 text-white font-bold px-4 py-2.5 rounded-xl text-xs flex items-center gap-2 shadow-md cursor-pointer"
                   >
                     <Camera className="w-4 h-4" />
-                    Aktifkan Kamera Sekarang
+                    {isMobileDevice ? 'Aktifkan Kamera Sekarang' : 'Aktifkan Kamera Laptop / Webcam'}
                   </button>
                 </div>
               )}
 
               {cameraError && (
                 <div className="absolute inset-0 flex flex-col items-center justify-center p-5 text-center bg-slate-900/95 z-10 overflow-y-auto">
-                  <div className="w-12 h-12 rounded-2xl bg-rose-500/20 text-rose-400 flex items-center justify-center mb-2.5 ring-2 ring-rose-500/30">
-                    <AlertTriangle className="w-6 h-6" />
+                  <div className="w-12 h-12 rounded-2xl bg-amber-500/20 text-amber-400 flex items-center justify-center mb-2.5 ring-2 ring-amber-500/30">
+                    <Camera className="w-6 h-6" />
                   </div>
-                  <h4 className="text-white font-bold text-sm">Gagal Mengakses Kamera</h4>
-                  <p className="text-rose-200 text-xs font-medium max-w-xs mt-1 leading-relaxed">{cameraError}</p>
+                  <h4 className="text-white font-bold text-sm">
+                    {isMobileDevice ? 'Gagal Mengakses Kamera HP' : 'Kamera Laptop Belum Diizinkan'}
+                  </h4>
+                  <p className="text-slate-200 text-xs font-medium max-w-sm mt-1 leading-relaxed">{cameraError}</p>
 
                   {/* Actions to recover */}
-                  <div className="flex flex-col sm:flex-row items-center gap-2 mt-4 w-full max-w-xs">
+                  <div className="flex flex-col sm:flex-row items-center gap-2 mt-4 w-full max-w-sm">
                     <button
-                      onClick={() => startCamera(undefined, 'environment')}
-                      className="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-bold px-3 py-2 rounded-xl text-xs flex items-center justify-center gap-1.5 shadow-md cursor-pointer transition-all"
+                      onClick={() => handleRequestPermissionAndStart()}
+                      className="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-bold px-3 py-2.5 rounded-xl text-xs flex items-center justify-center gap-1.5 shadow-md cursor-pointer transition-all"
                     >
-                      <Camera className="w-3.5 h-3.5" />
-                      Coba Buka Kamera Belakang
+                      <Camera className="w-4 h-4" />
+                      {isMobileDevice ? 'Coba Buka Kamera Belakang' : '📷 Buka Kamera Laptop / Webcam'}
                     </button>
-                    <button
-                      onClick={() => startCamera(undefined, 'user')}
-                      className="w-full bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-semibold px-3 py-2 rounded-xl text-xs flex items-center justify-center gap-1.5 cursor-pointer transition-all"
-                    >
-                      <SwitchCamera className="w-3.5 h-3.5" />
-                      Coba Kamera Depan
-                    </button>
+                    {isMobileDevice && (
+                      <button
+                        onClick={() => startCamera(undefined, 'user')}
+                        className="w-full bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-semibold px-3 py-2.5 rounded-xl text-xs flex items-center justify-center gap-1.5 cursor-pointer transition-all"
+                      >
+                        <SwitchCamera className="w-4 h-4" />
+                        Coba Kamera Depan
+                      </button>
+                    )}
                   </div>
 
                   <button
                     type="button"
                     onClick={() => setCameraError(null)}
-                    className="mt-2 w-full max-w-xs bg-white/10 hover:bg-white/20 text-slate-300 font-semibold px-3 py-1.5 rounded-xl text-xs flex items-center justify-center gap-1.5 cursor-pointer transition-all"
+                    className="mt-2.5 w-full max-w-sm bg-white/10 hover:bg-white/20 text-slate-300 font-semibold px-3 py-2 rounded-xl text-xs flex items-center justify-center gap-1.5 cursor-pointer transition-all"
                   >
                     Tutup Pesan & Gunakan Simulasi Klik di Bawah
                   </button>
 
-                  <div className="mt-3 bg-slate-800/80 border border-slate-700/60 rounded-xl p-2.5 text-[11px] text-slate-300 max-w-xs text-left">
-                    <p className="font-semibold text-amber-400 mb-0.5">💡 Tips Izin Kamera HP:</p>
-                    <p className="leading-snug text-slate-300">
-                      Jika muncul dialog browser, pilih <strong>"Izinkan" (Allow)</strong>. Jika terblokir, klik ikon gembok/pengaturan di samping alamat web di atas untuk mengaktifkan izin Kamera.
+                  <div className="mt-3.5 bg-slate-800/90 border border-slate-700/80 rounded-xl p-3 text-[11px] text-slate-300 max-w-sm text-left">
+                    <p className="font-bold text-amber-400 mb-1 flex items-center gap-1">
+                      💡 {isMobileDevice ? 'Tips Izin Kamera HP:' : 'Panduan Izin Kamera Laptop (Chrome / Edge / Firefox):'}
                     </p>
+                    {isMobileDevice ? (
+                      <p className="leading-snug text-slate-300">
+                        Jika muncul dialog browser, pilih <strong>"Izinkan" (Allow)</strong>. Jika terblokir, klik ikon gembok/pengaturan di samping alamat web di atas untuk mengaktifkan izin Kamera.
+                      </p>
+                    ) : (
+                      <div className="space-y-1.5 text-slate-300 leading-snug">
+                        <p>1. Lihat bagian atas browser Anda, klik <strong>ikon 🔒 Gembok</strong> atau <strong>Setelan Situs</strong> di sebelah kiri alamat website (URL).</p>
+                        <p>2. Pada opsi <strong>Kamera (Camera)</strong>, ubah status dari <em>Blokir</em> menjadi <strong>"Izinkan" (Allow)</strong>.</p>
+                        <p>3. Muat ulang halaman (tekan <strong>F5 / Refresh</strong>), lalu klik tombol <strong>"Buka Kamera Laptop"</strong> di atas.</p>
+                      </div>
+                    )}
                   </div>
                 </div>
               )}

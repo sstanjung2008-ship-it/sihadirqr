@@ -205,7 +205,7 @@ export const CharacterPointsView: React.FC<CharacterPointsViewProps> = ({
         videoRef.current.srcObject = stream;
       }
     } catch (err: any) {
-      console.error("Camera access error:", err);
+      console.warn("Camera access note:", err?.message || err);
       try {
         const fallbackStream = await navigator.mediaDevices.getUserMedia({ video: true });
         mediaStreamRef.current = fallbackStream;

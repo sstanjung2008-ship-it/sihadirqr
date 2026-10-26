@@ -501,12 +501,20 @@ export default function App() {
       }
     };
 
+    const handleStorageEvent = (e: StorageEvent) => {
+      if (!e.key || e.key.includes('sihadir_')) {
+        refreshDataFromStorage();
+      }
+    };
+
     window.addEventListener('sihadir_storage_updated', refreshDataFromStorage);
+    window.addEventListener('storage', handleStorageEvent);
     window.addEventListener('sihadir_network_toast', handleNetworkToast);
 
     return () => {
       isCancelled = true;
       window.removeEventListener('sihadir_storage_updated', refreshDataFromStorage);
+      window.removeEventListener('storage', handleStorageEvent);
       window.removeEventListener('sihadir_network_toast', handleNetworkToast);
     };
   }, [currentRole, refreshDataFromStorage]);

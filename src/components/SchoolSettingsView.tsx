@@ -1088,7 +1088,7 @@ export const SchoolSettingsView: React.FC<SchoolSettingsViewProps> = ({
 
       {saveSuccess && (
         <div className="bg-emerald-50 border border-emerald-200 text-emerald-800 p-3.5 rounded-2xl text-xs font-bold text-center shadow-sm animate-fadeIn">
-          ✓ Pengaturan profil sekolah berhasil disimpan! Kartu Pelajar Digital & Laporan secara otomatis disesuaikan.
+          ✓ Pengaturan profil sekolah & jam pulang berhasil disimpan dan disinkronkan langsung ke Cloud Firestore! Pengaturan otomatis aktif di seluruh perangkat presensi.
         </div>
       )}
 

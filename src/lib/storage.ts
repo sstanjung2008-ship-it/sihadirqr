@@ -2836,8 +2836,72 @@ export async function forceDownloadAllFromCloud(): Promise<{ success: boolean; e
   }
 }
 
+let profileSnapshotUnsubscribe: (() => void) | null = null;
+
+/**
+ * Mendengarkan perubahan dokumen profil sekolah & jam pulang secara real-time dari Cloud Firestore.
+ * Memastikan bila admin mengubah jam pulang/hari aktif di satu perangkat, SELURUH perangkat scanner
+ * dan portal seketika menerima pembaruan jam pulang tanpa perlu me-refresh halaman.
+ */
+export function listenToCloudSchoolProfile(): void {
+  if (typeof window === 'undefined') return;
+  if (profileSnapshotUnsubscribe) return;
+
+  try {
+    const profileDocRef = doc(db, 'sihadir_app_data', KEYS.PROFILE);
+    profileSnapshotUnsubscribe = onSnapshot(profileDocRef, (snap) => {
+      if (!snap.exists()) return;
+      const payload = snap.data();
+      if (!payload || !payload.data) return;
+
+      try {
+        const cloudProfile: SchoolProfile = typeof payload.data === 'string' ? JSON.parse(payload.data) : payload.data;
+        const localProfile = getSchoolProfile();
+
+        const cloudDaily = JSON.stringify(cloudProfile.dailyEndTimes || {});
+        const localDaily = JSON.stringify(localProfile.dailyEndTimes || {});
+        const cloudActive = JSON.stringify(cloudProfile.activeDays || []);
+        const localActive = JSON.stringify(localProfile.activeDays || []);
+
+        const isDifferent =
+          cloudProfile.endTime !== localProfile.endTime ||
+          cloudProfile.startTime !== localProfile.startTime ||
+          cloudProfile.lateToleranceMinutes !== localProfile.lateToleranceMinutes ||
+          cloudDaily !== localDaily ||
+          cloudActive !== localActive ||
+          cloudProfile.parentPortalLoginEnabled !== localProfile.parentPortalLoginEnabled ||
+          cloudProfile.parentPortalForceLogoutTimestamp !== localProfile.parentPortalForceLogoutTimestamp;
+
+        if (isDifferent) {
+          const merged = mergeSchoolProfile(localProfile, cloudProfile);
+          const mergedStr = JSON.stringify(merged);
+          const cloudTs = Number(payload.updatedAt) || Date.now();
+          safeSetLocalStorage(KEYS.PROFILE, mergedStr);
+          safeSetLocalStorage(KEYS.PROFILE + '_updatedAt', String(cloudTs));
+          lastSavedStringCache[KEYS.PROFILE] = mergedStr;
+          notifyStorageUpdated(true);
+        }
+      } catch (err) {
+        console.warn('[Cloud Profile Listener] Gagal memproses update profil dari Cloud:', err);
+      }
+    }, (err) => {
+      console.warn('[Cloud Profile Listener] Firestore onSnapshot warning:', err);
+    });
+
+    if (profileSnapshotUnsubscribe) {
+      activeUnsubscribes.push(profileSnapshotUnsubscribe);
+    }
+  } catch (err) {
+    console.warn('[Cloud Profile Listener] Gagal mendaftarkan listener profil Firestore:', err);
+  }
+}
+
 // Stop and unsubscribe all active Firestore Realtime listeners
 export function stopFirestoreRealtimeSync(): void {
+  if (profileSnapshotUnsubscribe) {
+    try { profileSnapshotUnsubscribe(); } catch {}
+    profileSnapshotUnsubscribe = null;
+  }
   if (activeUnsubscribes.length > 0) {
     activeUnsubscribes.forEach(unsub => {
       try { unsub(); } catch {}
@@ -3084,6 +3148,9 @@ export function initFirestoreAppSession(role?: UserRole): Promise<{ success: boo
       localStorage.removeItem('sihadir_wa_logs');
     } catch {}
   }
+
+  // Daftarkan listener real-time profil sekolah agar jam pulang & hari aktif sinkron otomatis ke seluruh perangkat
+  listenToCloudSchoolProfile();
 
   // Jalankan pembacaan data Cloud berkecepatan tinggi saat membuka awal aplikasi / reload
   return initialLoadSyncFromCloud(currentRole).then((res) => {
@@ -3429,7 +3496,8 @@ export function saveSchoolProfile(profile: SchoolProfile): void {
   const dataStr = JSON.stringify(profile);
   safeSetLocalStorage(KEYS.PROFILE, dataStr);
   safeSetLocalStorage(KEYS.PROFILE + '_updatedAt', String(now));
-  notifyStorageUpdated();
+  lastSavedStringCache[KEYS.PROFILE] = dataStr;
+  notifyStorageUpdated(true);
   syncToCloud(KEYS.PROFILE, profile, true, now);
 }
 

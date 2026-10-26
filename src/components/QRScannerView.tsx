@@ -34,7 +34,8 @@ import {
   XCircle,
   FlipHorizontal,
   Zap,
-  Info
+  Info,
+  Lock
 } from 'lucide-react';
 
 interface QRScannerViewProps {
@@ -81,74 +82,82 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
   const handleManualFlush = async () => {
     await flushAttendanceScanQueue(true);
   };
-  const todayName = DAY_NAMES[new Date().getDay()];
+  const [currentTime, setCurrentTime] = useState<Date>(() => new Date());
+
+  // Real-time tick setiap 1 detik agar batas jam pulang dan penguncian tombol berganti presisi seketika
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setCurrentTime(new Date());
+    }, 1000);
+    return () => clearInterval(timer);
+  }, []);
+
+  const todayName = DAY_NAMES[currentTime.getDay()];
   const todayEndTimeStr = getSchoolCheckoutTimeForDay(schoolProfile, todayName);
   const autoAlpaTimeStr = schoolProfile.autoAlpaTime || '08:30';
   const startTimeStr = schoolProfile.startTime || '07:00';
 
   /**
-   * Logika Auto Switch Mode Scan:
-   * - Mode MASUK : Mulai pukul 01:00 WITA s.d sebelum waktu jam pulang sekolah hari ini (todayEndTimeStr)
-   * - Mode PULANG: Mulai waktu jam pulang sekolah hari ini s.d pukul 00:59 WITA (sebelum 01:00 WITA)
-   * - Mengikuti pengaturan jam pulang sekolah per hari (dailyEndTimes[day] atau fallback endTime)
+   * Logika Jam Pulang Sekolah Harian:
+   * - Parse jam pulang hari ini (todayEndTimeStr, misal Senin-Kamis 15:00, Jumat 11:30, Sabtu 13:00)
+   * - Waktu reset mode masuk kembali pada 01:00 WITA dini hari
    */
+  const [eH, eM] = todayEndTimeStr.split(':').map(Number);
+  const endMinutes = (isNaN(eH) ? 15 : eH) * 60 + (isNaN(eM) ? 0 : eM);
+  const currentMinutes = currentTime.getHours() * 60 + currentTime.getMinutes();
+  const resetMasukMinutes = 1 * 60; // 01:00 WITA
+
+  // Apakah waktu saat ini masih SEBELUM jam pulang sekolah hari ini (01:00 s.d sebelum jam pulang)?
+  const isBeforeEndTime = currentMinutes >= resetMasukMinutes && currentMinutes < endMinutes;
+
+  // Apakah waktu saat ini SUDAH MEMASUKI jam pulang sekolah (jam pulang s.d 00:59)?
+  const isMasukClosedNow = currentMinutes >= endMinutes || currentMinutes < resetMasukMinutes;
+
   const getAutoScanMode = useCallback((checkTime: Date = new Date()): 'MASUK' | 'PULANG' => {
-    const currentMinutes = checkTime.getHours() * 60 + checkTime.getMinutes();
+    const mins = checkTime.getHours() * 60 + checkTime.getMinutes();
     const day = DAY_NAMES[checkTime.getDay()];
-    const departureTime = getSchoolCheckoutTimeForDay(schoolProfile, day);
-    
-    // Parse Jam Pulang Sekolah untuk hari tersebut (default 15:00, Jumat: 11:30, Sabtu: 13:00)
-    const [eH, eM] = departureTime.split(':').map(Number);
-    const endMinutes = (isNaN(eH) ? 15 : eH) * 60 + (isNaN(eM) ? 0 : eM);
+    const depTime = getSchoolCheckoutTimeForDay(schoolProfile, day);
+    const [h, m] = depTime.split(':').map(Number);
+    const endMins = (isNaN(h) ? 15 : h) * 60 + (isNaN(m) ? 0 : m);
+    const resetMins = 60; // 01:00 WITA
 
-    // Waktu reset kembali ke scan masuk pada 01:00 WITA (1 * 60 = 60 menit)
-    const resetMasukMinutes = 1 * 60; // 01:00 WITA
-
-    // Jika waktu >= jam pulang atau waktu dini hari sebelum 01:00 (00:00 - 00:59) -> mode PULANG
-    if (currentMinutes >= endMinutes || currentMinutes < resetMasukMinutes) {
+    if (mins >= endMins || mins < resetMins) {
       return 'PULANG';
     }
-    // Jika waktu antara 01:00 WITA s.d sebelum jam pulang -> mode MASUK
     return 'MASUK';
   }, [schoolProfile]);
 
   const checkIsMasukScanClosed = useCallback((checkTime: Date = new Date()) => {
-    // Mode Scan Masuk DITUTUP berdasarkan Jam Pulang sekolah hari ini (todayEndTimeStr)
-    const currentMinutes = checkTime.getHours() * 60 + checkTime.getMinutes();
+    const mins = checkTime.getHours() * 60 + checkTime.getMinutes();
     const day = DAY_NAMES[checkTime.getDay()];
-    const departureTime = getSchoolCheckoutTimeForDay(schoolProfile, day);
-    const [eH, eM] = departureTime.split(':').map(Number);
-    const endMinutes = (isNaN(eH) ? 15 : eH) * 60 + (isNaN(eM) ? 0 : eM);
-
-    return currentMinutes >= endMinutes;
+    const depTime = getSchoolCheckoutTimeForDay(schoolProfile, day);
+    const [h, m] = depTime.split(':').map(Number);
+    const endMins = (isNaN(h) ? 15 : h) * 60 + (isNaN(m) ? 0 : m);
+    return mins >= endMins || mins < 60;
   }, [schoolProfile]);
 
-  const [scanMode, setScanMode] = useState<'MASUK' | 'PULANG'>(() => getAutoScanMode());
+  const [scanMode, setScanMode] = useState<'MASUK' | 'PULANG'>(() => (isBeforeEndTime ? 'MASUK' : 'PULANG'));
   const [isManualOverride, setIsManualOverride] = useState<boolean>(false);
   const [isScanning, setIsScanning] = useState<boolean>(false);
   const [simClassFilter, setSimClassFilter] = useState<string>('ALL');
   const [simSearchQuery, setSimSearchQuery] = useState<string>('');
 
-  // Auto switch timer yang memantau waktu secara realtime dan beralih otomatis
+  // Auto switch timer yang memantau waktu secara realtime dan mengunci/membuka tombol
   useEffect(() => {
-    const checkAutoMode = () => {
-      const nowTime = new Date();
-      const isClosed = checkIsMasukScanClosed(nowTime);
-      const autoMode = getAutoScanMode(nowTime);
-
-      // Jika sudah melewati jam pulang sekolah, paksa mode PULANG dan kunci scan masuk
-      if (isClosed) {
-        setScanMode('PULANG');
-        setIsManualOverride(false);
-      } else if (!isManualOverride) {
-        setScanMode(autoMode);
+    // 1. Kritis: Bila sebelum jam pulang hari ini, paksa mode MASUK dan batalkan manual override
+    if (isBeforeEndTime) {
+      if (scanMode !== 'MASUK') {
+        setScanMode('MASUK');
       }
-    };
-
-    checkAutoMode();
-    const interval = setInterval(checkAutoMode, 3000); // Periksa setiap 3 detik
-    return () => clearInterval(interval);
-  }, [getAutoScanMode, checkIsMasukScanClosed, isManualOverride]);
+      setIsManualOverride(false);
+    } else if (isMasukClosedNow) {
+      // 2. Bila telah memasuki jam pulang sekolah, otomatis aktifkan mode PULANG
+      if (scanMode !== 'PULANG') {
+        setScanMode('PULANG');
+      }
+      setIsManualOverride(false);
+    }
+  }, [isBeforeEndTime, isMasukClosedNow, scanMode]);
 
   const classList = useMemo(() => {
     if (classes && classes.length > 0) {
@@ -184,7 +193,7 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
     });
   }, [students, simClassFilter, simSearchQuery]);
 
-  const now = new Date();
+  const now = currentTime;
   const activeDays = schoolProfile.activeDays || ['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
   const isTodayActiveDay = activeDays.includes(todayName);
 
@@ -198,7 +207,6 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
   });
 
   const isAutoAlpaActive = schoolProfile.autoAlpaEnabled !== false && isTodayActiveDay && !todayHoliday;
-  const isMasukClosedNow = checkIsMasukScanClosed(now);
 
   const [lastScannedResult, setLastScannedResult] = useState<{
     student: Student;
@@ -580,7 +588,52 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
 
     if (scanMode === 'PULANG') {
       // MODE SCAN PULANG
-      // Check if student has ALREADY scanned for PULANG today
+      // 1. Validasi mutlak: Jika waktu saat ini masih sebelum jam pulang sekolah hari ini, tolak presensi pulang
+      const dayNowName = DAY_NAMES[now.getDay()];
+      const dayEndTimeStr = getSchoolCheckoutTimeForDay(schoolProfile, dayNowName);
+      const [endH, endM] = dayEndTimeStr.split(':').map(Number);
+      const endMins = (endH || 15) * 60 + (endM || 0);
+      const currMins = now.getHours() * 60 + now.getMinutes();
+      const resetMins = 60; // 01:00 WITA
+      const isBeforeCheckoutTime = currMins >= resetMins && currMins < endMins;
+
+      if (isBeforeCheckoutTime) {
+        playScanSound('ERROR');
+        const rejectionReason = `Scan Pulang DITOLAK! Waktu saat ini (${timeStr.slice(0, 5)} WITA) belum memasuki jam kepulangan sekolah (${dayEndTimeStr} WITA). Tombol & mode scan pulang dinonaktifkan hingga jam pulang tiba.`;
+        setScanNotification({
+          type: 'REJECTED',
+          badgeText: '🔒 SCAN PULANG TERKUNCI',
+          title: 'Belum Memasuki Jam Pulang Sekolah',
+          studentName: student.name,
+          className: student.className,
+          time: timeStr.slice(0, 5),
+          mode: 'PULANG',
+          reason: rejectionReason,
+          timestamp: Date.now()
+        });
+        setLastScannedResult({
+          student,
+          record: existingRecord || {
+            id: `att-rejected-${Date.now()}`,
+            studentId: student.id,
+            studentName: student.name,
+            nisn: student.nisn,
+            className: student.className,
+            date: dateStr,
+            time: '-',
+            status: 'HADIR',
+            method: 'QR_SCAN',
+            scannedBy: 'Pos Scanner Utama',
+            parentNotified: false
+          },
+          mode: 'PULANG',
+          isRejected: true,
+          rejectionReason: rejectionReason
+        });
+        return;
+      }
+
+      // 2. Check if student has ALREADY scanned for PULANG today
       if (existingRecord && existingRecord.returnTime && existingRecord.returnTime !== '-') {
         playScanSound('ERROR');
 
@@ -615,14 +668,7 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
 
       playScanSound('PULANG');
 
-      const dayNowName = DAY_NAMES[now.getDay()];
-      const dayEndTimeStr = getSchoolCheckoutTimeForDay(schoolProfile, dayNowName);
-      const [endH, endM] = dayEndTimeStr.split(':').map(Number);
-      const endMinutes = (endH || 15) * 60 + (endM || 0);
-      const currentMinutes = now.getHours() * 60 + now.getMinutes();
-      const isBeforeEndTime = currentMinutes < endMinutes;
-
-      const returnStatus = isBeforeEndTime ? 'PULANG_CEPAT' : 'PULANG';
+      const returnStatus = 'PULANG';
 
       const record: AttendanceRecord = {
         id: existingRecord ? existingRecord.id : `att-${Date.now()}-${student.id}`,
@@ -638,9 +684,7 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
         parentNotified: false,
         returnTime: timeStr,
         returnStatus,
-        returnScannedBy: isBeforeEndTime 
-          ? `Pos Scanner Utama (Pulang Cepat sebelum ${dayEndTimeStr})` 
-          : 'Pos Scanner Utama (Pulang)',
+        returnScannedBy: 'Pos Scanner Utama (Pulang)',
       };
 
       onAddAttendance(record);
@@ -654,17 +698,13 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
 
       setScanNotification({
         type: 'SUCCESS',
-        badgeText: isBeforeEndTime ? '🏠 SCAN PULANG LEBIH AWAL' : '✅ QR CODE PULANG BERHASIL!',
-        title: isBeforeEndTime 
-          ? `Presensi Pulang Cepat Tercatat (Sebelum ${dayEndTimeStr} WITA)` 
-          : `Presensi Kepulangan Berhasil Dicatat (Jam Pulang: ${dayEndTimeStr} WITA)`,
+        badgeText: '✅ QR CODE PULANG BERHASIL!',
+        title: `Presensi Kepulangan Berhasil Dicatat (Jam Pulang: ${dayEndTimeStr} WITA)`,
         studentName: student.name,
         className: student.className,
         time: timeStr,
         mode: 'PULANG',
-        reason: isBeforeEndTime
-          ? `Siswa ${student.name} tercatat pulang lebih awal sebelum jam pulang sekolah (${dayEndTimeStr} WITA). Status: PULANG_CEPAT.`
-          : `Siswa ${student.name} tercatat presensi pulang tepat waktu sesuai jadwal kepulangan hari ${dayNowName} (${dayEndTimeStr} WITA).`,
+        reason: `Siswa ${student.name} tercatat presensi pulang tepat waktu sesuai jadwal kepulangan hari ${dayNowName} (${dayEndTimeStr} WITA).`,
         timestamp: Date.now()
       });
     } else {
@@ -884,6 +924,7 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
       <div className="bg-white border border-slate-200/80 rounded-2xl p-2 shadow-xs flex flex-col sm:flex-row items-center gap-2">
         <button
           type="button"
+          disabled={isMasukClosedNow}
           onClick={() => {
             if (isMasukClosedNow) {
               setScanMode('PULANG');
@@ -894,7 +935,7 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
                 title: 'Mode Scan Masuk Tidak Dapat Digunakan',
                 studentName: '-',
                 className: '-',
-                time: new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }),
+                time: currentTime.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }),
                 mode: 'MASUK',
                 reason: `Mode Scan Masuk telah ditutup karena sudah melewati jam pulang sekolah (${todayEndTimeStr} WITA). Sistem otomatis beralih ke Mode Scan Pulang.`,
                 timestamp: Date.now()
@@ -904,45 +945,107 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
             setScanMode('MASUK');
             setIsManualOverride(true);
           }}
-          className={`flex-1 w-full py-3 px-4 rounded-xl font-extrabold text-xs flex items-center justify-center gap-2 transition-all cursor-pointer ${
+          className={`flex-1 w-full py-3 px-4 rounded-xl font-extrabold text-xs flex items-center justify-center gap-2 transition-all ${
             scanMode === 'MASUK'
               ? 'bg-amber-500 text-white shadow-md shadow-amber-500/20'
               : isMasukClosedNow
-                ? 'bg-slate-100 text-slate-400 border border-slate-200 hover:bg-slate-200/60'
-                : 'bg-slate-50 text-slate-600 hover:bg-slate-100 border border-slate-200/60'
+                ? 'bg-slate-100 text-slate-400 border border-slate-200 cursor-not-allowed opacity-60'
+                : 'bg-slate-50 text-slate-600 hover:bg-slate-100 border border-slate-200/60 cursor-pointer'
           }`}
+          title={isMasukClosedNow ? `Mode Scan Masuk ditutup karena sudah lewat jam pulang (${todayEndTimeStr} WITA)` : 'Mode Scan Masuk (Pagi)'}
         >
           <Sun className={`w-4 h-4 ${isMasukClosedNow ? 'text-slate-400' : 'text-amber-200'}`} />
           <span>☀️ MODE SCAN MASUK (TIBA SEKOLAH / PAGI)</span>
-          {isMasukClosedNow && (
+          {isMasukClosedNow ? (
             <span className="bg-rose-100 text-rose-700 border border-rose-200 text-[10px] px-2 py-0.5 rounded-full font-black ml-1">
               🔒 TUTUP ({todayEndTimeStr} WITA)
             </span>
+          ) : (
+            scanMode === 'MASUK' && (
+              <span className="bg-amber-600 text-amber-100 border border-amber-400 text-[10px] px-2 py-0.5 rounded-full font-black ml-1">
+                ✅ AKTIF
+              </span>
+            )
           )}
         </button>
 
         <button
           type="button"
+          disabled={isBeforeEndTime}
           onClick={() => {
+            if (isBeforeEndTime) {
+              setScanNotification({
+                type: 'REJECTED',
+                badgeText: '🔒 SCAN PULANG TERKUNCI',
+                title: 'Mode Scan Pulang Belum Dibuka',
+                studentName: '-',
+                className: '-',
+                time: currentTime.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }),
+                mode: 'PULANG',
+                reason: `Mode Scan Pulang dinonaktifkan sebelum jam pulang sekolah! Jam kepulangan hari ini (${todayName}) adalah pukul ${todayEndTimeStr} WITA. Tombol otomatis aktif saat jam pulang tiba.`,
+                timestamp: Date.now()
+              });
+              return;
+            }
             setScanMode('PULANG');
             setIsManualOverride(true);
           }}
-          className={`flex-1 w-full py-3 px-4 rounded-xl font-extrabold text-xs flex items-center justify-center gap-2 transition-all cursor-pointer ${
-            scanMode === 'PULANG'
-              ? 'bg-emerald-600 text-white shadow-md shadow-emerald-600/20 ring-2 ring-emerald-400/50'
-              : 'bg-slate-50 text-slate-600 hover:bg-slate-100 border border-slate-200/60'
+          className={`flex-1 w-full py-3 px-4 rounded-xl font-extrabold text-xs flex items-center justify-center gap-2 transition-all ${
+            isBeforeEndTime
+              ? 'bg-slate-100 text-slate-400 border border-slate-200 cursor-not-allowed opacity-60'
+              : scanMode === 'PULANG'
+                ? 'bg-emerald-600 text-white shadow-md shadow-emerald-600/20 ring-2 ring-emerald-400/50 cursor-pointer'
+                : 'bg-slate-50 text-slate-600 hover:bg-slate-100 border border-slate-200/60 cursor-pointer'
           }`}
+          title={isBeforeEndTime ? `Mode Scan Pulang terkunci sebelum jam kepulangan hari ini (${todayEndTimeStr} WITA)` : 'Mode Scan Pulang (Sore)'}
         >
-          <Home className={`w-4 h-4 ${scanMode === 'PULANG' ? 'text-emerald-100' : 'text-emerald-600'}`} />
+          {isBeforeEndTime ? (
+            <Lock className="w-4 h-4 text-slate-400" />
+          ) : (
+            <Home className={`w-4 h-4 ${scanMode === 'PULANG' ? 'text-emerald-100' : 'text-emerald-600'}`} />
+          )}
           <span>🏠 MODE SCAN PULANG (SAAT PULANG / SORE)</span>
-          <span className={`text-[10px] px-2 py-0.5 rounded-full font-black ${
-            scanMode === 'PULANG'
-              ? 'bg-emerald-800 text-emerald-100 border border-emerald-500'
-              : 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-          }`}>
-            {scanMode === 'PULANG' ? `✅ AKTIF (Mulai ${todayEndTimeStr} WITA)` : `Mulai ${todayEndTimeStr} WITA`}
-          </span>
+          {isBeforeEndTime ? (
+            <span className="bg-amber-100 text-amber-800 border border-amber-300 text-[10px] px-2 py-0.5 rounded-full font-black ml-1">
+              🔒 TERKUNCI (Buka {todayEndTimeStr} WITA)
+            </span>
+          ) : (
+            <span className={`text-[10px] px-2 py-0.5 rounded-full font-black ${
+              scanMode === 'PULANG'
+                ? 'bg-emerald-800 text-emerald-100 border border-emerald-500'
+                : 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+            }`}>
+              {scanMode === 'PULANG' ? `✅ AKTIF (Mulai ${todayEndTimeStr} WITA)` : `Mulai ${todayEndTimeStr} WITA`}
+            </span>
+          )}
         </button>
+      </div>
+
+      {/* Info Bar Waktu Real-Time & Jam Pulang Sekolah */}
+      <div className="bg-slate-50 border border-slate-200/80 text-slate-700 px-4 py-2.5 rounded-2xl text-xs font-semibold flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 shadow-2xs">
+        <div className="flex items-center gap-2">
+          <Clock className="w-4 h-4 text-indigo-600 shrink-0" />
+          <span>
+            Waktu Sekarang (WITA): <strong className="text-slate-900 font-mono">{currentTime.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}</strong> ({todayName}, {isTodayActiveDay ? 'Hari Aktif Belajar' : 'Hari Libur / Non-Aktif'}).
+          </span>
+        </div>
+        <div className="flex items-center gap-2 text-[11px]">
+          <span className="text-slate-500 font-medium">Jam Pulang Hari Ini:</span>
+          <span className="px-2.5 py-0.5 rounded-lg bg-indigo-50 border border-indigo-200 text-indigo-800 font-extrabold font-mono">
+            {todayEndTimeStr} WITA
+          </span>
+          {isBeforeEndTime ? (
+            <span className="px-2.5 py-0.5 rounded-lg bg-amber-100 text-amber-900 border border-amber-300 font-bold flex items-center gap-1">
+              <Lock className="w-3 h-3 text-amber-700" />
+              Scan Pulang Terkunci
+            </span>
+          ) : (
+            <span className="px-2.5 py-0.5 rounded-lg bg-emerald-100 text-emerald-900 border border-emerald-300 font-bold flex items-center gap-1">
+              <CheckCircle2 className="w-3 h-3 text-emerald-700" />
+              Scan Pulang Dibuka
+            </span>
+          )}
+        </div>
       </div>
 
       {scanMode === 'MASUK' && isMasukClosedNow && (

@@ -70,6 +70,8 @@ import {
   reconcileTeachersAndClasses,
   checkParentLoginAccess,
   isDemoClass,
+  startAutoAttendanceSync30s,
+  checkAndSyncUnsyncedAttendanceToCloud,
   KEYS
 } from './lib/storage';
 import { ShieldCheck, CheckCircle2, WifiOff, RefreshCw, Wifi, X, Cloud } from 'lucide-react';
@@ -563,6 +565,16 @@ export default function App() {
     };
   }, [currentRole]);
 
+  // Pengecekan berkala setiap 30 detik untuk memastikan data presensi localStorage yang belum tersinkron segera dikirim ke Cloud
+  // Anti-duplikasi: jika data sudah ada di Cloud, lewati penulisan (0 write) untuk melindungi kuota Firebase
+  useEffect(() => {
+    if (currentRole === 'PARENT') return;
+    const cleanup = startAutoAttendanceSync30s();
+    return () => {
+      cleanup();
+    };
+  }, [currentRole]);
+
   // Track latest state references to avoid cascading re-render loops in periodic background intervals
   const attendanceRecordsRef = useRef(attendanceRecords);
   attendanceRecordsRef.current = attendanceRecords;
@@ -934,7 +946,7 @@ export default function App() {
         };
       }
       const updated = [newRecord, ...validPrev.filter((_, idx) => idx !== existingIndex)];
-      // Simpan segera ke antrean/cloud dengan auto-flush cepat (1.5 detik)
+      // Sinkron hasil scan QR menggunakan antrean batching 10 detik atau 20 siswa
       if (newRecord.method === 'QR_SCAN') {
         queueAttendanceScanRecord(updated);
       } else {

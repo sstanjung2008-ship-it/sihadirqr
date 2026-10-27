@@ -3150,6 +3150,7 @@ export function initFirestoreAppSession(role?: UserRole): Promise<{ success: boo
       if (scanQueuePendingCount > 0) {
         flushAttendanceScanQueue(true);
       }
+      checkAndSyncUnsyncedAttendanceToCloud().catch(() => {});
     });
 
     window.addEventListener('offline', () => {
@@ -3174,6 +3175,11 @@ export function initFirestoreAppSession(role?: UserRole): Promise<{ success: boo
 
   // Daftarkan listener real-time profil sekolah agar jam pulang & hari aktif sinkron otomatis ke seluruh perangkat
   listenToCloudSchoolProfile();
+
+  // Mulai interval pengecekan berkala presensi 30 detik ke Cloud Firestore
+  if (currentRole !== 'PARENT') {
+    startAutoAttendanceSync30s();
+  }
 
   // Jalankan pembacaan data Cloud berkecepatan tinggi saat membuka awal aplikasi / reload
   return initialLoadSyncFromCloud(currentRole).then((res) => {
@@ -3980,12 +3986,13 @@ export async function flushAttendanceScanQueue(force: boolean = false): Promise<
     // 1. Ambil data presensi terkini dari Cloud Firestore untuk digabungkan secara non-destruktif
     let finalRecords = localRecords;
     try {
-      const cloudDoc = await readCloudDocument(KEYS.ATTENDANCE);
+      const cloudDoc = await withTimeout(readCloudDocument(KEYS.ATTENDANCE), 4000, null);
       if (cloudDoc && cloudDoc.data) {
         const cloudRecords = typeof cloudDoc.data === 'string' ? JSON.parse(cloudDoc.data) : cloudDoc.data;
         if (Array.isArray(cloudRecords) && cloudRecords.length > 0) {
           // Gabungkan: siswa yang di-scan Perangkat A dan Perangkat B menyatu 100% tanpa saling tindih!
           finalRecords = mergeAttendanceLists(cloudRecords, localRecords);
+          inMemoryAttendanceRecords = finalRecords;
           safeSetLocalStorage(KEYS.ATTENDANCE, JSON.stringify(finalRecords));
           safeSetLocalStorage(KEYS.ATTENDANCE + '_updatedAt', String(now));
           notifyStorageUpdated();
@@ -3996,9 +4003,11 @@ export async function flushAttendanceScanQueue(force: boolean = false): Promise<
     }
 
     // 2. Tulis hasil gabungan ke Cloud Firestore (1 kali write hemat kuota)
+    delete lastSavedStringCache[KEYS.ATTENDANCE];
     await writeCloudDocument(KEYS.ATTENDANCE, JSON.stringify(finalRecords), now);
     lastSavedStringCache[KEYS.ATTENDANCE] = JSON.stringify(finalRecords);
     scanQueueLastFlushTime = now;
+    setCloudSyncStatus('connected');
   } catch (err) {
     console.error('[ScanQueueWorker] Gagal flush antrean scan ke Cloud:', err);
   } finally {
@@ -4009,10 +4018,10 @@ export async function flushAttendanceScanQueue(force: boolean = false): Promise<
 }
 
 /**
- * Menyimpan hasil scan QR secara hemat kuota & berkinerja tinggi:
- * 1. Simpan segera ke localStorage lokal & backup aman (zero-delay bagi layar kamera & audio beep)
- * 2. Kumpulkan dalam batch (flush jika mencapai 20 siswa atau idle 10 detik)
- * 3. Mencegah ribuan write sia-sia ke Firestore Cloud Blaze
+ * Menyimpan hasil scan QR menggunakan antrean batching 10 detik atau 20 siswa:
+ * 1. Simpan segera ke localStorage lokal (zero-delay bagi layar kamera & audio beep)
+ * 2. Kumpulkan dalam batch (flush otomatis jika mencapai 20 siswa atau jeda idle 10 detik)
+ * 3. Menghemat kuota Firestore dan menjamin keutuhan data presensi multi-perangkat
  */
 export function queueAttendanceScanRecord(records: AttendanceRecord[]): void {
   const currentRole = getUserSession()?.role;
@@ -4022,9 +4031,10 @@ export function queueAttendanceScanRecord(records: AttendanceRecord[]): void {
 
   const cleanRecords = validateAndSanitizeAttendanceRecords(records);
   const now = Date.now();
+  inMemoryAttendanceRecords = cleanRecords;
   const dataStr = JSON.stringify(cleanRecords);
   
-  // 1. Simpan segera ke penyimpanan lokal & backup aman (Zero-delay untuk UI & feedback audio)
+  // 1. Simpan segera ke penyimpanan lokal (Zero-delay untuk UI & feedback audio)
   safeSetLocalStorage(KEYS.ATTENDANCE, dataStr);
   safeSetLocalStorage(KEYS.ATTENDANCE + '_updatedAt', String(now));
   notifyStorageUpdated();
@@ -4093,8 +4103,11 @@ export function saveAttendanceRecords(records: AttendanceRecord[], instant: bool
   safeSetLocalStorage(KEYS.ATTENDANCE + '_updatedAt', String(now));
   notifyStorageUpdated();
 
-  // Multi-perangkat non-tindih: gabungkan dengan Cloud sebelum push
-  readCloudDocument(KEYS.ATTENDANCE).then(cloudDoc => {
+  // Hapus cache string agar penulisan ke cloud tidak diabaikan
+  delete lastSavedStringCache[KEYS.ATTENDANCE];
+
+  // Multi-perangkat non-tindih: gabungkan dengan snapshot Cloud jika tersedia cepat (1500ms)
+  withTimeout(readCloudDocument(KEYS.ATTENDANCE), 1500, null).then(cloudDoc => {
     let finalRecords = cleanRecords;
     if (cloudDoc && cloudDoc.data) {
       try {
@@ -4108,10 +4121,308 @@ export function saveAttendanceRecords(records: AttendanceRecord[], instant: bool
         }
       } catch {}
     }
+    delete lastSavedStringCache[KEYS.ATTENDANCE];
     syncToCloud(KEYS.ATTENDANCE, finalRecords, instant, now);
   }).catch(() => {
+    delete lastSavedStringCache[KEYS.ATTENDANCE];
     syncToCloud(KEYS.ATTENDANCE, cleanRecords, instant, now);
   });
+}
+
+// =========================================================================
+// AUTO-SYNC PRESENSI SETIAP 30 DETIK (MULTI-PERANGKAT & ANTI-DUPLIKASI)
+// Memeriksa local storage berkala: kirim data belum tersinkron ke cloud,
+// lewati penulisan jika data sudah ada di cloud (0 write).
+// =========================================================================
+
+export interface AttendanceSyncEvaluation {
+  hasUnsyncedToCloud: boolean;
+  hasUpdatesFromCloud: boolean;
+  unsyncedCount: number;
+}
+
+/**
+ * Mengevaluasi secara presisi apakah ada data presensi lokal yang belum tersinkron ke Cloud
+ * atau sebaliknya data di Cloud yang belum diserap oleh perangkat ini.
+ */
+export function evaluateAttendanceSyncStatus(
+  localRecords: AttendanceRecord[],
+  cloudRecords: AttendanceRecord[]
+): AttendanceSyncEvaluation {
+  const cleanLocal = validateAndSanitizeAttendanceRecords(localRecords);
+  const cleanCloud = validateAndSanitizeAttendanceRecords(cloudRecords);
+
+  if (cleanLocal.length === 0) {
+    return {
+      hasUnsyncedToCloud: false,
+      hasUpdatesFromCloud: cleanCloud.length > 0,
+      unsyncedCount: 0
+    };
+  }
+  if (cleanCloud.length === 0) {
+    return {
+      hasUnsyncedToCloud: cleanLocal.length > 0,
+      hasUpdatesFromCloud: false,
+      unsyncedCount: cleanLocal.length
+    };
+  }
+
+  // Indeks data Cloud berdasarkan id, (date + studentId), dan (date + nisn)
+  const cloudById = new Map<string, AttendanceRecord>();
+  const cloudByStudentDate = new Map<string, AttendanceRecord>();
+  const cloudByNisnDate = new Map<string, AttendanceRecord>();
+
+  for (const c of cleanCloud) {
+    if (c.id) cloudById.set(c.id, c);
+    if (c.date && c.studentId) cloudByStudentDate.set(`${c.date}__${c.studentId}`, c);
+    if (c.date && c.nisn && c.nisn !== '-') cloudByNisnDate.set(`${c.date}__${c.nisn.trim()}`, c);
+  }
+
+  const findCloudMatch = (l: AttendanceRecord): AttendanceRecord | undefined => {
+    if (l.id && cloudById.has(l.id)) return cloudById.get(l.id);
+    if (l.date && l.studentId && cloudByStudentDate.has(`${l.date}__${l.studentId}`)) {
+      return cloudByStudentDate.get(`${l.date}__${l.studentId}`);
+    }
+    if (l.date && l.nisn && l.nisn !== '-' && cloudByNisnDate.has(`${l.date}__${l.nisn.trim()}`)) {
+      return cloudByNisnDate.get(`${l.date}__${l.nisn.trim()}`);
+    }
+    return undefined;
+  };
+
+  let hasUnsyncedToCloud = false;
+  let unsyncedCount = 0;
+
+  for (const l of cleanLocal) {
+    const c = findCloudMatch(l);
+    if (!c) {
+      // Data presensi siswa ini sama sekali belum ada di Cloud Firestore
+      hasUnsyncedToCloud = true;
+      unsyncedCount++;
+      continue;
+    }
+
+    // 1. Cek apakah ada scan masuk di lokal yang belum ada di Cloud
+    const lHasTime = !!(l.time && l.time !== '-' && !l.time.toLowerCase().includes('belum'));
+    const cHasTime = !!(c.time && c.time !== '-' && !c.time.toLowerCase().includes('belum'));
+    if (lHasTime && !cHasTime) {
+      hasUnsyncedToCloud = true;
+      unsyncedCount++;
+      continue;
+    }
+
+    // 2. Cek apakah ada scan pulang di lokal yang belum ada di Cloud
+    const lHasReturn = !!(l.returnTime && l.returnTime !== '-' && !l.returnTime.toLowerCase().includes('belum'));
+    const cHasReturn = !!(c.returnTime && c.returnTime !== '-' && !c.returnTime.toLowerCase().includes('belum'));
+    if (lHasReturn && !cHasReturn) {
+      hasUnsyncedToCloud = true;
+      unsyncedCount++;
+      continue;
+    }
+
+    // 3. Cek status kehadiran nyata (HADIR, TERLAMBAT, dll) vs ALPA di Cloud
+    if (l.status && l.status !== 'ALPA' && (!c.status || c.status === 'ALPA')) {
+      hasUnsyncedToCloud = true;
+      unsyncedCount++;
+      continue;
+    }
+
+    // 4. Cek status kepulangan tuntas di lokal vs belum pulang di Cloud
+    const isLReturnDone = l.returnStatus === 'PULANG' || l.returnStatus === 'PULANG_TEPAT' || l.returnStatus === 'PULANG_CEPAT';
+    const isCReturnDone = c.returnStatus === 'PULANG' || c.returnStatus === 'PULANG_TEPAT' || c.returnStatus === 'PULANG_CEPAT';
+    if (isLReturnDone && !isCReturnDone) {
+      hasUnsyncedToCloud = true;
+      unsyncedCount++;
+      continue;
+    }
+
+    // 5. Cek timestamp perubahan data masuk atau pulang
+    if ((l.updatedAt || 0) > (c.updatedAt || 0) + 1500) {
+      hasUnsyncedToCloud = true;
+      unsyncedCount++;
+      continue;
+    }
+    if ((l.returnUpdatedAt || 0) > (c.returnUpdatedAt || 0) + 1500) {
+      hasUnsyncedToCloud = true;
+      unsyncedCount++;
+      continue;
+    }
+  }
+
+  // Cek apakah Cloud memiliki pembaruan dari perangkat lain yang belum ada di lokal
+  let hasUpdatesFromCloud = false;
+  if (cleanCloud.length > cleanLocal.length) {
+    hasUpdatesFromCloud = true;
+  } else {
+    const localById = new Map<string, AttendanceRecord>();
+    const localByStudentDate = new Map<string, AttendanceRecord>();
+    for (const l of cleanLocal) {
+      if (l.id) localById.set(l.id, l);
+      if (l.date && l.studentId) localByStudentDate.set(`${l.date}__${l.studentId}`, l);
+    }
+    for (const c of cleanCloud) {
+      const match = (c.id && localById.has(c.id)) 
+        ? localById.get(c.id) 
+        : (c.date && c.studentId ? localByStudentDate.get(`${c.date}__${c.studentId}`) : undefined);
+      if (!match) {
+        hasUpdatesFromCloud = true;
+        break;
+      }
+      const cHasTime = !!(c.time && c.time !== '-' && !c.time.toLowerCase().includes('belum'));
+      const lHasTime = !!(match.time && match.time !== '-' && !match.time.toLowerCase().includes('belum'));
+      if (cHasTime && !lHasTime) {
+        hasUpdatesFromCloud = true;
+        break;
+      }
+      const cHasReturn = !!(c.returnTime && c.returnTime !== '-' && !c.returnTime.toLowerCase().includes('belum'));
+      const lHasReturn = !!(match.returnTime && match.returnTime !== '-' && !match.returnTime.toLowerCase().includes('belum'));
+      if (cHasReturn && !lHasReturn) {
+        hasUpdatesFromCloud = true;
+        break;
+      }
+    }
+  }
+
+  return {
+    hasUnsyncedToCloud,
+    hasUpdatesFromCloud,
+    unsyncedCount
+  };
+}
+
+let autoAttendanceSyncTimer: any = null;
+let isAutoAttendanceSyncRunning = false;
+
+/**
+ * Memeriksa data localStorage berkala setiap 30 detik:
+ * - Jika ada data scan/presensi yang belum tersinkron, langsung digabungkan & dikirim ke Cloud Firestore.
+ * - JIKA DATA SUDAH ADA DI CLOUD, LEWATI WRITE (0 write) untuk menghindari duplikasi dan hemat kuota.
+ * - Jika Cloud memiliki data dari perangkat lain, serap ke penyimpanan lokal agar kedua perangkat sinkron.
+ */
+export async function checkAndSyncUnsyncedAttendanceToCloud(): Promise<{
+  synced: boolean;
+  writtenToCloud: boolean;
+  message?: string;
+}> {
+  if (typeof window === 'undefined') return { synced: false, writtenToCloud: false, message: 'SSR' };
+  if (typeof navigator !== 'undefined' && !navigator.onLine) {
+    return { synced: false, writtenToCloud: false, message: 'Offline' };
+  }
+  const currentRole = getUserSession()?.role;
+  if (currentRole === 'PARENT') {
+    return { synced: false, writtenToCloud: false, message: 'Role Orang Tua tidak memiliki izin sinkronisasi sekolah' };
+  }
+  if (isFirestoreQuotaExceeded()) {
+    return { synced: false, writtenToCloud: false, message: 'Batas kuota harian tercapai' };
+  }
+  if (isAutoAttendanceSyncRunning) {
+    return { synced: false, writtenToCloud: false, message: 'Pemeriksaan sinkronisasi sedang berjalan' };
+  }
+
+  isAutoAttendanceSyncRunning = true;
+  try {
+    // Jika ada antrean batching scan yang sedang menunggu, flush segera ke Cloud
+    if (scanQueuePendingCount > 0) {
+      await flushAttendanceScanQueue(true);
+    }
+
+    const localRecords = getAttendanceRecords();
+    const cloudDoc = await withTimeout(readCloudDocument(KEYS.ATTENDANCE), 5000, null);
+    let cloudRecords: AttendanceRecord[] = [];
+    if (cloudDoc && cloudDoc.data) {
+      try {
+        const parsed = typeof cloudDoc.data === 'string' ? JSON.parse(cloudDoc.data) : cloudDoc.data;
+        if (Array.isArray(parsed)) {
+          cloudRecords = parsed;
+        }
+      } catch {}
+    }
+
+    const { hasUnsyncedToCloud, hasUpdatesFromCloud, unsyncedCount } = evaluateAttendanceSyncStatus(localRecords, cloudRecords);
+
+    // KASUS 1: Semua data lokal sudah ada di Cloud (hasUnsyncedToCloud === false)
+    if (!hasUnsyncedToCloud) {
+      // Jika Cloud memiliki data baru dari perangkat lain, serap ke lokal tanpa melakukan write ke cloud
+      if (hasUpdatesFromCloud && cloudRecords.length > 0) {
+        const merged = mergeAttendanceLists(cloudRecords, localRecords);
+        inMemoryAttendanceRecords = merged;
+        safeSetLocalStorage(KEYS.ATTENDANCE, JSON.stringify(merged));
+        safeSetLocalStorage(KEYS.ATTENDANCE + '_updatedAt', String(cloudDoc?.updatedAt || Date.now()));
+        notifyStorageUpdated();
+      }
+      // LEWATI PENULISAN KE CLOUD: 0 write, anti-duplikasi & hemat kuota 100%!
+      return {
+        synced: true,
+        writtenToCloud: false,
+        message: 'Seluruh data lokal sudah ada di Cloud. Penulisan ke cloud dilewati untuk menghindari duplikasi.'
+      };
+    }
+
+    // KASUS 2: Ada data lokal yang belum tersinkron ke Cloud (hasUnsyncedToCloud === true)
+    const merged = mergeAttendanceLists(cloudRecords, localRecords);
+    const now = Date.now();
+    inMemoryAttendanceRecords = merged;
+    const mergedStr = JSON.stringify(merged);
+    safeSetLocalStorage(KEYS.ATTENDANCE, mergedStr);
+    safeSetLocalStorage(KEYS.ATTENDANCE + '_updatedAt', String(now));
+    notifyStorageUpdated();
+
+    // Tulis hasil gabungan ke Cloud Firestore
+    delete lastSavedStringCache[KEYS.ATTENDANCE];
+    await writeCloudDocument(KEYS.ATTENDANCE, mergedStr, now);
+    lastSavedStringCache[KEYS.ATTENDANCE] = mergedStr;
+    setCloudSyncStatus('connected');
+
+    console.log(`[AutoSync30s] Berhasil menyinkronkan ${unsyncedCount} data presensi lokal baru ke Cloud Firestore.`);
+    return {
+      synced: true,
+      writtenToCloud: true,
+      message: `Berhasil menyinkronkan ${unsyncedCount} data presensi baru ke cloud.`
+    };
+  } catch (err: any) {
+    console.warn('[AutoSync30s] Gagal periksa atau sinkron presensi ke cloud:', err);
+    return {
+      synced: false,
+      writtenToCloud: false,
+      message: err?.message || 'Error'
+    };
+  } finally {
+    isAutoAttendanceSyncRunning = false;
+  }
+}
+
+/**
+ * Memulai pengecekan berkala otomatis setiap 30 detik untuk memastikan data presensi tersinkron ke cloud.
+ */
+export function startAutoAttendanceSync30s(): () => void {
+  if (typeof window === 'undefined') return () => {};
+  if (autoAttendanceSyncTimer) {
+    return stopAutoAttendanceSync30s;
+  }
+
+  // Pengecekan awal 3.5 detik setelah startup aplikasi
+  const initialTimer = setTimeout(() => {
+    checkAndSyncUnsyncedAttendanceToCloud().catch(() => {});
+  }, 3500);
+
+  // Interval berkala setiap 30 detik (30.000 ms)
+  autoAttendanceSyncTimer = setInterval(() => {
+    checkAndSyncUnsyncedAttendanceToCloud().catch(() => {});
+  }, 30000);
+
+  return () => {
+    clearTimeout(initialTimer);
+    stopAutoAttendanceSync30s();
+  };
+}
+
+/**
+ * Menghentikan pengecekan berkala otomatis presensi 30 detik
+ */
+export function stopAutoAttendanceSync30s(): void {
+  if (autoAttendanceSyncTimer) {
+    clearInterval(autoAttendanceSyncTimer);
+    autoAttendanceSyncTimer = null;
+  }
 }
 
 // Local-only save for automatic ALPA calculation so local device NEVER overwrites real Cloud scans

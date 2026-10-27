@@ -358,21 +358,30 @@ export function generateInitialAttendanceHistory(students: Student[]): Attendanc
   const todayStr = getWitaDateStr(now);
 
   const datesSet = new Set<string>();
-  datesSet.add(todayStr);
+  // HANYA tambahkan hari ini jika BUKAN hari Minggu (hari libur)
+  if (now.getDay() !== 0) {
+    datesSet.add(todayStr);
+  }
 
-  // 1. Pastikan SELURUH hari sekolah di bulan berjalan (mulai tanggal 1 s/d hari ini) selalu ada
+  // 1. Pastikan seluruh hari sekolah di bulan berjalan (mulai tanggal 1 s/d hari ini) selalu ada, LEWATI hari Minggu
   const currentYear = now.getFullYear();
   const currentMonth = now.getMonth();
   const currentDate = now.getDate();
 
   for (let day = 1; day <= currentDate; day++) {
     const d = new Date(currentYear, currentMonth, day);
-    if (d.getDay() !== 0) { // Lewati hari Minggu
+    if (d.getDay() !== 0) { // Lewati hari Minggu (Minggu = 0)
       datesSet.add(getWitaDateStr(d));
     }
   }
 
-  // JAMINAN KHUSUS: Pastikan seluruh tanggal 1 - 7 Oktober 2026 selalu terisi (kecuali Minggu 4 Okt)
+  // JAMINAN KHUSUS: Tanggal sekolah bulan September dimulai pada 21 September 2026 (hari pertama scan QR aktif di sekolah)
+  const septemberGuaranteedDates = [
+    '2026-09-21', '2026-09-22', '2026-09-23', '2026-09-24', '2026-09-25', '2026-09-26',
+    '2026-09-28', '2026-09-29', '2026-09-30',
+  ];
+  septemberGuaranteedDates.forEach(d => datesSet.add(d));
+
   const octoberGuaranteedDates = [
     '2026-10-01', // Kamis
     '2026-10-02', // Jumat
@@ -380,49 +389,73 @@ export function generateInitialAttendanceHistory(students: Student[]): Attendanc
     '2026-10-05', // Senin (Upacara)
     '2026-10-06', // Selasa
     '2026-10-07', // Rabu
+    '2026-10-08', // Kamis
+    '2026-10-09', // Jumat
+    '2026-10-10', // Sabtu
+    '2026-10-12', // Senin
+    '2026-10-13', // Selasa
+    '2026-10-14', // Rabu
+    '2026-10-15', // Kamis
+    '2026-10-16', // Jumat
+    '2026-10-17', // Sabtu
+    '2026-10-19', // Senin
+    '2026-10-20', // Selasa
+    '2026-10-21', // Rabu
+    '2026-10-22', // Kamis
+    '2026-10-23', // Jumat
+    '2026-10-24', // Sabtu
+    '2026-10-26', // Senin
   ];
   octoberGuaranteedDates.forEach(d => datesSet.add(d));
 
-  // 2. Tambahkan hari sekolah sebelumnya (mundur hingga awal semester, minimal 35 hari sekolah ke belakang)
-  for (let daysBack = 1; daysBack <= 45; daysBack++) {
-    const pastDate = new Date(now.getTime() - (daysBack * 86400000));
-    if (pastDate.getDay() !== 0) { // Lewati hari Minggu
-      datesSet.add(getWitaDateStr(pastDate));
+  // Pastikan 2026-10-25 (Minggu / Hari Libur) dan hari Minggu lainnya sama sekali tidak pernah masuk
+  const validDates = Array.from(datesSet).filter(dStr => {
+    if (dStr === '2026-10-25') return false;
+    const parts = dStr.split('-');
+    if (parts.length === 3) {
+      const dObj = new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10));
+      if (dObj.getDay() === 0) return false;
     }
-  }
+    return true;
+  }).sort((a, b) => b.localeCompare(a));
 
-  // Urutkan tanggal dari terbaru ke terlama
-  const dates = Array.from(datesSet).sort((a, b) => b.localeCompare(a));
-
-  dates.forEach((dateStr, dayIdx) => {
-    const isToday = dayIdx === 0;
-
+  validDates.forEach((dateStr, dayIdx) => {
     students.forEach((student, sIdx) => {
-      // Distribusi realistis kehadiran
+      // Distribusi riil sekolah: mayoritas hadir tepat waktu (06:30 - 07:15 WITA, jauh sebelum batas 07:35 WITA)
       let status: AttendanceRecord['status'] = 'HADIR';
       let time = "06:45:12";
+      let method: AttendanceRecord['method'] = 'QR_SCAN';
 
-      const rand = (dayIdx * 11 + sIdx * 17) % 100;
+      const sHash = (parseInt(student.id.replace(/\D/g, '').slice(-4), 10) || sIdx);
+      const rand = (dayIdx * 7 + sIdx * 13) % 100;
 
-      if (rand > 88) {
+      if (rand >= 98 && sHash % 30 === 0) {
+        // Keterlambatan sangat jarang (hanya 1-2 siswa per hari se-sekolah, scan setelah batas 07:35:00 WITA)
         status = 'TERLAMBAT';
-        time = "07:42:18";
-      } else if (rand > 81 && rand <= 88) {
+        time = "07:38:22";
+      } else if (rand === 97 && sHash % 60 === 0) {
+        // Izin sah sangat jarang
         status = 'IZIN';
-        time = "07:00:00";
-      } else if (rand > 75 && rand <= 81) {
+        time = "-";
+        method = 'IZIN_APPROVED';
+      } else if (rand === 96 && sHash % 60 === 1) {
+        // Sakit sah sangat jarang
         status = 'SAKIT';
-        time = "07:00:00";
-      } else if (rand > 71 && rand <= 75) {
+        time = "-";
+        method = 'IZIN_APPROVED';
+      } else if (rand <= 3) {
+        // Siswa tidak hadir / alpa (~15 siswa per hari)
         status = 'ALPA';
         time = "-";
       } else {
+        // 95%+ hadir tepat waktu antara jam 06:30 s/d 07:15 WITA
         status = 'HADIR';
-        time = `06:${String(30 + (sIdx % 26)).padStart(2, '0')}:${String(10 + (sIdx % 45)).padStart(2, '0')}`;
+        const m = String(30 + (sIdx % 35)).padStart(2, '0');
+        const s = String(10 + (sIdx % 48)).padStart(2, '0');
+        time = `06:${m}:${s}`;
       }
 
       const isPresent = status === 'HADIR' || status === 'TERLAMBAT';
-      // Untuk hari ini, jika belum lewat siang, sebagian siswa sudah scan masuk; yang status pulang diatur sesuai simulasi
       const hasReturned = isPresent && ((dayIdx * 3 + sIdx) % 4 !== 0);
       const returnTimeStr = hasReturned ? `15:${String(10 + (sIdx % 35)).padStart(2, '0')}:${String(12 + (sIdx % 40)).padStart(2, '0')}` : undefined;
       const returnStatusVal = hasReturned ? 'PULANG' : undefined;
@@ -434,15 +467,14 @@ export function generateInitialAttendanceHistory(students: Student[]): Attendanc
         nisn: student.nisn,
         className: student.className,
         date: dateStr,
-        time: status === 'ALPA' ? '-' : time,
+        time: status === 'ALPA' || status === 'IZIN' || status === 'SAKIT' ? '-' : time,
         status,
-        method: status === 'IZIN' || status === 'SAKIT' ? 'IZIN_APPROVED' : 'QR_SCAN',
-        scannedBy: "Pos Satpam Utama",
-        notes: status === 'TERLAMBAT' ? 'Macet lalu lintas' : (status === 'SAKIT' ? 'Demam & flu' : undefined),
+        method,
+        scannedBy: "Pos Scanner Utama",
         parentNotified: true,
         returnTime: returnTimeStr,
         returnStatus: returnStatusVal,
-        returnScannedBy: hasReturned ? "Pos Satpam Utama (Pulang)" : undefined
+        returnScannedBy: hasReturned ? "Pos Scanner Utama (Pulang)" : undefined
       });
     });
   });

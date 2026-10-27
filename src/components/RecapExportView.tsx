@@ -388,9 +388,9 @@ export const RecapExportView: React.FC<RecapExportViewProps> = ({
     };
   }, [filteredStudents, getRecordsForStudent]);
 
-  // Pagination State for ultra-responsive matrix and summary rendering
+  // Pagination State for ultra-responsive matrix and summary rendering (default: -1 / Semua agar seluruh siswa dan tanggal tampil tanpa tersembunyi)
   const [recapPage, setRecapPage] = useState<number>(1);
-  const [recapPageSize, setRecapPageSize] = useState<number>(30); // 30, 60, 100, or -1 (Semua)
+  const [recapPageSize, setRecapPageSize] = useState<number>(-1); // -1 (Semua), 30, 60, 100
 
   useEffect(() => {
     setRecapPage(1);
@@ -409,7 +409,7 @@ export const RecapExportView: React.FC<RecapExportViewProps> = ({
     const now = new Date();
 
     if (p === 'SEMESTER_GANJIL') {
-      setStartDate('2026-09-21');
+      setStartDate('2026-07-01');
       setEndDate('2026-12-31');
     } else if (p === 'MONTHLY') {
       const { startStr, endStr } = getMonthDateRange(selectedYear, selectedMonth);
@@ -756,7 +756,7 @@ export const RecapExportView: React.FC<RecapExportViewProps> = ({
   const filterTitle = useMemo(() => {
     let periodStr = '';
     if (filterPeriod === 'SEMESTER_GANJIL') {
-      periodStr = 'Semester Ganjil: 21 September - 31 Desember 2026';
+      periodStr = 'Semester Ganjil: 1 Juli - 31 Desember 2026';
     } else if (filterPeriod === 'MONTHLY') {
       const mLabel = MONTH_NAMES[selectedMonth]?.label || 'Bulan';
       periodStr = `Bulan ${mLabel} ${selectedYear}`;
@@ -1180,7 +1180,7 @@ export const RecapExportView: React.FC<RecapExportViewProps> = ({
               <label className="block text-slate-700 font-semibold mb-1">Periode Semester Ganjil 2026/2027</label>
               <div className="w-full bg-amber-50 border border-amber-200 text-amber-900 rounded-xl p-2.5 font-bold text-xs flex items-center justify-center gap-2">
                 <Calendar className="w-4 h-4 text-amber-600 shrink-0" />
-                <span>21 September 2026 s/d 31 Desember 2026</span>
+                <span>1 Juli 2026 s/d 31 Desember 2026</span>
               </div>
             </div>
           )}

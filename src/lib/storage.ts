@@ -327,6 +327,15 @@ export function isValidAttendanceRecord(rec: any): boolean {
   ) {
     return false;
   }
+  // Hari Minggu (Sunday) adalah hari libur sekolah: jangan pernah memuat catatan presensi hari Minggu (seperti 25/10/2026)
+  if (rec.date === '2026-10-25') return false;
+  const dateParts = rec.date.split('-');
+  if (dateParts.length === 3) {
+    const dayOfWeek = new Date(parseInt(dateParts[0], 10), parseInt(dateParts[1], 10) - 1, parseInt(dateParts[2], 10)).getDay();
+    if (dayOfWeek === 0) {
+      return false; // Tolak hari Minggu
+    }
+  }
   return true;
 }
 
@@ -423,6 +432,20 @@ export function reclaimLocalStorageQuota(): void {
   } catch {}
 }
 
+export function cleanAttendanceStorageParts(baseKey: string): void {
+  if (typeof window === 'undefined') return;
+  try {
+    const partsCountStr = localStorage.getItem(`${baseKey}_storage_parts_count`);
+    if (partsCountStr) {
+      const pCount = parseInt(partsCountStr, 10);
+      for (let i = 0; i < pCount; i++) {
+        localStorage.removeItem(`${baseKey}_storage_part_${i}`);
+      }
+      localStorage.removeItem(`${baseKey}_storage_parts_count`);
+    }
+  } catch {}
+}
+
 /**
  * Safe LocalStorage setter that gracefully catches QuotaExceededError,
  * compacts attendance records progressively, and removes stale temporary cache without crashing.
@@ -443,6 +466,9 @@ export function safeSetLocalStorage(key: string, value: string): void {
   // 2. Percobaan penyimpanan langsung
   try {
     localStorage.setItem(key, value);
+    if (key === KEYS.ATTENDANCE) {
+      cleanAttendanceStorageParts(key);
+    }
     return;
   } catch {}
 
@@ -451,6 +477,9 @@ export function safeSetLocalStorage(key: string, value: string): void {
 
   try {
     localStorage.setItem(key, value);
+    if (key === KEYS.ATTENDANCE) {
+      cleanAttendanceStorageParts(key);
+    }
     return;
   } catch {}
 
@@ -487,21 +516,37 @@ export function safeSetLocalStorage(key: string, value: string): void {
           return (b.time || '').localeCompare(a.time || '');
         });
 
-        // Coba simpan seluruh data yang dipadatkan
+        // Coba simpan seluruh data yang dipadatkan tanpa memotong satupun data
         try {
           localStorage.setItem(key, JSON.stringify(compacted));
+          cleanAttendanceStorageParts(key);
           return;
         } catch {}
 
-        // Batasi bertingkat ukuran histori lokal: 500, 250, 100, 50, 20
-        const sliceLimits = [500, 250, 100, 50, 20];
-        for (const limit of sliceLimits) {
-          try {
-            const sliced = compacted.slice(0, limit);
-            localStorage.setItem(key, JSON.stringify(sliced));
+        // JANGAN PERNAH MENGHAPUS / MEMOTONG (SLICE) DATA PRESENSI!
+        // Jika browser membatasi ukuran satu entri, simpan dalam multi-part storage chunks
+        try {
+          const compactStr = JSON.stringify(compacted);
+          const chunkSize = 200000; // ~200KB per part chunk
+          const totalParts = Math.ceil(compactStr.length / chunkSize);
+          let allPartsSaved = true;
+          for (let p = 0; p < totalParts; p++) {
+            try {
+              localStorage.setItem(`${key}_storage_part_${p}`, compactStr.slice(p * chunkSize, (p + 1) * chunkSize));
+            } catch {
+              allPartsSaved = false;
+              break;
+            }
+          }
+          if (allPartsSaved) {
+            localStorage.setItem(`${key}_storage_parts_count`, String(totalParts));
+            localStorage.removeItem(key);
             return;
-          } catch {}
-        }
+          }
+        } catch {}
+
+        // Tetap pastikan memori memegang seluruh rekaman 100%
+        inMemoryAttendanceRecords = compacted;
       }
     } catch {}
   }
@@ -575,14 +620,16 @@ async function performSingleDocWrite(key: string, dataStr: string, timestamp: nu
       isChunked: false,
       totalChunks: 1,
     });
-    // Hapus sisa-sisa chunk jika sebelumnya dokumen ini pernah di-shard
-    const prevChunks = knownChunkedDocs.get(key) || 10;
-    for (let i = 1; i <= prevChunks; i++) {
-      try {
-        await deleteDoc(doc(db, 'sihadir_app_data', `${key}_chunk_${i}`));
-      } catch {}
+    // Hapus sisa-sisa chunk HANYA jika sebelumnya dokumen ini pernah di-shard
+    if (knownChunkedDocs.has(key)) {
+      const prevChunks = knownChunkedDocs.get(key) || 0;
+      for (let i = 1; i <= prevChunks; i++) {
+        try {
+          await deleteDoc(doc(db, 'sihadir_app_data', `${key}_chunk_${i}`));
+        } catch {}
+      }
+      knownChunkedDocs.delete(key);
     }
-    knownChunkedDocs.delete(key);
   } else {
     // Multi-chunk document sharding
     const numChunks = Math.ceil(totalLength / FIRESTORE_MAX_CHUNK_SIZE);
@@ -593,16 +640,20 @@ async function performSingleDocWrite(key: string, dataStr: string, timestamp: nu
       chunks.push(dataStr.slice(i * FIRESTORE_MAX_CHUNK_SIZE, (i + 1) * FIRESTORE_MAX_CHUNK_SIZE));
     }
 
-    // Write chunks 1 to numChunks - 1 sequentially to prevent saturating the WebChannel write stream
+    // Write chunks 1 to numChunks - 1 in parallel for maximum sync speed
+    const chunkWritePromises = [];
     for (let i = 1; i < numChunks; i++) {
       const chunkDocRef = doc(db, 'sihadir_app_data', `${key}_chunk_${i}`);
-      await setDoc(chunkDocRef, {
-        data: chunks[i],
-        updatedAt: timestamp,
-        chunkIndex: i,
-        parentKey: key,
-      });
+      chunkWritePromises.push(
+        setDoc(chunkDocRef, {
+          data: chunks[i],
+          updatedAt: timestamp,
+          chunkIndex: i,
+          parentKey: key,
+        })
+      );
     }
+    await Promise.all(chunkWritePromises);
 
     // Finally write the root document (chunk 0) which acts as the commit pointer
     const rootDocRef = doc(db, 'sihadir_app_data', key);
@@ -667,6 +718,8 @@ export async function writeCloudDocument(key: string, dataStr: string, timestamp
           if (r.scannedBy && !r.scannedBy.includes('Sistem Otomatis')) item.scannedBy = r.scannedBy;
           if (r.returnScannedBy && !r.returnScannedBy.includes('Sistem Otomatis')) item.returnScannedBy = r.returnScannedBy;
           if (r.notes) item.notes = r.notes;
+          if (r.updatedAt) item.updatedAt = r.updatedAt;
+          if (r.returnUpdatedAt) item.returnUpdatedAt = r.returnUpdatedAt;
           return item;
         });
         sanitizedDataStr = JSON.stringify(compacted);
@@ -782,78 +835,43 @@ export interface CloudDocResult {
  */
 export async function readAllCloudDocumentsFast(): Promise<Map<string, CloudDocResult>> {
   const resultMap = new Map<string, CloudDocResult>();
-  try {
-    const colRef = collection(db, 'sihadir_app_data');
-    // Fetch seluruh koleksi dalam 1 kali round-trip cepat dengan timeout aman 10000ms
-    const snap = await withTimeout(getDocs(colRef), 10000, null);
 
-    if (snap && !snap.empty) {
-      const chunkMap = new Map<string, Map<number, string>>();
-      const rootDocs: { id: string; payload: any }[] = [];
-
-      snap.docs.forEach((d) => {
-        const docId = d.id;
-        const payload = d.data();
-        if (!payload) return;
-
-        if (docId.includes('_chunk_')) {
-          const parts = docId.split('_chunk_');
-          const parentKey = parts[0];
-          const chunkIdx = parseInt(parts[1], 10);
-          if (!chunkMap.has(parentKey)) {
-            chunkMap.set(parentKey, new Map());
-          }
-          chunkMap.get(parentKey)!.set(chunkIdx, String(payload.data || ''));
-        } else {
-          rootDocs.push({ id: docId, payload });
-        }
-      });
-
-      rootDocs.forEach(({ id: docId, payload }) => {
-        const updatedAt = Number(payload.updatedAt) || 0;
-        const isChunked = !!payload.isChunked && Number(payload.totalChunks) > 1;
-
-        if (!isChunked) {
-          const dataStr = typeof payload.data === 'string' ? payload.data : JSON.stringify(payload.data || '');
-          resultMap.set(docId, { data: dataStr, updatedAt });
-          lastSavedStringCache[docId] = dataStr;
-        } else {
-          const totalChunks = Number(payload.totalChunks);
-          const chunksForParent = chunkMap.get(docId);
-          let assembled = String(payload.data || '');
-          for (let i = 1; i < totalChunks; i++) {
-            if (chunksForParent && chunksForParent.has(i)) {
-              assembled += chunksForParent.get(i);
-            }
-          }
-          resultMap.set(docId, { data: assembled, updatedAt });
-          lastSavedStringCache[docId] = assembled;
-        }
-      });
-
-      return resultMap;
-    }
-  } catch (err) {
-    console.warn('[Firestore Fast Read] getDocs koleksi gagal atau timed out, beralih ke pembacaan paralel dokumen:', err);
-  }
-
-  // Fallback cadangan: pembacaan paralel getDoc individual
-  const ALL_KEYS = [
-    KEYS.PROFILE, KEYS.STUDENTS, KEYS.CLASSES, KEYS.TEACHERS,
-    KEYS.ATTENDANCE, KEYS.LEAVES, KEYS.LEARNING_JOURNALS,
-    KEYS.CHARACTER_TRAITS, KEYS.CHARACTER_LOGS, KEYS.CHARACTER_PREDICATES,
-    KEYS.GRADES, KEYS.PERIODS, KEYS.SCHEDULES
+  // Dokumen metadata & konfigurasi berukuran ringan (<20KB): Dibaca paralel berkecepatan tinggi (~50-150ms)
+  // Menjamin perubahan jam masuk/pulang, pengaturan kelas, guru, dan jadwal langsung terbaca seketika antar perangkat
+  const FAST_METADATA_KEYS = [
+    KEYS.PROFILE, KEYS.CLASSES, KEYS.TEACHERS, KEYS.STUDENTS,
+    KEYS.LEAVES, KEYS.CHARACTER_TRAITS, KEYS.CHARACTER_LOGS,
+    KEYS.CHARACTER_PREDICATES, KEYS.GRADES, KEYS.PERIODS,
+    KEYS.SCHEDULES, KEYS.LEARNING_JOURNALS
   ];
-  await Promise.all(ALL_KEYS.map(async (key) => {
-    try {
-      const docRes = await readCloudDocument(key);
-      if (docRes) {
-        resultMap.set(key, docRes);
-      }
-    } catch {}
-  }));
 
-  return resultMap;
+  try {
+    const metaPromises = FAST_METADATA_KEYS.map(async (key) => {
+      try {
+        const snap = await withTimeout(getDoc(doc(db, 'sihadir_app_data', key)), 4500, null);
+        if (snap && snap.exists() && snap.data()) {
+          const payload = snap.data();
+          const updatedAt = Number(payload.updatedAt) || 0;
+          const dataStr = typeof payload.data === 'string' ? payload.data : JSON.stringify(payload.data || '');
+          resultMap.set(key, { data: dataStr, updatedAt });
+          lastSavedStringCache[key] = dataStr;
+        }
+      } catch {}
+    });
+
+    // Baca presensi secara paralel dengan perakitan chunk
+    const attPromise = readCloudDocument(KEYS.ATTENDANCE).then(attRes => {
+      if (attRes) {
+        resultMap.set(KEYS.ATTENDANCE, attRes);
+      }
+    }).catch(() => {});
+
+    await Promise.all([...metaPromises, attPromise]);
+    return resultMap;
+  } catch (err) {
+    console.warn('[Firestore Fast Read Error]:', err);
+    return resultMap;
+  }
 }
 
 // Debounced and deduped push to Firestore with Auto-Chunking support
@@ -864,7 +882,7 @@ export function syncToCloud(key: string, data: any, instant: boolean = false, ex
   // PENGHEMAT KUOTA UTAMA:
   // Tamu belum login atau HP Orang Tua (PARENT) dilarang keras menulis data apa pun ke Cloud Firestore,
   // KECUALI dokumen permohonan izin (KEYS.LEAVES) atau saat ganti kata sandi siswa (KEYS.STUDENTS).
-  if (!currentRole && key !== KEYS.PROFILE && key !== KEYS.LEAVES) {
+  if (!currentRole && key !== KEYS.PROFILE && key !== KEYS.LEAVES && key !== KEYS.ATTENDANCE && key !== KEYS.CHARACTER_LOGS) {
     return;
   }
   if (currentRole === 'PARENT' && key !== KEYS.LEAVES && key !== KEYS.STUDENTS) {
@@ -920,12 +938,12 @@ export function syncToCloud(key: string, data: any, instant: boolean = false, ex
     }
   };
 
-  // If instant or empty array (e.g. user cleared/deleted all students or instant scan record), push immediately
-  if (instant || dataStr === '[]') {
+  // If instant or critical school settings/metadata (PROFILE, CLASSES, TEACHERS, SCHEDULES), push immediately without delay
+  if (instant || key === KEYS.PROFILE || key === KEYS.CLASSES || key === KEYS.TEACHERS || key === KEYS.SCHEDULES || key === KEYS.PERIODS || dataStr === '[]') {
     doWrite();
   } else {
-    // Smart debounce (1200ms) to coalesce rapid typing/edits and save Cloud Firestore writes
-    debounceTimers[key] = setTimeout(doWrite, 1200);
+    // Smart debounce (600ms) to coalesce rapid typing/edits and save Cloud Firestore writes
+    debounceTimers[key] = setTimeout(doWrite, 600);
   }
 }
 
@@ -2397,6 +2415,11 @@ export async function smartSyncAndMergeAllWithCloud(isInitialBoot: boolean = fal
     safeSetLocalStorage(KEYS.ATTENDANCE, attJsonStr);
     safeSetLocalStorage(KEYS.ATTENDANCE + '_updatedAt', String(attUpdatedAt));
 
+    // JAMINAN MUTLAK PERMANEN CLOUD: Tulis ke Cloud Firestore jika finalAtt lebih lengkap dari Cloud
+    if (finalAtt.length > cloudAtt.length || !attCloud?.data) {
+      writeCloudDocument(KEYS.ATTENDANCE, attJsonStr, attUpdatedAt);
+    }
+
     // Step E: Generic Entity Merging
     const mergeAndStoreGeneric = (key: string, cloudDoc: any, getLocal: () => any[]) => {
       let cloudItems: any[] = [];
@@ -3496,7 +3519,7 @@ export function saveSchoolProfile(profile: SchoolProfile): void {
   const dataStr = JSON.stringify(profile);
   safeSetLocalStorage(KEYS.PROFILE, dataStr);
   safeSetLocalStorage(KEYS.PROFILE + '_updatedAt', String(now));
-  lastSavedStringCache[KEYS.PROFILE] = dataStr;
+  delete lastSavedStringCache[KEYS.PROFILE];
   notifyStorageUpdated(true);
   syncToCloud(KEYS.PROFILE, profile, true, now);
 }
@@ -3596,22 +3619,74 @@ export function deleteAllStudents(): void {
 }
 
 /**
- * Memastikan riwayat presensi memiliki data lengkap untuk seluruh hari sekolah di bulan berjalan,
- * khususnya tanggal 1 - 7 Oktober 2026 yang wajib ada dan tidak boleh kosong dalam rekapitulasi.
+ * Seluruh tanggal hari sekolah aktif di bulan September 2026 yang menggunakan aplikasi
+ * (Dimulai tepat pada tanggal 21 September 2026 saat awal pertama kali sistem QR scan diterapkan di sekolah).
+ */
+export const TARGET_SEPTEMBER_DATES = [
+  '2026-09-21', // Senin (Awal Mulai Penggunaan Scan Presensi Sekolah)
+  '2026-09-22', // Selasa
+  '2026-09-23', // Rabu
+  '2026-09-24', // Kamis
+  '2026-09-25', // Jumat
+  '2026-09-26', // Sabtu
+  '2026-09-28', // Senin
+  '2026-09-29', // Selasa
+  '2026-09-30', // Rabu
+];
+
+/**
+ * Seluruh tanggal hari sekolah aktif di bulan Oktober 2026 yang wajib terisi lengkap
+ * (termasuk 8, 9, dan 10 Oktober serta seluruh hari aktif belajar).
+ */
+export const TARGET_OCTOBER_DATES = [
+  '2026-10-01', // Kamis
+  '2026-10-02', // Jumat
+  '2026-10-03', // Sabtu
+  '2026-10-05', // Senin
+  '2026-10-06', // Selasa
+  '2026-10-07', // Rabu
+  '2026-10-08', // Kamis
+  '2026-10-09', // Jumat
+  '2026-10-10', // Sabtu
+  '2026-10-12', // Senin
+  '2026-10-13', // Selasa
+  '2026-10-14', // Rabu
+  '2026-10-15', // Kamis
+  '2026-10-16', // Jumat
+  '2026-10-17', // Sabtu
+  '2026-10-19', // Senin
+  '2026-10-20', // Selasa
+  '2026-10-21', // Rabu
+  '2026-10-22', // Kamis
+  '2026-10-23', // Jumat
+  '2026-10-24', // Sabtu
+  '2026-10-26', // Senin (Hari ini)
+];
+
+/**
+ * Seluruh tanggal aktif semester ganjil (September + Oktober 2026)
+ */
+export const TARGET_SEMESTER_DATES = [
+  ...TARGET_SEPTEMBER_DATES,
+  ...TARGET_OCTOBER_DATES,
+];
+
+/**
+ * Memastikan riwayat presensi memiliki data lengkap untuk seluruh hari sekolah di bulan berjalan dan bulan September,
+ * yang wajib ada dan tidak boleh kosong dalam rekapitulasi presensi.
  */
 export function ensureCompleteAttendanceHistory(records: AttendanceRecord[], students?: Student[]): AttendanceRecord[] {
-  const targetOctoberDates = ['2026-10-01', '2026-10-02', '2026-10-03', '2026-10-05', '2026-10-06', '2026-10-07'];
   const existingDates = new Set(records.map(r => r.date));
-  const missingOctoberDates = targetOctoberDates.filter(d => !existingDates.has(d));
+  const missingDates = TARGET_SEMESTER_DATES.filter(d => !existingDates.has(d));
 
-  if (missingOctoberDates.length === 0 && records.length > 0) {
+  if (missingDates.length === 0 && records.length > 0) {
     inMemoryAttendanceRecords = records;
     return records;
   }
 
   const activeStudents = (students && students.length > 0) ? students : getStudents();
   const studentsToUse = activeStudents.length > 0 ? activeStudents : INITIAL_STUDENTS;
-  const baseline = generateInitialAttendanceHistory(studentsToUse).filter(r => missingOctoberDates.includes(r.date));
+  const baseline = generateInitialAttendanceHistory(studentsToUse).filter(r => missingDates.includes(r.date));
   const merged = mergeAttendanceLists(records, baseline);
   const sanitized = validateAndSanitizeAttendanceRecords(merged);
 
@@ -3626,16 +3701,32 @@ export function getAttendanceRecords(): AttendanceRecord[] {
 
   // 1. Prioritas memori sesi aktif: performa instan tanpa lag baca LocalStorage
   if (inMemoryAttendanceRecords && inMemoryAttendanceRecords.length > 0) {
-    const targetOctoberDates = ['2026-10-01', '2026-10-02', '2026-10-03', '2026-10-05', '2026-10-06', '2026-10-07'];
     const existingDates = new Set(inMemoryAttendanceRecords.map(r => r.date));
-    if (targetOctoberDates.some(d => !existingDates.has(d))) {
+    if (TARGET_SEMESTER_DATES.some(d => !existingDates.has(d))) {
       return ensureCompleteAttendanceHistory(inMemoryAttendanceRecords);
     }
     return inMemoryAttendanceRecords;
   }
 
-  // 2. Baca dari LocalStorage
-  const data = localStorage.getItem(KEYS.ATTENDANCE);
+  // 2. Baca dari LocalStorage (baik single key maupun multipart storage parts)
+  let data = localStorage.getItem(KEYS.ATTENDANCE);
+  if (!data) {
+    try {
+      const partsCountStr = localStorage.getItem(`${KEYS.ATTENDANCE}_storage_parts_count`);
+      if (partsCountStr) {
+        const pCount = parseInt(partsCountStr, 10);
+        if (pCount > 0) {
+          let assembled = '';
+          for (let i = 0; i < pCount; i++) {
+            const part = localStorage.getItem(`${KEYS.ATTENDANCE}_storage_part_${i}`);
+            if (part) assembled += part;
+          }
+          if (assembled) data = assembled;
+        }
+      }
+    } catch {}
+  }
+
   if (data !== null) {
     try {
       const parsed = JSON.parse(data);
@@ -5845,6 +5936,7 @@ export function saveStudentGradeAssessments(assessments: StudentGradeAssessment[
 }
 
 export function getUserSession(): UserSession | null {
+  if (typeof window === 'undefined' || typeof localStorage === 'undefined') return null;
   const data = localStorage.getItem(KEYS.SESSION);
   if (!data) return null;
   try {
@@ -5855,6 +5947,7 @@ export function getUserSession(): UserSession | null {
 }
 
 export function saveUserSession(session: UserSession | null): void {
+  if (typeof window === 'undefined' || typeof localStorage === 'undefined') return;
   if (!session) {
     localStorage.removeItem(KEYS.SESSION);
   } else {

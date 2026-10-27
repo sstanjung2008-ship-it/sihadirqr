@@ -215,9 +215,9 @@ export const AttendanceDashboard: React.FC<AttendanceDashboardProps> = ({
 
   const deferredSearchQuery = useDeferredValue(searchQuery);
 
-  // Pagination for fast rendering of large student lists
+  // Pagination for fast rendering of large student lists (default: -1 / Semua agar seluruh siswa tampil tanpa tersembunyi)
   const [currentPage, setCurrentPage] = useState<number>(1);
-  const [pageSize, setPageSize] = useState<number>(30); // 30, 60, 100, or -1 (Semua)
+  const [pageSize, setPageSize] = useState<number>(-1); // -1 (Semua), 30, 60, 100
 
   // Reset page when filter or date changes
   useEffect(() => {

@@ -685,6 +685,8 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
         returnTime: timeStr,
         returnStatus,
         returnScannedBy: 'Pos Scanner Utama (Pulang)',
+        updatedAt: (existingRecord && existingRecord.updatedAt) ? existingRecord.updatedAt : Date.now(),
+        returnUpdatedAt: Date.now(),
       };
 
       onAddAttendance(record);
@@ -815,6 +817,8 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
         returnTime: existingRecord?.returnTime,
         returnStatus: existingRecord?.returnStatus,
         returnScannedBy: existingRecord?.returnScannedBy,
+        updatedAt: Date.now(),
+        returnUpdatedAt: existingRecord?.returnUpdatedAt,
       };
 
       onAddAttendance(record);

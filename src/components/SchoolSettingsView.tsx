@@ -55,6 +55,18 @@ export const SchoolSettingsView: React.FC<SchoolSettingsViewProps> = ({
       lateToleranceMinutes: (rawTol === 15 || !rawTol) ? 35 : rawTol
     };
   });
+
+  // Sinkronisasi form seketika saat pengaturan profil diperbarui dari Cloud / sinkronisasi perangkat lain
+  useEffect(() => {
+    if (schoolProfile) {
+      setFormData(prev => ({
+        ...prev,
+        ...schoolProfile,
+        lateToleranceMinutes: schoolProfile.lateToleranceMinutes ?? prev.lateToleranceMinutes ?? 35,
+        dailyEndTimes: schoolProfile.dailyEndTimes || prev.dailyEndTimes
+      }));
+    }
+  }, [schoolProfile]);
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [showResetModal, setShowResetModal] = useState(false);
   const [confirmBatchTeacherModal, setConfirmBatchTeacherModal] = useState(false);

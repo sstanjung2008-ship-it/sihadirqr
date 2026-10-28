@@ -342,7 +342,7 @@ export const INITIAL_STUDENTS: Student[] = [
 ];
 
 // Helper formatting YYYY-MM-DD in WITA (UTC+8) school timezone
-function getWitaDateStr(date: Date = new Date()): string {
+export function getWitaDateStr(date: Date = new Date()): string {
   const utc = date.getTime() + (date.getTimezoneOffset() * 60000);
   const wita = new Date(utc + (3600000 * 8));
   const y = wita.getFullYear();
@@ -351,27 +351,37 @@ function getWitaDateStr(date: Date = new Date()): string {
   return `${y}-${m}-${d}`;
 }
 
-// Generate recent 15 school days attendance records (including TODAY)
-export function generateInitialAttendanceHistory(students: Student[]): AttendanceRecord[] {
+// Generate historical school days attendance records (KHUSUS histori lampau, TIDAK BOLEH memasukkan HARI INI / hari aktif scan)
+export function generateInitialAttendanceHistory(students: Student[], excludedDates?: Set<string> | string[]): AttendanceRecord[] {
   const records: AttendanceRecord[] = [];
   const now = new Date();
   const todayStr = getWitaDateStr(now);
 
-  const datesSet = new Set<string>();
-  // HANYA tambahkan hari ini jika BUKAN hari Minggu (hari libur)
-  if (now.getDay() !== 0) {
-    datesSet.add(todayStr);
+  const excludedSet = new Set<string>();
+  if (excludedDates) {
+    if (excludedDates instanceof Set) {
+      excludedDates.forEach(d => excludedSet.add(d));
+    } else if (Array.isArray(excludedDates)) {
+      excludedDates.forEach(d => excludedSet.add(d));
+    }
   }
+  // JAMINAN MUTLAK: HARI INI (hari scan aktif) TIDAK BOLEH diisi data sintetis!
+  excludedSet.add(todayStr);
 
-  // 1. Pastikan seluruh hari sekolah di bulan berjalan (mulai tanggal 1 s/d hari ini) selalu ada, LEWATI hari Minggu
+  const datesSet = new Set<string>();
+
+  // 1. Hari sekolah di bulan berjalan sebelum hari ini (LEWATI hari Minggu dan hari ini)
   const currentYear = now.getFullYear();
   const currentMonth = now.getMonth();
   const currentDate = now.getDate();
 
-  for (let day = 1; day <= currentDate; day++) {
+  for (let day = 1; day < currentDate; day++) {
     const d = new Date(currentYear, currentMonth, day);
     if (d.getDay() !== 0) { // Lewati hari Minggu (Minggu = 0)
-      datesSet.add(getWitaDateStr(d));
+      const dStr = getWitaDateStr(d);
+      if (!excludedSet.has(dStr)) {
+        datesSet.add(dStr);
+      }
     }
   }
 
@@ -380,37 +390,16 @@ export function generateInitialAttendanceHistory(students: Student[]): Attendanc
     '2026-09-21', '2026-09-22', '2026-09-23', '2026-09-24', '2026-09-25', '2026-09-26',
     '2026-09-28', '2026-09-29', '2026-09-30',
   ];
-  septemberGuaranteedDates.forEach(d => datesSet.add(d));
+  septemberGuaranteedDates.forEach(d => {
+    if (!excludedSet.has(d)) datesSet.add(d);
+  });
 
-  const octoberGuaranteedDates = [
-    '2026-10-01', // Kamis
-    '2026-10-02', // Jumat
-    '2026-10-03', // Sabtu
-    '2026-10-05', // Senin (Upacara)
-    '2026-10-06', // Selasa
-    '2026-10-07', // Rabu
-    '2026-10-08', // Kamis
-    '2026-10-09', // Jumat
-    '2026-10-10', // Sabtu
-    '2026-10-12', // Senin
-    '2026-10-13', // Selasa
-    '2026-10-14', // Rabu
-    '2026-10-15', // Kamis
-    '2026-10-16', // Jumat
-    '2026-10-17', // Sabtu
-    '2026-10-19', // Senin
-    '2026-10-20', // Selasa
-    '2026-10-21', // Rabu
-    '2026-10-22', // Kamis
-    '2026-10-23', // Jumat
-    '2026-10-24', // Sabtu
-    '2026-10-26', // Senin
-  ];
-  octoberGuaranteedDates.forEach(d => datesSet.add(d));
+  // JAMINAN MUTLAK: Seluruh hari di bulan Oktober 2026 adalah data otentik hasil scan real sekolah.
+  // Jangan pernah membangkitkan data sintetis untuk bulan Oktober!
 
   // Pastikan 2026-10-25 (Minggu / Hari Libur) dan hari Minggu lainnya sama sekali tidak pernah masuk
   const validDates = Array.from(datesSet).filter(dStr => {
-    if (dStr === '2026-10-25') return false;
+    if (dStr === '2026-10-25' || excludedSet.has(dStr)) return false;
     const parts = dStr.split('-');
     if (parts.length === 3) {
       const dObj = new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10));
@@ -430,25 +419,20 @@ export function generateInitialAttendanceHistory(students: Student[]): Attendanc
       const rand = (dayIdx * 7 + sIdx * 13) % 100;
 
       if (rand >= 98 && sHash % 30 === 0) {
-        // Keterlambatan sangat jarang (hanya 1-2 siswa per hari se-sekolah, scan setelah batas 07:35:00 WITA)
         status = 'TERLAMBAT';
         time = "07:38:22";
       } else if (rand === 97 && sHash % 60 === 0) {
-        // Izin sah sangat jarang
         status = 'IZIN';
         time = "-";
         method = 'IZIN_APPROVED';
       } else if (rand === 96 && sHash % 60 === 1) {
-        // Sakit sah sangat jarang
         status = 'SAKIT';
         time = "-";
         method = 'IZIN_APPROVED';
       } else if (rand <= 3) {
-        // Siswa tidak hadir / alpa (~15 siswa per hari)
         status = 'ALPA';
         time = "-";
       } else {
-        // 95%+ hadir tepat waktu antara jam 06:30 s/d 07:15 WITA
         status = 'HADIR';
         const m = String(30 + (sIdx % 35)).padStart(2, '0');
         const s = String(10 + (sIdx % 48)).padStart(2, '0');
@@ -461,7 +445,7 @@ export function generateInitialAttendanceHistory(students: Student[]): Attendanc
       const returnStatusVal = hasReturned ? 'PULANG' : undefined;
 
       records.push({
-        id: `att-${dateStr}-${student.id}`,
+        id: `att-synth-${dateStr}-${student.id}`,
         studentId: student.id,
         studentName: student.name,
         nisn: student.nisn,
@@ -470,11 +454,13 @@ export function generateInitialAttendanceHistory(students: Student[]): Attendanc
         time: status === 'ALPA' || status === 'IZIN' || status === 'SAKIT' ? '-' : time,
         status,
         method,
-        scannedBy: "Pos Scanner Utama",
+        scannedBy: "Baseline Histori",
         parentNotified: true,
         returnTime: returnTimeStr,
         returnStatus: returnStatusVal,
-        returnScannedBy: hasReturned ? "Pos Scanner Utama (Pulang)" : undefined
+        returnScannedBy: hasReturned ? "Pos Scanner Utama (Pulang)" : undefined,
+        isSynthetic: true,
+        isRealScan: false,
       });
     });
   });

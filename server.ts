@@ -1,6 +1,6 @@
 import express from "express";
 import path from "path";
-import { createServer as createViteServer } from "vite";
+import fs from "fs";
 import { GoogleGenAI } from "@google/genai";
 import dotenv from "dotenv";
 
@@ -8,6 +8,19 @@ dotenv.config();
 
 const app = express();
 const PORT = Number(process.env.PORT) || 3000;
+
+// Production mode detection: True if NODE_ENV=production OR if pre-built dist/index.html exists (e.g. Cloud Run)
+const isProduction =
+  process.env.NODE_ENV === "production" ||
+  (!process.env.NODE_ENV && fs.existsSync(path.join(process.cwd(), "dist", "index.html"))) ||
+  (process.env.NODE_ENV !== "development" && fs.existsSync(path.join(process.cwd(), "dist", "index.html")));
+
+process.on("unhandledRejection", (reason) => {
+  console.error("[SiHadir QR Server] Unhandled Rejection:", reason);
+});
+process.on("uncaughtException", (error) => {
+  console.error("[SiHadir QR Server] Uncaught Exception:", error);
+});
 
 app.use(express.json({ limit: "25mb" }));
 
@@ -1139,7 +1152,8 @@ app.post("/api/whatsapp/send", (req, res) => {
 });
 
 async function startServer() {
-  if (process.env.NODE_ENV !== "production") {
+  if (!isProduction) {
+    const { createServer: createViteServer } = await import("vite");
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: "spa",
@@ -1169,7 +1183,7 @@ async function startServer() {
   }
 
   const server = app.listen(PORT, "0.0.0.0", () => {
-    console.log(`[SiHadir QR Server] Listening on http://0.0.0.0:${PORT}`);
+    console.log(`[SiHadir QR Server] Listening on http://0.0.0.0:${PORT} (mode: ${isProduction ? 'production' : 'development'})`);
   });
 
   const handleShutdown = (signal: string) => {

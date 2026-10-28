@@ -919,31 +919,53 @@ export default function App() {
         (r.nisn && record.nisn && r.nisn === record.nisn)
       ) && r.date === record.date);
 
-      let newRecord = { ...record };
+      let newRecord: AttendanceRecord = {
+        ...record,
+        isSynthetic: false,
+        isRealScan: record.method === 'QR_SCAN' || record.isRealScan === true,
+        updatedAt: Date.now(),
+      };
+
       if (existingIndex >= 0) {
         const existing = validPrev[existingIndex];
-        const mergedTime = (record.time && record.time !== '-')
-          ? record.time
-          : (existing.time && existing.time !== '-' ? existing.time : '-');
-        const mergedReturnTime = (record.returnTime && record.returnTime !== '-')
-          ? record.returnTime
-          : (existing.returnTime && existing.returnTime !== '-' ? existing.returnTime : undefined);
-        const isCompletedReturn = (s?: string) => s === 'PULANG' || s === 'PULANG_CEPAT' || s === 'PULANG_TEPAT';
-        const mergedReturnStatus = isCompletedReturn(record.returnStatus)
-          ? record.returnStatus
-          : (isCompletedReturn(existing.returnStatus) ? existing.returnStatus : (record.returnStatus || existing.returnStatus));
+        const isExistingSynth = existing.isSynthetic || existing.id?.startsWith('att-synth-') || existing.scannedBy === 'Baseline Histori';
 
-        newRecord = {
-          ...existing,
-          ...record,
-          time: mergedTime,
-          status: (record.status && record.status !== 'ALPA') ? record.status : existing.status,
-          method: (record.method === 'QR_SCAN' || existing.method === 'QR_SCAN') ? 'QR_SCAN' : (record.method || existing.method),
-          scannedBy: (record.scannedBy && !record.scannedBy.includes('Sistem Otomatis')) ? record.scannedBy : existing.scannedBy,
-          returnTime: mergedReturnTime,
-          returnStatus: mergedReturnStatus,
-          returnScannedBy: record.returnScannedBy || existing.returnScannedBy,
-        };
+        if (isExistingSynth) {
+          // Record lama adalah sintetis/baseline: scan otentik ini MENGGANTIKAN SEPENUHNYA
+          newRecord = {
+            ...record,
+            id: record.id?.startsWith('att-synth-') ? `att-${record.studentId}-${record.date}` : (record.id || `att-${record.studentId}-${record.date}`),
+            isSynthetic: false,
+            isRealScan: record.method === 'QR_SCAN' || record.isRealScan === true,
+            updatedAt: Date.now(),
+          };
+        } else {
+          const mergedTime = (record.time && record.time !== '-')
+            ? record.time
+            : (existing.time && existing.time !== '-' ? existing.time : '-');
+          const mergedReturnTime = (record.returnTime && record.returnTime !== '-')
+            ? record.returnTime
+            : (existing.returnTime && existing.returnTime !== '-' ? existing.returnTime : undefined);
+          const isCompletedReturn = (s?: string) => s === 'PULANG' || s === 'PULANG_CEPAT' || s === 'PULANG_TEPAT';
+          const mergedReturnStatus = isCompletedReturn(record.returnStatus)
+            ? record.returnStatus
+            : (isCompletedReturn(existing.returnStatus) ? existing.returnStatus : (record.returnStatus || existing.returnStatus));
+
+          newRecord = {
+            ...existing,
+            ...record,
+            time: mergedTime,
+            status: (record.status && record.status !== 'ALPA') ? record.status : existing.status,
+            method: (record.method === 'QR_SCAN' || existing.method === 'QR_SCAN') ? 'QR_SCAN' : (record.method || existing.method),
+            scannedBy: (record.scannedBy && !record.scannedBy.includes('Sistem Otomatis')) ? record.scannedBy : existing.scannedBy,
+            returnTime: mergedReturnTime,
+            returnStatus: mergedReturnStatus,
+            returnScannedBy: record.returnScannedBy || existing.returnScannedBy,
+            isSynthetic: false,
+            isRealScan: existing.isRealScan || record.method === 'QR_SCAN' || record.isRealScan === true,
+            updatedAt: Date.now(),
+          };
+        }
       }
       const updated = [newRecord, ...validPrev.filter((_, idx) => idx !== existingIndex)];
       // Sinkron hasil scan QR menggunakan antrean batching 10 detik atau 20 siswa
@@ -1017,6 +1039,8 @@ export default function App() {
           notes: notes !== undefined ? notes : r.notes,
           returnTime: returnTime !== undefined ? (returnTime || undefined) : r.returnTime,
           returnStatus: returnTime !== undefined ? (returnTime ? (returnStatus || 'PULANG') : undefined) : r.returnStatus,
+          isSynthetic: false,
+          isRealScan: true,
           updatedAt: Date.now(),
           returnUpdatedAt: returnTime !== undefined ? Date.now() : r.returnUpdatedAt,
         };
@@ -1033,6 +1057,8 @@ export default function App() {
         notes: notes !== undefined ? notes : fullRecord.notes,
         returnTime: returnTime && returnTime.trim() ? returnTime.trim() : undefined,
         returnStatus: returnTime && returnTime.trim() ? (returnStatus || 'PULANG') : undefined,
+        isSynthetic: false,
+        isRealScan: true,
         updatedAt: Date.now(),
         returnUpdatedAt: returnTime && returnTime.trim() ? Date.now() : undefined,
       };
@@ -1174,6 +1200,7 @@ export default function App() {
             method: 'MANUAL',
             scannedBy: userSession?.displayName ? `Admin (${userSession.displayName})` : 'Admin (Update Massal)',
             notes: u.notes !== undefined ? u.notes : currentRec.notes,
+            isSynthetic: false,
             updatedAt: updateTimestamp,
           };
         } else {
@@ -1198,6 +1225,8 @@ export default function App() {
             scannedBy: userSession?.displayName ? `Admin (${userSession.displayName})` : 'Admin (Update Massal)',
             notes: u.notes,
             parentNotified: false,
+            isSynthetic: false,
+            isRealScan: false,
             updatedAt: updateTimestamp,
           };
           updated.unshift(newRecord);
@@ -1274,6 +1303,7 @@ export default function App() {
               returnTime: undefined,
               returnStatus: undefined,
               returnScannedBy: undefined,
+              isSynthetic: false,
               returnUpdatedAt: updateTimestamp,
               updatedAt: updateTimestamp,
             };
@@ -1284,6 +1314,7 @@ export default function App() {
               returnStatus: u.newReturnStatus,
               returnScannedBy: userSession?.displayName ? `Admin (${userSession.displayName})` : 'Admin (Pulang Massal)',
               notes: u.notes !== undefined ? u.notes : currentRec.notes,
+              isSynthetic: false,
               returnUpdatedAt: updateTimestamp,
               updatedAt: updateTimestamp,
             };
@@ -1307,6 +1338,8 @@ export default function App() {
               returnScannedBy: userSession?.displayName ? `Admin (${userSession.displayName})` : 'Admin (Pulang Massal)',
               notes: u.notes,
               parentNotified: false,
+              isSynthetic: false,
+              isRealScan: false,
               returnUpdatedAt: updateTimestamp,
               updatedAt: updateTimestamp,
             };

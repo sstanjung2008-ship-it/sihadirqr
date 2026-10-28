@@ -59,6 +59,8 @@ export interface AttendanceRecord {
   returnScannedBy?: string;
   updatedAt?: number; // Timestamp pembaruan data masuk (untuk anti-revert multi-perangkat)
   returnUpdatedAt?: number; // Timestamp pembaruan data kepulangan (untuk anti-revert multi-perangkat)
+  isSynthetic?: boolean; // True jika merupakan data sintetis awal/demo, bukan hasil scan live
+  isRealScan?: boolean; // True jika merupakan pencatatan presensi/scan nyata yang harus dilindungi
 }
 
 export type LeaveType = 'SAKIT' | 'IZIN' | 'DESAK';

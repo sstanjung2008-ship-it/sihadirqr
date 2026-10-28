@@ -5,6 +5,7 @@ import {
   SAMPLE_CLASSES,
   INITIAL_STUDENTS, 
   generateInitialAttendanceHistory, 
+  getWitaDateStr,
   INITIAL_LEAVE_REQUESTS, 
   INITIAL_TEACHERS,
   INITIAL_CHARACTER_TRAITS,
@@ -351,17 +352,17 @@ export function validateAndSanitizeAttendanceRecords(records: any[]): Attendance
     const r = records[i];
     if (!isValidAttendanceRecord(r)) continue;
 
-    const dedupeKey = r.id ? `id_${r.id}` : `${r.date}__${r.studentId}`;
-    if (seenKeys.has(dedupeKey)) continue;
-    seenKeys.add(dedupeKey);
+    const studentIdStr = String(r.studentId).trim();
+    const dateStr = String(r.date).trim();
+    const dedupeKey = `${dateStr}__${studentIdStr}`;
 
     const cleanRecord: AttendanceRecord = {
-      id: r.id || `att-${Date.now()}-${r.studentId}`,
-      studentId: String(r.studentId).trim(),
+      id: r.id || `att-${Date.now()}-${studentIdStr}`,
+      studentId: studentIdStr,
       studentName: String(r.studentName || 'Siswa').trim(),
       nisn: String(r.nisn || '').trim(),
       className: String(r.className || '').trim(),
-      date: String(r.date).trim(),
+      date: dateStr,
       time: (r.time && r.time !== '-') ? String(r.time).trim() : '-',
       status: r.status || 'HADIR',
       method: r.method || 'QR_SCAN',
@@ -375,6 +376,18 @@ export function validateAndSanitizeAttendanceRecords(records: any[]): Attendance
     if (r.notes) cleanRecord.notes = String(r.notes).trim();
     if (r.updatedAt) cleanRecord.updatedAt = Number(r.updatedAt);
     if (r.returnUpdatedAt) cleanRecord.returnUpdatedAt = Number(r.returnUpdatedAt);
+    if (r.isSynthetic !== undefined) cleanRecord.isSynthetic = Boolean(r.isSynthetic);
+    if (r.isRealScan !== undefined) cleanRecord.isRealScan = Boolean(r.isRealScan);
+
+    if (seenKeys.has(dedupeKey)) {
+      // Jika ada duplikat untuk siswa pada tanggal yang sama, gabungkan secara aman agar scan nyata tidak hilang
+      const existingIdx = cleanList.findIndex(item => `${item.date}__${item.studentId}` === dedupeKey);
+      if (existingIdx >= 0) {
+        cleanList[existingIdx] = mergeSingleAttendanceRecord(cleanList[existingIdx], cleanRecord);
+      }
+      continue;
+    }
+    seenKeys.add(dedupeKey);
 
     cleanList.push(cleanRecord);
   }
@@ -1640,8 +1653,23 @@ export async function restoreAllSchoolDataAndSyncCloud(): Promise<{
   const students = getStudents().length > 0 ? getStudents() : INITIAL_STUDENTS;
   const classes = getSchoolClasses().length > 0 ? getSchoolClasses() : INITIAL_CLASSES;
 
-  // 1. Pulihkan Presensi
-  const attendance = validateAndSanitizeAttendanceRecords(generateInitialAttendanceHistory(students));
+  // 1. Pulihkan Presensi (JAMINAN INTEGRITAS: Jangan pernah menimpa riwayat presensi riil yang sudah ada)
+  const existingAtt = getAttendanceRecords();
+  let attendance: AttendanceRecord[] = existingAtt;
+  if (existingAtt.length < 5000) {
+    const cloudAttDoc = await readCloudDocument(KEYS.ATTENDANCE);
+    if (cloudAttDoc && cloudAttDoc.data) {
+      try {
+        const parsed = JSON.parse(cloudAttDoc.data);
+        if (Array.isArray(parsed) && parsed.length >= 5000) {
+          attendance = validateAndSanitizeAttendanceRecords(parsed);
+        }
+      } catch {}
+    }
+    if (attendance.length === 0) {
+      attendance = validateAndSanitizeAttendanceRecords(generateInitialAttendanceHistory(students));
+    }
+  }
   safeSetLocalStorage(KEYS.ATTENDANCE, JSON.stringify(attendance));
   safeSetLocalStorage(KEYS.ATTENDANCE + '_updatedAt', String(now));
 
@@ -1666,14 +1694,17 @@ export async function restoreAllSchoolDataAndSyncCloud(): Promise<{
     localStorage.removeItem(DEMO_DATA_CLEARED_KEY);
   } catch {}
 
-  // Kirim secara instan ke Cloud Firestore
+  // Kirim secara instan ke Cloud Firestore (Presensi hanya ditulis jika data utuh >= 5000)
   try {
-    await Promise.all([
-      writeCloudDocument(KEYS.ATTENDANCE, JSON.stringify(attendance), now),
+    const writePromises: Promise<any>[] = [
       writeCloudDocument(KEYS.CHARACTER_LOGS, JSON.stringify(charLogs), now),
       writeCloudDocument(KEYS.LEARNING_JOURNALS, JSON.stringify(journals), now),
       writeCloudDocument(KEYS.GRADES, JSON.stringify(grades), now),
-    ]);
+    ];
+    if (attendance.length >= 5000) {
+      writePromises.push(writeCloudDocument(KEYS.ATTENDANCE, JSON.stringify(attendance), now));
+    }
+    await Promise.all(writePromises);
   } catch (err) {
     console.warn('[Restore] Push to cloud error:', err);
   }
@@ -1991,6 +2022,23 @@ export function hasRealReturnPresence(rec?: AttendanceRecord | null): boolean {
 }
 
 export function mergeSingleAttendanceRecord(a: AttendanceRecord, b: AttendanceRecord): AttendanceRecord {
+  const isSyntheticA = !!a.isSynthetic || a.id?.startsWith('att-synth-') || a.scannedBy === 'Baseline Histori';
+  const isSyntheticB = !!b.isSynthetic || b.id?.startsWith('att-synth-') || b.scannedBy === 'Baseline Histori';
+
+  // RULE 0: JAMINAN INTEGRITAS HISTORI PRESENSI (Authentic Scan vs Synthetic Baseline)
+  // Record scan otentik / riwayat presensi nyata SELALU MENANG 100% atas data sintetis!
+  // Data sintetis TIDAK PERNAH boleh menimpa record scan yang sudah ada.
+  if (!isSyntheticA && isSyntheticB) {
+    // a adalah data scan nyata/otentik, b adalah data sintetis generator
+    // a MENANG MUTLAK, pertahankan seluruh data a tanpa terdistorsi
+    return { ...a, isSynthetic: false, isRealScan: true };
+  }
+  if (isSyntheticA && !isSyntheticB) {
+    // a adalah data sintetis, b adalah data scan nyata baru
+    // b MENANG MUTLAK menggantikan data sintetis!
+    return { ...b, isSynthetic: false, isRealScan: true };
+  }
+
   const hasEntryA = hasRealEntryPresence(a);
   const hasEntryB = hasRealEntryPresence(b);
   const hasReturnA = hasRealReturnPresence(a);
@@ -3798,8 +3846,17 @@ export const TARGET_SEMESTER_DATES = [
  * yang wajib ada dan tidak boleh kosong dalam rekapitulasi presensi.
  */
 export function ensureCompleteAttendanceHistory(records: AttendanceRecord[], students?: Student[]): AttendanceRecord[] {
+  // JAMINAN MUTLAK: Jika riwayat presensi otentik sudah ada (>= 5000 record), jangan pernah menambahkan baseline sintetis!
+  if (records && records.length >= 5000) {
+    inMemoryAttendanceRecords = records;
+    return records;
+  }
+
+  const todayStr = getWitaDateStr(new Date());
   const existingDates = new Set(records.map(r => r.date));
-  const missingDates = TARGET_SEMESTER_DATES.filter(d => !existingDates.has(d));
+  // Filter missingDates: HANYA hari sekolah masa lalu sebelum hari ini.
+  // Jangan pernah memalsukan data untuk HARI INI (todayStr) atau hari masa depan!
+  const missingDates = TARGET_SEMESTER_DATES.filter(d => !existingDates.has(d) && d !== todayStr && d < todayStr);
 
   if (missingDates.length === 0 && records.length > 0) {
     inMemoryAttendanceRecords = records;
@@ -3808,7 +3865,7 @@ export function ensureCompleteAttendanceHistory(records: AttendanceRecord[], stu
 
   const activeStudents = (students && students.length > 0) ? students : getStudents();
   const studentsToUse = activeStudents.length > 0 ? activeStudents : INITIAL_STUDENTS;
-  const baseline = generateInitialAttendanceHistory(studentsToUse).filter(r => missingDates.includes(r.date));
+  const baseline = generateInitialAttendanceHistory(studentsToUse, existingDates).filter(r => missingDates.includes(r.date));
   const merged = mergeAttendanceLists(records, baseline);
   const sanitized = validateAndSanitizeAttendanceRecords(merged);
 
@@ -3823,8 +3880,12 @@ export function getAttendanceRecords(): AttendanceRecord[] {
 
   // 1. Prioritas memori sesi aktif: performa instan tanpa lag baca LocalStorage
   if (inMemoryAttendanceRecords && inMemoryAttendanceRecords.length > 0) {
+    if (inMemoryAttendanceRecords.length >= 5000) {
+      return inMemoryAttendanceRecords;
+    }
+    const todayStr = getWitaDateStr(new Date());
     const existingDates = new Set(inMemoryAttendanceRecords.map(r => r.date));
-    if (TARGET_SEMESTER_DATES.some(d => !existingDates.has(d))) {
+    if (TARGET_SEMESTER_DATES.some(d => !existingDates.has(d) && d !== todayStr && d < todayStr)) {
       return ensureCompleteAttendanceHistory(inMemoryAttendanceRecords);
     }
     return inMemoryAttendanceRecords;
@@ -3855,6 +3916,10 @@ export function getAttendanceRecords(): AttendanceRecord[] {
       if (Array.isArray(parsed) && parsed.length > 0) {
         const sanitized = validateAndSanitizeAttendanceRecords(parsed);
         if (sanitized.length > 0) {
+          if (sanitized.length >= 5000) {
+            inMemoryAttendanceRecords = sanitized;
+            return sanitized;
+          }
           const complete = ensureCompleteAttendanceHistory(sanitized);
           inMemoryAttendanceRecords = complete;
           return complete;
@@ -3873,6 +3938,10 @@ export function getAttendanceRecords(): AttendanceRecord[] {
       if (Array.isArray(parsedBackup) && parsedBackup.length > 0) {
         const validBackup = validateAndSanitizeAttendanceRecords(parsedBackup);
         if (validBackup.length > 0) {
+          if (validBackup.length >= 5000) {
+            inMemoryAttendanceRecords = validBackup;
+            return validBackup;
+          }
           const complete = ensureCompleteAttendanceHistory(validBackup);
           inMemoryAttendanceRecords = complete;
           safeSetLocalStorage(KEYS.ATTENDANCE, JSON.stringify(complete));
@@ -3943,10 +4012,27 @@ export async function restoreComprehensiveSchoolData(syncToCloud: boolean = true
       saveTeachers(activeTeachers);
     }
 
-    // 3. Pulihkan Riwayat Presensi (Hari ini + 14 hari sekolah sebelumnya)
-    const initialAtt = generateInitialAttendanceHistory(activeStudents);
-    const validAtt = validateAndSanitizeAttendanceRecords(initialAtt);
-    inMemoryAttendanceRecords = validAtt;
+    // 3. Pulihkan Riwayat Presensi (Lindungi data otentik >= 5000 records)
+    let validAtt: AttendanceRecord[] = [];
+    const existingAtt = (inMemoryAttendanceRecords && inMemoryAttendanceRecords.length >= 5000)
+      ? inMemoryAttendanceRecords
+      : (() => {
+          try {
+            const raw = localStorage.getItem(KEYS.ATTENDANCE);
+            const parsed = raw ? JSON.parse(raw) : [];
+            return (Array.isArray(parsed) && parsed.length >= 5000) ? parsed : [];
+          } catch { return []; }
+        })();
+
+    if (existingAtt.length >= 5000) {
+      validAtt = validateAndSanitizeAttendanceRecords(existingAtt);
+      inMemoryAttendanceRecords = validAtt;
+      console.log(`[Restore] Melindungi ${validAtt.length} data presensi otentik, tidak menimpa dengan data sintetis.`);
+    } else {
+      const initialAtt = generateInitialAttendanceHistory(activeStudents);
+      validAtt = validateAndSanitizeAttendanceRecords(initialAtt);
+      inMemoryAttendanceRecords = validAtt;
+    }
     const attStr = JSON.stringify(validAtt);
     safeSetLocalStorage(KEYS.ATTENDANCE, attStr);
     safeSetLocalStorage(KEYS.ATTENDANCE + '_updatedAt', String(now));
@@ -3979,15 +4065,19 @@ export async function restoreComprehensiveSchoolData(syncToCloud: boolean = true
     // 8. Sinkronkan ke Cloud Firestore jika requested dan kuota aman
     if (syncToCloud && !isFirestoreQuotaExceeded()) {
       try {
-        await Promise.all([
+        const promises: Promise<any>[] = [
           writeCloudDocument(KEYS.STUDENTS, JSON.stringify(activeStudents), now),
           writeCloudDocument(KEYS.CLASSES, JSON.stringify(activeClasses), now),
           writeCloudDocument(KEYS.TEACHERS, JSON.stringify(activeTeachers), now),
-          writeCloudDocument(KEYS.ATTENDANCE, attStr, now),
           writeCloudDocument(KEYS.CHARACTER_LOGS, charLogsStr, now),
           writeCloudDocument(KEYS.LEARNING_JOURNALS, journalsStr, now),
           writeCloudDocument(KEYS.GRADES, gradesStr, now),
-        ]);
+        ];
+        // Hanya tulis presensi jika jumlah record valid >= 5000 agar tidak merusak 14.771 data presensi di cloud
+        if (validAtt.length >= 5000) {
+          promises.push(writeCloudDocument(KEYS.ATTENDANCE, attStr, now));
+        }
+        await Promise.all(promises);
         setCloudSyncStatus('connected');
       } catch (cloudErr) {
         console.warn('[Restore] Cloud write notice:', cloudErr);
@@ -4019,6 +4109,21 @@ export async function restoreComprehensiveSchoolData(syncToCloud: boolean = true
  * Memulihkan data presensi sekolah secara instan jika pernah kosong / terhapus
  */
 export function restoreAttendanceRecords(): AttendanceRecord[] {
+  if (inMemoryAttendanceRecords && inMemoryAttendanceRecords.length >= 5000) {
+    return inMemoryAttendanceRecords;
+  }
+  try {
+    const raw = localStorage.getItem(KEYS.ATTENDANCE);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed) && parsed.length >= 5000) {
+        const sanitized = validateAndSanitizeAttendanceRecords(parsed);
+        inMemoryAttendanceRecords = sanitized;
+        return sanitized;
+      }
+    }
+  } catch {}
+
   const activeStudents = getStudents();
   const studentsToUse = activeStudents.length > 0 ? activeStudents : INITIAL_STUDENTS;
   const initial = generateInitialAttendanceHistory(studentsToUse);

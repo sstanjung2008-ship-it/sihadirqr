@@ -699,6 +699,13 @@ export async function writeCloudDocument(key: string, dataStr: string, timestamp
     try {
       const parsed = JSON.parse(dataStr);
       if (Array.isArray(parsed)) {
+        // PERLINDUNGAN ABSOLUT: Cegah data presensi anjlok / reset ke nol
+        // Database aktif memiliki > 14.000 record. Jika ada perangkat yang mencoba menulis
+        // kumpulan data terpotong (< 5000 record), BLOKIR penulisan ke Cloud!
+        if (parsed.length < 5000) {
+          console.error(`[CRITICAL DATA GUARD] Penulisan attendance ke Cloud DIBATALKAN karena jumlah data (${parsed.length}) jauh di bawah batas keamanan (5000). Data Cloud terlindungi dari reset ke nol.`);
+          return;
+        }
         const clean = validateAndSanitizeAttendanceRecords(parsed);
         // Kompaksi payload: buang field kosong / default untuk menghemat 40-50% ukuran JSON di Firestore
         const compacted = clean.map((r: any) => {
@@ -778,7 +785,7 @@ export async function writeCloudDocument(key: string, dataStr: string, timestamp
 export async function readCloudDocument(key: string): Promise<{ data: string; updatedAt: number } | null> {
   try {
     const rootDocRef = doc(db, 'sihadir_app_data', key);
-    const snap = await withTimeout(getDoc(rootDocRef), 6000, null);
+    const snap = await withTimeout(getDoc(rootDocRef), 10000, null);
     if (!snap || !snap.exists()) return null;
 
     const payload = snap.data();
@@ -807,13 +814,18 @@ export async function readCloudDocument(key: string): Promise<{ data: string; up
             }
             return '';
           }),
-          6000,
+          10000,
           ''
         )
       );
     }
 
     const otherChunks = await Promise.all(chunkPromises);
+    // VALIDASI INTEGRITAS CHUNK: Jika salah satu chunk gagal terbaca (kosong), jangan kembalikan string rusak!
+    if (otherChunks.some(chunk => !chunk || chunk.trim().length === 0)) {
+      console.warn(`[Firestore Sync] Salah satu dari ${totalChunks} chunk untuk ${key} gagal dimuat. Membatalkan hasil baca untuk mencegah data corrupt.`);
+      return null;
+    }
     const fullDataStr = (payload.data || '') + otherChunks.join('');
     lastSavedStringCache[key] = fullDataStr;
     return { data: fullDataStr, updatedAt };
@@ -1944,20 +1956,45 @@ export function isRealAttendance(rec?: AttendanceRecord | null): boolean {
     return false;
   }
   // If return scan happened with valid time, it's definitely real
-  if (rec.returnTime && rec.returnTime !== '-' && rec.returnTime.trim() !== '') return true;
+  if (rec.returnTime && rec.returnTime !== '-' && rec.returnTime.trim() !== '' && !rec.returnTime.toLowerCase().includes('belum')) return true;
+  if (rec.returnStatus === 'PULANG' || rec.returnStatus === 'PULANG_TEPAT' || rec.returnStatus === 'PULANG_CEPAT') return true;
   // If QR code was scanned with valid entry time
   if (rec.method === 'QR_SCAN' && rec.time && rec.time !== '-' && !rec.time.toLowerCase().includes('belum')) return true;
-  // If real presence status with non-alpa status
-  if (rec.status === 'HADIR' || rec.status === 'TERLAMBAT' || rec.status === 'IZIN' || rec.status === 'SAKIT') {
+  // If real presence status with non-alpa status and valid entry time
+  if ((rec.status === 'HADIR' || rec.status === 'TERLAMBAT') && rec.time && rec.time !== '-' && !rec.time.toLowerCase().includes('belum')) {
+    return true;
+  }
+  // If approved leave or medical excuse
+  if (rec.status === 'IZIN' || rec.status === 'SAKIT') {
     return true;
   }
   // Otherwise, only real if entry time is present and valid
   return !!(rec.time && rec.time !== '-' && rec.time.trim() && !rec.time.toLowerCase().includes('belum'));
 }
 
+export function hasRealEntryPresence(rec?: AttendanceRecord | null): boolean {
+  if (!rec) return false;
+  if (rec.id?.startsWith('att-autoalpa-') || rec.notes?.includes('Otomatis Alpa')) return false;
+  if ((rec.status as string) === 'BELUM_ABSEN') return false;
+  const hasTime = !!(rec.time && rec.time !== '-' && rec.time.trim() && !rec.time.toLowerCase().includes('belum'));
+  if (rec.method === 'QR_SCAN' && hasTime) return true;
+  if ((rec.status === 'HADIR' || rec.status === 'TERLAMBAT') && hasTime) return true;
+  if (rec.status === 'IZIN' || rec.status === 'SAKIT') return true;
+  return hasTime && rec.status !== 'ALPA';
+}
+
+export function hasRealReturnPresence(rec?: AttendanceRecord | null): boolean {
+  if (!rec) return false;
+  const isCompleted = rec.returnStatus === 'PULANG' || rec.returnStatus === 'PULANG_TEPAT' || rec.returnStatus === 'PULANG_CEPAT';
+  const hasTime = !!(rec.returnTime && rec.returnTime !== '-' && rec.returnTime.trim() && !rec.returnTime.toLowerCase().includes('belum'));
+  return isCompleted || hasTime;
+}
+
 export function mergeSingleAttendanceRecord(a: AttendanceRecord, b: AttendanceRecord): AttendanceRecord {
-  const isRealA = isRealAttendance(a);
-  const isRealB = isRealAttendance(b);
+  const hasEntryA = hasRealEntryPresence(a);
+  const hasEntryB = hasRealEntryPresence(b);
+  const hasReturnA = hasRealReturnPresence(a);
+  const hasReturnB = hasRealReturnPresence(b);
 
   const aUpdated = Number(a.updatedAt) || 0;
   const bUpdated = Number(b.updatedAt) || 0;
@@ -1972,113 +2009,121 @@ export function mergeSingleAttendanceRecord(a: AttendanceRecord, b: AttendanceRe
   let finalNotes: string;
   let finalEntryUpdated: number;
 
-  if (bUpdated > aUpdated) {
-    // b adalah update yang lebih baru secara eksplisit (misal: ubah massal / edit admin terbaru)
-    finalStatus = b.status || 'HADIR';
-    finalTime = (b.time && b.time !== '-') ? b.time : (finalStatus === 'TERLAMBAT' ? '07:40' : (finalStatus === 'HADIR' ? '07:00' : '-'));
-    finalMethod = b.method || 'MANUAL';
-    finalScannedBy = b.scannedBy || a.scannedBy || 'Admin';
-    finalNotes = b.notes !== undefined ? b.notes : (a.notes || '');
-    finalEntryUpdated = bUpdated;
-  } else if (aUpdated > bUpdated) {
-    // a adalah update yang lebih baru
-    finalStatus = a.status || 'HADIR';
-    finalTime = (a.time && a.time !== '-') ? a.time : (finalStatus === 'TERLAMBAT' ? '07:40' : (finalStatus === 'HADIR' ? '07:00' : '-'));
-    finalMethod = a.method || 'MANUAL';
-    finalScannedBy = a.scannedBy || b.scannedBy || 'Admin';
-    finalNotes = a.notes !== undefined ? a.notes : (b.notes || '');
-    finalEntryUpdated = aUpdated;
-  } else {
-    // Keduanya tidak memiliki updatedAt atau sama:
-    const bIsAdminManual = b.method === 'MANUAL' && (b.scannedBy?.includes('Admin') || b.notes?.includes('Admin'));
-    const aIsAdminManual = a.method === 'MANUAL' && (a.scannedBy?.includes('Admin') || a.notes?.includes('Admin'));
+  const bIsAdminManual = b.method === 'MANUAL' && (b.scannedBy?.includes('Admin') || b.notes?.includes('Admin'));
+  const aIsAdminManual = a.method === 'MANUAL' && (a.scannedBy?.includes('Admin') || a.notes?.includes('Admin'));
 
-    if (bIsAdminManual && !aIsAdminManual) {
-      finalStatus = b.status || 'HADIR';
+  if (hasEntryA && !hasEntryB) {
+    // JAMINAN MUTLAK MULTI-PERANGKAT:
+    // a memiliki scan/kehadiran nyata, b adalah record belum absen / ALPA dari perangkat lain.
+    // Scan nyata di a TIDAK BOLEH ditimpa menjadi ALPA oleh perangkat b!
+    if (bIsAdminManual && bUpdated > aUpdated && b.notes?.trim()) {
+      // Kecuali admin secara eksplisit mengubah dengan catatan manual
+      finalStatus = b.status || 'ALPA';
       finalTime = b.time || '-';
       finalMethod = 'MANUAL';
-      finalScannedBy = b.scannedBy;
+      finalScannedBy = b.scannedBy || 'Admin';
       finalNotes = b.notes || '';
-      finalEntryUpdated = Date.now();
-    } else if (aIsAdminManual && !bIsAdminManual) {
-      finalStatus = a.status || 'HADIR';
-      finalTime = a.time || '-';
-      finalMethod = 'MANUAL';
-      finalScannedBy = a.scannedBy;
-      finalNotes = a.notes || '';
-      finalEntryUpdated = Date.now();
-    } else if (isRealB && !isRealA) {
-      finalStatus = b.status || 'HADIR';
-      finalTime = b.time || '07:00';
-      finalMethod = b.method || 'QR_SCAN';
-      finalScannedBy = b.scannedBy;
-      finalNotes = b.notes || '';
-      finalEntryUpdated = bUpdated || Date.now();
-    } else if (isRealA && !isRealB) {
+      finalEntryUpdated = bUpdated;
+    } else {
       finalStatus = a.status || 'HADIR';
       finalTime = a.time || '07:00';
       finalMethod = a.method || 'QR_SCAN';
-      finalScannedBy = a.scannedBy;
+      finalScannedBy = a.scannedBy || 'Gerbang';
       finalNotes = a.notes || '';
       finalEntryUpdated = aUpdated || Date.now();
+    }
+  } else if (!hasEntryA && hasEntryB) {
+    // b memiliki scan nyata, a belum absen / ALPA. b menang mutlak!
+    if (aIsAdminManual && aUpdated > bUpdated && a.notes?.trim()) {
+      finalStatus = a.status || 'ALPA';
+      finalTime = a.time || '-';
+      finalMethod = 'MANUAL';
+      finalScannedBy = a.scannedBy || 'Admin';
+      finalNotes = a.notes || '';
+      finalEntryUpdated = aUpdated;
     } else {
-      finalStatus = b.status || a.status || 'HADIR';
-      finalTime = (b.time && b.time !== '-') ? b.time : ((a.time && a.time !== '-') ? a.time : '-');
-      finalMethod = b.method || a.method || 'MANUAL';
-      finalScannedBy = b.scannedBy || a.scannedBy;
+      finalStatus = b.status || 'HADIR';
+      finalTime = b.time || '07:00';
+      finalMethod = b.method || 'QR_SCAN';
+      finalScannedBy = b.scannedBy || 'Gerbang';
+      finalNotes = b.notes || '';
+      finalEntryUpdated = bUpdated || Date.now();
+    }
+  } else if (hasEntryA && hasEntryB) {
+    // Keduanya memiliki scan/kehadiran nyata (misal scan di dua gerbang berbeda):
+    if (bIsAdminManual && !aIsAdminManual && bUpdated > aUpdated) {
+      finalStatus = b.status || 'HADIR';
+      finalTime = b.time || '07:00';
+      finalMethod = 'MANUAL';
+      finalScannedBy = b.scannedBy;
+      finalNotes = b.notes || '';
+      finalEntryUpdated = bUpdated;
+    } else if (aIsAdminManual && !bIsAdminManual && aUpdated > bUpdated) {
+      finalStatus = a.status || 'HADIR';
+      finalTime = a.time || '07:00';
+      finalMethod = 'MANUAL';
+      finalScannedBy = a.scannedBy;
+      finalNotes = a.notes || '';
+      finalEntryUpdated = aUpdated;
+    } else {
+      // Pertahankan jam scan kedatangan siswa yang paling awal (arrival scan):
+      const timeA = (a.time && a.time !== '-') ? a.time : '99:99';
+      const timeB = (b.time && b.time !== '-') ? b.time : '99:99';
+      const earliestTime = (timeA <= timeB) ? a.time : b.time;
+      finalTime = (earliestTime && earliestTime !== '99:99') ? earliestTime : (a.time || b.time || '07:00');
+      
+      // Jika salah satu tepat waktu (HADIR), status akhir HADIR (siswa tidak dirugikan karena antre scanner)
+      if (a.status === 'HADIR' || b.status === 'HADIR') {
+        finalStatus = 'HADIR';
+      } else {
+        finalStatus = b.status || a.status || 'HADIR';
+      }
+
+      finalMethod = (a.method === 'QR_SCAN' || b.method === 'QR_SCAN') ? 'QR_SCAN' : (b.method || a.method);
+      finalScannedBy = (timeA <= timeB ? a.scannedBy : b.scannedBy) || b.scannedBy || a.scannedBy || 'Gerbang';
       finalNotes = (b.notes && b.notes.trim()) ? b.notes : (a.notes || '');
       finalEntryUpdated = Math.max(aUpdated, bUpdated) || Date.now();
     }
+  } else {
+    // Keduanya belum absen / ALPA:
+    finalStatus = 'ALPA';
+    finalTime = '-';
+    finalMethod = 'MANUAL';
+    finalScannedBy = b.scannedBy || a.scannedBy || 'Sistem Otomatis';
+    finalNotes = (b.notes && b.notes.trim()) ? b.notes : (a.notes || '');
+    finalEntryUpdated = Math.max(aUpdated, bUpdated) || Date.now();
   }
 
-  // 2. Evaluasi Status & Jam Pulang (Return)
+  // 2. Evaluasi Status & Jam Pulang (Return) - Anti-Hapus & Gabung Multi-Gerbang
   let returnTime: string | undefined = undefined;
   let returnStatus: AttendanceRecord['returnStatus'] | undefined = undefined;
   let returnScannedBy: string | undefined = undefined;
   let finalReturnUpdated: number | undefined = undefined;
 
-  if (bReturnUpdated > aReturnUpdated) {
-    // b secara eksplisit memperbarui return info (termasuk reset ke BELUM_PULANG / undefined)
-    returnTime = (b.returnTime && b.returnTime !== '-') ? b.returnTime : undefined;
-    returnStatus = b.returnStatus;
-    returnScannedBy = b.returnScannedBy;
-    finalReturnUpdated = bReturnUpdated;
-  } else if (aReturnUpdated > bReturnUpdated) {
-    // a secara eksplisit memperbarui return info
+  if (hasReturnA && !hasReturnB) {
     returnTime = (a.returnTime && a.returnTime !== '-') ? a.returnTime : undefined;
     returnStatus = a.returnStatus;
     returnScannedBy = a.returnScannedBy;
-    finalReturnUpdated = aReturnUpdated;
+    finalReturnUpdated = aReturnUpdated || Date.now();
+  } else if (!hasReturnA && hasReturnB) {
+    returnTime = (b.returnTime && b.returnTime !== '-') ? b.returnTime : undefined;
+    returnStatus = b.returnStatus;
+    returnScannedBy = b.returnScannedBy;
+    finalReturnUpdated = bReturnUpdated || Date.now();
+  } else if (hasReturnA && hasReturnB) {
+    returnTime = (b.returnTime && b.returnTime !== '-') ? b.returnTime : ((a.returnTime && a.returnTime !== '-') ? a.returnTime : undefined);
+    const isCompleted = (s?: string) => s === 'PULANG' || s === 'PULANG_TEPAT' || s === 'PULANG_CEPAT';
+    returnStatus = isCompleted(b.returnStatus) ? b.returnStatus : (isCompleted(a.returnStatus) ? a.returnStatus : (b.returnStatus || a.returnStatus));
+    returnScannedBy = b.returnScannedBy || a.returnScannedBy;
+    finalReturnUpdated = Math.max(aReturnUpdated, bReturnUpdated) || Date.now();
   } else {
-    // Keduanya tidak memiliki returnUpdatedAt atau sama:
-    const isCompleted = (s?: string) => s === 'PULANG' || s === 'PULANG_CEPAT' || s === 'PULANG_TEPAT';
-    const aHasReturn = !!(a.returnTime && a.returnTime !== '-' && a.returnTime.trim()) || isCompleted(a.returnStatus);
-    const bHasReturn = !!(b.returnTime && b.returnTime !== '-' && b.returnTime.trim()) || isCompleted(b.returnStatus);
-
-    if (bHasReturn && !aHasReturn) {
-      returnTime = (b.returnTime && b.returnTime !== '-') ? b.returnTime : undefined;
-      returnStatus = b.returnStatus;
-      returnScannedBy = b.returnScannedBy;
-      finalReturnUpdated = bReturnUpdated || Date.now();
-    } else if (aHasReturn && !bHasReturn) {
-      returnTime = (a.returnTime && a.returnTime !== '-') ? a.returnTime : undefined;
-      returnStatus = a.returnStatus;
-      returnScannedBy = a.returnScannedBy;
-      finalReturnUpdated = aReturnUpdated || Date.now();
-    } else if (aHasReturn && bHasReturn) {
-      returnTime = (b.returnTime && b.returnTime !== '-') ? b.returnTime : ((a.returnTime && a.returnTime !== '-') ? a.returnTime : undefined);
-      returnStatus = b.returnStatus || a.returnStatus;
-      returnScannedBy = b.returnScannedBy || a.returnScannedBy;
-      finalReturnUpdated = Math.max(aReturnUpdated, bReturnUpdated) || Date.now();
-    } else {
-      returnStatus = b.returnStatus || a.returnStatus;
-    }
+    returnStatus = b.returnStatus || a.returnStatus;
   }
 
   const merged: AttendanceRecord = {
     ...a,
     ...b,
-    id: b.id || a.id || `att-${b.date || a.date}-${b.studentId || a.studentId}`,
+    id: (hasEntryA && !hasEntryB) ? a.id : (b.id || a.id || `att-${b.date || a.date}-${b.studentId || a.studentId}`),
     studentId: b.studentId || a.studentId,
     studentName: (b.studentName && b.studentName !== 'Siswa') ? b.studentName : (a.studentName || 'Siswa'),
     nisn: b.nisn || a.nisn || '',
@@ -2394,7 +2439,7 @@ export async function smartSyncAndMergeAllWithCloud(isInitialBoot: boolean = fal
       finalAtt = cloudAtt;
     } else if (currentLocalAtt.length > 0) {
       finalAtt = currentLocalAtt;
-      if (!isInitialBoot) {
+      if (!isInitialBoot && finalAtt.length >= 5000) {
         writeCloudDocument(KEYS.ATTENDANCE, JSON.stringify(finalAtt), now);
       }
     } else {
@@ -2415,8 +2460,8 @@ export async function smartSyncAndMergeAllWithCloud(isInitialBoot: boolean = fal
     safeSetLocalStorage(KEYS.ATTENDANCE, attJsonStr);
     safeSetLocalStorage(KEYS.ATTENDANCE + '_updatedAt', String(attUpdatedAt));
 
-    // JAMINAN MUTLAK PERMANEN CLOUD: Tulis ke Cloud Firestore jika finalAtt lebih lengkap dari Cloud
-    if (finalAtt.length > cloudAtt.length || !attCloud?.data) {
+    // JAMINAN MUTLAK PERMANEN CLOUD: Tulis ke Cloud Firestore jika finalAtt lebih lengkap dari Cloud dan data utuh
+    if (finalAtt.length >= 5000 && (finalAtt.length > cloudAtt.length || !attCloud?.data)) {
       writeCloudDocument(KEYS.ATTENDANCE, attJsonStr, attUpdatedAt);
     }
 
@@ -2919,11 +2964,81 @@ export function listenToCloudSchoolProfile(): void {
   }
 }
 
+let attendanceSnapshotUnsubscribe: (() => void) | null = null;
+let lastCloudAttendanceTimestamp = 0;
+let isAttendanceSyncingFromCloud = false;
+
+/**
+ * Mendengarkan perubahan data presensi dari Cloud Firestore secara real-time.
+ * Memastikan saat satu perangkat memindai QR (misal Gerbang 1), SELURUH perangkat lain
+ * (Gerbang 2, Admin, Guru) langsung menerima dan menampilkan hasil presensi dalam 1-2 detik
+ * tanpa perlu me-refresh halaman dan tanpa saling menimpa data.
+ */
+export function listenToCloudAttendance(): void {
+  if (typeof window === 'undefined') return;
+  if (attendanceSnapshotUnsubscribe) return;
+
+  try {
+    const attDocRef = doc(db, 'sihadir_app_data', KEYS.ATTENDANCE);
+    attendanceSnapshotUnsubscribe = onSnapshot(attDocRef, async (snap) => {
+      if (!snap.exists()) return;
+      const payload = snap.data();
+      if (!payload) return;
+
+      const cloudTs = Number(payload.updatedAt) || 0;
+      const localTs = Number(localStorage.getItem(KEYS.ATTENDANCE + '_updatedAt') || '0');
+
+      // Jika update ini dipicu oleh perangkat ini sendiri, lewati untuk mencegah loop
+      if (cloudTs <= localTs && cloudTs <= lastCloudAttendanceTimestamp) {
+        return;
+      }
+      if (isAttendanceSyncingFromCloud) return;
+
+      try {
+        isAttendanceSyncingFromCloud = true;
+        lastCloudAttendanceTimestamp = cloudTs;
+
+        const cloudDoc = await readCloudDocument(KEYS.ATTENDANCE);
+        if (!cloudDoc || !cloudDoc.data) return;
+
+        const cloudRecords = typeof cloudDoc.data === 'string' ? JSON.parse(cloudDoc.data) : cloudDoc.data;
+        if (!Array.isArray(cloudRecords) || cloudRecords.length === 0) return;
+
+        const localRecords = getAttendanceRecords();
+        // Gabungkan secara non-destruktif: scan lokal yang mungkin baru di-scan tidak akan hilang
+        const merged = mergeAttendanceLists(cloudRecords, localRecords);
+        inMemoryAttendanceRecords = merged;
+        const mergedStr = JSON.stringify(merged);
+        safeSetLocalStorage(KEYS.ATTENDANCE, mergedStr);
+        safeSetLocalStorage(KEYS.ATTENDANCE + '_updatedAt', String(cloudTs));
+        lastSavedStringCache[KEYS.ATTENDANCE] = mergedStr;
+        notifyStorageUpdated(true);
+      } catch (err) {
+        console.warn('[Realtime Attendance Listener] Gagal serap update presensi Cloud:', err);
+      } finally {
+        isAttendanceSyncingFromCloud = false;
+      }
+    }, (err) => {
+      console.warn('[Realtime Attendance Listener] Firestore onSnapshot warning:', err);
+    });
+
+    if (attendanceSnapshotUnsubscribe) {
+      activeUnsubscribes.push(attendanceSnapshotUnsubscribe);
+    }
+  } catch (err) {
+    console.warn('[Realtime Attendance Listener] Gagal pasang listener presensi:', err);
+  }
+}
+
 // Stop and unsubscribe all active Firestore Realtime listeners
 export function stopFirestoreRealtimeSync(): void {
   if (profileSnapshotUnsubscribe) {
     try { profileSnapshotUnsubscribe(); } catch {}
     profileSnapshotUnsubscribe = null;
+  }
+  if (attendanceSnapshotUnsubscribe) {
+    try { attendanceSnapshotUnsubscribe(); } catch {}
+    attendanceSnapshotUnsubscribe = null;
   }
   if (activeUnsubscribes.length > 0) {
     activeUnsubscribes.forEach(unsub => {
@@ -3176,8 +3291,9 @@ export function initFirestoreAppSession(role?: UserRole): Promise<{ success: boo
   // Daftarkan listener real-time profil sekolah agar jam pulang & hari aktif sinkron otomatis ke seluruh perangkat
   listenToCloudSchoolProfile();
 
-  // Mulai interval pengecekan berkala presensi 30 detik ke Cloud Firestore
+  // Daftarkan listener real-time presensi agar hasil scan di satu perangkat langsung masuk ke seluruh perangkat
   if (currentRole !== 'PARENT') {
+    listenToCloudAttendance();
     startAutoAttendanceSync30s();
   }
 
@@ -3985,8 +4101,9 @@ export async function flushAttendanceScanQueue(force: boolean = false): Promise<
 
     // 1. Ambil data presensi terkini dari Cloud Firestore untuk digabungkan secara non-destruktif
     let finalRecords = localRecords;
+    let cloudFetchSuccess = false;
     try {
-      const cloudDoc = await withTimeout(readCloudDocument(KEYS.ATTENDANCE), 4000, null);
+      const cloudDoc = await withTimeout(readCloudDocument(KEYS.ATTENDANCE), 15000, null);
       if (cloudDoc && cloudDoc.data) {
         const cloudRecords = typeof cloudDoc.data === 'string' ? JSON.parse(cloudDoc.data) : cloudDoc.data;
         if (Array.isArray(cloudRecords) && cloudRecords.length > 0) {
@@ -3996,10 +4113,18 @@ export async function flushAttendanceScanQueue(force: boolean = false): Promise<
           safeSetLocalStorage(KEYS.ATTENDANCE, JSON.stringify(finalRecords));
           safeSetLocalStorage(KEYS.ATTENDANCE + '_updatedAt', String(now));
           notifyStorageUpdated();
+          cloudFetchSuccess = true;
         }
       }
     } catch (err) {
-      console.warn('[ScanQueueWorker] Gagal fetch snapshot Cloud presensi, menggunakan record lokal:', err);
+      console.warn('[ScanQueueWorker] Gagal fetch snapshot Cloud presensi:', err);
+    }
+
+    if (!cloudFetchSuccess) {
+      // PERLINDUNGAN ANTI-TINDIH & ANTI-RESET:
+      // Jika pembacaan Cloud gagal (misal koneksi lambat / timeout), JANGAN timpa Cloud dengan record lokal!
+      console.warn('[ScanQueueWorker] Pembacaan Cloud belum berhasil. Data scan tersimpan aman di lokal dan sinkronisasi Cloud ditunda.');
+      return;
     }
 
     // 2. Tulis hasil gabungan ke Cloud Firestore (1 kali write hemat kuota)
@@ -4106,8 +4231,8 @@ export function saveAttendanceRecords(records: AttendanceRecord[], instant: bool
   // Hapus cache string agar penulisan ke cloud tidak diabaikan
   delete lastSavedStringCache[KEYS.ATTENDANCE];
 
-  // Multi-perangkat non-tindih: gabungkan dengan snapshot Cloud jika tersedia cepat (1500ms)
-  withTimeout(readCloudDocument(KEYS.ATTENDANCE), 1500, null).then(cloudDoc => {
+  // Multi-perangkat non-tindih: gabungkan dengan snapshot Cloud jika tersedia
+  readCloudDocument(KEYS.ATTENDANCE).then(cloudDoc => {
     let finalRecords = cleanRecords;
     if (cloudDoc && cloudDoc.data) {
       try {
@@ -4121,11 +4246,14 @@ export function saveAttendanceRecords(records: AttendanceRecord[], instant: bool
         }
       } catch {}
     }
-    delete lastSavedStringCache[KEYS.ATTENDANCE];
-    syncToCloud(KEYS.ATTENDANCE, finalRecords, instant, now);
-  }).catch(() => {
-    delete lastSavedStringCache[KEYS.ATTENDANCE];
-    syncToCloud(KEYS.ATTENDANCE, cleanRecords, instant, now);
+    // Hanya tulis jika finalRecords aman dan tidak mereduksi data
+    if (finalRecords.length >= 5000) {
+      delete lastSavedStringCache[KEYS.ATTENDANCE];
+      syncToCloud(KEYS.ATTENDANCE, finalRecords, instant, now);
+    }
+  }).catch((err) => {
+    console.warn('[Storage] Gagal baca cloud saat simpan presensi:', err);
+    // JANGAN tulis cleanRecords ke cloud jika gagal baca, untuk mencegah penimpaan data multi-perangkat!
   });
 }
 
@@ -4235,13 +4363,15 @@ export function evaluateAttendanceSyncStatus(
       continue;
     }
 
-    // 5. Cek timestamp perubahan data masuk atau pulang
-    if ((l.updatedAt || 0) > (c.updatedAt || 0) + 1500) {
+    // 5. Cek timestamp perubahan data masuk atau pulang HANYA jika ada perbedaan nilai data nyata
+    const isEntryDifferent = l.status !== c.status || l.time !== c.time || l.method !== c.method;
+    const isReturnDifferent = l.returnStatus !== c.returnStatus || l.returnTime !== c.returnTime;
+    if (isEntryDifferent && (l.updatedAt || 0) > (c.updatedAt || 0) + 1500) {
       hasUnsyncedToCloud = true;
       unsyncedCount++;
       continue;
     }
-    if ((l.returnUpdatedAt || 0) > (c.returnUpdatedAt || 0) + 1500) {
+    if (isReturnDifferent && (l.returnUpdatedAt || 0) > (c.returnUpdatedAt || 0) + 1500) {
       hasUnsyncedToCloud = true;
       unsyncedCount++;
       continue;
@@ -4326,7 +4456,7 @@ export async function checkAndSyncUnsyncedAttendanceToCloud(): Promise<{
     }
 
     const localRecords = getAttendanceRecords();
-    const cloudDoc = await withTimeout(readCloudDocument(KEYS.ATTENDANCE), 5000, null);
+    const cloudDoc = await withTimeout(readCloudDocument(KEYS.ATTENDANCE), 15000, null);
     let cloudRecords: AttendanceRecord[] = [];
     if (cloudDoc && cloudDoc.data) {
       try {
@@ -4335,6 +4465,11 @@ export async function checkAndSyncUnsyncedAttendanceToCloud(): Promise<{
           cloudRecords = parsed;
         }
       } catch {}
+    }
+
+    if (!cloudDoc || cloudRecords.length === 0) {
+      console.warn('[AutoSync30s] Snapshot Cloud presensi belum tersedia atau gagal dibaca. Menunda sinkronisasi agar tidak menimpa data Cloud.');
+      return { synced: false, writtenToCloud: false, message: 'Cloud belum terbaca' };
     }
 
     const { hasUnsyncedToCloud, hasUpdatesFromCloud, unsyncedCount } = evaluateAttendanceSyncStatus(localRecords, cloudRecords);

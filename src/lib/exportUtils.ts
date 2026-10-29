@@ -1064,6 +1064,223 @@ export function exportAttendanceExcel(
   saveExcelWorkbook(workbook, `Rekap_Presensi_${filterTitle.replace(/\s+/g, '_')}_${startDateStr}.xlsx`);
 }
 
+/**
+ * Ekspor Data Presensi Dasbor Harian & Rekapitulasi Kelas ke File Excel (.xlsx)
+ * Khusus untuk Administrator Sekolah
+ */
+export function exportDashboardAttendanceExcel(options: {
+  schoolProfile: SchoolProfile;
+  students: Student[];
+  records: AttendanceRecord[];
+  selectedDate: string;
+  selectedClassFilter: string;
+  selectedEntryStatusFilter?: string;
+  selectedReturnStatusFilter?: string;
+  cutoffTimeStr?: string;
+}) {
+  const {
+    schoolProfile,
+    students,
+    records,
+    selectedDate,
+    selectedClassFilter,
+    selectedEntryStatusFilter = 'ALL',
+    selectedReturnStatusFilter = 'ALL',
+  } = options;
+
+  // Filter siswa berdasarkan filter kelas
+  let targetStudents = students;
+  if (selectedClassFilter && selectedClassFilter !== 'ALL') {
+    targetStudents = students.filter(s => s.className === selectedClassFilter);
+  }
+
+  // Peta data presensi untuk tanggal terpilih
+  const dateRecords = records.filter(r => r.date === selectedDate);
+  const recordMap = new Map<string, AttendanceRecord>();
+  dateRecords.forEach(r => {
+    if (r.studentId) recordMap.set(r.studentId, r);
+    if (r.nisn && r.nisn !== '-') recordMap.set(r.nisn.trim(), r);
+    if (r.studentName && r.studentName.trim() !== '') recordMap.set(r.studentName.trim().toLowerCase(), r);
+  });
+
+  const getRecord = (s: Student): AttendanceRecord | undefined => {
+    return (s.id && recordMap.get(s.id)) ||
+      (s.nisn && recordMap.get(s.nisn.trim())) ||
+      (s.name && recordMap.get(s.name.trim().toLowerCase())) ||
+      undefined;
+  };
+
+  // Filter berdasarkan status masuk dan status pulang jika aktif
+  let filteredStudents = targetStudents;
+  if (selectedEntryStatusFilter !== 'ALL') {
+    filteredStudents = filteredStudents.filter(std => {
+      const rec = getRecord(std);
+      if (selectedEntryStatusFilter === 'BELUM_ABSEN') return !rec;
+      if (selectedEntryStatusFilter === 'ALPA') return rec?.status === 'ALPA';
+      return rec?.status === selectedEntryStatusFilter;
+    });
+  }
+
+  if (selectedReturnStatusFilter !== 'ALL') {
+    filteredStudents = filteredStudents.filter(std => {
+      const rec = getRecord(std);
+      const isPulang = !!(rec && (rec.returnTime || rec.returnStatus === 'PULANG' || rec.returnStatus === 'PULANG_TEPAT' || rec.returnStatus === 'PULANG_CEPAT'));
+      if (selectedReturnStatusFilter === 'PULANG') return isPulang;
+      if (selectedReturnStatusFilter === 'BELUM_PULANG') return !isPulang;
+      return true;
+    });
+  }
+
+  // 1. Sheet Presensi Harian Lengkap
+  const dailyRows = filteredStudents.map((std, idx) => {
+    const rec = getRecord(std);
+    let entryStatus = 'Belum Absen';
+    let entryTime = '-';
+    let scannedBy = '-';
+    let returnTime = '-';
+    let returnStatus = 'Belum Pulang';
+    let returnScannedBy = '-';
+    let notes = rec?.notes || '-';
+
+    if (rec) {
+      if (rec.status === 'HADIR') entryStatus = 'Hadir (Tepat Waktu)';
+      else if (rec.status === 'TERLAMBAT') entryStatus = 'Terlambat';
+      else if (rec.status === 'SAKIT') entryStatus = 'Sakit';
+      else if (rec.status === 'IZIN') entryStatus = 'Izin';
+      else if (rec.status === 'ALPA') entryStatus = 'Alpa (Tanpa Keterangan)';
+      else entryStatus = rec.status || 'Belum Absen';
+
+      entryTime = (rec.time && rec.time !== '-') ? rec.time : '-';
+      scannedBy = rec.scannedBy || (rec.method === 'QR_SCAN' ? 'Pos Scanner Utama' : 'Sistem Otomatis');
+
+      returnTime = (rec.returnTime && rec.returnTime !== '-') ? rec.returnTime : '-';
+      if (rec.returnStatus === 'PULANG' || rec.returnStatus === 'PULANG_TEPAT') returnStatus = 'Pulang Tepat Waktu';
+      else if (rec.returnStatus === 'PULANG_CEPAT') returnStatus = 'Pulang Lebih Awal';
+      else if (rec.returnTime && rec.returnTime !== '-') returnStatus = 'Sudah Pulang';
+      else returnStatus = 'Belum Pulang';
+
+      returnScannedBy = rec.returnScannedBy || (rec.returnTime ? 'Pos Scanner Pulang' : '-');
+    }
+
+    return {
+      'No': idx + 1,
+      'NISN': std.nisn || '-',
+      'NIS': std.nis || '-',
+      'Nama Siswa': std.name,
+      'Kelas': std.className || '-',
+      'Jenis Kelamin': std.gender === 'L' ? 'Laki-Laki' : (std.gender === 'P' ? 'Perempuan' : '-'),
+      'Tanggal': selectedDate,
+      'Jam Masuk': entryTime,
+      'Status Masuk': entryStatus,
+      'Petugas Scan Masuk': scannedBy,
+      'Jam Pulang': returnTime,
+      'Status Pulang': returnStatus,
+      'Petugas Scan Pulang': returnScannedBy,
+      'Keterangan': notes,
+    };
+  });
+
+  // 2. Sheet Rekapitulasi Presensi Per Kelas
+  const uniqueClasses = Array.from(new Set(students.map(s => s.className || '-'))).sort((a, b) => 
+    a.localeCompare(b, 'id', { numeric: true, sensitivity: 'base' })
+  );
+  
+  const classSummaryRows = uniqueClasses.map((clsName, cIdx) => {
+    const clsStudents = students.filter(s => (s.className || '-') === clsName);
+    let hadir = 0;
+    let terlambat = 0;
+    let sakit = 0;
+    let izin = 0;
+    let alpa = 0;
+    let belum = 0;
+    let pulang = 0;
+
+    clsStudents.forEach(std => {
+      const rec = getRecord(std);
+      if (!rec) {
+        belum++;
+      } else {
+        if (rec.status === 'HADIR') hadir++;
+        else if (rec.status === 'TERLAMBAT') terlambat++;
+        else if (rec.status === 'SAKIT') sakit++;
+        else if (rec.status === 'IZIN') izin++;
+        else if (rec.status === 'ALPA') alpa++;
+        else belum++;
+
+        if (rec.returnTime || rec.returnStatus === 'PULANG' || rec.returnStatus === 'PULANG_TEPAT' || rec.returnStatus === 'PULANG_CEPAT') {
+          pulang++;
+        }
+      }
+    });
+
+    const total = clsStudents.length;
+    const present = hadir + terlambat;
+    const pct = total > 0 ? Math.round((present / total) * 100) : 0;
+
+    return {
+      'No': cIdx + 1,
+      'Kelas': clsName,
+      'Total Siswa': total,
+      'Hadir Tepat Waktu': hadir,
+      'Terlambat': terlambat,
+      'Sakit': sakit,
+      'Izin': izin,
+      'Alpa': alpa,
+      'Belum Absen': belum,
+      'Total Hadir': present,
+      'Sudah Pulang': pulang,
+      '% Kehadiran': `${pct}%`
+    };
+  });
+
+  const workbook = XLSX.utils.book_new();
+
+  // Buat Sheet 1: Presensi Harian
+  const wsDaily = XLSX.utils.json_to_sheet(dailyRows.length > 0 ? dailyRows : [{ 'Keterangan': 'Tidak ada data presensi yang sesuai dengan filter' }]);
+  wsDaily['!cols'] = [
+    { wch: 5 },   // No
+    { wch: 14 },  // NISN
+    { wch: 10 },  // NIS
+    { wch: 28 },  // Nama Siswa
+    { wch: 10 },  // Kelas
+    { wch: 14 },  // Jenis Kelamin
+    { wch: 12 },  // Tanggal
+    { wch: 12 },  // Jam Masuk
+    { wch: 24 },  // Status Masuk
+    { wch: 20 },  // Petugas Scan Masuk
+    { wch: 12 },  // Jam Pulang
+    { wch: 22 },  // Status Pulang
+    { wch: 20 },  // Petugas Scan Pulang
+    { wch: 25 },  // Keterangan
+  ];
+
+  // Buat Sheet 2: Rekap Kelas
+  const wsClass = XLSX.utils.json_to_sheet(classSummaryRows);
+  wsClass['!cols'] = [
+    { wch: 5 },   // No
+    { wch: 12 },  // Kelas
+    { wch: 12 },  // Total Siswa
+    { wch: 18 },  // Hadir Tepat Waktu
+    { wch: 12 },  // Terlambat
+    { wch: 10 },  // Sakit
+    { wch: 10 },  // Izin
+    { wch: 10 },  // Alpa
+    { wch: 14 },  // Belum Absen
+    { wch: 14 },  // Total Hadir
+    { wch: 14 },  // Sudah Pulang
+    { wch: 14 },  // % Kehadiran
+  ];
+
+  XLSX.utils.book_append_sheet(workbook, wsDaily, 'Presensi Harian');
+  XLSX.utils.book_append_sheet(workbook, wsClass, 'Rekapitulasi Kelas');
+
+  const schoolNameSanitized = (schoolProfile?.name || 'Sekolah').replace(/[^a-zA-Z0-9_\-]/g, '_');
+  const classSanitized = selectedClassFilter === 'ALL' ? 'Semua_Kelas' : selectedClassFilter.replace(/[^a-zA-Z0-9_\-]/g, '_');
+  const fileName = `Presensi_${schoolNameSanitized}_${selectedDate}_${classSanitized}.xlsx`;
+
+  saveExcelWorkbook(workbook, fileName);
+}
+
 // Download Template Excel for Batch Importing New Students
 export function downloadStudentImportTemplate() {
   const sampleData = [

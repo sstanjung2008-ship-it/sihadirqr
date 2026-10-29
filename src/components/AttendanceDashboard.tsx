@@ -50,7 +50,8 @@ import {
   RefreshCw,
   AlertCircle,
   RotateCcw,
-  Download
+  Download,
+  FileSpreadsheet
 } from 'lucide-react';
 import { BulkAlpaManagementModal } from './BulkAlpaManagementModal';
 import { BulkReturnManagementModal, BulkReturnUpdatePayload } from './BulkReturnManagementModal';
@@ -65,7 +66,7 @@ import {
   calculateAttendanceStatus,
   getLateCutoffTime
 } from '../lib/storage';
-import { exportStudentCharacterDetailPdf } from '../lib/exportUtils';
+import { exportStudentCharacterDetailPdf, exportDashboardAttendanceExcel } from '../lib/exportUtils';
 
 interface AttendanceDashboardProps {
   students: Student[];
@@ -188,6 +189,32 @@ export const AttendanceDashboard: React.FC<AttendanceDashboardProps> = ({
       setTimeout(() => setParentRefreshNotice(null), 4000);
     } finally {
       setIsRefreshingParent(false);
+    }
+  };
+
+  const [isExportingExcel, setIsExportingExcel] = useState<boolean>(false);
+
+  const handleDownloadExcel = () => {
+    try {
+      setIsExportingExcel(true);
+      exportDashboardAttendanceExcel({
+        schoolProfile,
+        students,
+        records: attendanceRecords,
+        selectedDate,
+        selectedClassFilter,
+        selectedEntryStatusFilter,
+        selectedReturnStatusFilter,
+        cutoffTimeStr,
+      });
+      setCloudSyncFeedback('Berhasil mengunduh rekap presensi dalam format file Excel (.xlsx)!');
+      setTimeout(() => setCloudSyncFeedback(null), 4500);
+    } catch (err) {
+      console.error('[Export Excel Error]', err);
+      setCloudSyncFeedback('Gagal mengunduh file Excel presensi.');
+      setTimeout(() => setCloudSyncFeedback(null), 4500);
+    } finally {
+      setTimeout(() => setIsExportingExcel(false), 800);
     }
   };
 
@@ -1599,6 +1626,17 @@ export const AttendanceDashboard: React.FC<AttendanceDashboardProps> = ({
                         {countBelumPulang}
                       </span>
                     )}
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={handleDownloadExcel}
+                    disabled={isExportingExcel}
+                    className="bg-gradient-to-r from-emerald-600 to-green-600 hover:from-emerald-700 hover:to-green-700 text-white font-extrabold px-3.5 py-1.5 rounded-xl text-xs flex items-center gap-1.5 transition-all cursor-pointer shadow-sm shadow-emerald-600/25 active:scale-95 shrink-0 disabled:opacity-60"
+                    title="Download Data Presensi Siswa ke File Excel (.xlsx) (Khusus Admin)"
+                  >
+                    <FileSpreadsheet className="w-3.5 h-3.5 text-white shrink-0" />
+                    <span>{isExportingExcel ? 'Mengunduh...' : 'Download Excel'}</span>
                   </button>
                 </>
               )}

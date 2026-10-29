@@ -678,12 +678,14 @@ async function performSingleDocWrite(key: string, dataStr: string, timestamp: nu
       totalChunks: numChunks,
     });
 
-    // Otomatis bersihkan sisa chunk lama jika jumlah chunk berkurang
-    const maxScanChunks = Math.max(prevChunks, numChunks + 5);
-    for (let i = numChunks; i <= maxScanChunks; i++) {
-      try {
-        await deleteDoc(doc(db, 'sihadir_app_data', `${key}_chunk_${i}`));
-      } catch {}
+    // Otomatis bersihkan sisa chunk lama HANYA jika jumlah chunk benar-benar berkurang (prevChunks > numChunks)
+    // JAMINAN HEMAT KUOTA: Tidak ada pemanggilan deleteDoc spekulatif yang memicu tagihan delete Firebase!
+    if (prevChunks > numChunks) {
+      for (let i = numChunks; i < prevChunks; i++) {
+        try {
+          await deleteDoc(doc(db, 'sihadir_app_data', `${key}_chunk_${i}`));
+        } catch {}
+      }
     }
   }
 
@@ -4555,68 +4557,23 @@ export async function checkAndSyncUnsyncedAttendanceToCloud(): Promise<{
 
   isAutoAttendanceSyncRunning = true;
   try {
-    // Jika ada antrean batching scan yang sedang menunggu, flush segera ke Cloud
+    // 1. Prioritas Utama: Jika ada antrean hasil scan QR lokal yang menunggu, segera kirim ke Cloud
     if (scanQueuePendingCount > 0) {
       await flushAttendanceScanQueue(true);
-    }
-
-    const localRecords = getAttendanceRecords();
-    const cloudDoc = await withTimeout(readCloudDocument(KEYS.ATTENDANCE), 15000, null);
-    let cloudRecords: AttendanceRecord[] = [];
-    if (cloudDoc && cloudDoc.data) {
-      try {
-        const parsed = typeof cloudDoc.data === 'string' ? JSON.parse(cloudDoc.data) : cloudDoc.data;
-        if (Array.isArray(parsed)) {
-          cloudRecords = parsed;
-        }
-      } catch {}
-    }
-
-    if (!cloudDoc || cloudRecords.length === 0) {
-      console.warn('[AutoSync30s] Snapshot Cloud presensi belum tersedia atau gagal dibaca. Menunda sinkronisasi agar tidak menimpa data Cloud.');
-      return { synced: false, writtenToCloud: false, message: 'Cloud belum terbaca' };
-    }
-
-    const { hasUnsyncedToCloud, hasUpdatesFromCloud, unsyncedCount } = evaluateAttendanceSyncStatus(localRecords, cloudRecords);
-
-    // KASUS 1: Semua data lokal sudah ada di Cloud (hasUnsyncedToCloud === false)
-    if (!hasUnsyncedToCloud) {
-      // Jika Cloud memiliki data baru dari perangkat lain, serap ke lokal tanpa melakukan write ke cloud
-      if (hasUpdatesFromCloud && cloudRecords.length > 0) {
-        const merged = mergeAttendanceLists(cloudRecords, localRecords);
-        inMemoryAttendanceRecords = merged;
-        safeSetLocalStorage(KEYS.ATTENDANCE, JSON.stringify(merged));
-        safeSetLocalStorage(KEYS.ATTENDANCE + '_updatedAt', String(cloudDoc?.updatedAt || Date.now()));
-        notifyStorageUpdated();
-      }
-      // LEWATI PENULISAN KE CLOUD: 0 write, anti-duplikasi & hemat kuota 100%!
       return {
         synced: true,
-        writtenToCloud: false,
-        message: 'Seluruh data lokal sudah ada di Cloud. Penulisan ke cloud dilewati untuk menghindari duplikasi.'
+        writtenToCloud: true,
+        message: 'Antrean scan presensi lokal berhasil dikirim ke Cloud.'
       };
     }
 
-    // KASUS 2: Ada data lokal yang belum tersinkron ke Cloud (hasUnsyncedToCloud === true)
-    const merged = mergeAttendanceLists(cloudRecords, localRecords);
-    const now = Date.now();
-    inMemoryAttendanceRecords = merged;
-    const mergedStr = JSON.stringify(merged);
-    safeSetLocalStorage(KEYS.ATTENDANCE, mergedStr);
-    safeSetLocalStorage(KEYS.ATTENDANCE + '_updatedAt', String(now));
-    notifyStorageUpdated();
-
-    // Tulis hasil gabungan ke Cloud Firestore
-    delete lastSavedStringCache[KEYS.ATTENDANCE];
-    await writeCloudDocument(KEYS.ATTENDANCE, mergedStr, now);
-    lastSavedStringCache[KEYS.ATTENDANCE] = mergedStr;
-    setCloudSyncStatus('connected');
-
-    console.log(`[AutoSync30s] Berhasil menyinkronkan ${unsyncedCount} data presensi lokal baru ke Cloud Firestore.`);
+    // 2. HEMAT KUOTA FIRESTORE 100% GRATIS:
+    // Jika tidak ada scan baru di perangkat ini, JANGAN membaca / mendownload 7 dokumen chunk presensi!
+    // Pembacaan Cloud menyeluruh hanya terjadi saat buka halaman awal, refresh halaman (F5), atau klik tombol Segarkan.
     return {
       synced: true,
-      writtenToCloud: true,
-      message: `Berhasil menyinkronkan ${unsyncedCount} data presensi baru ke cloud.`
+      writtenToCloud: false,
+      message: 'Tidak ada antrean scan lokal yang tertunda. Pembacaan cloud dilewati untuk menjaga kuota gratis.'
     };
   } catch (err: any) {
     console.warn('[AutoSync30s] Gagal periksa atau sinkron presensi ke cloud:', err);

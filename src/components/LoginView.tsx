@@ -11,8 +11,7 @@ import {
   Sparkles, 
   Clock,
   RefreshCw,
-  CheckCircle2,
-  ShieldCheck
+  CheckCircle2
 } from 'lucide-react';
 import { PWAInstallBanner } from './PWAInstallBanner';
 import { quickSyncAuthCredentials, getTeachers, getStudents, getSchoolProfile, checkParentLoginAccess } from '../lib/storage';
@@ -146,7 +145,7 @@ export const LoginView: React.FC<LoginViewProps> = ({
         onLoginSuccess(session);
         return true;
       } else {
-        setErrorMessage('Password Admin salah! Silakan gunakan kata sandi "admin123" atau password yang telah diatur.');
+        setErrorMessage('Password salah! Silakan periksa kembali atau hubungi Administrator.');
         return true;
       }
     }
@@ -179,7 +178,7 @@ export const LoginView: React.FC<LoginViewProps> = ({
         };
         onLoginSuccess(session);
       } else {
-        setErrorMessage('Password Pos Scanner Satpam salah! (Default: 123456).');
+        setErrorMessage('Password Pos Scanner Satpam salah! Silakan periksa kembali.');
         return true;
       }
     }
@@ -260,7 +259,7 @@ export const LoginView: React.FC<LoginViewProps> = ({
         onLoginSuccess(session);
         return true;
       } else {
-        setErrorMessage('Password Guru salah! Silakan gunakan kata sandi Anda, default (123456 / 123123), atau hubungi Administrator.');
+        setErrorMessage('Password Guru salah! Silakan periksa kembali atau hubungi Administrator.');
         return true;
       }
     }
@@ -311,29 +310,12 @@ export const LoginView: React.FC<LoginViewProps> = ({
         onLoginSuccess(session);
         return true;
       } else {
-        setErrorMessage('Password Wali / Siswa salah! (Default password: 123456). Silakan periksa kembali atau hubungi Administrator.');
+        setErrorMessage('Password Wali / Siswa salah! Silakan periksa kembali atau hubungi Administrator.');
         return true;
       }
     }
 
     return false;
-  };
-
-  const handleQuickAdminLogin = () => {
-    setUsername('admin');
-    setPassword('admin123');
-    setErrorMessage(null);
-    setSyncSuccessMsg(null);
-    const session: UserSession = {
-      isLoggedIn: true,
-      role: 'ADMIN',
-      originalRole: 'ADMIN',
-      username: 'admin',
-      displayName: 'Administrator Utama (Admin Sekolah)',
-      photoUrl: schoolProfile.schoolLogo || undefined,
-      loginTimestamp: Date.now()
-    };
-    onLoginSuccess(session);
   };
 
   const handleLoginSubmit = async (e: React.FormEvent) => {
@@ -471,32 +453,6 @@ export const LoginView: React.FC<LoginViewProps> = ({
             </p>
           </div>
 
-          {/* Unified Login Info Banner */}
-          <div className="bg-indigo-50/90 border border-indigo-200/90 rounded-2xl p-3.5 text-xs flex items-center justify-between gap-3 shadow-2xs">
-            <div className="flex items-center gap-2.5 min-w-0">
-              <div className="p-2.5 bg-indigo-600 text-white rounded-xl shadow-xs shrink-0">
-                <KeyRound className="w-4 h-4 text-amber-300" />
-              </div>
-              <div className="min-w-0">
-                <p className="font-extrabold text-indigo-950">
-                  Portal Login Terpadu
-                </p>
-                <p className="text-[11px] text-indigo-700 mt-0.5 leading-snug font-medium truncate">
-                  Admin: <strong className="font-mono text-indigo-950">admin</strong> • Sandi: <strong className="font-mono text-indigo-950">admin123</strong>
-                </p>
-              </div>
-            </div>
-            <button
-              type="button"
-              onClick={handleQuickAdminLogin}
-              className="px-2.5 py-1.5 bg-indigo-600 hover:bg-indigo-700 active:scale-95 text-white font-extrabold text-[11px] rounded-xl shadow-xs transition-all cursor-pointer shrink-0 flex items-center gap-1"
-              title="Klik untuk langsung masuk sebagai Admin Sekolah"
-            >
-              <Sparkles className="w-3.5 h-3.5 text-amber-300" />
-              <span>Login Admin</span>
-            </button>
-          </div>
-
           {/* Banner Info Penutupan Akses Wali Murid jika Nonaktif atau Di Luar Jadwal */}
           {!checkParentLoginAccess(schoolProfile).allowed && (
             <div className="bg-amber-50/95 border border-amber-200/90 rounded-2xl p-3.5 text-xs flex items-start gap-2.5 text-amber-900 shadow-2xs animate-fadeIn">
@@ -532,7 +488,7 @@ export const LoginView: React.FC<LoginViewProps> = ({
             {/* Username / No. HP / NIP / NISN Input */}
             <div className="space-y-1.5">
               <label className="text-xs font-bold text-slate-700 flex items-center justify-between">
-                <span>Username (Admin) • No. HP (Guru) • NISN (Wali)</span>
+                <span>ID Pengguna / No. HP / NIP / NISN</span>
                 <span className="text-[10px] text-indigo-600 font-mono font-bold">*Wajib</span>
               </label>
               
@@ -547,7 +503,7 @@ export const LoginView: React.FC<LoginViewProps> = ({
                     setUsername(e.target.value);
                     if (errorMessage) setErrorMessage(null);
                   }}
-                  placeholder="Masukkan admin, No. HP/WA, NIP, atau NISN..."
+                  placeholder="Masukkan ID Pengguna, No. HP/WA, NIP, atau NISN..."
                   className="w-full bg-slate-50 hover:bg-white focus:bg-white border border-slate-200 rounded-2xl pl-10 pr-4 py-3 text-xs text-slate-900 placeholder-slate-400 font-mono font-bold focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all shadow-2xs"
                   autoComplete="username"
                 />
@@ -556,22 +512,9 @@ export const LoginView: React.FC<LoginViewProps> = ({
 
             {/* Password Input */}
             <div className="space-y-1.5">
-              <div className="flex items-center justify-between">
-                <label className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
-                  <span>Kata Sandi (Password)</span>
-                </label>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setUsername('admin');
-                    setPassword('admin123');
-                    if (errorMessage) setErrorMessage(null);
-                  }}
-                  className="text-[10px] text-indigo-600 hover:text-indigo-800 font-bold hover:underline cursor-pointer"
-                >
-                  Isi admin / admin123
-                </button>
-              </div>
+              <label className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
+                <span>Kata Sandi (Password)</span>
+              </label>
 
               <div className="relative">
                 <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
@@ -584,7 +527,7 @@ export const LoginView: React.FC<LoginViewProps> = ({
                     setPassword(e.target.value);
                     if (errorMessage) setErrorMessage(null);
                   }}
-                  placeholder="Masukkan kata sandi (contoh: admin123)..."
+                  placeholder="Masukkan kata sandi..."
                   className="w-full bg-slate-50 hover:bg-white focus:bg-white border border-slate-200 rounded-2xl pl-10 pr-10 py-3 text-xs text-slate-900 placeholder-slate-400 font-mono font-bold focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all shadow-2xs"
                   autoComplete="current-password"
                 />

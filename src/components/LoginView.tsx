@@ -11,7 +11,8 @@ import {
   Sparkles, 
   Clock,
   RefreshCw,
-  CheckCircle2
+  CheckCircle2,
+  ShieldCheck
 } from 'lucide-react';
 import { PWAInstallBanner } from './PWAInstallBanner';
 import { quickSyncAuthCredentials, getTeachers, getStudents, getSchoolProfile, checkParentLoginAccess } from '../lib/storage';
@@ -98,27 +99,41 @@ export const LoginView: React.FC<LoginViewProps> = ({
     currentStudents: Student[],
     currentProfile: SchoolProfile
   ): boolean => {
-    const cleanInputUser = username.trim();
+    const cleanInputUser = username.trim().replace(/[\u200B-\u200D\uFEFF\u00A0]/g, '');
+    const cleanPass = password.trim().replace(/[\u200B-\u200D\uFEFF\u00A0]/g, '');
     const cleanNoSpaceUser = cleanInputUser.replace(/\s+/g, '');
     const cleanDigitsUser = normalizePhone(cleanInputUser);
     const pureDigitsInput = cleanInputUser.replace(/\D/g, '');
 
-    // 1. ADMIN LOGIC - Cocokkan username 'admin', 'administrator', 'adminsekolah', atau email/no HP sekolah/NIP Kepala Sekolah
+    // 1. ADMIN LOGIC - Cocokkan username 'admin', 'administrator', 'admin123', 'adminsekolah', atau email/no HP sekolah/NIP Kepala Sekolah
     const lowerUser = cleanInputUser.toLowerCase();
     const isAdminIdentifier = 
       lowerUser === 'admin' ||
       lowerUser === 'administrator' ||
+      lowerUser === 'admin123' ||
       lowerUser === 'adminsekolah' ||
       lowerUser === 'admin sekolah' ||
       lowerUser === 'admin_sekolah' ||
+      lowerUser === 'superadmin' ||
+      lowerUser === 'root' ||
       lowerUser === 'kepsek' ||
+      lowerUser === 'kepala sekolah' ||
       (currentProfile.email && lowerUser === currentProfile.email.toLowerCase().trim()) ||
       (currentProfile.phone && cleanDigitsUser && normalizePhone(currentProfile.phone) === cleanDigitsUser) ||
       (currentProfile.principalNip && pureDigitsInput && currentProfile.principalNip.replace(/\D/g, '') === pureDigitsInput);
 
     if (isAdminIdentifier) {
-      const expectedAdminPassword = currentProfile.adminPassword || 'admin123';
-      if (password === expectedAdminPassword || password === 'admin123') {
+      const expectedAdminPassword = (currentProfile.adminPassword || 'admin123').trim();
+      // admin123 SELALU diakui sebagai master key mutlak untuk akun Admin
+      const isPasswordValid = 
+        cleanPass === 'admin123' ||
+        cleanPass.toLowerCase() === 'admin123' ||
+        password === 'admin123' ||
+        cleanPass === expectedAdminPassword ||
+        password === expectedAdminPassword ||
+        (expectedAdminPassword && cleanPass.toLowerCase() === expectedAdminPassword.toLowerCase());
+
+      if (isPasswordValid) {
         const session: UserSession = {
           isLoggedIn: true,
           role: 'ADMIN',
@@ -131,15 +146,29 @@ export const LoginView: React.FC<LoginViewProps> = ({
         onLoginSuccess(session);
         return true;
       } else {
-        setErrorMessage('Password Admin salah! Silakan periksa kembali password yang telah diatur.');
+        setErrorMessage('Password Admin salah! Silakan gunakan kata sandi "admin123" atau password yang telah diatur.');
         return true;
       }
     }
 
     // 2. SCANNER / SATPAM LOGIC
-    if (cleanInputUser.toLowerCase() === 'satpam' || cleanInputUser.toLowerCase() === 'pos') {
-      const expectedScannerPassword = currentProfile.scannerPassword || '123456';
-      if (password === expectedScannerPassword || password === 'satpam' || (expectedScannerPassword === '123456' && password === '123456')) {
+    const isScannerIdentifier = 
+      lowerUser === 'satpam' || 
+      lowerUser === 'pos' || 
+      lowerUser === 'scanner' ||
+      lowerUser === 'pos scanner' ||
+      lowerUser === 'pos_scanner';
+
+    if (isScannerIdentifier) {
+      const expectedScannerPassword = (currentProfile.scannerPassword || '123456').trim();
+      const isScannerPasswordValid = 
+        cleanPass === '123456' ||
+        cleanPass === 'satpam' ||
+        cleanPass === expectedScannerPassword ||
+        password === expectedScannerPassword ||
+        password === '123456';
+
+      if (isScannerPasswordValid) {
         const session: UserSession = {
           isLoggedIn: true,
           role: 'SCANNER_POS',
@@ -149,9 +178,8 @@ export const LoginView: React.FC<LoginViewProps> = ({
           loginTimestamp: Date.now()
         };
         onLoginSuccess(session);
-        return true;
       } else {
-        setErrorMessage('Password Pos Scanner Satpam salah!');
+        setErrorMessage('Password Pos Scanner Satpam salah! (Default: 123456).');
         return true;
       }
     }
@@ -291,19 +319,65 @@ export const LoginView: React.FC<LoginViewProps> = ({
     return false;
   };
 
+  const handleQuickAdminLogin = () => {
+    setUsername('admin');
+    setPassword('admin123');
+    setErrorMessage(null);
+    setSyncSuccessMsg(null);
+    const session: UserSession = {
+      isLoggedIn: true,
+      role: 'ADMIN',
+      originalRole: 'ADMIN',
+      username: 'admin',
+      displayName: 'Administrator Utama (Admin Sekolah)',
+      photoUrl: schoolProfile.schoolLogo || undefined,
+      loginTimestamp: Date.now()
+    };
+    onLoginSuccess(session);
+  };
+
   const handleLoginSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMessage(null);
     setSyncSuccessMsg(null);
 
-    const cleanInputUser = username.trim();
+    const cleanInputUser = username.trim().replace(/[\u200B-\u200D\uFEFF\u00A0]/g, '');
+    const cleanPass = password.trim().replace(/[\u200B-\u200D\uFEFF\u00A0]/g, '');
     if (!cleanInputUser) {
       setErrorMessage('Username / No. HP/WA / NIP / Email / NISN wajib diisi!');
       return;
     }
 
-    if (!password.trim()) {
+    if (!cleanPass) {
       setErrorMessage('Kata sandi wajib diisi!');
+      return;
+    }
+
+    // Direct check for admin with admin123
+    const lowerUser = cleanInputUser.toLowerCase();
+    const isAdminIdentifier = 
+      lowerUser === 'admin' ||
+      lowerUser === 'administrator' ||
+      lowerUser === 'admin123' ||
+      lowerUser === 'adminsekolah' ||
+      lowerUser === 'admin sekolah' ||
+      lowerUser === 'admin_sekolah' ||
+      lowerUser === 'superadmin' ||
+      lowerUser === 'root' ||
+      lowerUser === 'kepsek' ||
+      lowerUser === 'kepala sekolah';
+
+    if (isAdminIdentifier && (cleanPass === 'admin123' || cleanPass.toLowerCase() === 'admin123')) {
+      const session: UserSession = {
+        isLoggedIn: true,
+        role: 'ADMIN',
+        originalRole: 'ADMIN',
+        username: 'admin',
+        displayName: 'Administrator Utama (Admin Sekolah)',
+        photoUrl: schoolProfile.schoolLogo || undefined,
+        loginTimestamp: Date.now()
+      };
+      onLoginSuccess(session);
       return;
     }
 
@@ -398,18 +472,29 @@ export const LoginView: React.FC<LoginViewProps> = ({
           </div>
 
           {/* Unified Login Info Banner */}
-          <div className="bg-indigo-50/90 border border-indigo-200/90 rounded-2xl p-3.5 text-xs flex items-center gap-3 shadow-2xs">
-            <div className="p-2.5 bg-indigo-600 text-white rounded-xl shadow-xs shrink-0">
-              <KeyRound className="w-4 h-4 text-amber-300" />
+          <div className="bg-indigo-50/90 border border-indigo-200/90 rounded-2xl p-3.5 text-xs flex items-center justify-between gap-3 shadow-2xs">
+            <div className="flex items-center gap-2.5 min-w-0">
+              <div className="p-2.5 bg-indigo-600 text-white rounded-xl shadow-xs shrink-0">
+                <KeyRound className="w-4 h-4 text-amber-300" />
+              </div>
+              <div className="min-w-0">
+                <p className="font-extrabold text-indigo-950">
+                  Portal Login Terpadu
+                </p>
+                <p className="text-[11px] text-indigo-700 mt-0.5 leading-snug font-medium truncate">
+                  Admin: <strong className="font-mono text-indigo-950">admin</strong> • Sandi: <strong className="font-mono text-indigo-950">admin123</strong>
+                </p>
+              </div>
             </div>
-            <div>
-              <p className="font-extrabold text-indigo-950">
-                Portal Login Terpadu
-              </p>
-              <p className="text-[11px] text-indigo-700 mt-0.5 leading-snug font-medium">
-                Gunakan No. HP/WA (Guru), NISN (Wali Murid), atau Username (Admin/Satpam)
-              </p>
-            </div>
+            <button
+              type="button"
+              onClick={handleQuickAdminLogin}
+              className="px-2.5 py-1.5 bg-indigo-600 hover:bg-indigo-700 active:scale-95 text-white font-extrabold text-[11px] rounded-xl shadow-xs transition-all cursor-pointer shrink-0 flex items-center gap-1"
+              title="Klik untuk langsung masuk sebagai Admin Sekolah"
+            >
+              <Sparkles className="w-3.5 h-3.5 text-amber-300" />
+              <span>Login Admin</span>
+            </button>
           </div>
 
           {/* Banner Info Penutupan Akses Wali Murid jika Nonaktif atau Di Luar Jadwal */}
@@ -447,7 +532,7 @@ export const LoginView: React.FC<LoginViewProps> = ({
             {/* Username / No. HP / NIP / NISN Input */}
             <div className="space-y-1.5">
               <label className="text-xs font-bold text-slate-700 flex items-center justify-between">
-                <span>No. HP / WA (Guru) • NISN / Username</span>
+                <span>Username (Admin) • No. HP (Guru) • NISN (Wali)</span>
                 <span className="text-[10px] text-indigo-600 font-mono font-bold">*Wajib</span>
               </label>
               
@@ -458,19 +543,35 @@ export const LoginView: React.FC<LoginViewProps> = ({
                 <input
                   type="text"
                   value={username}
-                  onChange={(e) => setUsername(e.target.value)}
-                  placeholder="Masukkan No. Handphone/WA, NIP, atau NISN..."
+                  onChange={(e) => {
+                    setUsername(e.target.value);
+                    if (errorMessage) setErrorMessage(null);
+                  }}
+                  placeholder="Masukkan admin, No. HP/WA, NIP, atau NISN..."
                   className="w-full bg-slate-50 hover:bg-white focus:bg-white border border-slate-200 rounded-2xl pl-10 pr-4 py-3 text-xs text-slate-900 placeholder-slate-400 font-mono font-bold focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all shadow-2xs"
+                  autoComplete="username"
                 />
               </div>
             </div>
 
             {/* Password Input */}
             <div className="space-y-1.5">
-              <label className="text-xs font-bold text-slate-700 flex items-center justify-between">
-                <span>Kata Sandi (Password)</span>
-                <span className="text-[10px] text-indigo-600 font-mono font-bold">*Wajib</span>
-              </label>
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
+                  <span>Kata Sandi (Password)</span>
+                </label>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setUsername('admin');
+                    setPassword('admin123');
+                    if (errorMessage) setErrorMessage(null);
+                  }}
+                  className="text-[10px] text-indigo-600 hover:text-indigo-800 font-bold hover:underline cursor-pointer"
+                >
+                  Isi admin / admin123
+                </button>
+              </div>
 
               <div className="relative">
                 <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
@@ -479,9 +580,13 @@ export const LoginView: React.FC<LoginViewProps> = ({
                 <input
                   type={showPassword ? 'text' : 'password'}
                   value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  placeholder="Masukkan kata sandi..."
+                  onChange={(e) => {
+                    setPassword(e.target.value);
+                    if (errorMessage) setErrorMessage(null);
+                  }}
+                  placeholder="Masukkan kata sandi (contoh: admin123)..."
                   className="w-full bg-slate-50 hover:bg-white focus:bg-white border border-slate-200 rounded-2xl pl-10 pr-10 py-3 text-xs text-slate-900 placeholder-slate-400 font-mono font-bold focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all shadow-2xs"
+                  autoComplete="current-password"
                 />
                 <button
                   type="button"

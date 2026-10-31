@@ -6900,3 +6900,64 @@ export function resetToDefaultData(): void {
   notifyStorageUpdated();
 }
 
+export interface ReplaceAttendanceRangeResult {
+  success: boolean;
+  message: string;
+  newCountInserted: number;
+  oldCountInRange: number;
+  preservedOctober26To28Count: number;
+  totalRecordsNow: number;
+}
+
+export function downloadAttendanceBackupJson(): void {
+  if (typeof window === 'undefined') return;
+  const records = getAttendanceRecords();
+  const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(records, null, 2));
+  const dlAnchorElem = document.createElement('a');
+  dlAnchorElem.setAttribute("href", dataStr);
+  dlAnchorElem.setAttribute("download", `SiHadirQR_Backup_Presensi_${getLocalDateString()}.json`);
+  dlAnchorElem.click();
+}
+
+export async function replaceAttendanceRangeStrictly(
+  newRecords: any[],
+  startDate: string = '2026-10-01',
+  endDate: string = '2026-10-24'
+): Promise<ReplaceAttendanceRangeResult> {
+  const current = getAttendanceRecords();
+  
+  // 1. Data di luar rentang tanggal (seperti 26-28 Oktober 2026, September, dll) diproteksi 100% aman
+  const preservedOutsideRange = current.filter(r => r.date < startDate || r.date > endDate);
+  const oldCountInRange = current.filter(r => r.date >= startDate && r.date <= endDate).length;
+  const preservedOctober26To28Count = current.filter(r => r.date >= '2026-10-26' && r.date <= '2026-10-28').length;
+
+  // 2. Data baru yang dimasukkan HANYA yang berada dalam rentang tanggal target (1 s/d 24 Oktober 2026)
+  const incomingWithinRange = (Array.isArray(newRecords) ? newRecords : [])
+    .filter(r => r && r.date >= startDate && r.date <= endDate)
+    .map(r => ({
+      ...r,
+      isRealScan: true,
+      isSynthetic: false,
+    }));
+
+  const cleanIncoming = validateAndSanitizeAttendanceRecords(incomingWithinRange);
+
+  // 3. Gabungkan data terproteksi dengan data baru
+  const merged = validateAndSanitizeAttendanceRecords([
+    ...preservedOutsideRange,
+    ...cleanIncoming
+  ]);
+
+  // 4. Simpan ke local dan cloud
+  saveAttendanceRecords(merged, true);
+
+  return {
+    success: true,
+    message: `Berhasil mengganti data tanggal ${startDate} s/d ${endDate} dengan ${cleanIncoming.length} data scan riil. Seluruh ${preservedOctober26To28Count} data tanggal 26–28 Oktober 2026 tetap utuh terproteksi.`,
+    newCountInserted: cleanIncoming.length,
+    oldCountInRange,
+    preservedOctober26To28Count,
+    totalRecordsNow: merged.length
+  };
+}
+

@@ -735,11 +735,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
               <button
                 type="button"
                 onClick={onLogout}
-                className="p-2 bg-red-950/60 hover:bg-red-900 text-red-300 hover:text-white rounded-xl border border-red-800/60 transition-colors shrink-0 cursor-pointer flex items-center gap-1 text-[10px] font-bold"
+                className="px-2.5 py-1.5 bg-red-950/70 hover:bg-red-900 active:scale-95 text-red-200 hover:text-white rounded-xl border border-red-800/80 transition-all shrink-0 cursor-pointer flex items-center gap-1.5 text-xs font-bold"
                 title="Keluar dari Akun"
               >
                 <LogOut className="w-3.5 h-3.5" />
-                <span className="hidden sm:inline">Keluar</span>
+                <span>Keluar</span>
               </button>
             )}
           </div>

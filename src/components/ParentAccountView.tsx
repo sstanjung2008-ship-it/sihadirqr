@@ -18,7 +18,8 @@ import {
   Download,
   Printer,
   ChevronRight,
-  Info
+  Info,
+  LogOut
 } from 'lucide-react';
 import { exportSingleStudentCardPdf } from '../lib/exportUtils';
 
@@ -567,6 +568,29 @@ export const ParentAccountView: React.FC<ParentAccountViewProps> = ({
                   Ganti Password
                 </button>
               </div>
+            )}
+          </div>
+
+          {/* Card Keluar / Ganti Akun */}
+          <div className="bg-white border border-slate-200/80 rounded-3xl p-6 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div className="space-y-1">
+              <h3 className="text-xs font-extrabold text-slate-900 uppercase tracking-wider flex items-center gap-2">
+                <LogOut className="w-4 h-4 text-rose-600" />
+                Keluar dari Akun
+              </h3>
+              <p className="text-xs text-slate-500">
+                Keluar dari sesi portal saat ini untuk berganti ke akun Administrator atau akun lainnya.
+              </p>
+            </div>
+            {onLogout && (
+              <button
+                type="button"
+                onClick={onLogout}
+                className="px-5 py-2.5 bg-rose-50 hover:bg-rose-100 text-rose-700 hover:text-rose-900 border border-rose-200 font-bold text-xs rounded-xl transition-all cursor-pointer flex items-center justify-center gap-2 shrink-0 active:scale-95"
+              >
+                <LogOut className="w-4 h-4" />
+                <span>Keluar dari Akun</span>
+              </button>
             )}
           </div>
 

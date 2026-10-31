@@ -9,7 +9,8 @@ import {
   StudentCharacterLog,
   CharacterPredicateSettings,
   UserSession,
-  SchoolProfile
+  SchoolProfile,
+  AttendanceAuditLog
 } from '../types';
 import { 
   Users, 
@@ -48,10 +49,13 @@ import {
   Trash2,
   LogOut,
   RefreshCw,
-  AlertCircle,
   RotateCcw,
   Download,
-  FileSpreadsheet
+  FileSpreadsheet,
+  History,
+  ChevronsLeft,
+  ChevronsRight,
+  ShieldAlert
 } from 'lucide-react';
 import { BulkAlpaManagementModal } from './BulkAlpaManagementModal';
 import { BulkReturnManagementModal, BulkReturnUpdatePayload } from './BulkReturnManagementModal';
@@ -64,7 +68,8 @@ import {
   mergeSingleAttendanceRecord,
   getCloudSyncStatus,
   calculateAttendanceStatus,
-  getLateCutoffTime
+  getLateCutoffTime,
+  getAttendanceAuditLogs
 } from '../lib/storage';
 import { exportStudentCharacterDetailPdf, exportDashboardAttendanceExcel } from '../lib/exportUtils';
 
@@ -144,6 +149,24 @@ export const AttendanceDashboard: React.FC<AttendanceDashboardProps> = ({
   const [showBulkAlpaModal, setShowBulkAlpaModal] = useState<boolean>(false);
   const [showBulkReturnModal, setShowBulkReturnModal] = useState<boolean>(false);
   const [highlightedCharLogId, setHighlightedCharLogId] = useState<string | null>(null);
+
+  // Jejak Audit Log Presensi Manual (Requirement 6)
+  const [showAuditModal, setShowAuditModal] = useState<boolean>(false);
+  const [auditLogs, setAuditLogs] = useState<AttendanceAuditLog[]>([]);
+  const [isLoadingAuditLogs, setIsLoadingAuditLogs] = useState<boolean>(false);
+
+  const handleOpenAuditModal = async () => {
+    setShowAuditModal(true);
+    setIsLoadingAuditLogs(true);
+    try {
+      const logs = await getAttendanceAuditLogs();
+      setAuditLogs(logs);
+    } catch {
+      setAuditLogs([]);
+    } finally {
+      setIsLoadingAuditLogs(false);
+    }
+  };
 
   // Status Sinkronisasi On-Demand Khusus Akun Orang Tua (100% Hemat Kuota)
   const [isRefreshingParent, setIsRefreshingParent] = useState(false);
@@ -242,9 +265,9 @@ export const AttendanceDashboard: React.FC<AttendanceDashboardProps> = ({
 
   const deferredSearchQuery = useDeferredValue(searchQuery);
 
-  // Pagination for fast rendering of large student lists (default: -1 / Semua agar seluruh siswa tampil tanpa tersembunyi)
+  // Pagination & incremental loading (default: 25 students per page, Requirement 8)
   const [currentPage, setCurrentPage] = useState<number>(1);
-  const [pageSize, setPageSize] = useState<number>(-1); // -1 (Semua), 30, 60, 100
+  const [pageSize, setPageSize] = useState<number>(25); // 25, 50, 100, 200
 
   // Reset page when filter or date changes
   useEffect(() => {
@@ -441,28 +464,6 @@ export const AttendanceDashboard: React.FC<AttendanceDashboardProps> = ({
     }
   }, [selectedDate]);
 
-  // Tanggal terbaru yang memiliki rekaman scan aktif di database
-  const latestScanInfo = React.useMemo(() => {
-    if (!attendanceRecords || attendanceRecords.length === 0) return null;
-    let maxDate = '';
-    for (let i = 0; i < attendanceRecords.length; i++) {
-      const r = attendanceRecords[i];
-      if (r.date && (r.time || r.status === 'HADIR' || r.status === 'TERLAMBAT' || r.returnTime)) {
-        if (r.date > maxDate) {
-          maxDate = r.date;
-        }
-      }
-    }
-    if (!maxDate) return null;
-    let count = 0;
-    for (let i = 0; i < attendanceRecords.length; i++) {
-      const r = attendanceRecords[i];
-      if (r.date === maxDate && (r.time || r.status === 'HADIR' || r.status === 'TERLAMBAT')) {
-        count++;
-      }
-    }
-    return { date: maxDate, count };
-  }, [attendanceRecords]);
 
   // Selected child for Parent Role
   const targetStudent = useMemo(() => {
@@ -1047,25 +1048,6 @@ export const AttendanceDashboard: React.FC<AttendanceDashboardProps> = ({
                 </div>
               )}
 
-              {/* Banner Penjelas jika tanggal terpilih belum ada scan */}
-              {!childRecord && latestScanInfo && latestScanInfo.date !== selectedDate && (
-                <div className="mt-3 py-2 px-3.5 bg-amber-50/90 border border-amber-200/90 rounded-2xl text-amber-900 text-xs flex flex-wrap items-center justify-between gap-2 shadow-2xs">
-                  <div className="flex items-center gap-2">
-                    <CalendarDays className="w-4 h-4 text-amber-600 shrink-0" />
-                    <span>
-                      Belum ada scan presensi anak pada tanggal <strong>{displayDateFormatted}</strong>. Aktivitas scan sekolah terakhir tercatat pada <strong>{latestScanInfo.date}</strong>.
-                    </span>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => setSelectedDate(latestScanInfo.date)}
-                    className="text-[11px] font-bold text-amber-800 bg-amber-200/80 hover:bg-amber-200 px-2.5 py-1 rounded-xl transition-all cursor-pointer inline-flex items-center gap-1"
-                  >
-                    <span>Buka {latestScanInfo.date}</span>
-                    <ArrowRight className="w-3 h-3" />
-                  </button>
-                </div>
-              )}
             </div>
 
             {/* 4 KARTU STATUS PRESENSI (MASUK, PULANG, KEAKTIFAN KBM, NILAI KARAKTER) */}
@@ -1602,8 +1584,8 @@ export const AttendanceDashboard: React.FC<AttendanceDashboardProps> = ({
                 </select>
               </div>
 
-              {/* Tombol Segarkan Data Cloud On-Demand (Khusus Role Admin, Sembunyi untuk Role Guru) */}
-              {currentRole === 'ADMIN' && (
+              {/* Tombol Segarkan Data Cloud On-Demand (Requirement 7 & 13) */}
+              {(currentRole === 'ADMIN' || currentRole === 'TEACHER') && (
                 <button
                   type="button"
                   onClick={handleManualCloudRefresh}
@@ -1616,6 +1598,19 @@ export const AttendanceDashboard: React.FC<AttendanceDashboardProps> = ({
                   <span className="text-[10px] font-mono font-medium text-slate-400 hidden sm:inline">
                     ({lastRefreshedAt})
                   </span>
+                </button>
+              )}
+
+              {/* Tombol Jejak Audit Manual (Requirement 6) */}
+              {(currentRole === 'ADMIN' || currentRole === 'TEACHER') && (
+                <button
+                  type="button"
+                  onClick={handleOpenAuditModal}
+                  className="bg-white hover:bg-slate-100 text-slate-700 hover:text-slate-900 border border-slate-200 font-extrabold px-3 py-1.5 rounded-xl text-xs flex items-center gap-1.5 transition-all cursor-pointer shadow-2xs active:scale-95 shrink-0"
+                  title="Lihat riwayat jejak audit perubahan manual presensi & kepulangan siswa"
+                >
+                  <History className="w-3.5 h-3.5 text-slate-600" />
+                  <span>Jejak Audit Manual</span>
                 </button>
               )}
 
@@ -1703,61 +1698,8 @@ export const AttendanceDashboard: React.FC<AttendanceDashboardProps> = ({
             </div>
           )}
 
-          {/* Banner jika riwayat presensi kosong */}
-          {attendanceRecords.length === 0 && (
-            <div className="bg-amber-50 border border-amber-200/90 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-amber-950 shadow-xs">
-              <div className="flex items-start sm:items-center gap-3">
-                <div className="w-9 h-9 rounded-xl bg-amber-500/20 text-amber-800 flex items-center justify-center shrink-0">
-                  <AlertCircle className="w-5 h-5 text-amber-700" />
-                </div>
-                <div>
-                  <p className="font-extrabold text-xs text-amber-950">Riwayat Presensi Sekolah Sedang Kosong</p>
-                  <p className="text-[11px] text-amber-800 mt-0.5">
-                    Data riwayat presensi belum terisi atau baru saja direset. Anda dapat memulihkan 14 hari riwayat presensi sekolah sekarang.
-                  </p>
-                </div>
-              </div>
-              {onRestoreAttendance && (
-                <button
-                  type="button"
-                  onClick={onRestoreAttendance}
-                  className="px-4 py-2 rounded-xl bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-700 hover:to-orange-700 text-white font-extrabold text-xs shadow-sm cursor-pointer transition-all shrink-0 active:scale-95 flex items-center gap-2 justify-center"
-                >
-                  <RotateCcw className="w-3.5 h-3.5" />
-                  <span>Pulihkan Data Presensi</span>
-                </button>
-              )}
-            </div>
-          )}
 
-          {/* Banner Penjelas jika Tanggal Terpilih Belum Ada Aktivitas Scan */}
-          {dateRecords.length === 0 && attendanceRecords.length > 0 && latestScanInfo && latestScanInfo.date !== selectedDate && (
-            <div className="bg-gradient-to-r from-amber-50 to-orange-50 border border-amber-200/90 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-amber-950 shadow-xs">
-              <div className="flex items-start sm:items-center gap-3">
-                <div className="w-9 h-9 rounded-xl bg-amber-500/20 text-amber-800 flex items-center justify-center shrink-0">
-                  <CalendarDays className="w-5 h-5 text-amber-700" />
-                </div>
-                <div>
-                  <p className="font-extrabold text-xs text-amber-950">
-                    Belum Ada Aktivitas Scan pada {displayDateFormatted} (Tercatat 0 Hadir)
-                  </p>
-                  <p className="text-[11px] text-amber-800 mt-0.5">
-                    Seluruh histori presensi sekolah Anda (<strong>{attendanceRecords.length.toLocaleString('id-ID')} data</strong>) tetap aman tersimpan di Cloud Firestore. Scan presensi terakhir tercatat pada <strong>{latestScanInfo.date}</strong> ({latestScanInfo.count} siswa).
-                  </p>
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={() => setSelectedDate(latestScanInfo.date)}
-                className="px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-700 hover:to-orange-700 text-white font-extrabold text-xs shadow-sm cursor-pointer transition-all shrink-0 active:scale-95 flex items-center gap-1.5 justify-center"
-                title={`Buka data scan tanggal ${latestScanInfo.date}`}
-              >
-                <Calendar className="w-3.5 h-3.5" />
-                <span>Lihat Data {latestScanInfo.date}</span>
-                <ArrowRight className="w-3.5 h-3.5" />
-              </button>
-            </div>
-          )}
+
 
           {/* Overview Stat Cards Grid for Admin / Teacher */}
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-7 gap-3 sm:gap-4">
@@ -2031,56 +1973,107 @@ export const AttendanceDashboard: React.FC<AttendanceDashboardProps> = ({
             </table>
           </div>
 
-          {/* Pagination Footer */}
+          {/* Pagination Footer (Incremental Loading, Requirement 8) */}
           {filteredStudents.length > 0 && (
             <div className="px-5 py-3.5 border-t border-slate-100 flex flex-col sm:flex-row items-center justify-between gap-3 bg-slate-50/60 text-xs">
               <div className="flex items-center gap-3 text-slate-500 font-medium text-xs">
                 <span>
-                  Menampilkan <strong className="text-slate-800">{pageSize === -1 ? 1 : (currentPage - 1) * pageSize + 1}</strong> - <strong className="text-slate-800">{pageSize === -1 ? filteredStudents.length : Math.min(currentPage * pageSize, filteredStudents.length)}</strong> dari <strong className="text-slate-800">{filteredStudents.length}</strong> siswa
+                  Menampilkan <strong className="text-slate-800">{(currentPage - 1) * pageSize + 1}</strong> - <strong className="text-slate-800">{Math.min(currentPage * pageSize, filteredStudents.length)}</strong> dari <strong className="text-slate-800">{filteredStudents.length}</strong> siswa
                 </span>
                 <span className="hidden sm:inline text-slate-300">|</span>
                 <div className="flex items-center gap-1.5">
-                  <span className="text-[11px] text-slate-500">Baris:</span>
+                  <span className="text-[11px] text-slate-500">Baris per halaman:</span>
                   <select
                     value={pageSize}
                     onChange={(e) => {
                       setPageSize(Number(e.target.value));
                       setCurrentPage(1);
                     }}
-                    className="bg-white border border-slate-200 rounded-lg px-2 py-1 text-xs font-bold text-slate-700 focus:outline-none cursor-pointer"
+                    className="bg-white border border-slate-200 rounded-lg px-2.5 py-1 text-xs font-bold text-slate-700 focus:outline-none cursor-pointer shadow-2xs"
                   >
-                    <option value={30}>30</option>
-                    <option value={60}>60</option>
+                    <option value={25}>25</option>
+                    <option value={50}>50</option>
                     <option value={100}>100</option>
-                    <option value={-1}>Semua</option>
+                    <option value={200}>200</option>
                   </select>
                 </div>
               </div>
 
-              {pageSize !== -1 && totalPages > 1 && (
-                <div className="flex items-center gap-1.5">
+              {totalPages > 1 && (
+                <div className="flex items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={() => setCurrentPage(1)}
+                    disabled={currentPage === 1}
+                    className="p-1.5 rounded-xl border border-slate-200 bg-white font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer shadow-2xs transition-all active:scale-95"
+                    title="Halaman Pertama"
+                  >
+                    <ChevronsLeft className="w-4 h-4" />
+                  </button>
+
                   <button
                     type="button"
                     onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
                     disabled={currentPage === 1}
-                    className="px-2.5 py-1.5 rounded-xl border border-slate-200 bg-white font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer flex items-center gap-1 shadow-2xs transition-all active:scale-95"
+                    className="px-2.5 py-1.5 rounded-xl border border-slate-200 bg-white font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer flex items-center gap-1 shadow-2xs transition-all active:scale-95"
+                    title="Halaman Sebelumnya"
                   >
                     <ChevronLeft className="w-3.5 h-3.5" />
-                    <span>Sebelumnya</span>
+                    <span className="hidden sm:inline">Sebelumnya</span>
                   </button>
 
-                  <span className="px-3 py-1 font-bold text-slate-700 bg-white border border-slate-200 rounded-xl shadow-2xs">
-                    {currentPage} / {totalPages}
-                  </span>
+                  {/* Dynamic Page Buttons */}
+                  <div className="flex items-center gap-1">
+                    {Array.from({ length: totalPages }, (_, i) => i + 1)
+                      .filter(p => p === 1 || p === totalPages || Math.abs(p - currentPage) <= 1)
+                      .reduce<(number | string)[]>((acc, p, idx, arr) => {
+                        if (idx > 0 && typeof arr[idx - 1] === 'number' && (p as number) - (arr[idx - 1] as number) > 1) {
+                          acc.push('...');
+                        }
+                        acc.push(p);
+                        return acc;
+                      }, [])
+                      .map((p, idx) => {
+                        if (p === '...') {
+                          return <span key={`dots-${idx}`} className="px-1 text-slate-400 font-bold">...</span>;
+                        }
+                        const isCurrent = p === currentPage;
+                        return (
+                          <button
+                            key={`page-${p}`}
+                            type="button"
+                            onClick={() => setCurrentPage(Number(p))}
+                            className={`min-w-[32px] h-8 rounded-xl font-extrabold text-xs transition-all cursor-pointer shadow-2xs flex items-center justify-center ${
+                              isCurrent
+                                ? 'bg-indigo-600 text-white shadow-indigo-600/30'
+                                : 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-50'
+                            }`}
+                          >
+                            {p}
+                          </button>
+                        );
+                      })}
+                  </div>
 
                   <button
                     type="button"
                     onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
                     disabled={currentPage === totalPages}
-                    className="px-2.5 py-1.5 rounded-xl border border-slate-200 bg-white font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer flex items-center gap-1 shadow-2xs transition-all active:scale-95"
+                    className="px-2.5 py-1.5 rounded-xl border border-slate-200 bg-white font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer flex items-center gap-1 shadow-2xs transition-all active:scale-95"
+                    title="Halaman Berikutnya"
                   >
-                    <span>Berikutnya</span>
+                    <span className="hidden sm:inline">Berikutnya</span>
                     <ChevronRight className="w-3.5 h-3.5" />
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setCurrentPage(totalPages)}
+                    disabled={currentPage === totalPages}
+                    className="p-1.5 rounded-xl border border-slate-200 bg-white font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer shadow-2xs transition-all active:scale-95"
+                    title="Halaman Terakhir"
+                  >
+                    <ChevronsRight className="w-4 h-4" />
                   </button>
                 </div>
               )}
@@ -2245,6 +2238,150 @@ export const AttendanceDashboard: React.FC<AttendanceDashboardProps> = ({
             }
           }}
         />
+      )}
+
+      {/* Modal Jejak Audit Log Presensi Manual (Requirement 6) */}
+      {showAuditModal && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 flex items-center justify-center p-3 sm:p-5">
+          <div className="bg-white rounded-3xl max-w-4xl w-full max-h-[90vh] flex flex-col shadow-2xl border border-slate-200 overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+            {/* Modal Header */}
+            <div className="p-5 border-b border-slate-100 flex items-center justify-between bg-slate-50/80">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-2xl bg-indigo-50 text-indigo-600 flex items-center justify-center shadow-2xs">
+                  <History className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-extrabold text-slate-900">Jejak Audit Manual Presensi</h3>
+                  <p className="text-[11px] text-slate-500 font-medium">
+                    Catatan otomatis setiap perubahan manual oleh Guru & Admin (Immutable Audit Trail)
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowAuditModal(false)}
+                className="w-8 h-8 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-600 flex items-center justify-center cursor-pointer transition-colors"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Modal Content */}
+            <div className="p-5 overflow-y-auto flex-1 space-y-3">
+              {isLoadingAuditLogs ? (
+                <div className="py-12 flex flex-col items-center justify-center space-y-3 text-slate-400">
+                  <RefreshCw className="w-6 h-6 animate-spin text-indigo-600" />
+                  <p className="text-xs font-bold text-slate-600">Memuat riwayat audit log...</p>
+                </div>
+              ) : auditLogs.length === 0 ? (
+                <div className="py-12 flex flex-col items-center justify-center space-y-2 text-slate-400 text-center">
+                  <ShieldCheck className="w-10 h-10 text-emerald-400" />
+                  <p className="text-xs font-extrabold text-slate-700">Belum Ada Catatan Perubahan Manual</p>
+                  <p className="text-[11px] text-slate-500 max-w-sm">
+                    Seluruh presensi saat ini murni hasil pemindaian QR Code otentik. Setiap modifikasi manual status atau jam pulang oleh Guru/Admin akan otomatis tercatat di sini.
+                  </p>
+                </div>
+              ) : (
+                <div className="space-y-2.5">
+                  <div className="text-[11px] text-slate-500 font-bold px-1 flex items-center justify-between">
+                    <span>Total {auditLogs.length} Riwayat Modifikasi Manual</span>
+                    <span className="text-[10px] text-emerald-600 font-extrabold bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
+                      Tersimpan Aman di Cloud
+                    </span>
+                  </div>
+                  {auditLogs.map((log) => {
+                    let formattedTime = log.timestamp;
+                    try {
+                      formattedTime = new Date(log.timestamp).toLocaleString('id-ID', {
+                        day: 'numeric',
+                        month: 'short',
+                        year: 'numeric',
+                        hour: '2-digit',
+                        minute: '2-digit',
+                        second: '2-digit'
+                      }) + ' WITA';
+                    } catch {}
+
+                    return (
+                      <div
+                        key={log.id}
+                        className="bg-slate-50/70 hover:bg-slate-50 border border-slate-200/90 rounded-2xl p-3.5 text-xs transition-colors space-y-2 shadow-2xs"
+                      >
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1.5 border-b border-slate-200/60 pb-2">
+                          <div className="flex items-center gap-2">
+                            <span className="font-extrabold text-slate-900">{log.studentName}</span>
+                            <span className="text-[10px] bg-slate-200 text-slate-700 font-bold px-2 py-0.5 rounded-md">
+                              {log.className}
+                            </span>
+                            <span className="text-[11px] font-mono font-medium text-slate-500">
+                              (Tgl: {log.date})
+                            </span>
+                          </div>
+                          <span className="text-[10px] font-mono text-slate-400 font-semibold">
+                            {formattedTime}
+                          </span>
+                        </div>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[11px]">
+                          <div>
+                            <span className="text-slate-400 font-medium">Petugas / Pengubah: </span>
+                            <strong className="text-slate-800">{log.modifiedByName}</strong>
+                            <span className="ml-1 text-[10px] font-bold px-1.5 py-0.2 rounded bg-indigo-50 text-indigo-700 border border-indigo-200">
+                              {log.modifiedByRole}
+                            </span>
+                            {log.scannerDeviceId && (
+                              <div className="text-[10px] text-slate-400 font-mono mt-0.5">
+                                Device: {log.scannerDeviceId}
+                              </div>
+                            )}
+                          </div>
+                          <div>
+                            <span className="text-slate-400 font-medium">Aksi: </span>
+                            <strong className="text-slate-700">{log.action}</strong>
+                            {log.reason && (
+                              <div className="text-[11px] text-slate-600 italic mt-0.5">
+                                &quot;{log.reason}&quot;
+                              </div>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Nilai Lama vs Nilai Baru */}
+                        {(log.oldValue || log.newValue) && (
+                          <div className="bg-white border border-slate-200 rounded-xl p-2.5 text-[11px] flex flex-col sm:flex-row sm:items-center justify-between gap-2 font-mono">
+                            <div className="text-rose-700">
+                              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block font-sans">Sebelum:</span>
+                              {log.oldValue ? JSON.stringify(log.oldValue).replace(/["{}]/g, ' ') : '(Kosong/Data Baru)'}
+                            </div>
+                            <div className="hidden sm:block text-slate-300 font-black">➔</div>
+                            <div className="text-emerald-700">
+                              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block font-sans">Sesudah:</span>
+                              {log.newValue ? JSON.stringify(log.newValue).replace(/["{}]/g, ' ') : '-'}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            {/* Modal Footer */}
+            <div className="p-4 border-t border-slate-100 flex items-center justify-between bg-slate-50/50">
+              <span className="text-[11px] text-slate-400">
+                Pencatatan ini dilindungi Security Rules dan tidak dapat diubah oleh siapapun.
+              </span>
+              <button
+                type="button"
+                onClick={() => setShowAuditModal(false)}
+                className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-900 text-white font-extrabold text-xs shadow-xs cursor-pointer transition-all"
+              >
+                Tutup
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
     </div>

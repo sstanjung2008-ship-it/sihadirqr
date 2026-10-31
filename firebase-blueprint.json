@@ -44,6 +44,56 @@
         "notes": { "type": "string", "description": "Evaluation notes" }
       },
       "required": ["id", "studentId", "traitName", "traitType", "points", "date"]
+    },
+    "AttendanceRecord": {
+      "title": "AttendanceRecord",
+      "description": "Student school daily attendance entry",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique attendance record ID" },
+        "studentId": { "type": "string", "description": "Student ID" },
+        "studentName": { "type": "string", "description": "Student name" },
+        "nisn": { "type": "string", "description": "Student NISN" },
+        "className": { "type": "string", "description": "Student class" },
+        "date": { "type": "string", "description": "Attendance date YYYY-MM-DD" },
+        "time": { "type": "string", "description": "Check-in time HH:mm:ss" },
+        "status": { "type": "string", "enum": ["HADIR", "TERLAMBAT", "IZIN", "SAKIT", "ALPA"], "description": "Attendance status" },
+        "method": { "type": "string", "enum": ["QR_SCAN", "MANUAL", "IZIN_APPROVED"], "description": "Check-in method" },
+        "scannedBy": { "type": "string", "description": "Device or officer scanning QR" },
+        "notes": { "type": "string", "description": "Attendance notes" },
+        "parentNotified": { "type": "boolean", "description": "Whether parent received notification" },
+        "returnTime": { "type": "string", "description": "Return checkout time HH:mm:ss" },
+        "returnStatus": { "type": "string", "description": "Return status" },
+        "validatorId": { "type": "string", "description": "Teacher validator or scanner user ID" },
+        "validatorName": { "type": "string", "description": "Teacher validator name" },
+        "scannerDeviceId": { "type": "string", "description": "Unique device UUID" },
+        "validationTimestamp": { "type": "string", "description": "ISO timestamp of validation" }
+      },
+      "required": ["id", "studentId", "date", "status"]
+    },
+    "AttendanceAuditLog": {
+      "title": "AttendanceAuditLog",
+      "description": "Audit trail logging manual attendance and character modifications",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique audit log ID" },
+        "recordId": { "type": "string", "description": "Target attendance record ID" },
+        "studentId": { "type": "string", "description": "Target student ID" },
+        "studentName": { "type": "string", "description": "Target student name" },
+        "className": { "type": "string", "description": "Student class name" },
+        "date": { "type": "string", "description": "Attendance date YYYY-MM-DD" },
+        "action": { "type": "string", "description": "Action performed" },
+        "fieldChanged": { "type": "string", "description": "Field that was modified" },
+        "oldValue": { "description": "Value before modification" },
+        "newValue": { "description": "Value after modification" },
+        "reason": { "type": "string", "description": "Reason for manual override" },
+        "modifiedByUserId": { "type": "string", "description": "User ID who performed override" },
+        "modifiedByName": { "type": "string", "description": "Name of user who performed override" },
+        "modifiedByRole": { "type": "string", "enum": ["ADMIN", "TEACHER"], "description": "Role of user" },
+        "timestamp": { "type": "string", "description": "ISO timestamp" },
+        "scannerDeviceId": { "type": "string", "description": "Device ID" }
+      },
+      "required": ["id", "recordId", "studentId", "date", "modifiedByUserId", "modifiedByName", "modifiedByRole", "timestamp"]
     }
   },
   "firestore": {
@@ -51,9 +101,17 @@
       "schema": "AppData",
       "description": "Collection storing synchronized school datasets"
     },
+    "/attendance_records/{recordId}": {
+      "schema": "AttendanceRecord",
+      "description": "Individual student attendance entries collection"
+    },
     "/character_logs/{logId}": {
       "schema": "CharacterLog",
       "description": "Individual student character points collection"
+    },
+    "/audit_logs/{logId}": {
+      "schema": "AttendanceAuditLog",
+      "description": "Audit trail of manual attendance modifications"
     }
   }
 }

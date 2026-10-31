@@ -72,6 +72,9 @@ import {
   isDemoClass,
   startAutoAttendanceSync30s,
   checkAndSyncUnsyncedAttendanceToCloud,
+  saveAttendanceAuditLog,
+  getScannerDeviceId,
+  refreshCloudData,
   KEYS
 } from './lib/storage';
 import { ShieldCheck, CheckCircle2, WifiOff, RefreshCw, Wifi, X, Cloud } from 'lucide-react';
@@ -158,6 +161,11 @@ export default function App() {
       }
     } catch {
       // Ignore iframe history restrictions
+    }
+
+    // Manual-Trigger Synchronization upon accessing/navigating to the dashboard (Requirement 7)
+    if (safeTab === 'dashboard') {
+      refreshCloudData(false).catch(() => {});
     }
   }, []);
 
@@ -1007,7 +1015,7 @@ export default function App() {
     }
   };
 
-  // Update Attendance Status manually
+  // Update Attendance Status manually (Teacher & Admin Only, Requirement 5 & 6)
   const handleUpdateAttendanceStatus = (
     recordId: string, 
     newStatus: AttendanceRecord['status'], 
@@ -1016,9 +1024,18 @@ export default function App() {
     returnStatus?: AttendanceRecord['returnStatus'],
     fullRecord?: AttendanceRecord
   ) => {
+    // Restricted Manual Override (Teacher & Admin Only - Requirement 5)
+    const effectiveRole = userSession?.role || currentRole;
+    if (effectiveRole !== 'ADMIN' && effectiveRole !== 'TEACHER') {
+      console.warn('[Security] Akses ditolak: Hanya Guru dan Admin yang dapat mengubah data presensi.');
+      return;
+    }
+
     let exists = false;
     let targetStudentId = fullRecord?.studentId;
     let targetDate = fullRecord?.date;
+
+    const existingRec = attendanceRecords.find(r => r.id === recordId || (fullRecord && r.studentId === fullRecord.studentId && r.date === fullRecord.date));
 
     const updated = attendanceRecords.map(r => {
       const isMatch = r.id === recordId || (fullRecord && r.studentId === fullRecord.studentId && r.date === fullRecord.date);
@@ -1037,6 +1054,8 @@ export default function App() {
           isRealScan: true,
           updatedAt: Date.now(),
           returnUpdatedAt: returnTime !== undefined ? Date.now() : r.returnUpdatedAt,
+          validatorId: userSession?.teacherId || userSession?.username || 'ADMIN',
+          validatorName: userSession?.displayName || 'Guru/Admin',
         };
       }
       return r;
@@ -1055,9 +1074,32 @@ export default function App() {
         isRealScan: true,
         updatedAt: Date.now(),
         returnUpdatedAt: returnTime && returnTime.trim() ? Date.now() : undefined,
+        validatorId: userSession?.teacherId || userSession?.username || 'ADMIN',
+        validatorName: userSession?.displayName || 'Guru/Admin',
       };
       updated.unshift(createdRecord);
     }
+
+    // Automated Audit Log System (Requirement 6)
+    const targetStudent = students.find(s => s.id === (targetStudentId || fullRecord?.studentId));
+    saveAttendanceAuditLog({
+      id: `audit-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+      recordId: recordId || fullRecord?.id || `att-${targetStudentId}-${targetDate}`,
+      studentId: targetStudentId || '',
+      studentName: targetStudent?.name || fullRecord?.studentName || 'Siswa',
+      className: targetStudent?.className || fullRecord?.className || '',
+      date: targetDate || getLocalDateString(),
+      action: 'UPDATE_STATUS',
+      fieldChanged: returnTime !== undefined ? 'multiple' : 'status',
+      oldValue: existingRec ? { status: existingRec.status, time: existingRec.time, returnStatus: existingRec.returnStatus, returnTime: existingRec.returnTime, notes: existingRec.notes } : null,
+      newValue: { status: newStatus, time: fullRecord?.time, returnStatus, returnTime, notes },
+      reason: notes || 'Pembaruan status presensi manual oleh Guru/Admin',
+      modifiedByUserId: userSession?.teacherId || userSession?.username || 'admin',
+      modifiedByName: userSession?.displayName || (effectiveRole === 'ADMIN' ? 'Admin Sekolah' : 'Guru'),
+      modifiedByRole: effectiveRole === 'ADMIN' ? 'ADMIN' : 'TEACHER',
+      timestamp: new Date().toISOString(),
+      scannerDeviceId: getScannerDeviceId()
+    });
 
     setAttendanceRecordsState(updated);
     saveAttendanceRecords(updated);
@@ -1164,7 +1206,37 @@ export default function App() {
       existingRecordId?: string;
     }[]
   ) => {
+    // Restricted Manual Override (Teacher & Admin Only - Requirement 5)
+    const effectiveRole = userSession?.role || currentRole;
+    if (effectiveRole !== 'ADMIN' && effectiveRole !== 'TEACHER') {
+      console.warn('[Security] Akses ditolak: Hanya Guru dan Admin yang dapat mengubah data presensi massal.');
+      return;
+    }
+
     const updateTimestamp = Date.now();
+
+    // Log each bulk change into the Audit Log (Requirement 6)
+    updates.forEach(u => {
+      saveAttendanceAuditLog({
+        id: `audit-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+        recordId: u.existingRecordId || `att-${u.studentId}-${u.date}`,
+        studentId: u.studentId,
+        studentName: u.studentName,
+        className: u.className,
+        date: u.date,
+        action: 'BULK_UPDATE',
+        fieldChanged: 'status',
+        oldValue: null,
+        newValue: { status: u.newStatus, notes: u.notes },
+        reason: u.notes || 'Pembaruan massal status kehadiran',
+        modifiedByUserId: userSession?.teacherId || userSession?.username || 'admin',
+        modifiedByName: userSession?.displayName || (effectiveRole === 'ADMIN' ? 'Admin Sekolah' : 'Guru'),
+        modifiedByRole: effectiveRole === 'ADMIN' ? 'ADMIN' : 'TEACHER',
+        timestamp: new Date().toISOString(),
+        scannerDeviceId: getScannerDeviceId()
+      });
+    });
+
     setAttendanceRecordsState(prev => {
       const updated = [...prev];
       const nowTime = new Date().toTimeString().substring(0, 5);
@@ -1276,8 +1348,37 @@ export default function App() {
 
   // Bulk update return status (e.g. mark multiple students as Pulang / Pulang Cepat or reset return status)
   const handleBulkUpdateReturnStatus = (updates: BulkReturnUpdatePayload[]) => {
+    // Restricted Manual Override (Teacher & Admin Only - Requirement 5)
+    const effectiveRole = userSession?.role || currentRole;
+    if (effectiveRole !== 'ADMIN' && effectiveRole !== 'TEACHER') {
+      console.warn('[Security] Akses ditolak: Hanya Guru dan Admin yang dapat mengubah data kepulangan massal.');
+      return;
+    }
+
     const nowTime = new Date().toTimeString().substring(0, 5);
     const updateTimestamp = Date.now();
+
+    // Log each return bulk update to Audit Log (Requirement 6)
+    updates.forEach(u => {
+      saveAttendanceAuditLog({
+        id: `audit-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+        recordId: u.existingRecordId || `att-${u.studentId}-${u.date}`,
+        studentId: u.studentId,
+        studentName: u.studentName,
+        className: u.className,
+        date: u.date,
+        action: 'UPDATE_RETURN',
+        fieldChanged: 'returnStatus',
+        oldValue: null,
+        newValue: { returnStatus: u.newReturnStatus, returnTime: u.newReturnTime, notes: u.notes },
+        reason: u.notes || 'Pembaruan massal status kepulangan oleh Guru/Admin',
+        modifiedByUserId: userSession?.teacherId || userSession?.username || 'admin',
+        modifiedByName: userSession?.displayName || (effectiveRole === 'ADMIN' ? 'Admin Sekolah' : 'Guru'),
+        modifiedByRole: effectiveRole === 'ADMIN' ? 'ADMIN' : 'TEACHER',
+        timestamp: new Date().toISOString(),
+        scannerDeviceId: getScannerDeviceId()
+      });
+    });
 
     setAttendanceRecordsState(prev => {
       const updated = [...prev];

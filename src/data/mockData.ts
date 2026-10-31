@@ -374,12 +374,16 @@ export function generateInitialAttendanceHistory(students: Student[], excludedDa
   const currentMonth = now.getMonth();
   const currentDate = now.getDate();
 
-  for (let day = 1; day < currentDate; day++) {
-    const d = new Date(currentYear, currentMonth, day);
-    if (d.getDay() !== 0) { // Lewati hari Minggu (Minggu = 0)
-      const dStr = getWitaDateStr(d);
-      if (!excludedSet.has(dStr)) {
-        datesSet.add(dStr);
+  // JAMINAN MUTLAK: Seluruh hari di bulan Oktober 2026 adalah data otentik hasil scan real sekolah.
+  // Jangan pernah membangkitkan data sintetis untuk bulan Oktober 2026!
+  if (currentYear !== 2026 || currentMonth !== 9) {
+    for (let day = 1; day < currentDate; day++) {
+      const d = new Date(currentYear, currentMonth, day);
+      if (d.getDay() !== 0) { // Lewati hari Minggu (Minggu = 0)
+        const dStr = getWitaDateStr(d);
+        if (!excludedSet.has(dStr)) {
+          datesSet.add(dStr);
+        }
       }
     }
   }
@@ -393,12 +397,11 @@ export function generateInitialAttendanceHistory(students: Student[], excludedDa
     if (!excludedSet.has(d)) datesSet.add(d);
   });
 
-  // JAMINAN MUTLAK: Seluruh hari di bulan Oktober 2026 adalah data otentik hasil scan real sekolah.
-  // Jangan pernah membangkitkan data sintetis untuk bulan Oktober!
-
   // Pastikan 2026-10-25 (Minggu / Hari Libur) dan hari Minggu lainnya sama sekali tidak pernah masuk
   const validDates = Array.from(datesSet).filter(dStr => {
     if (dStr === '2026-10-25' || excludedSet.has(dStr)) return false;
+    // Blokir seluruh data sintetis di bulan Oktober 2026:
+    if (dStr.startsWith('2026-10-')) return false;
     const parts = dStr.split('-');
     if (parts.length === 3) {
       const dObj = new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10));
@@ -433,7 +436,8 @@ export function generateInitialAttendanceHistory(students: Student[], excludedDa
         time = "-";
       } else {
         status = 'HADIR';
-        const m = String(30 + (sIdx % 35)).padStart(2, '0');
+        // Menit 30..57 (selalu valid, tidak pernah >= 60)
+        const m = String(30 + (sIdx % 28)).padStart(2, '0');
         const s = String(10 + (sIdx % 48)).padStart(2, '0');
         time = `06:${m}:${s}`;
       }

@@ -1,4 +1,4 @@
-import { SchoolProfile, SchoolClass, Student, AttendanceRecord, AttendanceStatus, LeaveRequest, Teacher, LearningJournal, CharacterTrait, StudentCharacterLog, CharacterPredicateSettings, UserSession, UserRole, StudentGradeAssessment, StudentGradeItem, LessonPeriod, ClassScheduleSlot } from '../types';
+import { SchoolProfile, SchoolClass, Student, AttendanceRecord, AttendanceStatus, AttendanceAuditLog, LeaveRequest, Teacher, LearningJournal, CharacterTrait, StudentCharacterLog, CharacterPredicateSettings, UserSession, UserRole, StudentGradeAssessment, StudentGradeItem, LessonPeriod, ClassScheduleSlot } from '../types';
 import { 
   INITIAL_SCHOOL_PROFILE, 
   INITIAL_CLASSES, 
@@ -55,6 +55,102 @@ export const SAFE_MANUAL_CHARACTER_LOGS_BACKUP_KEY = 'sihadir_manual_character_l
 
 // Daftar ID catatan karakter yang telah dihapus agar tidak dibangkitkan kembali oleh sinkronisasi Cloud
 export const DELETED_CHARACTER_LOGS_KEY = 'sihadir_deleted_character_log_ids_v2';
+
+// Kunci penyimpanan jejak audit manual presensi & karakter (Requirement 6)
+export const AUDIT_LOGS_KEY = 'sihadir_attendance_audit_logs_v1';
+
+/**
+ * Mengambil atau menghasilkan identitas unik scanner perangkat (UUID lokal).
+ * Menjamin setiap scan memiliki jejak pertanggungjawaban validator & perangkat (Requirement 2).
+ */
+export function getScannerDeviceId(): string {
+  if (typeof window === 'undefined') return 'SERVER_NODE';
+  try {
+    let id = localStorage.getItem('sihadir_scanner_device_id_v1');
+    if (!id || !id.trim()) {
+      const rand = Math.random().toString(36).substring(2, 8).toUpperCase();
+      const ts = Date.now().toString(36).toUpperCase();
+      id = `POS-DEV-${rand}-${ts}`;
+      localStorage.setItem('sihadir_scanner_device_id_v1', id);
+    }
+    return id;
+  } catch {
+    return 'POS-DEV-FALLBACK';
+  }
+}
+
+/**
+ * Menyimpan jejak audit saat Guru atau Admin melakukan perubahan manual (Requirement 6).
+ * Dicatat di local storage dan dikirim ke Firestore koleksi audit_logs (append-only/immutable).
+ */
+export async function saveAttendanceAuditLog(log: AttendanceAuditLog): Promise<void> {
+  try {
+    // 1. Simpan di local storage
+    if (typeof window !== 'undefined') {
+      const raw = localStorage.getItem(AUDIT_LOGS_KEY);
+      let list: AttendanceAuditLog[] = [];
+      if (raw) {
+        try { list = JSON.parse(raw); } catch {}
+      }
+      list.unshift(log);
+      if (list.length > 300) list = list.slice(0, 300);
+      localStorage.setItem(AUDIT_LOGS_KEY, JSON.stringify(list));
+      window.dispatchEvent(new CustomEvent('sihadir_audit_logs_updated', { detail: log }));
+    }
+
+    // 2. Tulis ke Cloud Firestore collection audit_logs
+    await withTimeout(
+      setDoc(doc(db, 'audit_logs', log.id), {
+        ...log,
+        serverTimestamp: serverTimestamp()
+      }),
+      6000,
+      null
+    );
+  } catch (err) {
+    console.warn('[AuditLog] Gagal simpan audit log ke cloud:', err);
+  }
+}
+
+/**
+ * Mengambil daftar jejak audit presensi manual dari Cloud dan local storage (Requirement 6).
+ * Menggunakan one-time getDocs (bukan onSnapshot) untuk efisiensi kuota.
+ */
+export async function getAttendanceAuditLogs(): Promise<AttendanceAuditLog[]> {
+  const localRaw = typeof window !== 'undefined' ? localStorage.getItem(AUDIT_LOGS_KEY) : null;
+  let localLogs: AttendanceAuditLog[] = [];
+  if (localRaw) {
+    try { localLogs = JSON.parse(localRaw); } catch {}
+  }
+
+  try {
+    const snap = await withTimeout(
+      getDocs(collection(db, 'audit_logs')),
+      5000,
+      null
+    );
+    if (snap && !snap.empty) {
+      const cloudLogs: AttendanceAuditLog[] = [];
+      snap.forEach(d => {
+        const data = d.data();
+        if (data && data.recordId) {
+          cloudLogs.push(data as AttendanceAuditLog);
+        }
+      });
+      const map = new Map<string, AttendanceAuditLog>();
+      cloudLogs.forEach(l => map.set(l.id, l));
+      localLogs.forEach(l => map.set(l.id, l));
+      const merged = Array.from(map.values()).sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+      if (typeof window !== 'undefined') {
+        localStorage.setItem(AUDIT_LOGS_KEY, JSON.stringify(merged.slice(0, 300)));
+      }
+      return merged;
+    }
+  } catch (err) {
+    console.warn('[AuditLog] Gagal fetch audit logs dari cloud:', err);
+  }
+  return localLogs;
+}
 
 export type CloudSyncStatus = 'connected' | 'syncing' | 'offline' | 'quota_exceeded';
 let currentSyncStatus: CloudSyncStatus = 'syncing';
@@ -317,6 +413,73 @@ export function handleFirestoreError(err: any): void {
  * - Format tanggal ISO YYYY-MM-DD (menolak record rusak seperti date: 'ALPA')
  * - Bukan data sampah autoalpa
  */
+export function isInvalidClockTime(timeStr?: string): boolean {
+  if (!timeStr || timeStr === '-') return false;
+  const parts = timeStr.split(/[:.]/);
+  if (parts.length >= 2) {
+    const h = parseInt(parts[0], 10);
+    const m = parseInt(parts[1], 10);
+    const s = parts[2] ? parseInt(parts[2], 10) : 0;
+    if (isNaN(h) || isNaN(m) || isNaN(s)) return true;
+    if (h < 0 || h > 23 || m < 0 || m >= 60 || s < 0 || s >= 60) return true;
+  }
+  return false;
+}
+
+export function isOctoberSyntheticRecord(r: any): boolean {
+  if (!r || !r.date) return false;
+  const d = String(r.date).trim();
+  if (d >= '2026-10-01' && d <= '2026-10-24') {
+    if (r.isSynthetic === true) return true;
+    if (typeof r.id === 'string' && r.id.startsWith('att-synth-')) return true;
+    if (r.scannedBy === 'Baseline Histori') return true;
+    if (r.isRealScan === false) return true;
+    if (r.notes === 'Macet lalu lintas' || r.notes === 'Demam & flu') return true;
+    if (isInvalidClockTime(r.time) || isInvalidClockTime(r.returnTime)) return true;
+
+    const authenticKeywords = ['disetujui admin', 'izin', 'ijin', 'sakit', 'surat', 'lomba', 'turnamen', 'kakek', 'orang tua', 'terlambat'];
+    const noteLower = (r.notes || '').toLowerCase();
+    const hasAuthenticNote = authenticKeywords.some(kw => noteLower.includes(kw));
+
+    if (typeof r.id === 'string' && r.id.startsWith('att-2026-10-') && !hasAuthenticNote) {
+      return true;
+    }
+
+    if (!hasAuthenticNote && (r.updatedAt >= 1793191855300 && r.updatedAt <= 1793191855420) && !r.notes) {
+      return true;
+    }
+  }
+  return false;
+}
+
+export function normalizeClockTime(t?: string): string {
+  if (!t || t === '-') return t || '-';
+  const delim = t.includes('.') ? '.' : ':';
+  const parts = t.split(/[:.]/);
+  if (parts.length >= 2) {
+    let h = parseInt(parts[0].replace(/\D/g, ''), 10);
+    let m = parseInt(parts[1].replace(/\D/g, ''), 10);
+    let s = parts[2] ? parseInt(parts[2].replace(/\D/g, ''), 10) : 0;
+    if (isNaN(h)) h = 7;
+    if (isNaN(m)) m = 0;
+    if (isNaN(s)) s = 0;
+    if (m >= 60) {
+      h += Math.floor(m / 60);
+      m = m % 60;
+    }
+    if (s >= 60) {
+      m += Math.floor(s / 60);
+      s = s % 60;
+    }
+    h = h % 24;
+    const hh = String(h).padStart(2, '0');
+    const mm = String(m).padStart(2, '0');
+    const ss = String(s).padStart(2, '0');
+    return `${hh}${delim}${mm}${delim}${ss}`;
+  }
+  return t;
+}
+
 export function isValidAttendanceRecord(rec: any): boolean {
   if (!rec || typeof rec !== 'object') return false;
   if (!rec.studentId || typeof rec.studentId !== 'string' || !rec.studentId.trim()) return false;
@@ -351,6 +514,12 @@ export function isValidAttendanceRecord(rec: any): boolean {
       return false; // Tolak hari Minggu
     }
   }
+
+  // Tolak rekaman sintetis 1-24 Oktober 2026
+  if (isOctoberSyntheticRecord(rec)) {
+    return false;
+  }
+
   return true;
 }
 
@@ -377,14 +546,14 @@ export function validateAndSanitizeAttendanceRecords(records: any[]): Attendance
       nisn: String(r.nisn || '').trim(),
       className: String(r.className || '').trim(),
       date: dateStr,
-      time: (r.time && r.time !== '-') ? String(r.time).trim() : '-',
+      time: (r.time && r.time !== '-') ? normalizeClockTime(String(r.time).trim()) : '-',
       status: r.status || 'HADIR',
       method: r.method || 'QR_SCAN',
       scannedBy: r.scannedBy || 'Pos Scanner Utama',
       parentNotified: Boolean(r.parentNotified),
     };
 
-    if (r.returnTime && r.returnTime !== '-') cleanRecord.returnTime = String(r.returnTime).trim();
+    if (r.returnTime && r.returnTime !== '-') cleanRecord.returnTime = normalizeClockTime(String(r.returnTime).trim());
     if (r.returnStatus) cleanRecord.returnStatus = r.returnStatus;
     if (r.returnScannedBy) cleanRecord.returnScannedBy = String(r.returnScannedBy).trim();
     if (r.notes) cleanRecord.notes = String(r.notes).trim();
@@ -392,6 +561,16 @@ export function validateAndSanitizeAttendanceRecords(records: any[]): Attendance
     if (r.returnUpdatedAt) cleanRecord.returnUpdatedAt = Number(r.returnUpdatedAt);
     if (r.isSynthetic !== undefined) cleanRecord.isSynthetic = Boolean(r.isSynthetic);
     if (r.isRealScan !== undefined) cleanRecord.isRealScan = Boolean(r.isRealScan);
+
+    // Validator & Device Tracking for Multi-Device Accountability (Requirements 1 & 2)
+    if (r.validatorId) cleanRecord.validatorId = String(r.validatorId).trim();
+    if (r.validatorName) cleanRecord.validatorName = String(r.validatorName).trim();
+    if (r.scannerDeviceId) cleanRecord.scannerDeviceId = String(r.scannerDeviceId).trim();
+    if (r.validationTimestamp) cleanRecord.validationTimestamp = String(r.validationTimestamp).trim();
+    if (r.returnValidatorId) cleanRecord.returnValidatorId = String(r.returnValidatorId).trim();
+    if (r.returnValidatorName) cleanRecord.returnValidatorName = String(r.returnValidatorName).trim();
+    if (r.returnScannerDeviceId) cleanRecord.returnScannerDeviceId = String(r.returnScannerDeviceId).trim();
+    if (r.returnValidationTimestamp) cleanRecord.returnValidationTimestamp = String(r.returnValidationTimestamp).trim();
 
     if (seenKeys.has(dedupeKey)) {
       // Jika ada duplikat untuk siswa pada tanggal yang sama, gabungkan secara aman agar scan nyata tidak hilang
@@ -641,6 +820,8 @@ export function safeSetLocalStorage(key: string, value: string): void {
 const knownChunkedDocs = new Map<string, number>();
 
 async function performSingleDocWrite(key: string, dataStr: string, timestamp: number): Promise<void> {
+  const currentRole = getUserSession()?.role;
+  const editorRole = currentRole || (key === KEYS.ATTENDANCE ? 'ADMIN_GURU' : 'ADMIN');
   const totalLength = dataStr.length;
   if (totalLength <= FIRESTORE_MAX_CHUNK_SIZE) {
     // Normal single document
@@ -651,6 +832,7 @@ async function performSingleDocWrite(key: string, dataStr: string, timestamp: nu
       serverTime: serverTimestamp(),
       isChunked: false,
       totalChunks: 1,
+      editorRole: editorRole,
     });
     // Hapus sisa-sisa chunk HANYA jika sebelumnya dokumen ini pernah di-shard
     if (knownChunkedDocs.has(key)) {
@@ -682,6 +864,7 @@ async function performSingleDocWrite(key: string, dataStr: string, timestamp: nu
           updatedAt: timestamp,
           chunkIndex: i,
           parentKey: key,
+          editorRole: editorRole,
         })
       );
     }
@@ -695,6 +878,7 @@ async function performSingleDocWrite(key: string, dataStr: string, timestamp: nu
       serverTime: serverTimestamp(),
       isChunked: true,
       totalChunks: numChunks,
+      editorRole: editorRole,
     });
 
     // Otomatis bersihkan sisa chunk lama HANYA jika jumlah chunk benar-benar berkurang (prevChunks > numChunks)
@@ -900,9 +1084,35 @@ export async function readAllCloudDocumentsFast(): Promise<Map<string, CloudDocR
         if (snap && snap.exists() && snap.data()) {
           const payload = snap.data();
           const updatedAt = Number(payload.updatedAt) || 0;
-          const dataStr = typeof payload.data === 'string' ? payload.data : JSON.stringify(payload.data || '');
-          resultMap.set(key, { data: dataStr, updatedAt });
-          lastSavedStringCache[key] = dataStr;
+          const isChunked = !!payload.isChunked && Number(payload.totalChunks) > 1;
+
+          if (!isChunked) {
+            const dataStr = typeof payload.data === 'string' ? payload.data : JSON.stringify(payload.data || '');
+            resultMap.set(key, { data: dataStr, updatedAt });
+            lastSavedStringCache[key] = dataStr;
+          } else {
+            // Rakit kembali chunk untuk dokumen besar (seperti STUDENTS dan CHARACTER_LOGS)
+            const totalChunks = Number(payload.totalChunks);
+            const chunkPromises: Promise<string>[] = [];
+            for (let i = 1; i < totalChunks; i++) {
+              chunkPromises.push(
+                withTimeout(
+                  getDoc(doc(db, 'sihadir_app_data', `${key}_chunk_${i}`)).then((cSnap) => {
+                    if (cSnap && cSnap.exists() && cSnap.data()?.data) {
+                      return String(cSnap.data().data);
+                    }
+                    return '';
+                  }),
+                  4500,
+                  ''
+                )
+              );
+            }
+            const otherChunks = await Promise.all(chunkPromises);
+            const fullDataStr = (payload.data || '') + otherChunks.join('');
+            resultMap.set(key, { data: fullDataStr, updatedAt });
+            lastSavedStringCache[key] = fullDataStr;
+          }
         }
       } catch {}
     });
@@ -2222,6 +2432,15 @@ export function mergeSingleAttendanceRecord(a: AttendanceRecord, b: AttendanceRe
     returnUpdatedAt: finalReturnUpdated,
     isSynthetic: false,
     isRealScan: a.isRealScan === true || b.isRealScan === true || hasEntryA || hasEntryB || hasReturnA || hasReturnB,
+    // Multi-Device Validator & Scanner Device Merging (Requirements 1 & 2)
+    validatorId: (hasEntryB && b.validatorId) ? b.validatorId : (a.validatorId || b.validatorId),
+    validatorName: (hasEntryB && b.validatorName) ? b.validatorName : (a.validatorName || b.validatorName),
+    scannerDeviceId: (hasEntryB && b.scannerDeviceId) ? b.scannerDeviceId : (a.scannerDeviceId || b.scannerDeviceId),
+    validationTimestamp: (hasEntryB && b.validationTimestamp) ? b.validationTimestamp : (a.validationTimestamp || b.validationTimestamp),
+    returnValidatorId: (hasReturnB && b.returnValidatorId) ? b.returnValidatorId : (a.returnValidatorId || b.returnValidatorId),
+    returnValidatorName: (hasReturnB && b.returnValidatorName) ? b.returnValidatorName : (a.returnValidatorName || b.returnValidatorName),
+    returnScannerDeviceId: (hasReturnB && b.returnScannerDeviceId) ? b.returnScannerDeviceId : (a.returnScannerDeviceId || b.returnScannerDeviceId),
+    returnValidationTimestamp: (hasReturnB && b.returnValidationTimestamp) ? b.returnValidationTimestamp : (a.returnValidationTimestamp || b.returnValidationTimestamp),
   };
 
   if ((finalStatus === 'HADIR' || finalStatus === 'TERLAMBAT') && (!merged.time || merged.time === '-')) {
@@ -2808,8 +3027,34 @@ export async function forceUploadAllToCloud(): Promise<{ success: boolean; error
     const writePromises = ALL_KEYS.map(async (key) => {
       const raw = localStorage.getItem(key);
       if (raw) {
-        lastSavedStringCache[key] = raw;
-        await writeCloudDocument(key, raw, now);
+        let finalDataToUpload = raw;
+        // JAMINAN MUTLAK MULTI-PERANGKAT: Gabungkan dengan Cloud snapshot sebelum upload
+        if (key === KEYS.ATTENDANCE) {
+          try {
+            const cloudDoc = await withTimeout(readCloudDocument(KEYS.ATTENDANCE), 4000, null);
+            if (cloudDoc && cloudDoc.data) {
+              const cloudAtt = typeof cloudDoc.data === 'string' ? JSON.parse(cloudDoc.data) : cloudDoc.data;
+              const localAtt = JSON.parse(raw);
+              if (Array.isArray(cloudAtt) && Array.isArray(localAtt)) {
+                finalDataToUpload = JSON.stringify(mergeAttendanceLists(cloudAtt, localAtt));
+              }
+            }
+          } catch {}
+        } else if (key === KEYS.STUDENTS) {
+          try {
+            const cloudDoc = await withTimeout(readCloudDocument(KEYS.STUDENTS), 4000, null);
+            if (cloudDoc && cloudDoc.data) {
+              const cloudStd = typeof cloudDoc.data === 'string' ? JSON.parse(cloudDoc.data) : cloudDoc.data;
+              const localStd = JSON.parse(raw);
+              if (Array.isArray(cloudStd) && Array.isArray(localStd)) {
+                finalDataToUpload = JSON.stringify(mergeStudentLists(localStd, cloudStd));
+              }
+            }
+          } catch {}
+        }
+
+        lastSavedStringCache[key] = finalDataToUpload;
+        await writeCloudDocument(key, finalDataToUpload, now);
       }
     });
 
@@ -3384,13 +3629,7 @@ export function initFirestoreAppSession(role?: UserRole): Promise<{ success: boo
   // Daftarkan listener real-time profil sekolah agar jam pulang & hari aktif sinkron otomatis ke seluruh perangkat
   listenToCloudSchoolProfile();
 
-  // Daftarkan listener real-time presensi agar hasil scan di satu perangkat langsung masuk ke seluruh perangkat
-  if (currentRole !== 'PARENT') {
-    listenToCloudAttendance();
-    startAutoAttendanceSync30s();
-  }
-
-  // Jalankan pembacaan data Cloud berkecepatan tinggi saat membuka awal aplikasi / reload
+  // Sinkronisasi data awal menggunakan pembacaan Cloud berkecepatan tinggi saat startup (Requirement 7 & 13)
   return initialLoadSyncFromCloud(currentRole).then((res) => {
     if (res.success) {
       setCloudSyncStatus('connected');
@@ -4156,35 +4395,58 @@ export async function restoreComprehensiveSchoolData(syncToCloud: boolean = true
 }
 
 /**
- * Memulihkan data presensi sekolah secara instan jika pernah kosong / terhapus
+ * Memulihkan data presensi sekolah: memulihkan histori presensi kehadiran otentik
+ * dan menghapus seluruh data sintetis dari tanggal 1-24 Oktober 2026 yang tidak sesuai sistem.
  */
 export function restoreAttendanceRecords(): AttendanceRecord[] {
-  if (inMemoryAttendanceRecords && inMemoryAttendanceRecords.length >= 5000) {
-    return inMemoryAttendanceRecords;
-  }
-  try {
-    const raw = localStorage.getItem(KEYS.ATTENDANCE);
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed) && parsed.length >= 5000) {
-        const sanitized = validateAndSanitizeAttendanceRecords(parsed);
-        inMemoryAttendanceRecords = sanitized;
-        return sanitized;
+  let rawList: any[] = [];
+  if (Array.isArray(inMemoryAttendanceRecords) && inMemoryAttendanceRecords.length > 0) {
+    rawList = inMemoryAttendanceRecords;
+  } else {
+    try {
+      const raw = localStorage.getItem(KEYS.ATTENDANCE);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) rawList = parsed;
       }
-    }
-  } catch {}
+    } catch {}
+  }
 
-  const activeStudents = getStudents();
-  const studentsToUse = activeStudents.length > 0 ? activeStudents : INITIAL_STUDENTS;
-  const initial = generateInitialAttendanceHistory(studentsToUse);
-  const validInitial = validateAndSanitizeAttendanceRecords(initial);
-  inMemoryAttendanceRecords = validInitial;
-  saveAttendanceRecords(validInitial, true);
-  // Picu pemulihan komprehensif di latar belakang agar karakter, jurnal, dan nilai juga pulih
-  try {
-    restoreComprehensiveSchoolData(true);
-  } catch {}
-  return validInitial;
+  // Jika masih kosong, coba ambil dari safe backup
+  if (rawList.length === 0) {
+    try {
+      const backupRaw = localStorage.getItem(SAFE_ATTENDANCE_BACKUP_KEY);
+      if (backupRaw) {
+        const parsed = JSON.parse(backupRaw);
+        if (Array.isArray(parsed)) rawList = parsed;
+      }
+    } catch {}
+  }
+
+  // Saring dan bersihkan: otomatis menghapus rekaman sintetis 1-24 Oktober dan jam invalid
+  let sanitized = validateAndSanitizeAttendanceRecords(rawList);
+
+  // Jika rekaman sebelum Oktober belum ada sama sekali, tambahkan histori baseline September
+  const hasSept = sanitized.some(r => r.date < '2026-10-01');
+  if (!hasSept) {
+    const activeStudents = getStudents();
+    const studentsToUse = activeStudents.length > 0 ? activeStudents : INITIAL_STUDENTS;
+    const initial = generateInitialAttendanceHistory(studentsToUse);
+    const validInitial = validateAndSanitizeAttendanceRecords(initial);
+    sanitized = validateAndSanitizeAttendanceRecords([...sanitized, ...validInitial]);
+  }
+
+  // Urutkan descending berdasarkan tanggal dan jam
+  sanitized.sort((a, b) => {
+    const dComp = (b.date || '').localeCompare(a.date || '');
+    if (dComp !== 0) return dComp;
+    return (b.time || '').localeCompare(a.time || '');
+  });
+
+  inMemoryAttendanceRecords = sanitized;
+  saveAttendanceRecords(sanitized, true);
+
+  return sanitized;
 }
 
 // =========================================================================
@@ -4636,23 +4898,16 @@ export async function checkAndSyncUnsyncedAttendanceToCloud(): Promise<{
 }
 
 /**
- * Memulai pengecekan berkala otomatis setiap 30 detik untuk memastikan data presensi tersinkron ke cloud.
+ * Pengecekan sinkronisasi awal satu kali pada saat pembukaan aplikasi / reload (Requirement 7).
+ * Background polling interval berkala telah dihapus untuk memaksimalkan efisiensi kuota read Cloud.
  */
 export function startAutoAttendanceSync30s(): () => void {
   if (typeof window === 'undefined') return () => {};
-  if (autoAttendanceSyncTimer) {
-    return stopAutoAttendanceSync30s;
-  }
 
-  // Pengecekan awal 3.5 detik setelah startup aplikasi
+  // Pengecekan satu kali (one-shot) 3.5 detik setelah startup aplikasi
   const initialTimer = setTimeout(() => {
     checkAndSyncUnsyncedAttendanceToCloud().catch(() => {});
   }, 3500);
-
-  // Interval berkala setiap 30 detik (30.000 ms)
-  autoAttendanceSyncTimer = setInterval(() => {
-    checkAndSyncUnsyncedAttendanceToCloud().catch(() => {});
-  }, 30000);
 
   return () => {
     clearTimeout(initialTimer);

@@ -61,6 +61,34 @@ export interface AttendanceRecord {
   returnUpdatedAt?: number; // Timestamp pembaruan data kepulangan (untuk anti-revert multi-perangkat)
   isSynthetic?: boolean; // True jika merupakan data sintetis awal/demo, bukan hasil scan live
   isRealScan?: boolean; // True jika merupakan pencatatan presensi/scan nyata yang harus dilindungi
+  // Validator & Device Tracking for Multi-Device Accountability (Requirements 1 & 2)
+  validatorId?: string; // ID Akun Guru atau Device Validator yang memvalidasi scan masuk
+  validatorName?: string; // Nama Guru atau Pos Scanner masuk
+  scannerDeviceId?: string; // Identitas perangkat scanner masuk (UUID lokal)
+  validationTimestamp?: string; // ISO string saat scan masuk divalidasi
+  returnValidatorId?: string; // ID Akun Guru atau Device Validator kepulangan
+  returnValidatorName?: string; // Nama Guru atau Pos Scanner pulang
+  returnScannerDeviceId?: string; // Identitas perangkat scanner pulang (UUID lokal)
+  returnValidationTimestamp?: string; // ISO string saat scan pulang divalidasi
+}
+
+export interface AttendanceAuditLog {
+  id: string;
+  recordId: string;
+  studentId: string;
+  studentName: string;
+  className: string;
+  date: string;
+  action: 'UPDATE_STATUS' | 'BULK_UPDATE' | 'UPDATE_RETURN' | 'MANUAL_OVERRIDE';
+  fieldChanged: 'status' | 'notes' | 'time' | 'returnStatus' | 'returnTime' | 'multiple';
+  oldValue: any;
+  newValue: any;
+  reason?: string;
+  modifiedByUserId: string;
+  modifiedByName: string;
+  modifiedByRole: 'ADMIN' | 'TEACHER';
+  timestamp: string; // ISO string
+  scannerDeviceId?: string;
 }
 
 export type LeaveType = 'SAKIT' | 'IZIN' | 'DESAK';

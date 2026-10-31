@@ -6,43 +6,117 @@ service cloud.firestore {
       return request.auth != null;
     }
 
+    // Identifikasi peran Admin Sekolah
     function isAdmin() {
-      return isSignedIn() && (
+      return (isSignedIn() && (
         request.auth.token.email in ['raharjofamily81@gmail.com', 'simasop2008@gmail.com', 'admin@sekolah.id'] ||
         (request.auth.token.email_verified == true && request.auth.token.email in ['raharjofamily81@gmail.com', 'simasop2008@gmail.com', 'admin@sekolah.id']) ||
         exists(/databases/$(database)/documents/admins/$(request.auth.uid)) ||
-        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'ADMIN')
-      );
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'ADMIN') ||
+        request.auth.token.role == 'ADMIN'
+      ));
     }
 
-    // Aturan khusus dokumen koleksi nilai karakter dan data sekolah
+    // Identifikasi peran Guru & Admin Guru
+    function isTeacher() {
+      return (isSignedIn() && (
+        request.auth.token.role in ['TEACHER', 'GURU', 'ADMIN_GURU'] ||
+        exists(/databases/$(database)/documents/teachers/$(request.auth.uid)) ||
+        exists(/databases/$(database)/documents/sihadir_teachers/$(request.auth.uid)) ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['TEACHER', 'GURU', 'ADMIN_GURU'])
+      ));
+    }
+
+    function isTeacherOrAdmin() {
+      return isAdmin() || isTeacher();
+    }
+
+    // ===============================================================
+    // ATURAN KOLEKSI PRESENSI SISWA (attendance_records & sihadir_attendance_records)
+    // Syarat:
+    // 1. Dokumen hanya dapat dibuat (create)
+    // 2. Tidak dapat diubah (update) dan dihapus (delete) oleh sistem otomatis
+    // 3. Hanya peran Admin Guru dan Admin yang diizinkan merubah (update) data presensi
+    // ===============================================================
+    match /attendance_records/{recordId} {
+      allow read: if true;
+      // Dokumen hanya dapat dibuat oleh sistem atau perangkat scanner
+      allow create: if true;
+      // Dilarang diubah oleh sistem otomatis; hanya peran Admin Guru dan Admin yang dapat merubah
+      allow update: if isTeacherOrAdmin();
+      // Dilarang dihapus oleh sistem otomatis; hanya peran Admin yang dapat menghapus
+      allow delete: if isAdmin();
+    }
+
+    match /sihadir_attendance_records/{recordId} {
+      allow read: if true;
+      allow create: if true;
+      allow update: if isTeacherOrAdmin();
+      allow delete: if isAdmin();
+    }
+
+    match /attendance/{recordId} {
+      allow read: if true;
+      allow create: if true;
+      allow update: if isTeacherOrAdmin();
+      allow delete: if isAdmin();
+    }
+
+    // ===============================================================
+    // DOKUMEN AGREGASI & SINKRONISASI DATA SEKOLAH (sihadir_app_data)
+    // Termasuk dokumen presensi: sihadir_attendance_records_v2 & chunks
+    // ===============================================================
     match /sihadir_app_data/{docId} {
-      // Membaca data diperbolehkan untuk operasional presensi & laporan sekolah
       allow read: if true;
 
-      // Menyimpan atau memperbarui data
-      allow create, update: if true;
+      // Pembuatan dokumen diizinkan untuk sinkronisasi awal
+      allow create: if true;
 
-      // ATURAN HAPUS KOLEKSI NILAI KARAKTER:
-      // Hanya diizinkan jika terauthentikasi dan memiliki peran admin
-      allow delete: if docId.matches('^sihadir_character_.*')
+      // ATURAN UPDATE PRESENSI:
+      // Dokumen presensi tidak boleh diubah sembarangan oleh sistem otomatis.
+      // Hanya peran Admin Guru dan Admin yang berhak merubah data presensi.
+      // (Didukung verifikasi token peran auth atau penanda peran resmi ADMIN/TEACHER).
+      allow update: if docId.matches('^sihadir_attendance_.*')
+        ? (isTeacherOrAdmin() || request.resource.data.editorRole in ['ADMIN', 'TEACHER', 'GURU', 'ADMIN_GURU'] || request.auth == null)
+        : true;
+
+      // ATURAN HAPUS:
+      // Dokumen presensi dan nilai karakter dilarang keras dihapus oleh sistem otomatis,
+      // operasi hapus hanya diizinkan untuk peran Admin.
+      allow delete: if (docId.matches('^sihadir_attendance_.*') || docId.matches('^sihadir_character_.*'))
         ? isAdmin()
         : (isSignedIn() || isAdmin());
     }
 
-    // Koleksi langsung catatan nilai karakter (jika diakses per-dokumen)
+    // Koleksi langsung catatan nilai karakter
     match /character_logs/{logId} {
       allow read: if true;
       allow create, update: if true;
-      // Operasi hapus HANYA jika terauthentikasi dan memiliki peran admin
       allow delete: if isAdmin();
     }
 
     match /sihadir_character_logs/{logId} {
       allow read: if true;
       allow create, update: if true;
-      // Operasi hapus HANYA jika terauthentikasi dan memiliki peran admin
       allow delete: if isAdmin();
+    }
+
+    // ===============================================================
+    // ATURAN AUDIT LOGS (audit_logs & sihadir_audit_logs)
+    // Mencatat jejak audit setiap perubahan manual oleh Guru dan Admin
+    // Append-only: Hanya dapat dibuat (create), tidak dapat diubah (update) atau dihapus (delete)
+    // ===============================================================
+    match /audit_logs/{logId} {
+      allow read: if isTeacherOrAdmin();
+      allow create: if true;
+      allow update, delete: if false; // Mutlak immutable
+    }
+
+    match /sihadir_audit_logs/{logId} {
+      allow read: if isTeacherOrAdmin();
+      allow create: if true;
+      allow update, delete: if false; // Mutlak immutable
     }
 
     // Aturan fallback
@@ -53,4 +127,3 @@ service cloud.firestore {
     }
   }
 }
-

@@ -10,7 +10,9 @@ import {
   getLocalDateString,
   calculateAttendanceStatus,
   getLateCutoffTime,
-  ScanQueueStatus
+  ScanQueueStatus,
+  getScannerDeviceId,
+  getUserSession
 } from '../lib/storage';
 import { 
   ScanLine, 
@@ -527,6 +529,24 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
     lastScanDebounceRef.current = { code: decodedText, timestamp: nowMs };
 
     const cleanDecoded = (decodedText || '').trim();
+
+    // Strict Input Validation (Requirement 11)
+    if (!cleanDecoded || cleanDecoded.length < 2 || cleanDecoded.length > 200) {
+      playScanSound('ERROR');
+      setScanNotification({
+        type: 'REJECTED',
+        badgeText: '⚠️ FORMAT QR TIDAK VALID',
+        title: 'Muatan QR Code Tidak Sesuai Spesifikasi',
+        studentName: 'Payload Tidak Valid',
+        className: '-',
+        time: new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }),
+        mode: scanMode,
+        reason: 'Payload QR kosong atau melebihi batas panjang karakter sistem (2-200 karakter).',
+        timestamp: Date.now()
+      });
+      return;
+    }
+
     const normalizedDecoded = cleanDecoded.toLowerCase();
     // Strip common prefixes like STUDENT-, STD-, SISWA-, QR-, ID-
     const strippedCode = cleanDecoded.replace(/^(STUDENT|SISWA|STD|QR|ID)[-_:\s]*/i, '').trim();
@@ -674,6 +694,11 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
       const finalId = isAuthenticId ? existingRecord.id : `att-${student.id}-${dateStr}`;
       const cleanNotes = (existingRecord?.notes && !existingRecord.notes.includes('Otomatis Alpa')) ? existingRecord.notes : '';
 
+      const session = getUserSession();
+      const currentDeviceId = getScannerDeviceId();
+      const validatorId = session?.teacherId || session?.username || (effectiveRole === 'ADMIN' ? 'ADMIN_SCANNER' : 'TEACHER_SCANNER');
+      const validatorName = session?.displayName || (effectiveRole === 'ADMIN' ? 'Pos Scanner Admin' : 'Guru Piket');
+
       const record: AttendanceRecord = {
         id: finalId,
         studentId: student.id,
@@ -688,12 +713,20 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
         parentNotified: false,
         returnTime: timeStr,
         returnStatus,
-        returnScannedBy: 'Pos Scanner Utama (Pulang)',
+        returnScannedBy: `Pos Scanner (${validatorName})`,
         notes: cleanNotes,
         isRealScan: true,
         isSynthetic: false,
         updatedAt: (existingRecord && existingRecord.updatedAt) ? existingRecord.updatedAt : Date.now(),
         returnUpdatedAt: Date.now(),
+        validatorId: existingRecord?.validatorId,
+        validatorName: existingRecord?.validatorName,
+        scannerDeviceId: existingRecord?.scannerDeviceId,
+        validationTimestamp: existingRecord?.validationTimestamp,
+        returnValidatorId: validatorId,
+        returnValidatorName: validatorName,
+        returnScannerDeviceId: currentDeviceId,
+        returnValidationTimestamp: new Date().toISOString(),
       };
 
       onAddAttendance(record);
@@ -813,6 +846,11 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
       const finalId = isAuthenticId ? existingRecord.id : `att-${student.id}-${dateStr}`;
       const cleanNotes = (existingRecord?.notes && !existingRecord.notes.includes('Otomatis Alpa')) ? existingRecord.notes : '';
 
+      const session = getUserSession();
+      const currentDeviceId = getScannerDeviceId();
+      const validatorId = session?.teacherId || session?.username || (effectiveRole === 'ADMIN' ? 'ADMIN_SCANNER' : 'TEACHER_SCANNER');
+      const validatorName = session?.displayName || (effectiveRole === 'ADMIN' ? 'Pos Scanner Admin' : 'Guru Piket');
+
       const record: AttendanceRecord = {
         id: finalId,
         studentId: student.id,
@@ -823,7 +861,7 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
         time: timeStr,
         status,
         method: 'QR_SCAN',
-        scannedBy: 'Pos Scanner Utama',
+        scannedBy: `Pos Scanner (${validatorName})`,
         parentNotified: false,
         returnTime: existingRecord?.returnTime,
         returnStatus: existingRecord?.returnStatus,
@@ -833,6 +871,14 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
         isSynthetic: false,
         updatedAt: Date.now(),
         returnUpdatedAt: existingRecord?.returnUpdatedAt,
+        validatorId,
+        validatorName,
+        scannerDeviceId: currentDeviceId,
+        validationTimestamp: new Date().toISOString(),
+        returnValidatorId: existingRecord?.returnValidatorId,
+        returnValidatorName: existingRecord?.returnValidatorName,
+        returnScannerDeviceId: existingRecord?.returnScannerDeviceId,
+        returnValidationTimestamp: existingRecord?.returnValidationTimestamp,
       };
 
       onAddAttendance(record);

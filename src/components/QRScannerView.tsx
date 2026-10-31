@@ -670,8 +670,12 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
 
       const returnStatus = 'PULANG';
 
+      const isAuthenticId = existingRecord && existingRecord.id && !existingRecord.id.startsWith('att-autoalpa-') && !existingRecord.id.startsWith('att-synth-');
+      const finalId = isAuthenticId ? existingRecord.id : `att-${student.id}-${dateStr}`;
+      const cleanNotes = (existingRecord?.notes && !existingRecord.notes.includes('Otomatis Alpa')) ? existingRecord.notes : '';
+
       const record: AttendanceRecord = {
-        id: existingRecord ? existingRecord.id : `att-${Date.now()}-${student.id}`,
+        id: finalId,
         studentId: student.id,
         studentName: student.name,
         nisn: student.nisn,
@@ -685,6 +689,9 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
         returnTime: timeStr,
         returnStatus,
         returnScannedBy: 'Pos Scanner Utama (Pulang)',
+        notes: cleanNotes,
+        isRealScan: true,
+        isSynthetic: false,
         updatedAt: (existingRecord && existingRecord.updatedAt) ? existingRecord.updatedAt : Date.now(),
         returnUpdatedAt: Date.now(),
       };
@@ -802,8 +809,12 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
 
       playScanSound(isLate ? 'LATE' : 'SUCCESS');
 
+      const isAuthenticId = existingRecord && existingRecord.id && !existingRecord.id.startsWith('att-autoalpa-') && !existingRecord.id.startsWith('att-synth-');
+      const finalId = isAuthenticId ? existingRecord.id : `att-${student.id}-${dateStr}`;
+      const cleanNotes = (existingRecord?.notes && !existingRecord.notes.includes('Otomatis Alpa')) ? existingRecord.notes : '';
+
       const record: AttendanceRecord = {
-        id: existingRecord ? existingRecord.id : `att-${Date.now()}-${student.id}`,
+        id: finalId,
         studentId: student.id,
         studentName: student.name,
         nisn: student.nisn,
@@ -817,6 +828,9 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
         returnTime: existingRecord?.returnTime,
         returnStatus: existingRecord?.returnStatus,
         returnScannedBy: existingRecord?.returnScannedBy,
+        notes: cleanNotes,
+        isRealScan: true,
+        isSynthetic: false,
         updatedAt: Date.now(),
         returnUpdatedAt: existingRecord?.returnUpdatedAt,
       };

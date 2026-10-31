@@ -114,11 +114,6 @@ import {
   playTeacherKbmVoiceReminder, 
   isKbmVoiceReminderEnabled 
 } from './lib/kbmVoiceReminder';
-import { 
-  run16WitaAutoCharacterAssessment, 
-  getWitaDateTime, 
-  isAutoAssessmentBatchDone 
-} from './lib/autoCharacterScheduler';
 
 const VALID_TABS = [
   'scanner', 'dashboard', 'schedule', 'analytics', 'learning',
@@ -537,33 +532,6 @@ export default function App() {
     }
   }, []);
 
-  // Penilaian Karakter Otomatis Secara Batching Pukul 16:00 WITA:
-  // (Belum Scan, Belum Pulang, & Hadir Tepat Waktu 3 Hari = 1 Poin dievaluasi bersamaan hanya pada jam 16:00 WITA)
-  // Menghapus interval 30 detik untuk mencegah loop write antar-perangkat dan melindungi kuota Firebase
-  useEffect(() => {
-    // PENGHEMAT KUOTA: Khusus Admin & Scanner Pos, jangan pernah dijalankan oleh akun Wali Murid (PARENT)!
-    if (currentRole === 'PARENT') return;
-
-    const checkAndRun16WitaBatch = () => {
-      const { witaDateStr, isPast16Wita } = getWitaDateTime();
-      const isBatchDone = isAutoAssessmentBatchDone(witaDateStr);
-
-      // HANYA jalankan jika sudah melewati 16:00 WITA dan batch hari ini belum pernah dieksekusi
-      if (isPast16Wita && !isBatchDone) {
-        run16WitaAutoCharacterAssessment(false);
-      }
-    };
-
-    // 1. Periksa saat aplikasi dibuka (jika sudah melewati 16:00 WITA dan belum dievaluasi hari ini)
-    checkAndRun16WitaBatch();
-
-    // 2. Timer hemat 60 detik (hanya memeriksa jam lokal, 0 Cloud Read & 0 Cloud Write)
-    const interval = setInterval(checkAndRun16WitaBatch, 60000);
-
-    return () => {
-      clearInterval(interval);
-    };
-  }, [currentRole]);
 
   // Pengecekan berkala setiap 30 detik untuk memastikan data presensi localStorage yang belum tersinkron segera dikirim ke Cloud
   // Anti-duplikasi: jika data sudah ada di Cloud, lewati penulisan (0 write) untuk melindungi kuota Firebase
@@ -589,26 +557,38 @@ export default function App() {
   useEffect(() => {
     if (currentRole === 'PARENT') return;
     setAttendanceRecordsState(prev => {
-      const hasCorrupt = prev.some(r => (
-        !r ||
-        !r.studentId ||
-        !r.date ||
-        !/^\d{4}-\d{2}-\d{2}$/.test(r.date) ||
-        r.id?.startsWith('att-autoalpa-') ||
-        r.scannedBy?.includes('Sistem Otomatis (Batas Alpa)') ||
-        r.notes?.includes('Otomatis Alpa')
-      ));
-      if (!hasCorrupt) return prev;
-      const cleaned = prev.filter(r => (
-        r &&
-        r.studentId &&
-        /^\d{4}-\d{2}-\d{2}$/.test(r.date) &&
-        !r.id?.startsWith('att-autoalpa-') &&
-        !r.scannedBy?.includes('Sistem Otomatis (Batas Alpa)') &&
-        !r.notes?.includes('Otomatis Alpa')
-      ));
-      saveAttendanceRecordsLocally(cleaned);
-      return cleaned;
+      let changed = false;
+      const repaired = prev.map(r => {
+        if (!r || !r.studentId || !r.date || !/^\d{4}-\d{2}-\d{2}$/.test(r.date)) {
+          changed = true;
+          return null;
+        }
+        const hasRealTime = (r.time && r.time !== '-' && !String(r.time).toLowerCase().includes('belum')) ||
+          (r.returnTime && r.returnTime !== '-' && !String(r.returnTime).toLowerCase().includes('belum')) ||
+          r.isRealScan === true || r.method === 'QR_SCAN';
+
+        if (r.id?.startsWith('att-autoalpa-') || r.scannedBy?.includes('Sistem Otomatis (Batas Alpa)') || r.notes?.includes('Otomatis Alpa')) {
+          if (hasRealTime) {
+            changed = true;
+            return {
+              ...r,
+              id: `att-${r.studentId}-${r.date}`,
+              notes: (r.notes || '').replace(/Otomatis Alpa[;, ]*/gi, '').trim(),
+              scannedBy: (r.scannedBy && !r.scannedBy.includes('Sistem Otomatis')) ? r.scannedBy : 'Pos Scanner Utama',
+              isRealScan: true,
+              isSynthetic: false,
+            };
+          } else {
+            changed = true;
+            return null;
+          }
+        }
+        return r;
+      }).filter(Boolean) as AttendanceRecord[];
+
+      if (!changed) return prev;
+      saveAttendanceRecordsLocally(repaired);
+      return repaired;
     });
   }, []);
 
@@ -910,107 +890,121 @@ export default function App() {
       return;
     }
 
-    setAttendanceRecordsState(prev => {
-      // Pastikan array lama bebas dari item rusak
-      const validPrev = prev.filter(r => r && r.studentId && /^\d{4}-\d{2}-\d{2}$/.test(r.date));
-      const existingIndex = validPrev.findIndex(r => (
-        (record.id && r.id === record.id) ||
-        (r.studentId && record.studentId && r.studentId === record.studentId) ||
-        (r.nisn && record.nisn && r.nisn === record.nisn)
-      ) && r.date === record.date);
+    const prev = attendanceRecordsRef.current || [];
+    const validPrev = prev.filter(r => r && r.studentId && /^\d{4}-\d{2}-\d{2}$/.test(r.date));
+    const existingIndex = validPrev.findIndex(r => (
+      (record.id && r.id === record.id) ||
+      (r.studentId && record.studentId && r.studentId === record.studentId) ||
+      (r.nisn && record.nisn && r.nisn === record.nisn)
+    ) && r.date === record.date);
 
-      let newRecord: AttendanceRecord = {
-        ...record,
-        isSynthetic: false,
-        isRealScan: record.method === 'QR_SCAN' || record.isRealScan === true,
-        updatedAt: Date.now(),
-      };
+    const cleanCandidateId = (record.id && !record.id.startsWith('att-autoalpa-') && !record.id.startsWith('att-synth-'))
+      ? record.id
+      : `att-${record.studentId}-${record.date}`;
 
-      if (existingIndex >= 0) {
-        const existing = validPrev[existingIndex];
-        const isExistingSynth = existing.isSynthetic || existing.id?.startsWith('att-synth-') || existing.scannedBy === 'Baseline Histori';
+    let newRecord: AttendanceRecord = {
+      ...record,
+      id: cleanCandidateId,
+      notes: (record.notes && !record.notes.includes('Otomatis Alpa')) ? record.notes : '',
+      isSynthetic: false,
+      isRealScan: true,
+      updatedAt: Date.now(),
+    };
 
-        if (isExistingSynth) {
-          // Record lama adalah sintetis/baseline: scan otentik ini MENGGANTIKAN SEPENUHNYA
-          newRecord = {
-            ...record,
-            id: record.id?.startsWith('att-synth-') ? `att-${record.studentId}-${record.date}` : (record.id || `att-${record.studentId}-${record.date}`),
-            isSynthetic: false,
-            isRealScan: record.method === 'QR_SCAN' || record.isRealScan === true,
-            updatedAt: Date.now(),
-          };
-        } else {
-          const mergedTime = (record.time && record.time !== '-')
-            ? record.time
-            : (existing.time && existing.time !== '-' ? existing.time : '-');
-          const mergedReturnTime = (record.returnTime && record.returnTime !== '-')
-            ? record.returnTime
-            : (existing.returnTime && existing.returnTime !== '-' ? existing.returnTime : undefined);
-          const isCompletedReturn = (s?: string) => s === 'PULANG' || s === 'PULANG_CEPAT' || s === 'PULANG_TEPAT';
-          const mergedReturnStatus = isCompletedReturn(record.returnStatus)
-            ? record.returnStatus
-            : (isCompletedReturn(existing.returnStatus) ? existing.returnStatus : (record.returnStatus || existing.returnStatus));
+    if (existingIndex >= 0) {
+      const existing = validPrev[existingIndex];
+      const isExistingSynth = existing.isSynthetic || existing.id?.startsWith('att-synth-') || existing.scannedBy === 'Baseline Histori';
 
-          newRecord = {
-            ...existing,
-            ...record,
-            time: mergedTime,
-            status: (record.status && record.status !== 'ALPA') ? record.status : existing.status,
-            method: (record.method === 'QR_SCAN' || existing.method === 'QR_SCAN') ? 'QR_SCAN' : (record.method || existing.method),
-            scannedBy: (record.scannedBy && !record.scannedBy.includes('Sistem Otomatis')) ? record.scannedBy : existing.scannedBy,
-            returnTime: mergedReturnTime,
-            returnStatus: mergedReturnStatus,
-            returnScannedBy: record.returnScannedBy || existing.returnScannedBy,
-            isSynthetic: false,
-            isRealScan: existing.isRealScan || record.method === 'QR_SCAN' || record.isRealScan === true,
-            updatedAt: Date.now(),
-          };
-        }
-      }
-      const updated = [newRecord, ...validPrev.filter((_, idx) => idx !== existingIndex)];
-      // Sinkron hasil scan QR menggunakan antrean batching 10 detik atau 20 siswa
-      if (newRecord.method === 'QR_SCAN') {
-        queueAttendanceScanRecord(updated);
+      if (isExistingSynth) {
+        newRecord = {
+          ...record,
+          id: `att-${record.studentId}-${record.date}`,
+          notes: (record.notes && !record.notes.includes('Otomatis Alpa')) ? record.notes : '',
+          isSynthetic: false,
+          isRealScan: true,
+          updatedAt: Date.now(),
+        };
       } else {
-        saveAttendanceRecords(updated, true);
+        const mergedTime = (record.time && record.time !== '-')
+          ? record.time
+          : (existing.time && existing.time !== '-' ? existing.time : '-');
+        const mergedReturnTime = (record.returnTime && record.returnTime !== '-')
+          ? record.returnTime
+          : (existing.returnTime && existing.returnTime !== '-' ? existing.returnTime : undefined);
+        const isCompletedReturn = (s?: string) => s === 'PULANG' || s === 'PULANG_CEPAT' || s === 'PULANG_TEPAT';
+        const mergedReturnStatus = isCompletedReturn(record.returnStatus)
+          ? record.returnStatus
+          : (isCompletedReturn(existing.returnStatus) ? existing.returnStatus : (record.returnStatus || existing.returnStatus));
+
+        const finalId = (existing.id && !existing.id.startsWith('att-autoalpa-') && !existing.id.startsWith('att-synth-'))
+          ? existing.id
+          : cleanCandidateId;
+
+        const cleanExistingNotes = (existing.notes && !existing.notes.includes('Otomatis Alpa')) ? existing.notes : '';
+        const cleanRecordNotes = (record.notes && !record.notes.includes('Otomatis Alpa')) ? record.notes : '';
+
+        newRecord = {
+          ...existing,
+          ...record,
+          id: finalId,
+          time: mergedTime,
+          status: (record.status && record.status !== 'ALPA') ? record.status : existing.status,
+          method: (record.method === 'QR_SCAN' || existing.method === 'QR_SCAN') ? 'QR_SCAN' : (record.method || existing.method),
+          scannedBy: (record.scannedBy && !record.scannedBy.includes('Sistem Otomatis')) ? record.scannedBy : (existing.scannedBy && !existing.scannedBy.includes('Sistem Otomatis') ? existing.scannedBy : 'Pos Scanner Utama'),
+          notes: cleanRecordNotes || cleanExistingNotes,
+          returnTime: mergedReturnTime,
+          returnStatus: mergedReturnStatus,
+          returnScannedBy: record.returnScannedBy || existing.returnScannedBy,
+          isSynthetic: false,
+          isRealScan: true,
+          updatedAt: Date.now(),
+        };
       }
+    }
 
-      // Auto-cleanup corresponding auto character penalty logs if student just scanned
-      if (newRecord.studentId && newRecord.date) {
-        const sid = newRecord.studentId;
-        const sdate = newRecord.date;
-        const hasValidTime = newRecord.time && newRecord.time !== '-' && newRecord.time.trim() !== '' && !newRecord.time.toLowerCase().includes('belum');
-        const hasReturned = !!((newRecord.returnTime && newRecord.returnTime !== '-') || 
-          newRecord.returnStatus === 'PULANG' || 
-          newRecord.returnStatus === 'PULANG_TEPAT' || 
-          newRecord.returnStatus === 'PULANG_CEPAT');
+    const updated = [newRecord, ...validPrev.filter((_, idx) => idx !== existingIndex)];
+    setAttendanceRecordsState(updated);
 
-        setCharacterLogsState(prevLogs => {
-          let logsChanged = false;
-          const cleaned = prevLogs.filter(l => {
-            if (isManualCharacterLog(l)) return true; // JAMINAN MUTLAK: Catatan karakter manual tidak boleh dihapus
-            if (l.studentId === sid && l.date === sdate) {
-              if (hasValidTime && (l.id.includes('auto-unscanned') || (l.traitType === 'NEGATIF' && l.traitName.toLowerCase().includes('belum') && l.traitName.toLowerCase().includes('scan')))) {
-                logsChanged = true;
-                return false;
-              }
-              if (hasReturned && (l.id.includes('auto-unreturned') || (l.traitType === 'NEGATIF' && l.traitName.toLowerCase().includes('belum') && l.traitName.toLowerCase().includes('pulang')))) {
-                logsChanged = true;
-                return false;
-              }
+    // Sinkron hasil scan QR menggunakan antrean batching 10 detik atau 20 siswa
+    if (newRecord.method === 'QR_SCAN') {
+      queueAttendanceScanRecord(updated);
+    } else {
+      saveAttendanceRecords(updated, true);
+    }
+
+    // Auto-cleanup corresponding auto character penalty logs if student just scanned
+    if (newRecord.studentId && newRecord.date) {
+      const sid = newRecord.studentId;
+      const sdate = newRecord.date;
+      const hasValidTime = newRecord.time && newRecord.time !== '-' && newRecord.time.trim() !== '' && !newRecord.time.toLowerCase().includes('belum');
+      const hasReturned = !!((newRecord.returnTime && newRecord.returnTime !== '-') || 
+        newRecord.returnStatus === 'PULANG' || 
+        newRecord.returnStatus === 'PULANG_TEPAT' || 
+        newRecord.returnStatus === 'PULANG_CEPAT');
+
+      setCharacterLogsState(prevLogs => {
+        let logsChanged = false;
+        const cleaned = prevLogs.filter(l => {
+          if (isManualCharacterLog(l)) return true; // JAMINAN MUTLAK: Catatan karakter manual tidak boleh dihapus
+          if (l.studentId === sid && l.date === sdate) {
+            if (hasValidTime && (l.id.includes('auto-unscanned') || (l.traitType === 'NEGATIF' && l.traitName.toLowerCase().includes('belum') && l.traitName.toLowerCase().includes('scan')))) {
+              logsChanged = true;
+              return false;
             }
-            return true;
-          });
-          if (logsChanged) {
-            saveStudentCharacterLogsLocally(cleaned);
-            return cleaned;
+            if (hasReturned && (l.id.includes('auto-unreturned') || (l.traitType === 'NEGATIF' && l.traitName.toLowerCase().includes('belum') && l.traitName.toLowerCase().includes('pulang')))) {
+              logsChanged = true;
+              return false;
+            }
           }
-          return prevLogs;
+          return true;
         });
-      }
-
-      return updated;
-    });
+        if (logsChanged) {
+          saveStudentCharacterLogsLocally(cleaned);
+          return cleaned;
+        }
+        return prevLogs;
+      });
+    }
   };
 
   // Update Attendance Status manually

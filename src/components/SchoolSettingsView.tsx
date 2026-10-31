@@ -2,7 +2,6 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { SchoolProfile, Teacher, Student, SchoolHoliday } from '../types';
 import { Settings, Save, School, Clock, RotateCcw, CreditCard, CheckCircle2, Upload, Image as ImageIcon, Link, BookOpen, Plus, X, KeyRound, Key, Lock, Unlock, Eye, EyeOff, User, GraduationCap, Search, Check, RefreshCw, Users, ShieldAlert, ShieldCheck, AlertCircle, Calendar, CalendarDays, Trash2, Edit3, Tag, Flag, AlertTriangle, Sparkles, Filter, Cloud, CloudDownload, CloudUpload, FileJson, Download, Volume2, VolumeX, Mic, Headphones, BellRing, UserCheck, Smile, UserX, Play, Square, MessageSquare, Flame, CalendarCheck2, Layers, Power, Ban } from 'lucide-react';
 import { resetToDefaultData, forceUploadAllToCloud, forceDownloadAllFromCloud, getCloudSyncStatus, CloudSyncStatus, downloadDatabaseBackupFile, getLocalDateString, updateParentPortalAccess } from '../lib/storage';
-import { run16WitaAutoCharacterAssessment } from '../lib/autoCharacterScheduler';
 import { 
   DEFAULT_TEACHER_SPEECH_TEMPLATE,
   DEFAULT_PARENT_ARRIVAL_MESSAGE,
@@ -326,28 +325,6 @@ export const SchoolSettingsView: React.FC<SchoolSettingsViewProps> = ({
   const [newSubjectInput, setNewSubjectInput] = useState('');
   const [subjectSavedNotice, setSubjectSavedNotice] = useState<string | null>(null);
 
-  // Penilaian Karakter Otomatis 16:00 WITA Manual Test State
-  const [manualAssessmentResult, setManualAssessmentResult] = useState<{ message: string; type: 'success' | 'info' | 'error' } | null>(null);
-  const [isRunningAutoAssessment, setIsRunningAutoAssessment] = useState(false);
-
-  const handleRunManual16WitaAssessment = () => {
-    setIsRunningAutoAssessment(true);
-    try {
-      const res = run16WitaAutoCharacterAssessment(true);
-      setManualAssessmentResult({
-        message: res.message,
-        type: res.executed ? 'success' : 'info'
-      });
-    } catch (e: any) {
-      setManualAssessmentResult({
-        message: `Terjadi kendala: ${e?.message || 'Gagal menjalankan evaluasi otomatis'}`,
-        type: 'error'
-      });
-    } finally {
-      setIsRunningAutoAssessment(false);
-      setTimeout(() => setManualAssessmentResult(null), 6000);
-    }
-  };
 
   // ==========================================
   // FITUR SUARA AI & NOTIFIKASI PERAN (GURU & ORANG TUA)
@@ -2517,7 +2494,7 @@ export const SchoolSettingsView: React.FC<SchoolSettingsViewProps> = ({
               </div>
             </div>
 
-            {/* 7. Belum Scan Presensi (Otomatis 16:00 WITA) */}
+            {/* 7. Belum Scan Presensi (Real-Time) */}
             <div className="p-3.5 bg-orange-50/40 border border-orange-200 rounded-2xl space-y-2">
               <div className="flex items-center justify-between">
                 <span className="font-extrabold text-orange-950 flex items-center gap-1.5">
@@ -2529,7 +2506,7 @@ export const SchoolSettingsView: React.FC<SchoolSettingsViewProps> = ({
                 </span>
               </div>
               <p className="text-[10px] text-slate-500 leading-tight">
-                Hanya dinilai jika kriteria status masuk Hadir tetapi pada kolom Jam Masuk belum scan (status Sakit, Izin, Alpa, Terlambat tidak dinilai).
+                Dihitung secara real-time pada Detail Nilai Karakter jika siswa berstatus Belum Absen atau Hadir tetapi belum memiliki rekaman jam masuk.
               </p>
               <div className="flex items-center justify-between pt-1">
                 <span className="text-[11px] text-slate-600 font-medium">Nilai Poin:</span>
@@ -2563,7 +2540,7 @@ export const SchoolSettingsView: React.FC<SchoolSettingsViewProps> = ({
               </div>
             </div>
 
-            {/* 8. Belum Pulang Sekolah (Otomatis 16:00 WITA) */}
+            {/* 8. Belum Pulang Sekolah (Real-Time) */}
             <div className="p-3.5 bg-amber-50/40 border border-amber-200 rounded-2xl space-y-2">
               <div className="flex items-center justify-between">
                 <span className="font-extrabold text-amber-950 flex items-center gap-1.5">
@@ -2575,7 +2552,7 @@ export const SchoolSettingsView: React.FC<SchoolSettingsViewProps> = ({
                 </span>
               </div>
               <p className="text-[10px] text-slate-500 leading-tight">
-                Hanya dinilai jika status masuk Hadir atau Terlambat. Status selain Hadir/Terlambat (Sakit, Izin, Alpa) tidak dinilai negatif belum pulang.
+                Dihitung secara real-time pada Detail Nilai Karakter jika siswa berstatus Hadir atau Terlambat tetapi belum memiliki rekaman jam kepulangan.
               </p>
               <div className="flex items-center justify-between pt-1">
                 <span className="text-[11px] text-slate-600 font-medium">Nilai Poin:</span>
@@ -2610,80 +2587,23 @@ export const SchoolSettingsView: React.FC<SchoolSettingsViewProps> = ({
             </div>
           </div>
 
-          {/* Banner Penjadwalan Eksekusi Otomatis 16:00 WITA */}
-          <div className="mt-4 p-4 rounded-2xl bg-gradient-to-r from-indigo-900/90 to-slate-900 text-white flex flex-col gap-4 border border-indigo-700/60 shadow-md">
-            <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
-              <div className="space-y-1">
-                <div className="flex items-center gap-2">
-                  <span className="bg-amber-400 text-slate-950 text-[10px] font-black px-2 py-0.5 rounded-full">
-                    ⏰ Eksekusi 16:00 WITA
-                  </span>
-                  <span className="text-xs font-extrabold text-amber-200">
-                    Sinkronisasi Terjadwal & Kontrol Evaluasi Karakter
-                  </span>
-                </div>
-                <p className="text-[11px] text-slate-300 max-w-2xl leading-relaxed">
-                  Pemeriksaan siswa yang <strong>Belum Scan Presensi (-{formData.autoCharacterPoints?.unscannedPoints ?? 1} Poin)</strong> dan <strong>Belum Scan Pulang (-{formData.autoCharacterPoints?.unreturnedPoints ?? 1} Poin)</strong> dilakukan mulai pukul 16:00 WITA secara <strong>batching 1 kali write</strong> agar tidak berulang melakukan penilaian dan menghemat kuota cloud.
-                </p>
+          {/* Banner Informasi Penilaian Karakter Real-Time */}
+          <div className="mt-4 p-4 rounded-2xl bg-gradient-to-r from-indigo-900/90 to-slate-900 text-white flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 border border-indigo-700/60 shadow-md">
+            <div className="space-y-1">
+              <div className="flex items-center gap-2">
+                <span className="bg-emerald-400 text-slate-950 text-[10px] font-black px-2 py-0.5 rounded-full">
+                  ⚡ Evaluasi Real-Time
+                </span>
+                <span className="text-xs font-extrabold text-emerald-200">
+                  Rekapitulasi Presensi Otomatis Langsung Terakumulasi
+                </span>
               </div>
-
-              <div className="shrink-0 flex flex-col items-end gap-1.5 w-full md:w-auto">
-                <button
-                  type="button"
-                  onClick={handleRunManual16WitaAssessment}
-                  disabled={isRunningAutoAssessment}
-                  className="w-full md:w-auto px-4 py-2 bg-amber-400 hover:bg-amber-300 text-slate-950 font-black text-xs rounded-xl transition-all shadow-xs flex items-center justify-center gap-2 cursor-pointer active:scale-95 disabled:opacity-50"
-                >
-                  {isRunningAutoAssessment ? (
-                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                  ) : (
-                    <Sparkles className="w-3.5 h-3.5 text-slate-950" />
-                  )}
-                  <span>Jalankan Evaluasi 16:00 WITA Sekarang</span>
-                </button>
-
-                {manualAssessmentResult && (
-                  <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md ${
-                    manualAssessmentResult.type === 'success' 
-                      ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30' 
-                      : manualAssessmentResult.type === 'error'
-                      ? 'bg-rose-500/20 text-rose-300 border border-rose-500/30'
-                      : 'bg-sky-500/20 text-sky-300 border border-sky-500/30'
-                  }`}>
-                    {manualAssessmentResult.message}
-                  </span>
-                )}
-              </div>
+              <p className="text-[11px] text-slate-300 max-w-2xl leading-relaxed">
+                Akumulasi poin karakter dari presensi (Hadir Tepat Waktu, Terlambat, Alpa, Belum Scan Masuk, dan Belum Scan Pulang) dihitung secara langsung (real-time) setiap kali membuka detail siswa tanpa memerlukan eksekusi terjadwal latar belakang.
+              </p>
             </div>
-
-            {/* Saklar Eksekusi Otomatis Latar Belakang */}
-            <div className="pt-3 border-t border-indigo-700/60 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-              <div className="space-y-0.5">
-                <span className="text-xs font-bold text-white flex items-center gap-1.5">
-                  Eksekusi Otomatis Latar Belakang (Background Auto-Run)
-                </span>
-                <p className="text-[10px] text-slate-300 max-w-xl">
-                  {formData.auto16WitaBackgroundExecutionEnabled === true 
-                    ? '🟢 Aktif: Sistem otomatis menambahkan penalti setiap pukul 16:00 WITA di background.' 
-                    : '🛡️ Non-Aktif (Disarankan): Poin karakter siswa aman dan tidak akan berkurang sendiri di latar belakang tanpa persetujuan Admin/Guru.'}
-                </p>
-              </div>
-
-              <label className="relative inline-flex items-center cursor-pointer select-none shrink-0 self-start sm:self-auto">
-                <input
-                  type="checkbox"
-                  checked={formData.auto16WitaBackgroundExecutionEnabled === true}
-                  onChange={(e) => setFormData({
-                    ...formData,
-                    auto16WitaBackgroundExecutionEnabled: e.target.checked
-                  })}
-                  className="sr-only peer"
-                />
-                <div className="w-10 h-5 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-amber-400"></div>
-                <span className="ml-2 text-xs font-bold text-amber-200">
-                  {formData.auto16WitaBackgroundExecutionEnabled === true ? 'Aktif' : 'Non-Aktif'}
-                </span>
-              </label>
+            <div className="shrink-0 px-3 py-1.5 bg-white/10 rounded-xl border border-white/15 text-[11px] font-bold text-slate-200">
+              0 Kuota Cloud Write
             </div>
           </div>
         </div>

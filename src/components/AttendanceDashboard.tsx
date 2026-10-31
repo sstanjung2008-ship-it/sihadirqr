@@ -441,6 +441,29 @@ export const AttendanceDashboard: React.FC<AttendanceDashboardProps> = ({
     }
   }, [selectedDate]);
 
+  // Tanggal terbaru yang memiliki rekaman scan aktif di database
+  const latestScanInfo = React.useMemo(() => {
+    if (!attendanceRecords || attendanceRecords.length === 0) return null;
+    let maxDate = '';
+    for (let i = 0; i < attendanceRecords.length; i++) {
+      const r = attendanceRecords[i];
+      if (r.date && (r.time || r.status === 'HADIR' || r.status === 'TERLAMBAT' || r.returnTime)) {
+        if (r.date > maxDate) {
+          maxDate = r.date;
+        }
+      }
+    }
+    if (!maxDate) return null;
+    let count = 0;
+    for (let i = 0; i < attendanceRecords.length; i++) {
+      const r = attendanceRecords[i];
+      if (r.date === maxDate && (r.time || r.status === 'HADIR' || r.status === 'TERLAMBAT')) {
+        count++;
+      }
+    }
+    return { date: maxDate, count };
+  }, [attendanceRecords]);
+
   // Selected child for Parent Role
   const targetStudent = useMemo(() => {
     if (currentRole !== 'PARENT') return null;
@@ -1021,6 +1044,26 @@ export const AttendanceDashboard: React.FC<AttendanceDashboardProps> = ({
                 <div className="mt-3 py-1.5 px-3 bg-emerald-100/90 border border-emerald-300 rounded-xl text-emerald-800 text-[11px] font-bold flex items-center gap-2">
                   <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
                   <span>{parentRefreshNotice}</span>
+                </div>
+              )}
+
+              {/* Banner Penjelas jika tanggal terpilih belum ada scan */}
+              {!childRecord && latestScanInfo && latestScanInfo.date !== selectedDate && (
+                <div className="mt-3 py-2 px-3.5 bg-amber-50/90 border border-amber-200/90 rounded-2xl text-amber-900 text-xs flex flex-wrap items-center justify-between gap-2 shadow-2xs">
+                  <div className="flex items-center gap-2">
+                    <CalendarDays className="w-4 h-4 text-amber-600 shrink-0" />
+                    <span>
+                      Belum ada scan presensi anak pada tanggal <strong>{displayDateFormatted}</strong>. Aktivitas scan sekolah terakhir tercatat pada <strong>{latestScanInfo.date}</strong>.
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedDate(latestScanInfo.date)}
+                    className="text-[11px] font-bold text-amber-800 bg-amber-200/80 hover:bg-amber-200 px-2.5 py-1 rounded-xl transition-all cursor-pointer inline-flex items-center gap-1"
+                  >
+                    <span>Buka {latestScanInfo.date}</span>
+                    <ArrowRight className="w-3 h-3" />
+                  </button>
                 </div>
               )}
             </div>
@@ -1684,6 +1727,35 @@ export const AttendanceDashboard: React.FC<AttendanceDashboardProps> = ({
                   <span>Pulihkan Data Presensi</span>
                 </button>
               )}
+            </div>
+          )}
+
+          {/* Banner Penjelas jika Tanggal Terpilih Belum Ada Aktivitas Scan */}
+          {dateRecords.length === 0 && attendanceRecords.length > 0 && latestScanInfo && latestScanInfo.date !== selectedDate && (
+            <div className="bg-gradient-to-r from-amber-50 to-orange-50 border border-amber-200/90 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-amber-950 shadow-xs">
+              <div className="flex items-start sm:items-center gap-3">
+                <div className="w-9 h-9 rounded-xl bg-amber-500/20 text-amber-800 flex items-center justify-center shrink-0">
+                  <CalendarDays className="w-5 h-5 text-amber-700" />
+                </div>
+                <div>
+                  <p className="font-extrabold text-xs text-amber-950">
+                    Belum Ada Aktivitas Scan pada {displayDateFormatted} (Tercatat 0 Hadir)
+                  </p>
+                  <p className="text-[11px] text-amber-800 mt-0.5">
+                    Seluruh histori presensi sekolah Anda (<strong>{attendanceRecords.length.toLocaleString('id-ID')} data</strong>) tetap aman tersimpan di Cloud Firestore. Scan presensi terakhir tercatat pada <strong>{latestScanInfo.date}</strong> ({latestScanInfo.count} siswa).
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSelectedDate(latestScanInfo.date)}
+                className="px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-700 hover:to-orange-700 text-white font-extrabold text-xs shadow-sm cursor-pointer transition-all shrink-0 active:scale-95 flex items-center gap-1.5 justify-center"
+                title={`Buka data scan tanggal ${latestScanInfo.date}`}
+              >
+                <Calendar className="w-3.5 h-3.5" />
+                <span>Lihat Data {latestScanInfo.date}</span>
+                <ArrowRight className="w-3.5 h-3.5" />
+              </button>
             </div>
           )}
 

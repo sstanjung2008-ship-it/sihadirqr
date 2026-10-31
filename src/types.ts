@@ -150,7 +150,6 @@ export interface SchoolProfile {
   autoAlpaTime?: string; // e.g. "08:30" Waktu Batas Otomatis Alpa
   autoAlpaEnabled?: boolean; // Saklar aktif/non-aktif penentuan otomatis status ALPA
   autoCharacterAssessmentEnabled?: boolean; // Saklar aktif/non-aktif Penilaian Karakter Otomatis
-  auto16WitaBackgroundExecutionEnabled?: boolean; // Saklar eksekusi background otomatis 16:00 WITA tanpa konfirmasi (default: false)
   autoCharacterPoints?: AutoCharacterPointSettings; // Konfigurasi besaran nilai poin untuk aturan karakter otomatis
   lateToleranceMinutes: number; // e.g. 35 -> after 07:35 is TERLAMBAT
   educationLevel: string; // e.g. "SMP / MTs"

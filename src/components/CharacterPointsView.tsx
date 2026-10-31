@@ -15,7 +15,6 @@ import {
   restoreAllManualCharacterLogs,
   refreshCloudData
 } from '../lib/storage';
-import { getWitaDateTime, setAutoAssessmentBatchDone } from '../lib/autoCharacterScheduler';
 import { 
   Plus, 
   Search, 

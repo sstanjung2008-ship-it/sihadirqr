@@ -39,7 +39,6 @@ import {
   Award
 } from 'lucide-react';
 import { saveSchoolProfile, isLogForStudent } from '../lib/storage';
-import { getWitaDateTime } from '../lib/autoCharacterScheduler';
 
 export type AutoRuleType = 
   | 'DISRUPTIVE_KBM' 
@@ -126,9 +125,6 @@ export const AutoCharacterAssessmentModal: React.FC<AutoCharacterAssessmentModal
   const [pointsSavedNotice, setPointsSavedNotice] = useState<{ type: 'success' | 'info'; message: string } | null>(null);
   const [saveNotice, setSaveNotice] = useState<{ type: 'success' | 'info' | 'error'; message: string } | null>(null);
 
-  // Waktu WITA untuk sinkronisasi evaluasi 16:00 WITA
-  const { witaDateStr, witaTimeStr, totalMinutes } = useMemo(() => getWitaDateTime(), [isOpen]);
-  const isPast16Wita = totalMinutes >= 16 * 60;
 
   // Sync state when schoolProfile updates from cloud
   useEffect(() => {
@@ -831,24 +827,20 @@ export const AutoCharacterAssessmentModal: React.FC<AutoCharacterAssessmentModal
             )}
           </div>
 
-          {/* Banner Kebijakan 16:00 WITA: Penilaian Belum Scan Presensi & Belum Scan Pulang */}
-          <div className="p-3.5 sm:p-4 rounded-2xl bg-amber-500/10 border border-amber-400/40 text-slate-800 text-xs flex items-start gap-3">
-            <Clock className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+          {/* Banner Penilaian Karakter Real-Time */}
+          <div className="p-3.5 sm:p-4 rounded-2xl bg-indigo-50 border border-indigo-200 text-slate-800 text-xs flex items-start gap-3">
+            <CheckCircle2 className="w-5 h-5 text-indigo-600 shrink-0 mt-0.5" />
             <div className="space-y-1">
               <div className="flex items-center gap-2 flex-wrap">
-                <span className="font-extrabold text-amber-950 text-xs">
-                  Kebijakan Penilaian Presensi & Kepulangan (Mulai 16:00 WITA)
+                <span className="font-extrabold text-indigo-950 text-xs">
+                  Rekapitulasi Presensi Otomatis Terakumulasi Real-Time
                 </span>
-                <span className={`px-2 py-0.5 rounded-full text-[10px] font-black ${
-                  isPast16Wita 
-                    ? 'bg-emerald-100 text-emerald-800 border border-emerald-300' 
-                    : 'bg-amber-100 text-amber-800 border border-amber-300'
-                }`}>
-                  {isPast16Wita ? '🟢 Waktu Aktif: Sudah Pukul 16:00 WITA' : '⏳ Menunggu Pukul 16:00 WITA'}
+                <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-emerald-100 text-emerald-800 border border-emerald-300">
+                  ⚡ Real-Time On-the-Fly
                 </span>
               </div>
               <p className="text-[11px] text-slate-600 leading-relaxed">
-                Penilaian karakter <strong>Belum Scan Presensi</strong> dan <strong>Belum Scan Pulang</strong> untuk hari berjalan ({witaDateStr}) dilakukan mulai pukul <strong>16:00 WITA</strong> secara <strong>batching 1 kali write</strong> agar tidak berulang melakukan penilaian dan menghemat kuota Firestore. Waktu WITA saat ini: <strong>{witaTimeStr} WITA</strong>.
+                Penilaian karakter dari presensi (Hadir Tepat Waktu, Terlambat, Alpa, Belum Scan Masuk, dan Belum Scan Pulang) dihitung secara langsung dan real-time dari data presensi tanpa memerlukan eksekusi terjadwal latar belakang.
               </p>
             </div>
           </div>

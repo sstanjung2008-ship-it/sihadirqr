@@ -326,7 +326,21 @@ export function isValidAttendanceRecord(rec: any): boolean {
     rec.scannedBy?.includes('Sistem Otomatis (Batas Alpa)') ||
     rec.notes?.includes('Otomatis Alpa')
   ) {
-    return false;
+    const hasRealTime = (rec.time && rec.time !== '-' && !String(rec.time).toLowerCase().includes('belum')) ||
+      (rec.returnTime && rec.returnTime !== '-' && !String(rec.returnTime).toLowerCase().includes('belum'));
+    if (hasRealTime || rec.isRealScan === true || rec.method === 'QR_SCAN') {
+      rec.id = `att-${rec.studentId}-${rec.date}`;
+      if (rec.notes?.includes('Otomatis Alpa')) {
+        rec.notes = rec.notes.replace(/Otomatis Alpa[;, ]*/gi, '').trim();
+      }
+      if (rec.scannedBy?.includes('Sistem Otomatis')) {
+        rec.scannedBy = 'Pos Scanner Utama';
+      }
+      rec.isRealScan = true;
+      rec.isSynthetic = false;
+    } else {
+      return false;
+    }
   }
   // Hari Minggu (Sunday) adalah hari libur sekolah: jangan pernah memuat catatan presensi hari Minggu (seperti 25/10/2026)
   if (rec.date === '2026-10-25') return false;
@@ -499,9 +513,10 @@ export function safeSetLocalStorage(key: string, value: string): void {
   // 4. Kompaksi bertingkat untuk ATTENDANCE jika kuota masih belum cukup
   if (key === KEYS.ATTENDANCE) {
     try {
-      const records = inMemoryAttendanceRecords || JSON.parse(value);
+      const records = JSON.parse(value);
       if (Array.isArray(records)) {
         const clean = validateAndSanitizeAttendanceRecords(records);
+        inMemoryAttendanceRecords = clean;
         const compacted = clean.map((r: any) => {
           const item: any = {
             id: r.id,
@@ -519,6 +534,10 @@ export function safeSetLocalStorage(key: string, value: string): void {
           if (r.scannedBy && !r.scannedBy.includes('Sistem Otomatis')) item.scannedBy = r.scannedBy;
           if (r.returnScannedBy) item.returnScannedBy = r.returnScannedBy;
           if (r.notes) item.notes = r.notes;
+          if (r.updatedAt) item.updatedAt = r.updatedAt;
+          if (r.returnUpdatedAt) item.returnUpdatedAt = r.returnUpdatedAt;
+          if (r.isRealScan !== undefined) item.isRealScan = r.isRealScan;
+          if (r.isSynthetic !== undefined) item.isSynthetic = r.isSynthetic;
           return item;
         });
 
@@ -559,7 +578,7 @@ export function safeSetLocalStorage(key: string, value: string): void {
         } catch {}
 
         // Tetap pastikan memori memegang seluruh rekaman 100%
-        inMemoryAttendanceRecords = compacted;
+        inMemoryAttendanceRecords = clean;
       }
     } catch {}
   }
@@ -742,6 +761,8 @@ export async function writeCloudDocument(key: string, dataStr: string, timestamp
           if (r.notes) item.notes = r.notes;
           if (r.updatedAt) item.updatedAt = r.updatedAt;
           if (r.returnUpdatedAt) item.returnUpdatedAt = r.returnUpdatedAt;
+          if (r.isRealScan !== undefined) item.isRealScan = r.isRealScan;
+          if (r.isSynthetic !== undefined) item.isSynthetic = r.isSynthetic;
           return item;
         });
         sanitizedDataStr = JSON.stringify(compacted);
@@ -800,7 +821,7 @@ export async function writeCloudDocument(key: string, dataStr: string, timestamp
 export async function readCloudDocument(key: string): Promise<{ data: string; updatedAt: number } | null> {
   try {
     const rootDocRef = doc(db, 'sihadir_app_data', key);
-    const snap = await withTimeout(getDoc(rootDocRef), 10000, null);
+    const snap = await withTimeout(getDoc(rootDocRef), 20000, null);
     if (!snap || !snap.exists()) return null;
 
     const payload = snap.data();
@@ -829,7 +850,7 @@ export async function readCloudDocument(key: string): Promise<{ data: string; up
             }
             return '';
           }),
-          10000,
+          20000,
           ''
         )
       );
@@ -2171,10 +2192,19 @@ export function mergeSingleAttendanceRecord(a: AttendanceRecord, b: AttendanceRe
     returnStatus = b.returnStatus || a.returnStatus;
   }
 
+  const candidateId = (hasEntryA && !hasEntryB) ? a.id : (b.id || a.id || `att-${b.studentId || a.studentId}-${b.date || a.date}`);
+  const cleanId = (candidateId && !candidateId.startsWith('att-autoalpa-') && !candidateId.startsWith('att-synth-'))
+    ? candidateId
+    : `att-${b.studentId || a.studentId}-${b.date || a.date}`;
+
+  const cleanNotes = (hasEntryA || hasEntryB || hasReturnA || hasReturnB)
+    ? finalNotes.replace(/Otomatis Alpa[;, ]*/gi, '').trim()
+    : finalNotes;
+
   const merged: AttendanceRecord = {
     ...a,
     ...b,
-    id: (hasEntryA && !hasEntryB) ? a.id : (b.id || a.id || `att-${b.date || a.date}-${b.studentId || a.studentId}`),
+    id: cleanId,
     studentId: b.studentId || a.studentId,
     studentName: (b.studentName && b.studentName !== 'Siswa') ? b.studentName : (a.studentName || 'Siswa'),
     nisn: b.nisn || a.nisn || '',
@@ -2184,12 +2214,14 @@ export function mergeSingleAttendanceRecord(a: AttendanceRecord, b: AttendanceRe
     status: finalStatus,
     method: finalMethod,
     scannedBy: finalScannedBy,
-    notes: finalNotes,
+    notes: cleanNotes,
     returnTime: returnTime || undefined,
     returnStatus: returnStatus || undefined,
     returnScannedBy: returnScannedBy || undefined,
     updatedAt: finalEntryUpdated,
     returnUpdatedAt: finalReturnUpdated,
+    isSynthetic: false,
+    isRealScan: a.isRealScan === true || b.isRealScan === true || hasEntryA || hasEntryB || hasReturnA || hasReturnB,
   };
 
   if ((finalStatus === 'HADIR' || finalStatus === 'TERLAMBAT') && (!merged.time || merged.time === '-')) {
@@ -2511,8 +2543,18 @@ export async function smartSyncAndMergeAllWithCloud(isInitialBoot: boolean = fal
     safeSetLocalStorage(KEYS.ATTENDANCE, attJsonStr);
     safeSetLocalStorage(KEYS.ATTENDANCE + '_updatedAt', String(attUpdatedAt));
 
-    // JAMINAN MUTLAK PERMANEN CLOUD: Tulis ke Cloud Firestore jika finalAtt lebih lengkap dari Cloud dan data utuh
-    if (finalAtt.length >= 5000 && (finalAtt.length > cloudAtt.length || !attCloud?.data)) {
+    // JAMINAN MUTLAK PERMANEN CLOUD: Tulis ke Cloud Firestore jika finalAtt lebih lengkap dari Cloud,
+    // atau jika terdapat scan nyata hari ini yang belum tercatat di Cloud
+    const todayStr = getLocalDateString();
+    const hasTodayRealScanLocal = finalAtt.some(r => r.date === todayStr && (r.isRealScan === true || (r.time && r.time !== '-')));
+    const hasTodayRealScanCloud = cloudAtt.some(r => r.date === todayStr && (r.time && r.time !== '-'));
+    const needsCloudSave = finalAtt.length >= 5000 && (
+      finalAtt.length > cloudAtt.length ||
+      !attCloud?.data ||
+      (hasTodayRealScanLocal && !hasTodayRealScanCloud)
+    );
+
+    if (needsCloudSave) {
       writeCloudDocument(KEYS.ATTENDANCE, attJsonStr, attUpdatedAt);
     }
 
@@ -3833,7 +3875,12 @@ export const TARGET_OCTOBER_DATES = [
   '2026-10-22', // Kamis
   '2026-10-23', // Jumat
   '2026-10-24', // Sabtu
-  '2026-10-26', // Senin (Hari ini)
+  '2026-10-26', // Senin
+  '2026-10-27', // Selasa
+  '2026-10-28', // Rabu
+  '2026-10-29', // Kamis
+  '2026-10-30', // Jumat
+  '2026-10-31', // Sabtu
 ];
 
 /**
@@ -4211,7 +4258,7 @@ export async function flushAttendanceScanQueue(force: boolean = false): Promise<
     let finalRecords = localRecords;
     let cloudFetchSuccess = false;
     try {
-      const cloudDoc = await withTimeout(readCloudDocument(KEYS.ATTENDANCE), 15000, null);
+      const cloudDoc = await withTimeout(readCloudDocument(KEYS.ATTENDANCE), 20000, null);
       if (cloudDoc && cloudDoc.data) {
         const cloudRecords = typeof cloudDoc.data === 'string' ? JSON.parse(cloudDoc.data) : cloudDoc.data;
         if (Array.isArray(cloudRecords) && cloudRecords.length > 0) {
@@ -4228,10 +4275,10 @@ export async function flushAttendanceScanQueue(force: boolean = false): Promise<
       console.warn('[ScanQueueWorker] Gagal fetch snapshot Cloud presensi:', err);
     }
 
-    if (!cloudFetchSuccess) {
+    if (!cloudFetchSuccess && localRecords.length < 5000) {
       // PERLINDUNGAN ANTI-TINDIH & ANTI-RESET:
-      // Jika pembacaan Cloud gagal (misal koneksi lambat / timeout), JANGAN timpa Cloud dengan record lokal!
-      console.warn('[ScanQueueWorker] Pembacaan Cloud belum berhasil. Data scan tersimpan aman di lokal dan sinkronisasi Cloud ditunda.');
+      // Hanya tunda jika data lokal sedikit (< 5000) DAN pembacaan Cloud gagal, agar tidak menimpa Cloud.
+      console.warn('[ScanQueueWorker] Pembacaan Cloud belum berhasil dan data lokal di bawah ambang batas. Data scan tersimpan aman di lokal dan sinkronisasi Cloud ditunda.');
       return;
     }
 

@@ -443,7 +443,10 @@ export default function App() {
     setPeriodsState(getLessonPeriods());
     setSchedulesState(getClassSchedules());
     setGradesState(getStudentGradeAssessments());
-    setUserSessionState(getUserSession());
+    const activeStoredSession = getUserSession();
+    if (activeStoredSession && activeStoredSession.isLoggedIn) {
+      setUserSessionState(activeStoredSession);
+    }
   }, []);
 
   useEffect(() => {

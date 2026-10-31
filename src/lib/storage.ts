@@ -599,6 +599,11 @@ export function validateAndSanitizeAttendanceRecords(records: any[]): Attendance
 let inMemoryAttendanceRecords: AttendanceRecord[] | null = null;
 
 /**
+ * Cache in-memory sesi login: memastikan sesi aktif kebal batas kuota LocalStorage dan tidak terpental keluar
+ */
+let inMemoryUserSession: UserSession | null = null;
+
+/**
  * Membersihkan kunci sementara, log lama, dan cadangan duplikat saat kuota LocalStorage penuh
  */
 export function reclaimLocalStorageQuota(): void {
@@ -667,6 +672,21 @@ export function safeSetLocalStorage(key: string, value: string): void {
         inMemoryAttendanceRecords = validateAndSanitizeAttendanceRecords(records);
       }
     } catch {}
+  }
+
+  // 1b. Jika key adalah SESSION, amankan selalu di in-memory & sessionStorage
+  if (key === KEYS.SESSION) {
+    try {
+      const parsed = JSON.parse(value);
+      if (parsed && parsed.isLoggedIn) {
+        inMemoryUserSession = parsed;
+      }
+    } catch {}
+    if (typeof sessionStorage !== 'undefined') {
+      try {
+        sessionStorage.setItem(KEYS.SESSION, value);
+      } catch {}
+    }
   }
 
   // 2. Percobaan penyimpanan langsung
@@ -6747,23 +6767,80 @@ export function saveStudentGradeAssessments(assessments: StudentGradeAssessment[
 }
 
 export function getUserSession(): UserSession | null {
-  if (typeof window === 'undefined' || typeof localStorage === 'undefined') return null;
-  const data = localStorage.getItem(KEYS.SESSION);
-  if (!data) return null;
-  try {
-    return JSON.parse(data);
-  } catch {
-    return null;
+  // 1. Prioritaskan in-memory cache aktif (kebal batas kuota LocalStorage & kilat)
+  if (inMemoryUserSession && inMemoryUserSession.isLoggedIn) {
+    return inMemoryUserSession;
   }
+
+  // 2. Cek sessionStorage (terisolasi dan tahan terhadap refresh tab browser)
+  if (typeof window !== 'undefined' && typeof sessionStorage !== 'undefined') {
+    try {
+      const sessData = sessionStorage.getItem(KEYS.SESSION);
+      if (sessData) {
+        const parsed = JSON.parse(sessData);
+        if (parsed && parsed.isLoggedIn) {
+          inMemoryUserSession = parsed;
+          return parsed;
+        }
+      }
+    } catch {}
+  }
+
+  // 3. Cek localStorage
+  if (typeof window !== 'undefined' && typeof localStorage !== 'undefined') {
+    try {
+      const localData = localStorage.getItem(KEYS.SESSION);
+      if (localData) {
+        const parsed = JSON.parse(localData);
+        if (parsed && parsed.isLoggedIn) {
+          inMemoryUserSession = parsed;
+          if (typeof sessionStorage !== 'undefined') {
+            try { sessionStorage.setItem(KEYS.SESSION, localData); } catch {}
+          }
+          return parsed;
+        }
+      }
+    } catch {}
+  }
+
+  return inMemoryUserSession;
 }
 
 export function saveUserSession(session: UserSession | null): void {
-  if (typeof window === 'undefined' || typeof localStorage === 'undefined') return;
-  if (!session) {
-    localStorage.removeItem(KEYS.SESSION);
-  } else {
-    safeSetLocalStorage(KEYS.SESSION, JSON.stringify(session));
+  inMemoryUserSession = session;
+
+  if (typeof window !== 'undefined') {
+    // 1. Simpan ke sessionStorage (aman kuota & tahan reload tab)
+    if (typeof sessionStorage !== 'undefined') {
+      try {
+        if (!session) {
+          sessionStorage.removeItem(KEYS.SESSION);
+        } else {
+          sessionStorage.setItem(KEYS.SESSION, JSON.stringify(session));
+        }
+      } catch (err) {
+        console.warn('[Session] sessionStorage write warning:', err);
+      }
+    }
+
+    // 2. Simpan ke localStorage
+    if (typeof localStorage !== 'undefined') {
+      try {
+        if (!session) {
+          localStorage.removeItem(KEYS.SESSION);
+        } else {
+          localStorage.setItem(KEYS.SESSION, JSON.stringify(session));
+        }
+      } catch {
+        try {
+          if (session) {
+            safeSetLocalStorage(KEYS.SESSION, JSON.stringify(session));
+          }
+        } catch {}
+      }
+    }
   }
+
   notifyStorageUpdated();
 }
 

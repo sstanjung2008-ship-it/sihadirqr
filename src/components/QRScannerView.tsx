@@ -10,6 +10,7 @@ import {
   getLocalDateString,
   calculateAttendanceStatus,
   getLateCutoffTime,
+  hasRealEntryPresence,
   ScanQueueStatus,
   getScannerDeviceId,
   getUserSession
@@ -217,8 +218,9 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
     isRejected?: boolean;
     isDuplicate?: boolean;
     rejectionReason?: string;
+    autoHadirViaPulang?: boolean;
   } | null>(null);
-  const [scanNotification, setScanNotification] = useState<{
+  const [scanNotification, setScanNotificationState] = useState<{
     type: 'SUCCESS' | 'REJECTED' | 'DUPLICATE';
     badgeText?: string;
     title?: string;
@@ -227,8 +229,38 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
     time: string;
     mode: 'MASUK' | 'PULANG';
     timestamp: number;
+    notificationTimeStr?: string;
+    displayDurationSec?: number;
     reason?: string;
   } | null>(null);
+  const [notifSecondsLeft, setNotifSecondsLeft] = useState<number>(5);
+
+  const setScanNotification = useCallback((notif: {
+    type: 'SUCCESS' | 'REJECTED' | 'DUPLICATE';
+    badgeText?: string;
+    title?: string;
+    studentName: string;
+    className: string;
+    time: string;
+    mode: 'MASUK' | 'PULANG';
+    timestamp?: number;
+    notificationTimeStr?: string;
+    displayDurationSec?: number;
+    reason?: string;
+  } | null) => {
+    if (!notif) {
+      setScanNotificationState(null);
+      return;
+    }
+    const ts = notif.timestamp || Date.now();
+    const timeStr = notif.notificationTimeStr || (new Date(ts).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) + ' WITA');
+    setScanNotificationState({
+      ...notif,
+      timestamp: ts,
+      notificationTimeStr: timeStr,
+      displayDurationSec: notif.displayDurationSec || 5
+    });
+  }, []);
   const isMobileDevice = useMemo(() => {
     if (typeof window === 'undefined') return false;
     return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) || 
@@ -316,15 +348,23 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
     };
   }, [isMobileDevice]);
 
-  // Auto-dismiss notification (2s for SUCCESS, 4s for REJECTED / DUPLICATE)
+  // Auto-dismiss notification (5 detik agar pesan hasil scan dan waktu tampil terbaca jelas)
   useEffect(() => {
     if (scanNotification) {
+      const duration = scanNotification.displayDurationSec || 5;
+      setNotifSecondsLeft(duration);
+      const interval = setInterval(() => {
+        setNotifSecondsLeft(prev => Math.max(0, prev - 1));
+      }, 1000);
       const timer = setTimeout(() => {
         setScanNotification(null);
-      }, scanNotification.type === 'SUCCESS' ? 2000 : 4000);
-      return () => clearTimeout(timer);
+      }, duration * 1000);
+      return () => {
+        clearInterval(interval);
+        clearTimeout(timer);
+      };
     }
-  }, [scanNotification]);
+  }, [scanNotification?.timestamp]);
 
   const handleRequestPermissionAndStart = async () => {
     setCameraError(null);
@@ -699,6 +739,32 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
       const validatorId = session?.teacherId || session?.username || (effectiveRole === 'ADMIN' ? 'ADMIN_SCANNER' : 'TEACHER_SCANNER');
       const validatorName = session?.displayName || (effectiveRole === 'ADMIN' ? 'Pos Scanner Admin' : 'Guru Piket');
 
+      // =========================================================================
+      // ATURAN SISTEM OTOMATISASI PRESENSI SISWA:
+      // "Kondisi jika status masuk belum scan tetapi sudah melakukan scan pulang,
+      //  ubah status otomatis menjadi HADIR melalui pemindaian scan pulang."
+      // =========================================================================
+      const hasRealEntry = hasRealEntryPresence(existingRecord);
+      const isEntryUnscannedOrAlpa = !hasRealEntry || !existingRecord || existingRecord.status === 'ALPA' || (existingRecord.status as string) === 'BELUM_ABSEN' || !existingRecord.time || existingRecord.time === '-';
+
+      const finalStatus: AttendanceRecord['status'] = isEntryUnscannedOrAlpa
+        ? 'HADIR'
+        : (existingRecord?.status || 'HADIR');
+
+      const defaultMorningTime = startTimeStr || schoolProfile.startTime || '07:00';
+      const finalEntryTime: string = (existingRecord && existingRecord.time && existingRecord.time !== '-' && !existingRecord.time.toLowerCase().includes('belum'))
+        ? existingRecord.time
+        : defaultMorningTime;
+
+      let finalNotes = cleanNotes;
+      if (isEntryUnscannedOrAlpa) {
+        finalNotes = 'Otomatis Hadir melalui pemindaian scan pulang';
+      }
+
+      const finalScannedBy = isEntryUnscannedOrAlpa
+        ? 'Pos Scanner Pulang (Verifikasi Hadir)'
+        : ((existingRecord?.scannedBy && !existingRecord.scannedBy.includes('Sistem Otomatis')) ? existingRecord.scannedBy : 'Pos Scanner Utama');
+
       const record: AttendanceRecord = {
         id: finalId,
         studentId: student.id,
@@ -706,23 +772,23 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
         nisn: student.nisn,
         className: student.className,
         date: dateStr,
-        time: (existingRecord && existingRecord.time && existingRecord.time !== '-') ? existingRecord.time : '-',
-        status: (existingRecord && existingRecord.status && existingRecord.status !== 'ALPA') ? existingRecord.status : 'HADIR',
-        method: (existingRecord && existingRecord.method) ? existingRecord.method : 'QR_SCAN',
-        scannedBy: (existingRecord && existingRecord.scannedBy && !existingRecord.scannedBy.includes('Sistem Otomatis')) ? existingRecord.scannedBy : 'Pos Scanner Utama',
+        time: finalEntryTime,
+        status: finalStatus,
+        method: (existingRecord && existingRecord.method && existingRecord.method !== 'MANUAL') ? existingRecord.method : 'QR_SCAN',
+        scannedBy: finalScannedBy,
         parentNotified: false,
         returnTime: timeStr,
         returnStatus,
         returnScannedBy: `Pos Scanner (${validatorName})`,
-        notes: cleanNotes,
+        notes: finalNotes,
         isRealScan: true,
         isSynthetic: false,
-        updatedAt: (existingRecord && existingRecord.updatedAt) ? existingRecord.updatedAt : Date.now(),
+        updatedAt: Date.now(),
         returnUpdatedAt: Date.now(),
-        validatorId: existingRecord?.validatorId,
-        validatorName: existingRecord?.validatorName,
-        scannerDeviceId: existingRecord?.scannerDeviceId,
-        validationTimestamp: existingRecord?.validationTimestamp,
+        validatorId: existingRecord?.validatorId || validatorId,
+        validatorName: existingRecord?.validatorName || validatorName,
+        scannerDeviceId: existingRecord?.scannerDeviceId || currentDeviceId,
+        validationTimestamp: existingRecord?.validationTimestamp || new Date().toISOString(),
         returnValidatorId: validatorId,
         returnValidatorName: validatorName,
         returnScannerDeviceId: currentDeviceId,
@@ -735,18 +801,25 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
         student,
         record,
         mode: 'PULANG',
-        isRejected: false
+        isRejected: false,
+        autoHadirViaPulang: isEntryUnscannedOrAlpa
       });
 
       setScanNotification({
         type: 'SUCCESS',
-        badgeText: '✅ QR CODE PULANG BERHASIL!',
-        title: `Presensi Kepulangan Berhasil Dicatat (Jam Pulang: ${dayEndTimeStr} WITA)`,
+        badgeText: isEntryUnscannedOrAlpa
+          ? '⚡ SCAN PULANG (STATUS MASUK OTOMATIS HADIR)'
+          : '✅ QR CODE PULANG BERHASIL!',
+        title: isEntryUnscannedOrAlpa
+          ? 'Presensi Pulang Berhasil • Status Masuk Diubah Menjadi HADIR!'
+          : `Presensi Kepulangan Berhasil Dicatat (Jam Pulang: ${dayEndTimeStr} WITA)`,
         studentName: student.name,
         className: student.className,
         time: timeStr,
         mode: 'PULANG',
-        reason: `Siswa ${student.name} tercatat presensi pulang tepat waktu sesuai jadwal kepulangan hari ${dayNowName} (${dayEndTimeStr} WITA).`,
+        reason: isEntryUnscannedOrAlpa
+          ? `Siswa ${student.name} belum scan masuk pagi, namun berhasil melakukan scan pulang pukul ${timeStr.slice(0, 5)} WITA. Sesuai aturan sistem otomatisasi presensi, status presensi masuk siswa otomatis diubah menjadi HADIR.`
+          : `Siswa ${student.name} tercatat presensi pulang tepat waktu sesuai jadwal kepulangan hari ${dayNowName} (${dayEndTimeStr} WITA).`,
         timestamp: Date.now()
       });
     } else {
@@ -1163,95 +1236,150 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
 
       {/* Prominent Scan Success / Rejected / Duplicate (Biru Tua) Banner Notification */}
       {scanNotification && (
-        <div className={`border-2 rounded-3xl p-4 sm:p-5 shadow-xl flex items-start sm:items-center justify-between gap-4 animate-bounce-short ${
+        <div className={`border-2 rounded-3xl p-4 sm:p-5 shadow-xl relative overflow-hidden transition-all duration-300 animate-in fade-in slide-in-from-top-3 ${
           scanNotification.type === 'DUPLICATE'
             ? 'bg-blue-950 text-white border-blue-500 ring-1 ring-blue-400/30 shadow-blue-950/40'
             : scanNotification.type === 'REJECTED'
               ? 'bg-rose-600 text-white border-rose-400 shadow-rose-950/20'
               : 'bg-emerald-600 text-white border-emerald-400 shadow-emerald-950/20'
         }`}>
-          <div className="flex items-center gap-3.5">
-            <div className={`w-12 h-12 rounded-2xl flex items-center justify-center shrink-0 ring-4 ${
-              scanNotification.type === 'DUPLICATE'
-                ? 'bg-blue-900/90 text-blue-200 ring-blue-500/25 border border-blue-400/30'
-                : 'bg-white/20 text-white ring-white/10'
-            }`}>
-              {scanNotification.type === 'DUPLICATE' ? (
-                <Info className="w-7 h-7 text-blue-200" />
-              ) : scanNotification.type === 'REJECTED' ? (
-                <XCircle className="w-7 h-7 text-white" />
-              ) : (
-                <CheckCircle2 className="w-7 h-7 text-white" />
-              )}
-            </div>
-            <div>
-              <div className="flex items-center gap-2 flex-wrap">
-                <span className={`text-[11px] font-black px-2.5 py-0.5 rounded-full uppercase tracking-wider shadow-xs ${
-                  scanNotification.type === 'DUPLICATE'
-                    ? 'bg-blue-100 text-blue-950'
-                    : scanNotification.type === 'REJECTED'
-                      ? 'bg-white text-rose-900'
-                      : 'bg-white text-emerald-900'
-                }`}>
-                  {scanNotification.badgeText || (
-                    scanNotification.type === 'DUPLICATE'
-                      ? 'ℹ️ SUDAH PERNAH SCAN'
-                      : scanNotification.type === 'REJECTED'
-                        ? '❌ SCAN DITOLAK'
-                        : '✅ QR CODE BERHASIL DI-SCAN!'
-                  )}
-                </span>
-                <span className={`text-xs font-mono font-bold px-2 py-0.5 rounded-md ${
-                  scanNotification.type === 'DUPLICATE'
-                    ? 'bg-blue-900 text-blue-200 border border-blue-700/80'
-                    : scanNotification.type === 'REJECTED'
-                      ? 'bg-rose-800/80 text-rose-100'
-                      : 'bg-emerald-800/60 text-emerald-100'
-                }`}>
-                  {scanNotification.time} WITA
-                </span>
-              </div>
-              <h3 className="text-base sm:text-lg font-black mt-1 text-white tracking-tight">
-                {scanNotification.title || (
-                  scanNotification.type === 'DUPLICATE'
-                    ? 'Presensi Siswa Sudah Pernah Tercatat'
-                    : scanNotification.type === 'REJECTED'
-                      ? 'Scan QR Ditolak'
-                      : 'Data Presensi Siswa Berhasil Terdeteksi & Dicatat!'
-                )}
-              </h3>
-              <div className={`text-xs sm:text-sm font-medium mt-1 ${
+          {/* Top Progress countdown indicator */}
+          <div className="absolute top-0 left-0 right-0 h-1.5 bg-black/25 overflow-hidden">
+            <div 
+              className={`h-full transition-all duration-1000 ease-linear ${
                 scanNotification.type === 'DUPLICATE'
-                  ? 'text-blue-100'
+                  ? 'bg-blue-300'
                   : scanNotification.type === 'REJECTED'
-                    ? 'text-rose-100 font-semibold'
-                    : 'text-emerald-100'
+                    ? 'bg-rose-200'
+                    : 'bg-emerald-200'
+              }`}
+              style={{ width: `${(notifSecondsLeft / (scanNotification.displayDurationSec || 5)) * 100}%` }}
+            />
+          </div>
+
+          <div className="flex items-start sm:items-center justify-between gap-4">
+            <div className="flex items-start sm:items-center gap-3.5">
+              <div className={`w-12 h-12 rounded-2xl flex items-center justify-center shrink-0 ring-4 mt-0.5 sm:mt-0 ${
+                scanNotification.type === 'DUPLICATE'
+                  ? 'bg-blue-900/90 text-blue-200 ring-blue-500/25 border border-blue-400/30'
+                  : 'bg-white/20 text-white ring-white/10'
               }`}>
                 {scanNotification.type === 'DUPLICATE' ? (
-                  <p className="bg-blue-900/70 border border-blue-700/80 px-3 py-1.5 rounded-xl text-white font-bold leading-relaxed shadow-2xs">
-                    {scanNotification.reason}
-                  </p>
+                  <Info className="w-7 h-7 text-blue-200" />
                 ) : scanNotification.type === 'REJECTED' ? (
-                  <span>{scanNotification.reason}</span>
+                  <XCircle className="w-7 h-7 text-white" />
                 ) : (
-                  <span>
-                    Siswa: <strong className="text-white underline font-bold">{scanNotification.studentName}</strong> ({scanNotification.className}) • Presensi: <strong className="text-white uppercase font-bold bg-emerald-800/80 px-1.5 py-0.5 rounded">{scanNotification.mode}</strong>
-                  </span>
+                  <CheckCircle2 className="w-7 h-7 text-white" />
                 )}
               </div>
+              <div className="space-y-1.5">
+                {/* Badges row: Badge, Scan Mode, Notification Display Time & Duration */}
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className={`text-[11px] font-black px-2.5 py-0.5 rounded-full uppercase tracking-wider shadow-xs ${
+                    scanNotification.type === 'DUPLICATE'
+                      ? 'bg-blue-100 text-blue-950'
+                      : scanNotification.type === 'REJECTED'
+                        ? 'bg-white text-rose-900'
+                        : 'bg-white text-emerald-900'
+                  }`}>
+                    {scanNotification.badgeText || (
+                      scanNotification.type === 'DUPLICATE'
+                        ? 'ℹ️ SUDAH PERNAH SCAN'
+                        : scanNotification.type === 'REJECTED'
+                          ? '❌ SCAN DITOLAK'
+                          : '✅ QR CODE BERHASIL DI-SCAN!'
+                    )}
+                  </span>
+
+                  {/* Mode Scan */}
+                  <span className={`text-[11px] font-bold px-2 py-0.5 rounded-full ${
+                    scanNotification.type === 'DUPLICATE'
+                      ? 'bg-blue-900 text-blue-200 border border-blue-700'
+                      : 'bg-black/20 text-white border border-white/20'
+                  }`}>
+                    Mode: {scanNotification.mode}
+                  </span>
+
+                  {/* Waktu Tampil Notifikasi */}
+                  <span className={`inline-flex items-center gap-1 text-[11px] font-mono font-bold px-2.5 py-0.5 rounded-full shadow-2xs ${
+                    scanNotification.type === 'DUPLICATE'
+                      ? 'bg-blue-900 text-blue-100 border border-blue-400/40'
+                      : 'bg-white/20 text-white border border-white/30'
+                  }`}
+                  title="Waktu presisi pesan notifikasi hasil scan ditampilkan ke layar"
+                  >
+                    <Clock className="w-3 h-3" />
+                    <span>Waktu Tampil: {scanNotification.notificationTimeStr || (scanNotification.time + ' WITA')}</span>
+                  </span>
+
+                  {/* Durasi Tampil Pesan Notifikasi */}
+                  <span className={`text-[11px] font-extrabold px-2 py-0.5 rounded-full ${
+                    scanNotification.type === 'DUPLICATE'
+                      ? 'bg-blue-800 text-amber-200 border border-blue-600'
+                      : 'bg-black/25 text-amber-200 border border-white/20'
+                  }`}
+                  title="Sisa durasi tayang pesan notifikasi di layar"
+                  >
+                    ⏱️ Tampil: {notifSecondsLeft} detik
+                  </span>
+                </div>
+
+                {/* Notification Title / Header Message */}
+                <h3 className="text-base sm:text-lg font-black text-white tracking-tight">
+                  {scanNotification.title || (
+                    scanNotification.type === 'DUPLICATE'
+                      ? 'Presensi Siswa Sudah Pernah Tercatat'
+                      : scanNotification.type === 'REJECTED'
+                        ? 'Scan QR Ditolak'
+                        : 'Data Presensi Siswa Berhasil Terdeteksi & Dicatat!'
+                  )}
+                </h3>
+
+                {/* Notification Result Content / Pesan Hasil Scan */}
+                <div className={`text-xs sm:text-sm font-medium ${
+                  scanNotification.type === 'DUPLICATE'
+                    ? 'text-blue-100'
+                    : scanNotification.type === 'REJECTED'
+                      ? 'text-rose-100 font-semibold'
+                      : 'text-emerald-100'
+                }`}>
+                  {scanNotification.type === 'DUPLICATE' ? (
+                    <div className="bg-blue-900/70 border border-blue-700/80 px-3.5 py-2 rounded-xl text-white font-bold leading-relaxed shadow-2xs">
+                      {scanNotification.reason}
+                    </div>
+                  ) : scanNotification.type === 'REJECTED' ? (
+                    <div className="bg-rose-700/60 border border-rose-400/50 px-3 py-1.5 rounded-xl text-white font-semibold">
+                      {scanNotification.reason}
+                    </div>
+                  ) : (
+                    <div className="space-y-1">
+                      <p>
+                        Siswa: <strong className="text-white underline font-extrabold">{scanNotification.studentName}</strong> ({scanNotification.className}) • Jam Scan: <strong className="text-white font-mono font-bold bg-emerald-800/80 px-1.5 py-0.5 rounded">{scanNotification.time} WITA</strong>
+                      </p>
+                      {scanNotification.reason && (
+                        <p className="bg-emerald-700/60 border border-emerald-400/40 px-3 py-1.5 rounded-xl text-white text-xs leading-relaxed">
+                          {scanNotification.reason}
+                        </p>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
             </div>
+
+            <button
+              onClick={() => setScanNotification(null)}
+              className={`p-2 px-3 rounded-xl text-xs font-bold cursor-pointer transition-colors shrink-0 flex items-center gap-1.5 ${
+                scanNotification.type === 'DUPLICATE'
+                  ? 'text-blue-200 hover:text-white bg-blue-900/80 hover:bg-blue-800 border border-blue-700/60'
+                  : 'text-white/90 hover:text-white bg-white/10 hover:bg-white/20 border border-white/20'
+              }`}
+              title="Tutup Notifikasi Sekarang"
+            >
+              <span>✕ Tutup</span>
+              <span className="opacity-75 font-mono">({notifSecondsLeft}s)</span>
+            </button>
           </div>
-          <button
-            onClick={() => setScanNotification(null)}
-            className={`p-2 rounded-xl text-xs font-bold cursor-pointer transition-colors shrink-0 ${
-              scanNotification.type === 'DUPLICATE'
-                ? 'text-blue-200 hover:text-white bg-blue-900/80 hover:bg-blue-800 border border-blue-700/60'
-                : 'text-white/80 hover:text-white bg-white/10 hover:bg-white/20'
-            }`}
-            title="Tutup Notifikasi"
-          >
-            ✕ Tutup
-          </button>
         </div>
       )}
 
@@ -1779,6 +1907,17 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
                               : `PULANG TEPAT WAKTU (Jadwal ${todayEndTimeStr} WITA)`)}
                       </span>
                     </div>
+                    {lastScannedResult.autoHadirViaPulang && (
+                      <div className="bg-amber-50 border border-amber-300 rounded-xl p-2.5 text-xs text-amber-950 flex items-start gap-2 font-bold shadow-2xs">
+                        <Sparkles className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                        <div>
+                          <p className="text-amber-900 font-extrabold text-[11.5px]">Otomatis Hadir melalui Pemindaian Scan Pulang</p>
+                          <p className="text-amber-800 text-[10.5px] font-medium mt-0.5 leading-relaxed">
+                            Siswa belum scan masuk pagi. Melalui pemindaian scan pulang ini, sistem secara otomatis menetapkan status kehadiran masuk siswa menjadi <strong>HADIR</strong>.
+                          </p>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </div>
               )}
@@ -1865,6 +2004,12 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
                 <Sparkles className="w-3.5 h-3.5 text-amber-600 shrink-0 mt-0.5" />
                 <span className="text-amber-900 font-semibold">
                   <strong>Aturan 1-Kali Scan Per Sesi:</strong> QR Code hanya dapat di-scan 1x untuk Sesi Scan Masuk dan 1x untuk Sesi Scan Pulang. Scan ulang dalam sesi yang sama akan ditolak.
+                </span>
+              </div>
+              <div className="flex items-start gap-1.5 text-slate-700 font-medium bg-emerald-50 p-2.5 rounded-xl border border-emerald-200/80 text-[10.5px]">
+                <Zap className="w-3.5 h-3.5 text-emerald-600 shrink-0 mt-0.5" />
+                <span className="text-emerald-950 font-semibold leading-relaxed">
+                  <strong>Aturan Otomatisasi Scan Pulang:</strong> Jika status presensi masuk siswa belum di-scan (atau terekam Alpa), melakukan scan pulang akan secara otomatis mengubah status presensi masuknya menjadi <strong>HADIR</strong>.
                 </span>
               </div>
             </div>

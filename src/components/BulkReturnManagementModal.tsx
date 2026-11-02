@@ -343,15 +343,23 @@ export const BulkReturnManagementModal: React.FC<BulkReturnManagementModalProps>
           </div>
 
           {actionType === 'SET_RETURN' ? (
-            <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
-              <span className="text-xs font-bold text-slate-600 shrink-0">Catatan Pulang (Opsional):</span>
-              <input
-                type="text"
-                value={bulkNotes}
-                onChange={e => setBulkNotes(e.target.value)}
-                placeholder="Contoh: Kepulangan massal disetujui Admin / Ekstrakurikuler selesai..."
-                className="bg-white border border-emerald-200 text-slate-800 text-xs rounded-xl px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-emerald-500 flex-1 font-medium shadow-2xs"
-              />
+            <div className="space-y-2">
+              <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+                <span className="text-xs font-bold text-slate-600 shrink-0">Catatan Pulang (Opsional):</span>
+                <input
+                  type="text"
+                  value={bulkNotes}
+                  onChange={e => setBulkNotes(e.target.value)}
+                  placeholder="Contoh: Kepulangan massal disetujui Admin / Ekstrakurikuler selesai..."
+                  className="bg-white border border-emerald-200 text-slate-800 text-xs rounded-xl px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-emerald-500 flex-1 font-medium shadow-2xs"
+                />
+              </div>
+              <div className="bg-emerald-50/80 border border-emerald-200 rounded-xl p-2.5 text-[11px] text-emerald-950 flex items-start gap-2 font-medium">
+                <Sparkles className="w-3.5 h-3.5 text-emerald-600 shrink-0 mt-0.5" />
+                <span>
+                  <strong>Aturan Sistem Otomatisasi:</strong> Siswa yang belum scan masuk atau berstatus Alpa akan otomatis diubah status masuknya menjadi <strong>HADIR</strong> saat tanda pulang dicatat.
+                </span>
+              </div>
             </div>
           ) : (
             <div className="flex items-center gap-2 bg-rose-50 border border-rose-200 rounded-xl p-3 text-xs text-rose-800 font-medium">

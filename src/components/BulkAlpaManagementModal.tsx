@@ -48,6 +48,7 @@ interface BulkAlpaManagementModalProps {
     newStatus: AttendanceRecord['status'];
     notes?: string;
     existingRecordId?: string;
+    entryTime?: string;
   }[]) => void;
 }
 
@@ -74,7 +75,17 @@ export const BulkAlpaManagementModal: React.FC<BulkAlpaManagementModalProps> = (
   // Bulk action options (default to CONVERT / Ubah Status)
   const [actionType, setActionType] = useState<'CONVERT' | 'DELETE'>('CONVERT');
   const [targetStatus, setTargetStatus] = useState<AttendanceRecord['status']>('HADIR');
+  const [entryTimeInput, setEntryTimeInput] = useState<string>('07:00');
   const [bulkNotes, setBulkNotes] = useState<string>('Disetujui Admin (Update Massal)');
+
+  const handleTargetStatusChange = (newStat: AttendanceRecord['status']) => {
+    setTargetStatus(newStat);
+    if (newStat === 'HADIR') {
+      setEntryTimeInput('07:00');
+    } else if (newStat === 'TERLAMBAT') {
+      setEntryTimeInput('07:40');
+    }
+  };
 
   // Student map for fast lookup
   const studentMap = useMemo(() => {
@@ -203,6 +214,10 @@ export const BulkAlpaManagementModal: React.FC<BulkAlpaManagementModalProps> = (
       onClose();
     } else {
       // CONVERT TO ANOTHER STATUS
+      const resolvedEntryTime = (targetStatus === 'HADIR' || targetStatus === 'TERLAMBAT')
+        ? (entryTimeInput.trim() || (targetStatus === 'TERLAMBAT' ? '07:40' : '07:00'))
+        : undefined;
+
       const updates = selectedItemsToProcess.map(i => ({
         studentId: i.studentId,
         studentName: i.studentName,
@@ -210,6 +225,7 @@ export const BulkAlpaManagementModal: React.FC<BulkAlpaManagementModalProps> = (
         className: i.className,
         date: i.date,
         newStatus: targetStatus,
+        entryTime: resolvedEntryTime,
         notes: bulkNotes.trim() || `Diubah massal menjadi ${targetStatus} oleh Admin`,
         existingRecordId: i.existingRecordId
       }));
@@ -415,17 +431,17 @@ export const BulkAlpaManagementModal: React.FC<BulkAlpaManagementModalProps> = (
               </label>
             </div>
 
-            {/* If Convert Selected, show Target Status and Notes */}
+            {/* If Convert Selected, show Target Status, Jam Masuk (if Hadir/Terlambat), and Notes */}
             {actionType === 'CONVERT' && (
               <div className="p-3.5 bg-indigo-50/50 rounded-xl border border-indigo-100 space-y-3 animate-in fade-in duration-150">
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className={`grid grid-cols-1 sm:grid-cols-2 ${(targetStatus === 'HADIR' || targetStatus === 'TERLAMBAT') ? 'lg:grid-cols-3' : ''} gap-3`}>
                   <div>
                     <label className="block text-xs font-bold text-slate-700 mb-1">
                       Ubah Status Masuk Menjadi:
                     </label>
                     <select
                       value={targetStatus}
-                      onChange={(e) => setTargetStatus(e.target.value as AttendanceRecord['status'])}
+                      onChange={(e) => handleTargetStatusChange(e.target.value as AttendanceRecord['status'])}
                       className="w-full px-3 py-2 bg-white border border-indigo-200 rounded-xl text-xs font-bold text-indigo-900 focus:outline-none focus:ring-2 focus:ring-indigo-500"
                     >
                       <option value="HADIR">✅ HADIR (Tepat Waktu)</option>
@@ -435,6 +451,25 @@ export const BulkAlpaManagementModal: React.FC<BulkAlpaManagementModalProps> = (
                       <option value="ALPA">🔴 ALPA (Tanpa Keterangan)</option>
                     </select>
                   </div>
+
+                  {(targetStatus === 'HADIR' || targetStatus === 'TERLAMBAT') && (
+                    <div className="animate-in fade-in duration-150">
+                      <label className="block text-xs font-bold text-slate-700 mb-1 flex items-center gap-1.5">
+                        <Clock className="w-3.5 h-3.5 text-indigo-600" />
+                        <span>Jam Masuk (Format HH:mm):</span>
+                      </label>
+                      <input
+                        type="time"
+                        value={entryTimeInput}
+                        onChange={(e) => setEntryTimeInput(e.target.value)}
+                        required
+                        className="w-full px-3 py-2 bg-white border border-indigo-200 rounded-xl text-xs font-bold text-slate-800 font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                      />
+                      <span className="text-[10px] text-indigo-700/80 mt-0.5 block font-medium">
+                        Default: {targetStatus === 'HADIR' ? '07:00 (Tepat Waktu)' : '07:40 (Terlambat)'}
+                      </span>
+                    </div>
+                  )}
 
                   <div>
                     <label className="block text-xs font-bold text-slate-700 mb-1">

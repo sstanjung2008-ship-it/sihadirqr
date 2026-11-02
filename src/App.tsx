@@ -75,6 +75,7 @@ import {
   saveAttendanceAuditLog,
   getScannerDeviceId,
   refreshCloudData,
+  hasRealEntryPresence,
   KEYS
 } from './lib/storage';
 import { ShieldCheck, CheckCircle2, WifiOff, RefreshCw, Wifi, X, Cloud } from 'lucide-react';
@@ -954,15 +955,35 @@ export default function App() {
         const cleanExistingNotes = (existing.notes && !existing.notes.includes('Otomatis Alpa')) ? existing.notes : '';
         const cleanRecordNotes = (record.notes && !record.notes.includes('Otomatis Alpa')) ? record.notes : '';
 
+        const isReturnCompleted = !!(mergedReturnTime || isCompletedReturn(mergedReturnStatus));
+        const isExistingUnscannedOrAlpa = !hasRealEntryPresence(existing) || existing.status === 'ALPA' || (existing.status as string) === 'BELUM_ABSEN' || !existing.time || existing.time === '-';
+        const shouldAutoConvertHadir = isReturnCompleted && (record.status === 'HADIR' || isExistingUnscannedOrAlpa);
+
+        const finalStatus = shouldAutoConvertHadir
+          ? 'HADIR'
+          : ((record.status && record.status !== 'ALPA') ? record.status : existing.status);
+
+        const defaultMorningTime = schoolProfile.startTime || '07:00';
+        const finalTime = (mergedTime && mergedTime !== '-')
+          ? mergedTime
+          : (shouldAutoConvertHadir ? defaultMorningTime : '-');
+
+        let finalNotes = cleanRecordNotes || cleanExistingNotes;
+        if (shouldAutoConvertHadir && isExistingUnscannedOrAlpa && !cleanRecordNotes) {
+          finalNotes = 'Otomatis Hadir melalui pemindaian scan pulang';
+        }
+
         newRecord = {
           ...existing,
           ...record,
           id: finalId,
-          time: mergedTime,
-          status: (record.status && record.status !== 'ALPA') ? record.status : existing.status,
+          time: finalTime,
+          status: finalStatus,
           method: (record.method === 'QR_SCAN' || existing.method === 'QR_SCAN') ? 'QR_SCAN' : (record.method || existing.method),
-          scannedBy: (record.scannedBy && !record.scannedBy.includes('Sistem Otomatis')) ? record.scannedBy : (existing.scannedBy && !existing.scannedBy.includes('Sistem Otomatis') ? existing.scannedBy : 'Pos Scanner Utama'),
-          notes: cleanRecordNotes || cleanExistingNotes,
+          scannedBy: shouldAutoConvertHadir && isExistingUnscannedOrAlpa
+            ? 'Pos Scanner Pulang (Verifikasi Hadir)'
+            : ((record.scannedBy && !record.scannedBy.includes('Sistem Otomatis')) ? record.scannedBy : (existing.scannedBy && !existing.scannedBy.includes('Sistem Otomatis') ? existing.scannedBy : 'Pos Scanner Utama')),
+          notes: finalNotes,
           returnTime: mergedReturnTime,
           returnStatus: mergedReturnStatus,
           returnScannedBy: record.returnScannedBy || existing.returnScannedBy,
@@ -998,6 +1019,10 @@ export default function App() {
         const cleaned = prevLogs.filter(l => {
           if (isManualCharacterLog(l)) return true; // JAMINAN MUTLAK: Catatan karakter manual tidak boleh dihapus
           if (l.studentId === sid && l.date === sdate) {
+            if ((newRecord.status === 'HADIR' || newRecord.status === 'TERLAMBAT') && (l.id.includes('auto-alpa') || (l.traitType === 'NEGATIF' && l.traitName.toLowerCase().includes('alpa') && l.notes?.includes('Otomatis')))) {
+              logsChanged = true;
+              return false;
+            }
             if (hasValidTime && (l.id.includes('auto-unscanned') || (l.traitType === 'NEGATIF' && l.traitName.toLowerCase().includes('belum') && l.traitName.toLowerCase().includes('scan')))) {
               logsChanged = true;
               return false;
@@ -1042,6 +1067,7 @@ export default function App() {
 
     const updated = attendanceRecords.map(r => {
       const isMatch = r.id === recordId || (fullRecord && r.studentId === fullRecord.studentId && r.date === fullRecord.date);
+      const officerName = userSession?.displayName || userSession?.username || (effectiveRole === 'ADMIN' ? 'Admin Sekolah' : 'Guru');
       if (isMatch) {
         exists = true;
         targetStudentId = r.studentId;
@@ -1050,15 +1076,17 @@ export default function App() {
           ...r, 
           status: newStatus, 
           time: fullRecord?.time !== undefined ? fullRecord.time : r.time,
+          scannedBy: officerName,
           notes: notes !== undefined ? notes : r.notes,
           returnTime: returnTime !== undefined ? (returnTime || undefined) : r.returnTime,
           returnStatus: returnTime !== undefined ? (returnTime ? (returnStatus || 'PULANG') : undefined) : r.returnStatus,
+          returnScannedBy: returnTime !== undefined ? (returnTime ? officerName : undefined) : r.returnScannedBy,
           isSynthetic: false,
           isRealScan: true,
           updatedAt: Date.now(),
           returnUpdatedAt: returnTime !== undefined ? Date.now() : r.returnUpdatedAt,
           validatorId: userSession?.teacherId || userSession?.username || 'ADMIN',
-          validatorName: userSession?.displayName || 'Guru/Admin',
+          validatorName: officerName,
         };
       }
       return r;
@@ -1067,18 +1095,21 @@ export default function App() {
     if (!exists && fullRecord) {
       targetStudentId = fullRecord.studentId;
       targetDate = fullRecord.date;
+      const officerName = userSession?.displayName || userSession?.username || (effectiveRole === 'ADMIN' ? 'Admin Sekolah' : 'Guru');
       const createdRecord: AttendanceRecord = {
         ...fullRecord,
         status: newStatus,
         notes: notes !== undefined ? notes : fullRecord.notes,
+        scannedBy: officerName,
         returnTime: returnTime && returnTime.trim() ? returnTime.trim() : undefined,
         returnStatus: returnTime && returnTime.trim() ? (returnStatus || 'PULANG') : undefined,
+        returnScannedBy: returnTime && returnTime.trim() ? officerName : undefined,
         isSynthetic: false,
         isRealScan: true,
         updatedAt: Date.now(),
         returnUpdatedAt: returnTime && returnTime.trim() ? Date.now() : undefined,
         validatorId: userSession?.teacherId || userSession?.username || 'ADMIN',
-        validatorName: userSession?.displayName || 'Guru/Admin',
+        validatorName: officerName,
       };
       updated.unshift(createdRecord);
     }
@@ -1205,6 +1236,7 @@ export default function App() {
       className: string;
       date: string;
       newStatus: AttendanceRecord['status'];
+      entryTime?: string;
       notes?: string;
       existingRecordId?: string;
     }[]
@@ -1217,6 +1249,7 @@ export default function App() {
     }
 
     const updateTimestamp = Date.now();
+    const officerName = userSession?.displayName || userSession?.username || (effectiveRole === 'ADMIN' ? 'Admin Sekolah' : 'Guru');
 
     // Log each bulk change into the Audit Log (Requirement 6)
     updates.forEach(u => {
@@ -1230,10 +1263,10 @@ export default function App() {
         action: 'BULK_UPDATE',
         fieldChanged: 'status',
         oldValue: null,
-        newValue: { status: u.newStatus, notes: u.notes },
+        newValue: { status: u.newStatus, notes: u.notes, time: u.entryTime },
         reason: u.notes || 'Pembaruan massal status kehadiran',
         modifiedByUserId: userSession?.teacherId || userSession?.username || 'admin',
-        modifiedByName: userSession?.displayName || (effectiveRole === 'ADMIN' ? 'Admin Sekolah' : 'Guru'),
+        modifiedByName: officerName,
         modifiedByRole: effectiveRole === 'ADMIN' ? 'ADMIN' : 'TEACHER',
         timestamp: new Date().toISOString(),
         scannerDeviceId: getScannerDeviceId()
@@ -1254,8 +1287,10 @@ export default function App() {
         if (existingIdx >= 0) {
           const currentRec = updated[existingIdx];
           let entryTime = currentRec.time;
-          if (u.newStatus === 'HADIR' || u.newStatus === 'TERLAMBAT') {
-            entryTime = (currentRec.time && currentRec.time !== '-') ? currentRec.time : nowTime;
+          if (u.entryTime && u.entryTime.trim()) {
+            entryTime = u.entryTime.trim();
+          } else if (u.newStatus === 'HADIR' || u.newStatus === 'TERLAMBAT') {
+            entryTime = (currentRec.time && currentRec.time !== '-') ? currentRec.time : (u.newStatus === 'TERLAMBAT' ? '07:40' : '07:00');
           } else if (u.newStatus === 'ALPA') {
             entryTime = '-';
           } else if (u.newStatus === 'IZIN' || u.newStatus === 'SAKIT') {
@@ -1267,7 +1302,9 @@ export default function App() {
             status: u.newStatus,
             time: entryTime,
             method: 'MANUAL',
-            scannedBy: userSession?.displayName ? `Admin (${userSession.displayName})` : 'Admin (Update Massal)',
+            scannedBy: officerName,
+            validatorId: userSession?.teacherId || userSession?.username || 'ADMIN',
+            validatorName: officerName,
             notes: u.notes !== undefined ? u.notes : currentRec.notes,
             isSynthetic: false,
             updatedAt: updateTimestamp,
@@ -1275,8 +1312,10 @@ export default function App() {
         } else {
           // Create new record
           let entryTime = '-';
-          if (u.newStatus === 'HADIR' || u.newStatus === 'TERLAMBAT') {
-            entryTime = nowTime;
+          if (u.entryTime && u.entryTime.trim()) {
+            entryTime = u.entryTime.trim();
+          } else if (u.newStatus === 'HADIR' || u.newStatus === 'TERLAMBAT') {
+            entryTime = u.newStatus === 'TERLAMBAT' ? '07:40' : '07:00';
           } else if (u.newStatus === 'IZIN' || u.newStatus === 'SAKIT') {
             entryTime = '07:00';
           }
@@ -1291,7 +1330,9 @@ export default function App() {
             time: entryTime,
             status: u.newStatus,
             method: 'MANUAL',
-            scannedBy: userSession?.displayName ? `Admin (${userSession.displayName})` : 'Admin (Update Massal)',
+            scannedBy: officerName,
+            validatorId: userSession?.teacherId || userSession?.username || 'ADMIN',
+            validatorName: officerName,
             notes: u.notes,
             parentNotified: false,
             isSynthetic: false,
@@ -1360,6 +1401,7 @@ export default function App() {
 
     const nowTime = new Date().toTimeString().substring(0, 5);
     const updateTimestamp = Date.now();
+    const officerName = userSession?.displayName || userSession?.username || (effectiveRole === 'ADMIN' ? 'Admin Sekolah' : 'Guru');
 
     // Log each return bulk update to Audit Log (Requirement 6)
     updates.forEach(u => {
@@ -1376,7 +1418,7 @@ export default function App() {
         newValue: { returnStatus: u.newReturnStatus, returnTime: u.newReturnTime, notes: u.notes },
         reason: u.notes || 'Pembaruan massal status kepulangan oleh Guru/Admin',
         modifiedByUserId: userSession?.teacherId || userSession?.username || 'admin',
-        modifiedByName: userSession?.displayName || (effectiveRole === 'ADMIN' ? 'Admin Sekolah' : 'Guru'),
+        modifiedByName: officerName,
         modifiedByRole: effectiveRole === 'ADMIN' ? 'ADMIN' : 'TEACHER',
         timestamp: new Date().toISOString(),
         scannerDeviceId: getScannerDeviceId()
@@ -1406,12 +1448,21 @@ export default function App() {
               updatedAt: updateTimestamp,
             };
           } else {
+            const isEntryUnscannedOrAlpa = !hasRealEntryPresence(currentRec) || currentRec.status === 'ALPA' || (currentRec.status as string) === 'BELUM_ABSEN' || !currentRec.time || currentRec.time === '-';
+            const resolvedStatus = isEntryUnscannedOrAlpa ? 'HADIR' : currentRec.status;
+            const resolvedTime = isEntryUnscannedOrAlpa && (!currentRec.time || currentRec.time === '-') ? (schoolProfile.startTime || '07:00') : currentRec.time;
+            const resolvedNotes = isEntryUnscannedOrAlpa ? 'Otomatis Hadir melalui pemindaian pulang' : (u.notes !== undefined ? u.notes : currentRec.notes);
+
             updated[existingIdx] = {
               ...currentRec,
+              status: resolvedStatus,
+              time: resolvedTime,
               returnTime: u.newReturnTime || nowTime,
               returnStatus: u.newReturnStatus,
-              returnScannedBy: userSession?.displayName ? `Admin (${userSession.displayName})` : 'Admin (Pulang Massal)',
-              notes: u.notes !== undefined ? u.notes : currentRec.notes,
+              returnScannedBy: officerName,
+              validatorId: userSession?.teacherId || userSession?.username || 'ADMIN',
+              validatorName: officerName,
+              notes: resolvedNotes,
               isSynthetic: false,
               returnUpdatedAt: updateTimestamp,
               updatedAt: updateTimestamp,
@@ -1427,14 +1478,16 @@ export default function App() {
               nisn: u.nisn,
               className: u.className,
               date: u.date,
-              time: '-',
+              time: schoolProfile.startTime || '07:00',
               status: 'HADIR',
               method: 'MANUAL',
-              scannedBy: userSession?.displayName ? `Admin (${userSession.displayName})` : 'Admin (Pulang Massal)',
+              scannedBy: officerName,
+              validatorId: userSession?.teacherId || userSession?.username || 'ADMIN',
+              validatorName: officerName,
               returnTime: u.newReturnTime || nowTime,
               returnStatus: u.newReturnStatus,
-              returnScannedBy: userSession?.displayName ? `Admin (${userSession.displayName})` : 'Admin (Pulang Massal)',
-              notes: u.notes,
+              returnScannedBy: officerName,
+              notes: u.notes || 'Otomatis Hadir melalui pemindaian pulang',
               parentNotified: false,
               isSynthetic: false,
               isRealScan: false,
@@ -1450,7 +1503,7 @@ export default function App() {
       return updated;
     });
 
-    // Auto-sync & cleanup auto-unreturned penalty logs for students who are now marked as PULANG
+    // Auto-sync & cleanup penalty logs (auto-alpa, auto-unscanned, auto-unreturned) for students marked as PULANG
     const returnedStudentDates = updates
       .filter(u => u.newReturnStatus !== 'BELUM_PULANG')
       .map(u => ({ studentId: u.studentId, date: u.date }));
@@ -1461,10 +1514,22 @@ export default function App() {
         const cleaned = prevLogs.filter(l => {
           if (isManualCharacterLog(l)) return true; // JAMINAN MUTLAK: Catatan karakter manual tidak boleh dihapus
           const isMatch = returnedStudentDates.some(r => r.studentId === l.studentId && r.date === l.date);
-          if (isMatch && (l.id.includes('auto-unreturned') || (l.traitType === 'NEGATIF' && l.traitName.toLowerCase().includes('belum') && l.traitName.toLowerCase().includes('pulang')))) {
-            logsChanged = true;
-            if (l.id) markCharacterLogDeleted(l.id);
-            return false;
+          if (isMatch) {
+            if (l.id.includes('auto-alpa') || (l.traitType === 'NEGATIF' && l.traitName.toLowerCase().includes('alpa') && l.notes?.includes('Otomatis'))) {
+              logsChanged = true;
+              if (l.id) markCharacterLogDeleted(l.id);
+              return false;
+            }
+            if (l.id.includes('auto-unscanned') || (l.traitType === 'NEGATIF' && l.traitName.toLowerCase().includes('belum') && l.traitName.toLowerCase().includes('scan'))) {
+              logsChanged = true;
+              if (l.id) markCharacterLogDeleted(l.id);
+              return false;
+            }
+            if (l.id.includes('auto-unreturned') || (l.traitType === 'NEGATIF' && l.traitName.toLowerCase().includes('belum') && l.traitName.toLowerCase().includes('pulang'))) {
+              logsChanged = true;
+              if (l.id) markCharacterLogDeleted(l.id);
+              return false;
+            }
           }
           return true;
         });

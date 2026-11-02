@@ -55,10 +55,12 @@ import {
   History,
   ChevronsLeft,
   ChevronsRight,
-  ShieldAlert
+  ShieldAlert,
+  Upload
 } from 'lucide-react';
 import { BulkAlpaManagementModal } from './BulkAlpaManagementModal';
 import { BulkReturnManagementModal, BulkReturnUpdatePayload } from './BulkReturnManagementModal';
+import { ImportAttendanceExcelModal } from './ImportAttendanceExcelModal';
 import { 
   getLocalDateString, 
   refreshParentChildAttendance, 
@@ -93,6 +95,7 @@ interface AttendanceDashboardProps {
     className: string;
     date: string;
     newStatus: AttendanceRecord['status'];
+    entryTime?: string;
     notes?: string;
     existingRecordId?: string;
   }[]) => void;
@@ -150,23 +153,8 @@ export const AttendanceDashboard: React.FC<AttendanceDashboardProps> = ({
   const [showBulkReturnModal, setShowBulkReturnModal] = useState<boolean>(false);
   const [highlightedCharLogId, setHighlightedCharLogId] = useState<string | null>(null);
 
-  // Jejak Audit Log Presensi Manual (Requirement 6)
-  const [showAuditModal, setShowAuditModal] = useState<boolean>(false);
-  const [auditLogs, setAuditLogs] = useState<AttendanceAuditLog[]>([]);
-  const [isLoadingAuditLogs, setIsLoadingAuditLogs] = useState<boolean>(false);
-
-  const handleOpenAuditModal = async () => {
-    setShowAuditModal(true);
-    setIsLoadingAuditLogs(true);
-    try {
-      const logs = await getAttendanceAuditLogs();
-      setAuditLogs(logs);
-    } catch {
-      setAuditLogs([]);
-    } finally {
-      setIsLoadingAuditLogs(false);
-    }
-  };
+  // Modal Import Data Presensi Excel (Khusus Admin)
+  const [showImportExcelModal, setShowImportExcelModal] = useState<boolean>(false);
 
   // Status Sinkronisasi On-Demand Khusus Akun Orang Tua (100% Hemat Kuota)
   const [isRefreshingParent, setIsRefreshingParent] = useState(false);
@@ -697,14 +685,31 @@ export const AttendanceDashboard: React.FC<AttendanceDashboardProps> = ({
   const handleSaveStatus = (e: React.FormEvent) => {
     e.preventDefault();
     if (editingRecord) {
+      let targetStatus = editStatus;
+      let targetTime = editTime.trim() ? editTime.trim() : '-';
+      let targetNotes = editNotes;
+
+      // Aturan Otomatisasi: Jika jam pulang terisi dan status masuk belum scan / ALPA,
+      // ubah status otomatis menjadi HADIR
+      const hasReturn = !!(editReturnTime.trim());
+      if (hasReturn && (editStatus === 'ALPA' || targetTime === '-')) {
+        targetStatus = 'HADIR';
+        if (targetTime === '-') {
+          targetTime = schoolProfile?.startTime || '07:00';
+        }
+        if (!targetNotes) {
+          targetNotes = 'Otomatis Hadir melalui pemindaian scan pulang';
+        }
+      }
+
       const recordWithTime: AttendanceRecord = {
         ...editingRecord,
-        time: editTime.trim() ? editTime.trim() : '-',
+        time: targetTime,
       };
       onUpdateStatus(
         editingRecord.id, 
-        editStatus, 
-        editNotes, 
+        targetStatus, 
+        targetNotes, 
         editReturnTime.trim() ? editReturnTime.trim() : undefined,
         editReturnTime.trim() ? editReturnStatus : undefined,
         recordWithTime
@@ -1601,19 +1606,6 @@ export const AttendanceDashboard: React.FC<AttendanceDashboardProps> = ({
                 </button>
               )}
 
-              {/* Tombol Jejak Audit Manual (Requirement 6) */}
-              {(currentRole === 'ADMIN' || currentRole === 'TEACHER') && (
-                <button
-                  type="button"
-                  onClick={handleOpenAuditModal}
-                  className="bg-white hover:bg-slate-100 text-slate-700 hover:text-slate-900 border border-slate-200 font-extrabold px-3 py-1.5 rounded-xl text-xs flex items-center gap-1.5 transition-all cursor-pointer shadow-2xs active:scale-95 shrink-0"
-                  title="Lihat riwayat jejak audit perubahan manual presensi & kepulangan siswa"
-                >
-                  <History className="w-3.5 h-3.5 text-slate-600" />
-                  <span>Jejak Audit Manual</span>
-                </button>
-              )}
-
               {/* Clear Filters Button */}
               {hasActiveFilters && (
                 <button
@@ -1633,7 +1625,7 @@ export const AttendanceDashboard: React.FC<AttendanceDashboardProps> = ({
                 </button>
               )}
 
-              {/* KHUSUS ADMIN: Tombol Ubah Status Masuk Massal */}
+              {/* KHUSUS ADMIN: Tombol Ubah Status Masuk Massal, Ubah Pulang Massal, Download Excel & Import Excel */}
               {currentRole === 'ADMIN' && (
                 <>
                   <button
@@ -1675,6 +1667,16 @@ export const AttendanceDashboard: React.FC<AttendanceDashboardProps> = ({
                   >
                     <FileSpreadsheet className="w-3.5 h-3.5 text-white shrink-0" />
                     <span>{isExportingExcel ? 'Mengunduh...' : 'Download Excel'}</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setShowImportExcelModal(true)}
+                    className="bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-extrabold px-3.5 py-1.5 rounded-xl text-xs flex items-center gap-1.5 transition-all cursor-pointer shadow-sm shadow-blue-600/25 active:scale-95 shrink-0"
+                    title="Import & Perbarui Data Presensi Siswa dari File Excel (.xlsx) (Khusus Admin)"
+                  >
+                    <Upload className="w-3.5 h-3.5 text-white shrink-0" />
+                    <span>Import Data Absensi</span>
                   </button>
                 </>
               )}
@@ -2142,6 +2144,9 @@ export const AttendanceDashboard: React.FC<AttendanceDashboardProps> = ({
                   placeholder="Contoh: 14:00"
                   className="w-full bg-slate-50 border border-slate-200 text-slate-800 rounded-xl px-3 py-2 text-xs focus:ring-2 focus:ring-indigo-500 font-mono"
                 />
+                <p className="text-[11px] text-emerald-700 font-medium mt-1">
+                  ⚡ Jika siswa belum scan masuk atau Alpa, mengisi jam pulang akan otomatis mengubah status masuk menjadi Hadir.
+                </p>
               </div>
 
               <div>
@@ -2240,148 +2245,24 @@ export const AttendanceDashboard: React.FC<AttendanceDashboardProps> = ({
         />
       )}
 
-      {/* Modal Jejak Audit Log Presensi Manual (Requirement 6) */}
-      {showAuditModal && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 flex items-center justify-center p-3 sm:p-5">
-          <div className="bg-white rounded-3xl max-w-4xl w-full max-h-[90vh] flex flex-col shadow-2xl border border-slate-200 overflow-hidden animate-in fade-in zoom-in-95 duration-150">
-            {/* Modal Header */}
-            <div className="p-5 border-b border-slate-100 flex items-center justify-between bg-slate-50/80">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-2xl bg-indigo-50 text-indigo-600 flex items-center justify-center shadow-2xs">
-                  <History className="w-5 h-5" />
-                </div>
-                <div>
-                  <h3 className="text-sm font-extrabold text-slate-900">Jejak Audit Manual Presensi</h3>
-                  <p className="text-[11px] text-slate-500 font-medium">
-                    Catatan otomatis setiap perubahan manual oleh Guru & Admin (Immutable Audit Trail)
-                  </p>
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={() => setShowAuditModal(false)}
-                className="w-8 h-8 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-600 flex items-center justify-center cursor-pointer transition-colors"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-
-            {/* Modal Content */}
-            <div className="p-5 overflow-y-auto flex-1 space-y-3">
-              {isLoadingAuditLogs ? (
-                <div className="py-12 flex flex-col items-center justify-center space-y-3 text-slate-400">
-                  <RefreshCw className="w-6 h-6 animate-spin text-indigo-600" />
-                  <p className="text-xs font-bold text-slate-600">Memuat riwayat audit log...</p>
-                </div>
-              ) : auditLogs.length === 0 ? (
-                <div className="py-12 flex flex-col items-center justify-center space-y-2 text-slate-400 text-center">
-                  <ShieldCheck className="w-10 h-10 text-emerald-400" />
-                  <p className="text-xs font-extrabold text-slate-700">Belum Ada Catatan Perubahan Manual</p>
-                  <p className="text-[11px] text-slate-500 max-w-sm">
-                    Seluruh presensi saat ini murni hasil pemindaian QR Code otentik. Setiap modifikasi manual status atau jam pulang oleh Guru/Admin akan otomatis tercatat di sini.
-                  </p>
-                </div>
-              ) : (
-                <div className="space-y-2.5">
-                  <div className="text-[11px] text-slate-500 font-bold px-1 flex items-center justify-between">
-                    <span>Total {auditLogs.length} Riwayat Modifikasi Manual</span>
-                    <span className="text-[10px] text-emerald-600 font-extrabold bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
-                      Tersimpan Aman di Cloud
-                    </span>
-                  </div>
-                  {auditLogs.map((log) => {
-                    let formattedTime = log.timestamp;
-                    try {
-                      formattedTime = new Date(log.timestamp).toLocaleString('id-ID', {
-                        day: 'numeric',
-                        month: 'short',
-                        year: 'numeric',
-                        hour: '2-digit',
-                        minute: '2-digit',
-                        second: '2-digit'
-                      }) + ' WITA';
-                    } catch {}
-
-                    return (
-                      <div
-                        key={log.id}
-                        className="bg-slate-50/70 hover:bg-slate-50 border border-slate-200/90 rounded-2xl p-3.5 text-xs transition-colors space-y-2 shadow-2xs"
-                      >
-                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1.5 border-b border-slate-200/60 pb-2">
-                          <div className="flex items-center gap-2">
-                            <span className="font-extrabold text-slate-900">{log.studentName}</span>
-                            <span className="text-[10px] bg-slate-200 text-slate-700 font-bold px-2 py-0.5 rounded-md">
-                              {log.className}
-                            </span>
-                            <span className="text-[11px] font-mono font-medium text-slate-500">
-                              (Tgl: {log.date})
-                            </span>
-                          </div>
-                          <span className="text-[10px] font-mono text-slate-400 font-semibold">
-                            {formattedTime}
-                          </span>
-                        </div>
-
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[11px]">
-                          <div>
-                            <span className="text-slate-400 font-medium">Petugas / Pengubah: </span>
-                            <strong className="text-slate-800">{log.modifiedByName}</strong>
-                            <span className="ml-1 text-[10px] font-bold px-1.5 py-0.2 rounded bg-indigo-50 text-indigo-700 border border-indigo-200">
-                              {log.modifiedByRole}
-                            </span>
-                            {log.scannerDeviceId && (
-                              <div className="text-[10px] text-slate-400 font-mono mt-0.5">
-                                Device: {log.scannerDeviceId}
-                              </div>
-                            )}
-                          </div>
-                          <div>
-                            <span className="text-slate-400 font-medium">Aksi: </span>
-                            <strong className="text-slate-700">{log.action}</strong>
-                            {log.reason && (
-                              <div className="text-[11px] text-slate-600 italic mt-0.5">
-                                &quot;{log.reason}&quot;
-                              </div>
-                            )}
-                          </div>
-                        </div>
-
-                        {/* Nilai Lama vs Nilai Baru */}
-                        {(log.oldValue || log.newValue) && (
-                          <div className="bg-white border border-slate-200 rounded-xl p-2.5 text-[11px] flex flex-col sm:flex-row sm:items-center justify-between gap-2 font-mono">
-                            <div className="text-rose-700">
-                              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block font-sans">Sebelum:</span>
-                              {log.oldValue ? JSON.stringify(log.oldValue).replace(/["{}]/g, ' ') : '(Kosong/Data Baru)'}
-                            </div>
-                            <div className="hidden sm:block text-slate-300 font-black">➔</div>
-                            <div className="text-emerald-700">
-                              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block font-sans">Sesudah:</span>
-                              {log.newValue ? JSON.stringify(log.newValue).replace(/["{}]/g, ' ') : '-'}
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-
-            {/* Modal Footer */}
-            <div className="p-4 border-t border-slate-100 flex items-center justify-between bg-slate-50/50">
-              <span className="text-[11px] text-slate-400">
-                Pencatatan ini dilindungi Security Rules dan tidak dapat diubah oleh siapapun.
-              </span>
-              <button
-                type="button"
-                onClick={() => setShowAuditModal(false)}
-                className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-900 text-white font-extrabold text-xs shadow-xs cursor-pointer transition-all"
-              >
-                Tutup
-              </button>
-            </div>
-          </div>
-        </div>
+      {/* Modal Import Data Presensi Excel Khusus Admin */}
+      {showImportExcelModal && (
+        <ImportAttendanceExcelModal
+          isOpen={showImportExcelModal}
+          onClose={() => setShowImportExcelModal(false)}
+          students={students}
+          classes={classes}
+          attendanceRecords={attendanceRecords}
+          selectedDate={selectedDate}
+          schoolProfile={schoolProfile}
+          onImportSuccess={(_count, msg) => {
+            setCloudSyncFeedback(msg);
+            setTimeout(() => setCloudSyncFeedback(null), 5000);
+            if (onRestoreAttendance) {
+              onRestoreAttendance();
+            }
+          }}
+        />
       )}
 
     </div>

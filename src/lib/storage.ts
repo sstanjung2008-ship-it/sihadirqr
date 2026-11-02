@@ -2388,12 +2388,25 @@ export function mergeSingleAttendanceRecord(a: AttendanceRecord, b: AttendanceRe
     }
   } else {
     // Keduanya belum absen / ALPA:
-    finalStatus = 'ALPA';
-    finalTime = '-';
-    finalMethod = 'MANUAL';
-    finalScannedBy = b.scannedBy || a.scannedBy || 'Sistem Otomatis';
-    finalNotes = (b.notes && b.notes.trim()) ? b.notes : (a.notes || '');
-    finalEntryUpdated = Math.max(aUpdated, bUpdated) || Date.now();
+    // ATURAN SISTEM OTOMATISASI:
+    // Jika status masuk belum scan / ALPA tetapi sudah melakukan scan pulang,
+    // ubah status otomatis menjadi HADIR melalui pemindaian scan pulang.
+    if (hasReturnA || hasReturnB) {
+      finalStatus = 'HADIR';
+      const candidateTime = (b.time && b.time !== '-' && !b.time.toLowerCase().includes('belum')) ? b.time : ((a.time && a.time !== '-' && !a.time.toLowerCase().includes('belum')) ? a.time : '07:00');
+      finalTime = candidateTime;
+      finalMethod = 'QR_SCAN';
+      finalScannedBy = (b.returnScannedBy || a.returnScannedBy) ? 'Pos Scanner Pulang (Verifikasi Hadir)' : (b.scannedBy || a.scannedBy || 'Pos Scanner Pulang');
+      finalNotes = 'Otomatis Hadir melalui pemindaian scan pulang';
+      finalEntryUpdated = Math.max(aUpdated, bUpdated, aReturnUpdated, bReturnUpdated) || Date.now();
+    } else {
+      finalStatus = 'ALPA';
+      finalTime = '-';
+      finalMethod = 'MANUAL';
+      finalScannedBy = b.scannedBy || a.scannedBy || 'Sistem Otomatis';
+      finalNotes = (b.notes && b.notes.trim()) ? b.notes : (a.notes || '');
+      finalEntryUpdated = Math.max(aUpdated, bUpdated) || Date.now();
+    }
   }
 
   // 2. Evaluasi Status & Jam Pulang (Return) - Anti-Hapus & Gabung Multi-Gerbang
@@ -2422,14 +2435,31 @@ export function mergeSingleAttendanceRecord(a: AttendanceRecord, b: AttendanceRe
     returnStatus = b.returnStatus || a.returnStatus;
   }
 
+  // JAMINAN MUTLAK KONSISTENSI ATURAN OTOMATISASI PRESENSI:
+  // Jika record memiliki scan kepulangan (returnTime / returnStatus), namun status masuk masih ALPA atau BELUM_ABSEN,
+  // wajib otomatis diubah menjadi HADIR melalui pemindaian scan pulang.
+  const hasValidReturn = !!((returnTime && returnTime !== '-') || returnStatus === 'PULANG' || returnStatus === 'PULANG_TEPAT' || returnStatus === 'PULANG_CEPAT');
+  if (hasValidReturn && (finalStatus === 'ALPA' || (finalStatus as string) === 'BELUM_ABSEN')) {
+    finalStatus = 'HADIR';
+    if (!finalTime || finalTime === '-') {
+      finalTime = '07:00';
+    }
+    finalMethod = 'QR_SCAN';
+    finalNotes = 'Otomatis Hadir melalui pemindaian scan pulang';
+  }
+
   const candidateId = (hasEntryA && !hasEntryB) ? a.id : (b.id || a.id || `att-${b.studentId || a.studentId}-${b.date || a.date}`);
   const cleanId = (candidateId && !candidateId.startsWith('att-autoalpa-') && !candidateId.startsWith('att-synth-'))
     ? candidateId
     : `att-${b.studentId || a.studentId}-${b.date || a.date}`;
 
-  const cleanNotes = (hasEntryA || hasEntryB || hasReturnA || hasReturnB)
+  let cleanNotes = (hasEntryA || hasEntryB || hasReturnA || hasReturnB)
     ? finalNotes.replace(/Otomatis Alpa[;, ]*/gi, '').trim()
     : finalNotes;
+
+  if (hasValidReturn && (!hasEntryA && !hasEntryB) && !cleanNotes) {
+    cleanNotes = 'Otomatis Hadir melalui pemindaian scan pulang';
+  }
 
   const merged: AttendanceRecord = {
     ...a,

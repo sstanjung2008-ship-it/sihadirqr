@@ -1131,6 +1131,46 @@ export function exportDashboardAttendanceExcel(options: {
     });
   }
 
+/**
+ * Membersihkan format nama petugas scan untuk ekspor Excel.
+ * Menghapus awalan "Pos Scanner (" dan tanda kurung penutup ")",
+ * atau mengambil nama akun petugasnya saja.
+ */
+function cleanOfficerAccountName(rawOfficer?: string | null, validatorName?: string | null): string {
+  if (validatorName && typeof validatorName === 'string' && validatorName.trim() && !validatorName.includes('Pos Scanner')) {
+    return validatorName.trim();
+  }
+
+  if (!rawOfficer || typeof rawOfficer !== 'string') return '-';
+  const trimmed = rawOfficer.trim();
+  if (!trimmed || trimmed === '-') return '-';
+
+  // 1. Ekstrak nama di dalam tanda kurung jika berformat "Pos Scanner (Nama Akun)" atau "Admin (Nama Akun)"
+  const parenMatch = trimmed.match(/^(?:Pos Scanner|Admin|Guru|Petugas)?\s*\(([^)]+)\)$/i);
+  if (parenMatch && parenMatch[1] && parenMatch[1].trim()) {
+    return parenMatch[1].trim();
+  }
+
+  // 2. Hapus awalan "Pos Scanner (" dan tanda kurung penutup ")"
+  if (/^Pos Scanner\s*\(/i.test(trimmed)) {
+    const cleaned = trimmed.replace(/^Pos Scanner\s*\(/i, '').replace(/\)\s*$/, '').trim();
+    if (cleaned) return cleaned;
+  }
+
+  // 3. Format awalan tanda hubung "Pos Scanner - Nama"
+  if (/^Pos Scanner\s*-\s*/i.test(trimmed)) {
+    const cleaned = trimmed.replace(/^Pos Scanner\s*-\s*/i, '').trim();
+    if (cleaned) return cleaned;
+  }
+
+  // 4. Default string generik
+  if (/^Pos Scanner (Utama|Pulang|Masuk)$/i.test(trimmed)) {
+    return 'Petugas Scanner';
+  }
+
+  return trimmed;
+}
+
   // 1. Sheet Presensi Harian Lengkap
   const dailyRows = filteredStudents.map((std, idx) => {
     const rec = getRecord(std);
@@ -1151,7 +1191,8 @@ export function exportDashboardAttendanceExcel(options: {
       else entryStatus = rec.status || 'Belum Absen';
 
       entryTime = (rec.time && rec.time !== '-') ? rec.time : '-';
-      scannedBy = rec.scannedBy || (rec.method === 'QR_SCAN' ? 'Pos Scanner Utama' : 'Sistem Otomatis');
+      const rawScannedBy = rec.scannedBy || (rec.method === 'QR_SCAN' ? 'Pos Scanner Utama' : 'Sistem Otomatis');
+      scannedBy = cleanOfficerAccountName(rawScannedBy, rec.validatorName);
 
       returnTime = (rec.returnTime && rec.returnTime !== '-') ? rec.returnTime : '-';
       if (rec.returnStatus === 'PULANG' || rec.returnStatus === 'PULANG_TEPAT') returnStatus = 'Pulang Tepat Waktu';
@@ -1159,7 +1200,8 @@ export function exportDashboardAttendanceExcel(options: {
       else if (rec.returnTime && rec.returnTime !== '-') returnStatus = 'Sudah Pulang';
       else returnStatus = 'Belum Pulang';
 
-      returnScannedBy = rec.returnScannedBy || (rec.returnTime ? 'Pos Scanner Pulang' : '-');
+      const rawReturnScannedBy = rec.returnScannedBy || (rec.returnTime ? 'Pos Scanner Pulang' : '-');
+      returnScannedBy = (returnTime !== '-' || rec.returnStatus) ? cleanOfficerAccountName(rawReturnScannedBy, rec.returnValidatorName) : '-';
     }
 
     return {

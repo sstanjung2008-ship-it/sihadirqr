@@ -15,7 +15,8 @@ import {
   getAttendanceRecords, 
   saveAttendanceRecords,
   calculateAttendanceStatus,
-  getLateCutoffTime 
+  getLateCutoffTime,
+  saveLearningJournalDirectlyToCloud
 } from '../lib/storage';
 import { 
   BookOpen, 
@@ -50,7 +51,9 @@ import {
   RotateCcw,
   PlusCircle,
   HeartPulse,
-  UserX
+  UserX,
+  Cloud,
+  RefreshCw
 } from 'lucide-react';
 import { exportLearningJournalPdf, exportTeacherJournalPdf } from '../lib/exportUtils';
 import { StudentGradesSection } from './StudentGradesSection';
@@ -226,6 +229,8 @@ export const LearningJournalView: React.FC<LearningJournalViewProps> = ({
   const [savedJournalId, setSavedJournalId] = useState<string | null>(null);
   const [isSaved, setIsSaved] = useState<boolean>(false);
   const [isEditing, setIsEditing] = useState<boolean>(true);
+  const [isSavingToCloud, setIsSavingToCloud] = useState<boolean>(false);
+  const [lastCloudSavedTime, setLastCloudSavedTime] = useState<string | null>(null);
 
   // Attendance Edit State (allows quick edit of student attendance status directly from journal)
   const [editingAttendanceStudent, setEditingAttendanceStudent] = useState<Student | null>(null);
@@ -846,8 +851,8 @@ export const LearningJournalView: React.FC<LearningJournalViewProps> = ({
     setSelectedHistoryJournal(null);
   };
 
-  // Handle Form Submission
-  const handleSubmit = (e: React.FormEvent) => {
+  // Handle Form Submission with Real-Time Cloud Firestore Write
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
     const finalSubject = selectedSubject === 'LAINNYA' ? customSubject.trim() : selectedSubject;
@@ -898,19 +903,44 @@ export const LearningJournalView: React.FC<LearningJournalViewProps> = ({
       createdAt: existingJournal?.createdAt || new Date().toISOString()
     };
 
-    onSaveJournal(savedJournal);
+    setIsSavingToCloud(true);
+    try {
+      // 1. Eksekusi Real-Time Cloud Write langsung dalam satu write ke Cloud Firestore
+      await saveLearningJournalDirectlyToCloud(savedJournal);
 
-    // Save state & transition to saved mode
-    setSavedJournalId(targetJournalId);
-    setIsSaved(true);
-    setIsEditing(false);
+      // 2. Kirim ke callback props App
+      onSaveJournal(savedJournal);
 
-    // Show Toast Success
-    const toastMsg = existingJournal
-      ? `Perubahan Jurnal KBM ${finalSubject} (${currentClass.name}) berhasil disimpan!`
-      : `Jurnal KBM ${finalSubject} (${currentClass.name}) berhasil disimpan! Data tersimpan dan dapat diedit.`;
-    setSuccessToast({ title: 'BERHASIL DISIMPAN!', message: toastMsg });
-    setTimeout(() => setSuccessToast(null), 4000);
+      // Save state & transition to saved mode
+      setSavedJournalId(targetJournalId);
+      setIsSaved(true);
+      setIsEditing(false);
+
+      const now = new Date();
+      const timeStr = now.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }) + ' WITA';
+      setLastCloudSavedTime(timeStr);
+
+      // 3. Tampilkan Indikator Visual Notifikasi Sukses Cloud Write
+      const toastMsg = `Jurnal KBM ${finalSubject} (${currentClass.name}) berhasil disimpan permanen ke Cloud Firestore (${timeStr}). Data langsung seragam dan dapat diakses oleh Admin & Guru di seluruh perangkat.`;
+      setSuccessToast({ 
+        title: '✅ BERHASIL TERSIMPAN DI CLOUD FIRESTORE!', 
+        message: toastMsg 
+      });
+      setTimeout(() => setSuccessToast(null), 6000);
+    } catch (err: any) {
+      console.error('[Jurnal KBM Cloud Write Error]', err);
+      onSaveJournal(savedJournal);
+      setSavedJournalId(targetJournalId);
+      setIsSaved(true);
+      setIsEditing(false);
+      setSuccessToast({ 
+        title: 'TERSINKRONISASI KE ANTREAN', 
+        message: `Jurnal tersimpan di perangkat lokal dan akan terunggah otomatis ke cloud.` 
+      });
+      setTimeout(() => setSuccessToast(null), 4000);
+    } finally {
+      setIsSavingToCloud(false);
+    }
 
     // Note: Form data (material, limit, notes, ratings) remains on screen!
   };
@@ -1044,11 +1074,17 @@ export const LearningJournalView: React.FC<LearningJournalViewProps> = ({
                     }`}>
                       {isEditing ? 'Bisa Diedit' : 'Tersimpan & Tampil Lengkap'}
                     </span>
+                    {lastCloudSavedTime && (
+                      <span className="text-[10px] font-extrabold px-2.5 py-0.5 rounded-full bg-blue-50 text-blue-800 border border-blue-200 flex items-center gap-1">
+                        <Cloud className="w-3 h-3 text-blue-600" />
+                        Cloud Firestore ({lastCloudSavedTime})
+                      </span>
+                    )}
                   </div>
                   <p className="text-xs mt-0.5 opacity-90">
                     {isEditing 
                       ? 'Silakan ubah isian data jurnal atau keaktifan siswa di bawah, lalu klik "Simpan Perubahan".'
-                      : 'Semua data jurnal tetap ditampilkan. Klik tombol "Edit Jurnal" di bawah jika ingin mengubah data, atau klik "Input Jurnal Baru" untuk membuat jurnal baru.'
+                      : 'Semua data jurnal tetap ditampilkan dan tersinkronisasi di cloud. Klik tombol "Edit Jurnal" di bawah jika ingin mengubah data, atau klik "Input Jurnal Baru" untuk membuat sesi baru.'
                     }
                   </p>
                 </div>
@@ -1579,22 +1615,40 @@ export const LearningJournalView: React.FC<LearningJournalViewProps> = ({
                     <button
                       type="submit"
                       id="btn-simpan-perubahan-jurnal"
-                      disabled={currentClassStudents.length === 0}
+                      disabled={currentClassStudents.length === 0 || isSavingToCloud}
                       className="bg-amber-600 hover:bg-amber-700 text-white font-black text-xs px-6 py-3.5 rounded-2xl shadow-lg shadow-amber-600/20 flex items-center gap-2 transition-all cursor-pointer hover:scale-[1.01] disabled:opacity-50 disabled:cursor-not-allowed"
                     >
-                      <Save className="w-4 h-4 text-amber-200" />
-                      Simpan Perubahan Jurnal
+                      {isSavingToCloud ? (
+                        <>
+                          <RefreshCw className="w-4 h-4 text-amber-200 animate-spin" />
+                          <span>Menyimpan ke Cloud Firestore...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Save className="w-4 h-4 text-amber-200" />
+                          <span>Simpan Perubahan Jurnal</span>
+                        </>
+                      )}
                     </button>
                   </>
                 ) : (
                   <button
                     type="submit"
                     id="btn-simpan-jurnal"
-                    disabled={currentClassStudents.length === 0}
+                    disabled={currentClassStudents.length === 0 || isSavingToCloud}
                     className="bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs px-6 py-3.5 rounded-2xl shadow-lg shadow-emerald-600/20 flex items-center gap-2 transition-all cursor-pointer hover:scale-[1.01] disabled:opacity-50 disabled:cursor-not-allowed"
                   >
-                    <Save className="w-4 h-4 text-emerald-200" />
-                    Simpan Jurnal KBM
+                    {isSavingToCloud ? (
+                      <>
+                        <RefreshCw className="w-4 h-4 text-emerald-200 animate-spin" />
+                        <span>Menyimpan ke Cloud Firestore...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Save className="w-4 h-4 text-emerald-200" />
+                        <span>Simpan Jurnal KBM</span>
+                      </>
+                    )}
                   </button>
                 )}
               </div>

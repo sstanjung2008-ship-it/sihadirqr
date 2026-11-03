@@ -13,7 +13,8 @@ import {
   saveStudentCharacterLogs,
   getStudentCharacterLogs,
   restoreAllManualCharacterLogs,
-  refreshCloudData
+  refreshCloudData,
+  saveStudentCharacterLogDirectlyToCloud
 } from '../lib/storage';
 import { 
   Plus, 
@@ -68,6 +69,179 @@ interface CharacterPointsViewProps {
   userSession?: UserSession | null;
 }
 
+const MONTH_NAMES_INDONESIA = [
+  'Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni',
+  'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'
+];
+
+interface GroupedMonthDates {
+  key: string;
+  year: number;
+  monthName: string;
+  monthLabel: string;
+  days: number[];
+  fullDates: string[];
+}
+
+function groupDatesByMonthAndYear(dateStrings?: string[]): GroupedMonthDates[] {
+  if (!dateStrings || !Array.isArray(dateStrings) || dateStrings.length === 0) return [];
+
+  const cleanDates = Array.from(new Set(
+    dateStrings.filter(d => typeof d === 'string' && d.trim() !== '' && d !== '-')
+  ));
+
+  const groupsMap = new Map<string, { year: number; month: number; days: { day: number; fullDate: string }[] }>();
+
+  cleanDates.forEach(dateStr => {
+    const parts = dateStr.split(/[-/]/);
+    if (parts.length >= 3) {
+      const year = parseInt(parts[0], 10);
+      const month = parseInt(parts[1], 10);
+      const day = parseInt(parts[2].substring(0, 2), 10);
+
+      if (!isNaN(year) && !isNaN(month) && !isNaN(day) && month >= 1 && month <= 12) {
+        const key = `${year}-${String(month).padStart(2, '0')}`;
+        if (!groupsMap.has(key)) {
+          groupsMap.set(key, { year, month, days: [] });
+        }
+        groupsMap.get(key)!.days.push({ day, fullDate: dateStr });
+        return;
+      }
+    }
+
+    const d = new Date(dateStr);
+    if (!isNaN(d.getTime())) {
+      const year = d.getFullYear();
+      const month = d.getMonth() + 1;
+      const day = d.getDate();
+      const key = `${year}-${String(month).padStart(2, '0')}`;
+      if (!groupsMap.has(key)) {
+        groupsMap.set(key, { year, month, days: [] });
+      }
+      groupsMap.get(key)!.days.push({ day, fullDate: dateStr });
+    }
+  });
+
+  // Urutkan grup secara descending (bulan terbaru di atas)
+  const sortedKeys = Array.from(groupsMap.keys()).sort((a, b) => b.localeCompare(a));
+
+  return sortedKeys.map(key => {
+    const group = groupsMap.get(key)!;
+    // Urutkan hari secara ascending (tanggal 1, 2, 3...)
+    group.days.sort((a, b) => a.day - b.day);
+    const uniqueDaysMap = new Map<number, string>();
+    group.days.forEach(item => {
+      if (!uniqueDaysMap.has(item.day)) {
+        uniqueDaysMap.set(item.day, item.fullDate);
+      }
+    });
+
+    const days = Array.from(uniqueDaysMap.keys());
+    const fullDates = Array.from(uniqueDaysMap.values());
+    const monthName = MONTH_NAMES_INDONESIA[group.month - 1] || `Bulan ${group.month}`;
+
+    return {
+      key,
+      year: group.year,
+      monthName,
+      monthLabel: `${monthName} ${group.year}`,
+      days,
+      fullDates
+    };
+  });
+}
+
+interface CompactGroupedDatesProps {
+  dates?: string[];
+  theme?: 'emerald' | 'rose' | 'red' | 'orange' | 'amber' | 'slate';
+}
+
+const CompactGroupedDates: React.FC<CompactGroupedDatesProps> = ({
+  dates,
+  theme = 'slate'
+}) => {
+  const groups = useMemo(() => groupDatesByMonthAndYear(dates), [dates]);
+
+  if (groups.length === 0) return null;
+
+  const themeClasses = {
+    emerald: {
+      box: 'bg-emerald-50/60 border-emerald-100/90',
+      icon: 'text-emerald-600',
+      label: 'text-emerald-950',
+      pill: 'bg-white text-emerald-800 border-emerald-200/90 hover:bg-emerald-100/70',
+      count: 'text-emerald-700'
+    },
+    rose: {
+      box: 'bg-rose-50/60 border-rose-100/90',
+      icon: 'text-rose-600',
+      label: 'text-rose-950',
+      pill: 'bg-white text-rose-800 border-rose-200/90 hover:bg-rose-100/70',
+      count: 'text-rose-700'
+    },
+    red: {
+      box: 'bg-red-50/60 border-red-100/90',
+      icon: 'text-red-600',
+      label: 'text-red-950',
+      pill: 'bg-white text-red-800 border-red-200/90 hover:bg-red-100/70',
+      count: 'text-red-700'
+    },
+    orange: {
+      box: 'bg-orange-50/60 border-orange-100/90',
+      icon: 'text-orange-600',
+      label: 'text-orange-950',
+      pill: 'bg-white text-orange-800 border-orange-200/90 hover:bg-orange-100/70',
+      count: 'text-orange-700'
+    },
+    amber: {
+      box: 'bg-amber-50/60 border-amber-100/90',
+      icon: 'text-amber-600',
+      label: 'text-amber-950',
+      pill: 'bg-white text-amber-800 border-amber-200/90 hover:bg-amber-100/70',
+      count: 'text-amber-700'
+    },
+    slate: {
+      box: 'bg-slate-50 border-slate-100',
+      icon: 'text-slate-400',
+      label: 'text-slate-800',
+      pill: 'bg-white text-slate-700 border-slate-200 hover:bg-slate-100',
+      count: 'text-slate-500'
+    }
+  }[theme];
+
+  return (
+    <div className="pt-2 border-t border-slate-100/90 space-y-1.5">
+      {groups.map(group => (
+        <div
+          key={group.key}
+          className={`rounded-xl p-2 border flex flex-col sm:flex-row sm:items-center gap-1.5 sm:gap-2 transition-all ${themeClasses.box}`}
+        >
+          <div className="flex items-center gap-1.5 shrink-0">
+            <Calendar className={`w-3.5 h-3.5 ${themeClasses.icon}`} />
+            <span className={`font-bold text-[11px] ${themeClasses.label}`}>
+              {group.monthLabel}
+            </span>
+            <span className={`text-[10px] font-bold ${themeClasses.count}`}>
+              ({group.days.length} hari):
+            </span>
+          </div>
+          <div className="flex items-center gap-1 flex-wrap">
+            {group.days.map((dayNum, idx) => (
+              <span
+                key={idx}
+                title={`${dayNum} ${group.monthLabel} (${group.fullDates[idx]})`}
+                className={`px-1.5 py-0.5 rounded-md font-mono text-[9px] sm:text-[10px] font-bold border shadow-2xs transition-colors cursor-default ${themeClasses.pill}`}
+              >
+                {dayNum}
+              </span>
+            ))}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+};
+
 export const CharacterPointsView: React.FC<CharacterPointsViewProps> = ({
   students,
   classes,
@@ -98,6 +272,8 @@ export const CharacterPointsView: React.FC<CharacterPointsViewProps> = ({
   const [lastRefreshedAt, setLastRefreshedAt] = useState<string>(() => {
     return new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }) + ' WITA';
   });
+  const [isSavingCharacterToCloud, setIsSavingCharacterToCloud] = useState<boolean>(false);
+  const [cloudSuccessToast, setCloudSuccessToast] = useState<{ title: string; message: string } | null>(null);
 
   const handleManualCloudRefresh = async () => {
     setIsRefreshingCloud(true);
@@ -357,8 +533,8 @@ export const CharacterPointsView: React.FC<CharacterPointsViewProps> = ({
 
   // Pre-calculate/memoize character summary map for fast lookup and filtering using optimized batch index
   const studentScoresMap = useMemo(() => {
-    return calculateBatchStudentCharacterSummaries(students, allLogs, attendanceRecords);
-  }, [students, allLogs, attendanceRecords]);
+    return calculateBatchStudentCharacterSummaries(students, allLogs, attendanceRecords, learningJournals, schoolProfile);
+  }, [students, allLogs, attendanceRecords, learningJournals, schoolProfile]);
 
   // Filter students based on Class, Search, and Score Filter (sorted Ascending by student name)
   const filteredStudents = useMemo(() => {
@@ -479,14 +655,14 @@ export const CharacterPointsView: React.FC<CharacterPointsViewProps> = ({
         unreturnedDates: []
       };
     }
-    const computed = calculateStudentCharacterSummary(student, allLogs, attendanceRecords);
+    const computed = calculateStudentCharacterSummary(student, allLogs, attendanceRecords, learningJournals, schoolProfile);
     if (student.id) {
       studentScoresMap.set(student.id, computed);
       studentScoresMap.set(student.id.trim(), computed);
       studentScoresMap.set(student.id.trim().toLowerCase(), computed);
     }
     return computed;
-  }, [studentScoresMap, students, allLogs, attendanceRecords]);
+  }, [studentScoresMap, students, allLogs, attendanceRecords, learningJournals, schoolProfile]);
 
   // Memoized character score summary for currently viewed detail student (prevents redundant recomputations)
   const detailStudentScore = useMemo(() => {
@@ -620,8 +796,8 @@ export const CharacterPointsView: React.FC<CharacterPointsViewProps> = ({
     });
   }, [traits, inputTraitType, inputTraitSearch]);
 
-  // Submit New Character Point Log
-  const handleSubmitLog = (e: React.FormEvent) => {
+  // Submit New Character Point Log (Real-time Cloud Write dalam satu write)
+  const handleSubmitLog = async (e: React.FormEvent) => {
     e.preventDefault();
 
     const selectedStudent = students.find(s => s.id === inputStudentId) || (detailStudent?.id === inputStudentId ? detailStudent : undefined) || detailStudent;
@@ -662,18 +838,35 @@ export const CharacterPointsView: React.FC<CharacterPointsViewProps> = ({
       isManual: true
     };
 
-    // 1. Simpan langsung ke brankas manual permanen (anti-hilang)
-    savePermanentManualCharacterLogs([newLog]);
+    setIsSavingCharacterToCloud(true);
+    try {
+      // 1. Eksekusi Real-time Cloud Write langsung dalam satu write ke Cloud Firestore
+      await saveStudentCharacterLogDirectlyToCloud(newLog);
 
-    // 2. Simpan juga ke storage dan sinkronkan ke cloud
-    const currentLogs = getStudentCharacterLogs();
-    const updated = deduplicateCharacterLogs([newLog, ...currentLogs]);
-    saveStudentCharacterLogs(updated, true);
+      // 2. Panggil callback props
+      onAddLog(newLog);
+      setHighlightedLogId(newLog.id);
+      setShowAddModal(false);
 
-    // 3. Panggil callback props
-    onAddLog(newLog);
-    setHighlightedLogId(newLog.id);
-    setShowAddModal(false);
+      const timeStr = now.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }) + ' WITA';
+      setCloudSuccessToast({
+        title: '✅ NILAI KARAKTER TERSIMPAN DI CLOUD FIRESTORE!',
+        message: `Penilaian "${selectedTrait.name}" (${selectedTrait.points > 0 ? '+' : ''}${selectedTrait.points} Poin) untuk siswa ${selectedStudent.name} (${selectedStudent.className}) berhasil tersimpan permanen di Cloud Firestore (${timeStr}). Data seragam di seluruh perangkat.`
+      });
+      setTimeout(() => setCloudSuccessToast(null), 6000);
+    } catch (err: any) {
+      console.error('[Character Cloud Write Error]', err);
+      onAddLog(newLog);
+      setHighlightedLogId(newLog.id);
+      setShowAddModal(false);
+      setCloudSuccessToast({
+        title: 'TERSINKRONISASI KE ANTREAN',
+        message: 'Nilai karakter tersimpan di perangkat lokal dan akan disinkronkan ke cloud.'
+      });
+      setTimeout(() => setCloudSuccessToast(null), 4000);
+    } finally {
+      setIsSavingCharacterToCloud(false);
+    }
   };
 
   // Follow Up Handlers
@@ -792,7 +985,18 @@ export const CharacterPointsView: React.FC<CharacterPointsViewProps> = ({
   };
 
   return (
-    <div className="p-4 sm:p-6 max-w-7xl mx-auto space-y-6">
+    <div className="p-4 sm:p-6 max-w-7xl mx-auto space-y-6 relative">
+      {/* Toast Notification Cloud Success */}
+      {cloudSuccessToast && (
+        <div className="fixed top-5 right-5 z-50 bg-emerald-600 text-white px-5 py-3.5 rounded-2xl shadow-2xl flex items-center gap-3 border border-emerald-400 animate-in fade-in slide-in-from-top-4 duration-300 max-w-md">
+          <CheckCircle2 className="w-6 h-6 text-emerald-200 shrink-0" />
+          <div>
+            <h4 className="font-extrabold text-sm">{cloudSuccessToast.title}</h4>
+            <p className="text-xs text-emerald-100">{cloudSuccessToast.message}</p>
+          </div>
+        </div>
+      )}
+
       {/* Top Banner Header */}
       <div className="bg-gradient-to-r from-indigo-900 via-indigo-800 to-slate-900 rounded-3xl p-6 text-white shadow-xl flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
@@ -1470,9 +1674,17 @@ export const CharacterPointsView: React.FC<CharacterPointsViewProps> = ({
                 </button>
                 <button
                   type="submit"
-                  className="px-6 py-2.5 text-sm font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-xl shadow-lg transition-all cursor-pointer"
+                  disabled={isSavingCharacterToCloud}
+                  className="px-6 py-2.5 text-sm font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-xl shadow-lg transition-all cursor-pointer flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  Simpan Nilai Karakter
+                  {isSavingCharacterToCloud ? (
+                    <>
+                      <RefreshCw className="w-4 h-4 animate-spin text-indigo-200" />
+                      <span>Menyimpan ke Cloud Firestore...</span>
+                    </>
+                  ) : (
+                    <span>Simpan Nilai Karakter</span>
+                  )}
                 </button>
               </div>
             </form>
@@ -1506,6 +1718,17 @@ export const CharacterPointsView: React.FC<CharacterPointsViewProps> = ({
 
               {/* Action Buttons Header */}
               <div className="flex items-center gap-2 shrink-0 self-end sm:self-center">
+                <button
+                  type="button"
+                  onClick={handleManualCloudRefresh}
+                  disabled={isRefreshingCloud}
+                  className="px-2.5 sm:px-3 py-1.5 bg-white/10 hover:bg-white/20 active:scale-95 text-white font-bold text-xs rounded-xl transition-all flex items-center gap-1.5 shadow-sm cursor-pointer disabled:opacity-50 border border-white/20"
+                  title="Segarkan data presensi & karakter terbaru langsung dari Cloud Firestore"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 text-sky-300 ${isRefreshingCloud ? 'animate-spin' : ''}`} />
+                  <span className="hidden sm:inline">{isRefreshingCloud ? 'Sinkron...' : 'Sinkron Cloud'}</span>
+                </button>
+
                 <button
                   type="button"
                   onClick={handleExportDetailPdf}
@@ -1658,21 +1881,7 @@ export const CharacterPointsView: React.FC<CharacterPointsViewProps> = ({
                               </span>
                             </div>
 
-                            {detailStudentScore.onTimeDates && detailStudentScore.onTimeDates.length > 0 && (
-                              <div className="pt-1.5 border-t border-slate-100 flex items-center gap-1 flex-wrap text-[10px]">
-                                <span className="text-slate-400 font-medium">Tanggal:</span>
-                                {detailStudentScore.onTimeDates.slice(0, 6).map((dateStr, i) => (
-                                  <span key={i} className="px-1.5 py-0.5 bg-slate-100 text-slate-700 rounded font-mono text-[9px] sm:text-[10px] font-semibold">
-                                    {dateStr}
-                                  </span>
-                                ))}
-                                {detailStudentScore.onTimeDates.length > 6 && (
-                                  <span className="text-slate-400 font-bold text-[9px] sm:text-[10px]">
-                                    +{detailStudentScore.onTimeDates.length - 6} lainnya
-                                  </span>
-                                )}
-                              </div>
-                            )}
+                            <CompactGroupedDates dates={detailStudentScore.onTimeDates} theme="emerald" />
                           </div>
                         )}
 
@@ -1703,21 +1912,7 @@ export const CharacterPointsView: React.FC<CharacterPointsViewProps> = ({
                               </span>
                             </div>
 
-                            {detailStudentScore.lateDates && detailStudentScore.lateDates.length > 0 && (
-                              <div className="pt-1.5 border-t border-slate-100 flex items-center gap-1 flex-wrap text-[10px]">
-                                <span className="text-slate-400 font-medium">Tanggal:</span>
-                                {detailStudentScore.lateDates.slice(0, 6).map((dateStr, i) => (
-                                  <span key={i} className="px-1.5 py-0.5 bg-slate-100 text-slate-700 rounded font-mono text-[9px] sm:text-[10px] font-semibold">
-                                    {dateStr}
-                                  </span>
-                                ))}
-                                {detailStudentScore.lateDates.length > 6 && (
-                                  <span className="text-slate-400 font-bold text-[9px] sm:text-[10px]">
-                                    +{detailStudentScore.lateDates.length - 6} lainnya
-                                  </span>
-                                )}
-                              </div>
-                            )}
+                            <CompactGroupedDates dates={detailStudentScore.lateDates} theme="rose" />
                           </div>
                         )}
 
@@ -1748,21 +1943,7 @@ export const CharacterPointsView: React.FC<CharacterPointsViewProps> = ({
                               </span>
                             </div>
 
-                            {detailStudentScore.alpaDates && detailStudentScore.alpaDates.length > 0 && (
-                              <div className="pt-1.5 border-t border-slate-100 flex items-center gap-1 flex-wrap text-[10px]">
-                                <span className="text-slate-400 font-medium">Tanggal:</span>
-                                {detailStudentScore.alpaDates.slice(0, 6).map((dateStr, i) => (
-                                  <span key={i} className="px-1.5 py-0.5 bg-slate-100 text-slate-700 rounded font-mono text-[9px] sm:text-[10px] font-semibold">
-                                    {dateStr}
-                                  </span>
-                                ))}
-                                {detailStudentScore.alpaDates.length > 6 && (
-                                  <span className="text-slate-400 font-bold text-[9px] sm:text-[10px]">
-                                    +{detailStudentScore.alpaDates.length - 6} lainnya
-                                  </span>
-                                )}
-                              </div>
-                            )}
+                            <CompactGroupedDates dates={detailStudentScore.alpaDates} theme="red" />
                           </div>
                         )}
 
@@ -1793,21 +1974,7 @@ export const CharacterPointsView: React.FC<CharacterPointsViewProps> = ({
                               </span>
                             </div>
 
-                            {detailStudentScore.unscannedInDates && detailStudentScore.unscannedInDates.length > 0 && (
-                              <div className="pt-1.5 border-t border-slate-100 flex items-center gap-1 flex-wrap text-[10px]">
-                                <span className="text-slate-400 font-medium">Tanggal:</span>
-                                {detailStudentScore.unscannedInDates.slice(0, 6).map((dateStr, i) => (
-                                  <span key={i} className="px-1.5 py-0.5 bg-slate-100 text-slate-700 rounded font-mono text-[9px] sm:text-[10px] font-semibold">
-                                    {dateStr}
-                                  </span>
-                                ))}
-                                {detailStudentScore.unscannedInDates.length > 6 && (
-                                  <span className="text-slate-400 font-bold text-[9px] sm:text-[10px]">
-                                    +{detailStudentScore.unscannedInDates.length - 6} lainnya
-                                  </span>
-                                )}
-                              </div>
-                            )}
+                            <CompactGroupedDates dates={detailStudentScore.unscannedInDates} theme="orange" />
                           </div>
                         )}
 
@@ -1838,21 +2005,7 @@ export const CharacterPointsView: React.FC<CharacterPointsViewProps> = ({
                               </span>
                             </div>
 
-                            {detailStudentScore.unreturnedDates && detailStudentScore.unreturnedDates.length > 0 && (
-                              <div className="pt-1.5 border-t border-slate-100 flex items-center gap-1 flex-wrap text-[10px]">
-                                <span className="text-slate-400 font-medium">Tanggal:</span>
-                                {detailStudentScore.unreturnedDates.slice(0, 6).map((dateStr, i) => (
-                                  <span key={i} className="px-1.5 py-0.5 bg-slate-100 text-slate-700 rounded font-mono text-[9px] sm:text-[10px] font-semibold">
-                                    {dateStr}
-                                  </span>
-                                ))}
-                                {detailStudentScore.unreturnedDates.length > 6 && (
-                                  <span className="text-slate-400 font-bold text-[9px] sm:text-[10px]">
-                                    +{detailStudentScore.unreturnedDates.length - 6} lainnya
-                                  </span>
-                                )}
-                              </div>
-                            )}
+                            <CompactGroupedDates dates={detailStudentScore.unreturnedDates} theme="amber" />
                           </div>
                         )}
                       </div>

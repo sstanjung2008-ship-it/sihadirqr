@@ -164,10 +164,9 @@ export default function App() {
       // Ignore iframe history restrictions
     }
 
-    // Manual-Trigger Synchronization upon accessing/navigating to the dashboard (Requirement 7)
-    if (safeTab === 'dashboard') {
-      refreshCloudData(false).catch(() => {});
-    }
+    // Sinkronisasi Data Real-Time Cloud saat membuka halaman / tab baru
+    // Menghapus ketergantungan pada cache lokal usang sehingga tampilan seragam di semua perangkat
+    refreshCloudData(false).catch(() => {});
   }, []);
 
   // Hardware/Device & Browser Back Button Handler (popstate)
@@ -516,15 +515,25 @@ export default function App() {
       }
     };
 
+    const handleVisibilityOrFocus = () => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
+        refreshCloudData(false).catch(() => {});
+      }
+    };
+
     window.addEventListener('sihadir_storage_updated', refreshDataFromStorage);
     window.addEventListener('storage', handleStorageEvent);
     window.addEventListener('sihadir_network_toast', handleNetworkToast);
+    window.addEventListener('focus', handleVisibilityOrFocus);
+    document.addEventListener('visibilitychange', handleVisibilityOrFocus);
 
     return () => {
       isCancelled = true;
       window.removeEventListener('sihadir_storage_updated', refreshDataFromStorage);
       window.removeEventListener('storage', handleStorageEvent);
       window.removeEventListener('sihadir_network_toast', handleNetworkToast);
+      window.removeEventListener('focus', handleVisibilityOrFocus);
+      document.removeEventListener('visibilitychange', handleVisibilityOrFocus);
     };
   }, [currentRole, refreshDataFromStorage]);
 
@@ -1749,7 +1758,7 @@ export default function App() {
   const handleSaveJournal = (journal: LearningJournal) => {
     const updated = [journal, ...journals.filter(j => j.id !== journal.id)];
     setJournalsState(updated);
-    saveLearningJournals(updated);
+    saveLearningJournals(updated, true);
 
     // EKSEKUSI PENILAIAN KARAKTER KBM LANGSUNG TERSIMPAN DI CLOUD (BISA SEBELUM 16:00 WITA):
     // Ketika guru mengisi evaluasi keaktifan siswa di Jurnal KBM (Sangat aktif / Tidak ada saat KBM),
@@ -1852,7 +1861,7 @@ export default function App() {
           const newIds = new Set(newKbmLogs.map(l => l.id));
           const filtered = prevLogs.filter(l => !newIds.has(l.id));
           const merged = deduplicateCharacterLogs([...newKbmLogs, ...filtered]);
-          saveStudentCharacterLogs(merged);
+          saveStudentCharacterLogs(merged, true);
           return merged;
         });
       }
@@ -1862,7 +1871,7 @@ export default function App() {
   const handleDeleteJournal = (journalId: string) => {
     const updated = journals.filter(j => j.id !== journalId);
     setJournalsState(updated);
-    saveLearningJournals(updated);
+    saveLearningJournals(updated, true);
   };
 
   const handleAddTeacher = (newTeacherData: Omit<Teacher, 'id'>) => {

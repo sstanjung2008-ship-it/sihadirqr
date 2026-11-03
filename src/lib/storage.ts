@@ -920,8 +920,8 @@ export async function writeCloudDocument(key: string, dataStr: string, timestamp
   const currentRole = getUserSession()?.role;
   // PENGHEMAT KUOTA UTAMA:
   // Tamu belum login atau HP Orang Tua (PARENT) dilarang keras menulis data apa pun ke Cloud Firestore,
-  // KECUALI dokumen permohonan izin (KEYS.LEAVES), ganti kata sandi siswa (KEYS.STUDENTS), atau input nilai karakter & presensi siswa.
-  if (!currentRole && key !== KEYS.PROFILE && key !== KEYS.LEAVES && key !== KEYS.CHARACTER_LOGS && key !== KEYS.ATTENDANCE) {
+  // KECUALI dokumen permohonan izin (KEYS.LEAVES), ganti kata sandi siswa (KEYS.STUDENTS), atau input nilai karakter, presensi, jurnal KBM, dan nilai siswa.
+  if (!currentRole && key !== KEYS.PROFILE && key !== KEYS.LEAVES && key !== KEYS.CHARACTER_LOGS && key !== KEYS.ATTENDANCE && key !== KEYS.LEARNING_JOURNALS && key !== KEYS.GRADES) {
     return;
   }
   if (currentRole === 'PARENT' && key !== KEYS.LEAVES && key !== KEYS.STUDENTS) {
@@ -1159,8 +1159,8 @@ export function syncToCloud(key: string, data: any, instant: boolean = false, ex
   const currentRole = getUserSession()?.role;
   // PENGHEMAT KUOTA UTAMA:
   // Tamu belum login atau HP Orang Tua (PARENT) dilarang keras menulis data apa pun ke Cloud Firestore,
-  // KECUALI dokumen permohonan izin (KEYS.LEAVES) atau saat ganti kata sandi siswa (KEYS.STUDENTS).
-  if (!currentRole && key !== KEYS.PROFILE && key !== KEYS.LEAVES && key !== KEYS.ATTENDANCE && key !== KEYS.CHARACTER_LOGS) {
+  // KECUALI dokumen permohonan izin (KEYS.LEAVES), ganti kata sandi siswa (KEYS.STUDENTS), atau input nilai karakter, presensi, jurnal KBM, dan nilai siswa.
+  if (!currentRole && key !== KEYS.PROFILE && key !== KEYS.LEAVES && key !== KEYS.ATTENDANCE && key !== KEYS.CHARACTER_LOGS && key !== KEYS.LEARNING_JOURNALS && key !== KEYS.GRADES) {
     return;
   }
   if (currentRole === 'PARENT' && key !== KEYS.LEAVES && key !== KEYS.STUDENTS) {
@@ -2574,10 +2574,29 @@ export function mergeAttendanceLists(listA: AttendanceRecord[], listB: Attendanc
   return result;
 }
 
-export function mergeGenericListsById<T extends { id: string }>(local: T[], cloud: T[]): T[] {
+export function mergeGenericListsById<T extends { id: string; updatedAt?: number; createdAt?: string }>(local: T[], cloud: T[]): T[] {
   const map = new Map<string, T>();
-  cloud.forEach(item => map.set(item.id, item));
-  local.forEach(item => map.set(item.id, item));
+  // 1. Masukkan data lokal terlebih dahulu
+  local.forEach(item => {
+    if (item && item.id) map.set(item.id, item);
+  });
+  // 2. Timpa dengan data Cloud (Cloud Firestore otoritatif untuk sinkronisasi multi-perangkat)
+  cloud.forEach(item => {
+    if (item && item.id) {
+      const localItem = map.get(item.id);
+      if (!localItem) {
+        map.set(item.id, item);
+      } else {
+        const cloudTs = Number(item.updatedAt) || (item.createdAt ? new Date(item.createdAt).getTime() : 0);
+        const localTs = Number(localItem.updatedAt) || (localItem.createdAt ? new Date(localItem.createdAt).getTime() : 0);
+        if (localTs > cloudTs) {
+          map.set(item.id, localItem);
+        } else {
+          map.set(item.id, item);
+        }
+      }
+    }
+  });
   return Array.from(map.values());
 }
 
@@ -2840,20 +2859,27 @@ export async function smartSyncAndMergeAllWithCloud(isInitialBoot: boolean = fal
       const cloudTs = Number(cloudDoc?.updatedAt || 0);
       const finalTs = Math.max(cloudTs, prevTs);
 
-      // INTEGRASI NILAI KARAKTER ANTI-HILANG:
-      // Gabungkan data Cloud dengan brankas manual permanen & data lokal
-      // JAMINAN MUTLAK: Seluruh penilaian karakter yang diinput oleh guru melalui tombol +isi nilai tidak boleh hilang!
+      // INTEGRASI NILAI KARAKTER ANTI-HILANG & SERAGAM SEMUA PERANGKAT:
+      // Otoritas Cloud Firestore: Seluruh log karakter yang ada di database Cloud ditampilkan sebagai sumber kebenaran utama.
+      // Catatan manual lokal yang belum sempat terunggah (misal saat offline) digabungkan agar nilai guru tidak pernah hilang.
       if (key === KEYS.CHARACTER_LOGS) {
         const deletedIds = getDeletedCharacterLogIds();
         const permanentManuals = getPermanentManualCharacterLogs();
         const localItems = getLocal();
         const rawCloud = Array.isArray(cloudItems) ? cloudItems : [];
 
-        // Gabungkan seluruh sumber tanpa menghilangkan catatan manual guru
+        // Himpun ID dari cloud agar kita tahu item mana yang sudah ada di cloud
+        const cloudLogIdSet = new Set(rawCloud.map((l: any) => l && l.id ? String(l.id).trim() : ''));
+        const pendingLocalManuals = [...permanentManuals, ...localItems].filter((l: any) => {
+          if (!l || !l.id) return false;
+          const cleanId = String(l.id).trim();
+          return !cloudLogIdSet.has(cleanId) && isManualCharacterLog(l) && !deletedIds.has(cleanId);
+        });
+
+        // rawCloud ditaruh di depan agar data terbaru di Cloud Firestore menang atas cache lokal lama
         const combined = deduplicateCharacterLogs([
-          ...permanentManuals,
-          ...localItems,
-          ...rawCloud
+          ...rawCloud,
+          ...pendingLocalManuals
         ]);
 
         const upacaraResult = repairUpacaraLogs(combined);
@@ -2879,22 +2905,28 @@ export async function smartSyncAndMergeAllWithCloud(isInitialBoot: boolean = fal
       }
 
       const localItems = getLocal();
-      let merged = mergeGenericListsById(localItems, cloudItems);
-      if (key === KEYS.CHARACTER_LOGS) {
-        const deletedIds = getDeletedCharacterLogIds();
-        if (deletedIds.size > 0) {
-          merged = merged.filter((l: any) => l && l.id && !deletedIds.has(String(l.id).trim()));
-        }
-        if (merged.length === 0) {
-          merged = generateInitialCharacterLogs(getStudents());
-        }
-      } else if (key === KEYS.LEARNING_JOURNALS) {
+      let merged: any[] = [];
+      if (key === KEYS.LEARNING_JOURNALS) {
+        // OTORITAS CLOUD JURNAL KBM: Seluruh jurnal dari Cloud Firestore dijadikan data utama agar seragam di semua perangkat.
+        const cloudJournalIdSet = new Set(cloudItems.map((j: any) => j && j.id ? String(j.id).trim() : ''));
+        const pendingLocalJournals = localItems.filter((j: any) => {
+          if (!j || !j.id) return false;
+          return !cloudJournalIdSet.has(String(j.id).trim());
+        });
+        merged = [...cloudItems, ...pendingLocalJournals].sort((a, b) => {
+          const tA = (a.createdAt || a.date || '').trim();
+          const tB = (b.createdAt || b.date || '').trim();
+          return tB.localeCompare(tA);
+        });
         if (merged.length === 0) {
           merged = generateInitialLearningJournals(getStudents(), getSchoolClasses());
         }
-      } else if (key === KEYS.GRADES) {
-        if (merged.length === 0) {
-          merged = generateInitialStudentGrades(getStudents(), getSchoolClasses());
+      } else {
+        merged = mergeGenericListsById(localItems, cloudItems);
+        if (key === KEYS.GRADES) {
+          if (merged.length === 0) {
+            merged = generateInitialStudentGrades(getStudents(), getSchoolClasses());
+          }
         }
       }
       const jsonStr = JSON.stringify(merged);
@@ -5129,6 +5161,51 @@ export function saveLearningJournals(journals: LearningJournal[], instant: boole
   syncToCloud(KEYS.LEARNING_JOURNALS, journals, instant, now);
 }
 
+/**
+ * Menyimpan Form Jurnal KBM langsung ke Cloud Firestore (Real-time Cloud Write dalam satu write).
+ * Menjamin data langsung tersimpan secara permanen di database Cloud dan seragam di semua perangkat.
+ */
+export async function saveLearningJournalDirectlyToCloud(journal: LearningJournal): Promise<{
+  success: boolean;
+  cloudWritten: boolean;
+  timestamp: number;
+  message: string;
+}> {
+  const now = Date.now();
+  const currentJournals = getLearningJournals();
+  const updatedJournals = [journal, ...currentJournals.filter(j => j.id !== journal.id)];
+
+  // 1. Simpan segera di penyimpanan lokal & in-memory
+  const dataStr = JSON.stringify(updatedJournals);
+  safeSetLocalStorage(KEYS.LEARNING_JOURNALS, dataStr);
+  safeSetLocalStorage(KEYS.LEARNING_JOURNALS + '_updatedAt', String(now));
+  notifyStorageUpdated(true);
+
+  // 2. Hapus string cache lama agar penulisan ke cloud langsung diproses tanpa debounce
+  delete lastSavedStringCache[KEYS.LEARNING_JOURNALS];
+
+  let cloudWritten = false;
+  try {
+    setCloudSyncStatus('syncing');
+    await writeCloudDocument(KEYS.LEARNING_JOURNALS, dataStr, now);
+    lastSavedStringCache[KEYS.LEARNING_JOURNALS] = dataStr;
+    cloudWritten = true;
+    setCloudSyncStatus('connected');
+  } catch (err: any) {
+    console.warn('[Direct Cloud Write - Jurnal KBM] Gagal write langsung:', err);
+    syncToCloud(KEYS.LEARNING_JOURNALS, updatedJournals, true, now);
+  }
+
+  return {
+    success: true,
+    cloudWritten,
+    timestamp: now,
+    message: cloudWritten
+      ? `Jurnal KBM ${journal.subject} (${journal.className}) berhasil tersimpan permanen di Cloud Firestore!`
+      : `Jurnal KBM tersimpan di perangkat lokal dan antrean sinkronisasi Cloud.`
+  };
+}
+
 export function getCharacterTraits(): CharacterTrait[] {
   const data = localStorage.getItem(KEYS.CHARACTER_TRAITS);
   if (data === null) {
@@ -6253,8 +6330,13 @@ export function calculateStudentCharacterSummary(
     ? Array.from(classDatesSet).sort() 
     : (studentAtt.length > 0 ? Array.from(new Set(studentAtt.map(r => r.date))).sort() : Array.from(allDatesSet).sort());
 
+  const allJournals = (learningJournals && learningJournals.length > 0) 
+    ? learningJournals 
+    : getLearningJournals();
+  const effectiveProfile = schoolProfile || getSchoolProfile();
+
   const studentRawLogs = deduplicateCharacterLogs((logs || []).filter(l => isLogForStudent(l, student)));
-  const kbmFromJournals = extractStudentKbmLogsFromJournals(student, learningJournals, studentRawLogs, schoolProfile);
+  const kbmFromJournals = extractStudentKbmLogsFromJournals(student, allJournals, studentRawLogs, effectiveProfile);
   const combinedLogs = kbmFromJournals.length > 0 ? deduplicateCharacterLogs([...studentRawLogs, ...kbmFromJournals]) : studentRawLogs;
 
   return computeStudentCharacterSummaryFromData(student, combinedLogs, studentAtt, activeDates);
@@ -6432,7 +6514,11 @@ export function calculateBatchStudentCharacterSummaries(
       : (studentAtt.length > 0 ? Array.from(new Set(studentAtt.map(r => r.date))).sort() : allDatesArray);
 
     const studentRawLogs = deduplicateCharacterLogs(matchedLogs);
-    const kbmFromJournals = extractStudentKbmLogsFromJournals(s, learningJournals, studentRawLogs, schoolProfile);
+    const allJournals = (learningJournals && learningJournals.length > 0) 
+      ? learningJournals 
+      : getLearningJournals();
+    const effectiveProfile = schoolProfile || getSchoolProfile();
+    const kbmFromJournals = extractStudentKbmLogsFromJournals(s, allJournals, studentRawLogs, effectiveProfile);
     const combinedLogs = kbmFromJournals.length > 0 ? deduplicateCharacterLogs([...studentRawLogs, ...kbmFromJournals]) : studentRawLogs;
 
     const summary = computeStudentCharacterSummaryFromData(s, combinedLogs, studentAtt, activeDates);
@@ -6676,6 +6762,58 @@ export function saveStudentCharacterLogs(logs: StudentCharacterLog[], instantClo
   safeSetLocalStorage(KEYS.CHARACTER_LOGS + '_updatedAt', String(now));
   notifyStorageUpdated();
   syncToCloud(KEYS.CHARACTER_LOGS, cleanLogs, instantCloudSync, now);
+}
+
+/**
+ * Menyimpan Input Nilai Karakter Siswa langsung ke Cloud Firestore (Real-time Cloud Write dalam satu write).
+ * Menjamin catatan karakter guru langsung tersimpan permanen di Cloud Firestore dan seragam di semua perangkat.
+ */
+export async function saveStudentCharacterLogDirectlyToCloud(log: StudentCharacterLog): Promise<{
+  success: boolean;
+  cloudWritten: boolean;
+  timestamp: number;
+  message: string;
+}> {
+  const now = Date.now();
+  if (log?.id) unmarkCharacterLogDeleted(log.id);
+
+  // 1. Simpan ke brankas manual permanen (anti-hilang)
+  savePermanentManualCharacterLogs([log]);
+
+  // 2. Gabungkan dengan log yang ada
+  const currentLogs = getStudentCharacterLogs();
+  const upacaraResult = repairUpacaraLogs([log, ...currentLogs]);
+  const kbmResult = repairKbmActiveLogs(upacaraResult.repairedLogs);
+  const cleanLogs = deduplicateCharacterLogs(kbmResult.repairedLogs);
+
+  const dataStr = JSON.stringify(cleanLogs);
+  safeSetLocalStorage(KEYS.CHARACTER_LOGS, dataStr);
+  safeSetLocalStorage(KEYS.CHARACTER_LOGS + '_updatedAt', String(now));
+  notifyStorageUpdated(true);
+
+  // 3. Hapus cache string lama dan tulis langsung ke Cloud Firestore
+  delete lastSavedStringCache[KEYS.CHARACTER_LOGS];
+
+  let cloudWritten = false;
+  try {
+    setCloudSyncStatus('syncing');
+    await writeCloudDocument(KEYS.CHARACTER_LOGS, dataStr, now);
+    lastSavedStringCache[KEYS.CHARACTER_LOGS] = dataStr;
+    cloudWritten = true;
+    setCloudSyncStatus('connected');
+  } catch (err: any) {
+    console.warn('[Direct Cloud Write - Nilai Karakter] Gagal write langsung:', err);
+    syncToCloud(KEYS.CHARACTER_LOGS, cleanLogs, true, now);
+  }
+
+  return {
+    success: true,
+    cloudWritten,
+    timestamp: now,
+    message: cloudWritten
+      ? `Nilai karakter "${log.traitName}" untuk ${log.studentName} berhasil tersimpan permanen ke Cloud Firestore!`
+      : `Nilai karakter tersimpan di perangkat lokal dan antrean sinkronisasi Cloud.`
+  };
 }
 
 // Local-only save for character log cleanup so gate QR scanning NEVER triggers Cloud writes for character logs

@@ -41,6 +41,7 @@ import { StudentFormModal } from './StudentFormModal';
 import { StudentIdCardModal } from './StudentIdCardModal';
 import { BatchPrintModal } from './BatchPrintModal';
 import { ImportStudentsModal } from './ImportStudentsModal';
+import { Pagination } from './Pagination';
 import { 
   downloadStudentImportTemplate,
   exportStudentFullIdentityPdf,
@@ -81,7 +82,7 @@ export const StudentDirectoryView: React.FC<StudentDirectoryViewProps> = ({
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedClass, setSelectedClass] = useState('ALL');
   const [currentPage, setCurrentPage] = useState(1);
-  const ITEMS_PER_PAGE = 10;
+  const [itemsPerPage, setItemsPerPage] = useState<number>(25);
 
   const sortedClasses = useMemo(() => {
     return [...classes].sort((a, b) =>
@@ -326,27 +327,7 @@ export const StudentDirectoryView: React.FC<StudentDirectoryViewProps> = ({
     });
   }, [baseSortedStudents, deferredSearchQuery, activeClassTarget]);
 
-  const totalPages = Math.ceil(filteredStudents.length / ITEMS_PER_PAGE) || 1;
-
-  const visiblePages = useMemo(() => {
-    const maxVisible = 10;
-    if (totalPages <= maxVisible) {
-      return Array.from({ length: totalPages }, (_, i) => i + 1);
-    }
-    let startPage = Math.max(1, currentPage - Math.floor(maxVisible / 2));
-    let endPage = startPage + maxVisible - 1;
-
-    if (endPage > totalPages) {
-      endPage = totalPages;
-      startPage = Math.max(1, endPage - maxVisible + 1);
-    }
-
-    const pages = [];
-    for (let i = startPage; i <= endPage; i++) {
-      pages.push(i);
-    }
-    return pages;
-  }, [currentPage, totalPages]);
+  const totalPages = Math.ceil(filteredStudents.length / itemsPerPage) || 1;
 
   useEffect(() => {
     if (currentPage > totalPages) {
@@ -354,8 +335,8 @@ export const StudentDirectoryView: React.FC<StudentDirectoryViewProps> = ({
     }
   }, [totalPages, currentPage]);
 
-  const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
-  const paginatedStudents = filteredStudents.slice(startIndex, startIndex + ITEMS_PER_PAGE);
+  const startIndex = (currentPage - 1) * itemsPerPage;
+  const paginatedStudents = filteredStudents.slice(startIndex, startIndex + itemsPerPage);
 
   const handleOpenAdd = () => {
     setEditingStudent(null);
@@ -678,47 +659,15 @@ export const StudentDirectoryView: React.FC<StudentDirectoryViewProps> = ({
 
       {/* Pagination Bar */}
       {filteredStudents.length > 0 && (
-        <div className="flex flex-col sm:flex-row items-center justify-between gap-3 bg-white p-4 rounded-3xl border border-slate-200/80 shadow-sm text-xs font-semibold text-slate-600">
-          <div>
-            Menampilkan <span className="font-bold text-slate-900">{startIndex + 1}</span> - <span className="font-bold text-slate-900">{Math.min(startIndex + ITEMS_PER_PAGE, filteredStudents.length)}</span> dari <span className="font-bold text-indigo-600">{filteredStudents.length}</span> Siswa
-          </div>
-
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => setCurrentPage(p => Math.max(p - 1, 1))}
-              disabled={currentPage === 1}
-              className="px-3.5 py-2 rounded-xl border border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-700 disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1 cursor-pointer transition-all font-bold"
-            >
-              <ChevronLeft className="w-4 h-4" />
-              Sebelumnya
-            </button>
-
-            <div className="flex items-center gap-1 px-1 flex-wrap justify-center">
-              {visiblePages.map((pageNum) => (
-                <button
-                  key={pageNum}
-                  onClick={() => setCurrentPage(pageNum)}
-                  className={`w-8 h-8 rounded-xl font-bold flex items-center justify-center transition-all cursor-pointer ${
-                    currentPage === pageNum
-                      ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/20'
-                      : 'bg-slate-50 text-slate-700 border border-slate-200 hover:bg-slate-100'
-                  }`}
-                >
-                  {pageNum}
-                </button>
-              ))}
-            </div>
-
-            <button
-              onClick={() => setCurrentPage(p => Math.min(p + 1, totalPages))}
-              disabled={currentPage === totalPages || totalPages === 0}
-              className="px-3.5 py-2 rounded-xl border border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-700 disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1 cursor-pointer transition-all font-bold"
-            >
-              Selanjutnya
-              <ChevronRight className="w-4 h-4" />
-            </button>
-          </div>
-        </div>
+        <Pagination
+          currentPage={currentPage}
+          totalItems={filteredStudents.length}
+          itemsPerPage={itemsPerPage}
+          onPageChange={setCurrentPage}
+          onItemsPerPageChange={setItemsPerPage}
+          pageSizeOptions={[25, 50, 100]}
+          itemLabel="siswa"
+        />
       )}
 
       {/* Add / Edit Student Modal */}

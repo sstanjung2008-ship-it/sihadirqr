@@ -61,6 +61,7 @@ import {
 import { BulkAlpaManagementModal } from './BulkAlpaManagementModal';
 import { BulkReturnManagementModal, BulkReturnUpdatePayload } from './BulkReturnManagementModal';
 import { ImportAttendanceExcelModal } from './ImportAttendanceExcelModal';
+import { Pagination } from './Pagination';
 import { 
   getLocalDateString, 
   refreshParentChildAttendance, 
@@ -1975,110 +1976,18 @@ export const AttendanceDashboard: React.FC<AttendanceDashboardProps> = ({
             </table>
           </div>
 
-          {/* Pagination Footer (Incremental Loading, Requirement 8) */}
+          {/* Pagination Footer */}
           {filteredStudents.length > 0 && (
-            <div className="px-5 py-3.5 border-t border-slate-100 flex flex-col sm:flex-row items-center justify-between gap-3 bg-slate-50/60 text-xs">
-              <div className="flex items-center gap-3 text-slate-500 font-medium text-xs">
-                <span>
-                  Menampilkan <strong className="text-slate-800">{(currentPage - 1) * pageSize + 1}</strong> - <strong className="text-slate-800">{Math.min(currentPage * pageSize, filteredStudents.length)}</strong> dari <strong className="text-slate-800">{filteredStudents.length}</strong> siswa
-                </span>
-                <span className="hidden sm:inline text-slate-300">|</span>
-                <div className="flex items-center gap-1.5">
-                  <span className="text-[11px] text-slate-500">Baris per halaman:</span>
-                  <select
-                    value={pageSize}
-                    onChange={(e) => {
-                      setPageSize(Number(e.target.value));
-                      setCurrentPage(1);
-                    }}
-                    className="bg-white border border-slate-200 rounded-lg px-2.5 py-1 text-xs font-bold text-slate-700 focus:outline-none cursor-pointer shadow-2xs"
-                  >
-                    <option value={25}>25</option>
-                    <option value={50}>50</option>
-                    <option value={100}>100</option>
-                    <option value={200}>200</option>
-                  </select>
-                </div>
-              </div>
-
-              {totalPages > 1 && (
-                <div className="flex items-center gap-1">
-                  <button
-                    type="button"
-                    onClick={() => setCurrentPage(1)}
-                    disabled={currentPage === 1}
-                    className="p-1.5 rounded-xl border border-slate-200 bg-white font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer shadow-2xs transition-all active:scale-95"
-                    title="Halaman Pertama"
-                  >
-                    <ChevronsLeft className="w-4 h-4" />
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
-                    disabled={currentPage === 1}
-                    className="px-2.5 py-1.5 rounded-xl border border-slate-200 bg-white font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer flex items-center gap-1 shadow-2xs transition-all active:scale-95"
-                    title="Halaman Sebelumnya"
-                  >
-                    <ChevronLeft className="w-3.5 h-3.5" />
-                    <span className="hidden sm:inline">Sebelumnya</span>
-                  </button>
-
-                  {/* Dynamic Page Buttons */}
-                  <div className="flex items-center gap-1">
-                    {Array.from({ length: totalPages }, (_, i) => i + 1)
-                      .filter(p => p === 1 || p === totalPages || Math.abs(p - currentPage) <= 1)
-                      .reduce<(number | string)[]>((acc, p, idx, arr) => {
-                        if (idx > 0 && typeof arr[idx - 1] === 'number' && (p as number) - (arr[idx - 1] as number) > 1) {
-                          acc.push('...');
-                        }
-                        acc.push(p);
-                        return acc;
-                      }, [])
-                      .map((p, idx) => {
-                        if (p === '...') {
-                          return <span key={`dots-${idx}`} className="px-1 text-slate-400 font-bold">...</span>;
-                        }
-                        const isCurrent = p === currentPage;
-                        return (
-                          <button
-                            key={`page-${p}`}
-                            type="button"
-                            onClick={() => setCurrentPage(Number(p))}
-                            className={`min-w-[32px] h-8 rounded-xl font-extrabold text-xs transition-all cursor-pointer shadow-2xs flex items-center justify-center ${
-                              isCurrent
-                                ? 'bg-indigo-600 text-white shadow-indigo-600/30'
-                                : 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-50'
-                            }`}
-                          >
-                            {p}
-                          </button>
-                        );
-                      })}
-                  </div>
-
-                  <button
-                    type="button"
-                    onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
-                    disabled={currentPage === totalPages}
-                    className="px-2.5 py-1.5 rounded-xl border border-slate-200 bg-white font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer flex items-center gap-1 shadow-2xs transition-all active:scale-95"
-                    title="Halaman Berikutnya"
-                  >
-                    <span className="hidden sm:inline">Berikutnya</span>
-                    <ChevronRight className="w-3.5 h-3.5" />
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => setCurrentPage(totalPages)}
-                    disabled={currentPage === totalPages}
-                    className="p-1.5 rounded-xl border border-slate-200 bg-white font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer shadow-2xs transition-all active:scale-95"
-                    title="Halaman Terakhir"
-                  >
-                    <ChevronsRight className="w-4 h-4" />
-                  </button>
-                </div>
-              )}
+            <div className="p-3 bg-slate-50/50 border-t border-slate-100">
+              <Pagination
+                currentPage={currentPage}
+                totalItems={filteredStudents.length}
+                itemsPerPage={pageSize}
+                onPageChange={setCurrentPage}
+                onItemsPerPageChange={setPageSize}
+                pageSizeOptions={[25, 50, 100, 200]}
+                itemLabel="siswa"
+              />
             </div>
           )}
         </div>

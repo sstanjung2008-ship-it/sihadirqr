@@ -48,6 +48,7 @@ import {
   Layers,
   GraduationCap
 } from 'lucide-react';
+import { Pagination } from './Pagination';
 
 interface CharacterPointsViewProps {
   students: Student[];
@@ -1356,6 +1357,21 @@ export const CharacterPointsView: React.FC<CharacterPointsViewProps> = ({
             </tbody>
           </table>
         </div>
+
+        {/* Pagination Controls */}
+        {filteredStudents.length > 0 && (
+          <div className="p-3 bg-slate-50/50 border-t border-slate-100">
+            <Pagination
+              currentPage={currentPage}
+              totalItems={filteredStudents.length}
+              itemsPerPage={itemsPerPage}
+              onPageChange={setCurrentPage}
+              onItemsPerPageChange={setItemsPerPage}
+              pageSizeOptions={[25, 50, 100]}
+              itemLabel="siswa"
+            />
+          </div>
+        )}
       </div>
 
       {/* MODAL 1: Form Guru Mengisi Nilai Karakter */}

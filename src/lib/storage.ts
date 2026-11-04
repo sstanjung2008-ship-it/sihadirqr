@@ -1022,6 +1022,58 @@ export async function writeCloudDocument(key: string, dataStr: string, timestamp
   }
 }
 
+export function repairAndParseChunkedAttendance(rootData: string, otherChunks: string[]): any[] {
+  const recordsMap = new Map<string, any>();
+  
+  if (rootData && rootData.trim()) {
+    try {
+      const p = JSON.parse(rootData);
+      if (Array.isArray(p)) p.forEach(r => recordsMap.set(r.id || `${r.studentId}-${r.date}`, r));
+    } catch {
+      const lastBracket = rootData.lastIndexOf('},');
+      if (lastBracket !== -1) {
+        try {
+          const sub = rootData.slice(0, lastBracket + 1) + ']';
+          const p = JSON.parse(sub);
+          if (Array.isArray(p)) p.forEach(r => recordsMap.set(r.id || `${r.studentId}-${r.date}`, r));
+        } catch {}
+      }
+    }
+  }
+
+  if (otherChunks.length > 0) {
+    const otherFull = otherChunks.join('');
+    const firstObj = otherFull.indexOf('{"id"');
+    if (firstObj !== -1) {
+      const subOther = '[' + otherFull.slice(firstObj);
+      try {
+        const pOther = JSON.parse(subOther);
+        if (Array.isArray(pOther)) {
+          pOther.forEach(r => {
+            const key = r.id || `${r.studentId}-${r.date}`;
+            if (!recordsMap.has(key)) recordsMap.set(key, r);
+          });
+        }
+      } catch {
+        const lastBracketOther = subOther.lastIndexOf('},');
+        if (lastBracketOther !== -1) {
+          try {
+            const pSub = JSON.parse(subOther.slice(0, lastBracketOther + 1) + ']');
+            if (Array.isArray(pSub)) {
+              pSub.forEach(r => {
+                const key = r.id || `${r.studentId}-${r.date}`;
+                if (!recordsMap.has(key)) recordsMap.set(key, r);
+              });
+            }
+          } catch {}
+        }
+      }
+    }
+  }
+
+  return Array.from(recordsMap.values());
+}
+
 export async function readCloudDocument(key: string): Promise<{ data: string; updatedAt: number } | null> {
   try {
     const rootDocRef = doc(db, 'sihadir_app_data', key);
@@ -1067,8 +1119,20 @@ export async function readCloudDocument(key: string): Promise<{ data: string; up
       return null;
     }
     const fullDataStr = (payload.data || '') + otherChunks.join('');
-    lastSavedStringCache[key] = fullDataStr;
-    return { data: fullDataStr, updatedAt };
+    try {
+      JSON.parse(fullDataStr);
+      lastSavedStringCache[key] = fullDataStr;
+      return { data: fullDataStr, updatedAt };
+    } catch {
+      console.warn(`[Firestore Sync] Direct JSON.parse gagal pada ${key} chunked. Menjalankan pemulihan jahitan chunk otomatis...`);
+      const recovered = repairAndParseChunkedAttendance(payload.data || '', otherChunks);
+      if (recovered && recovered.length > 0) {
+        const repairedStr = JSON.stringify(recovered);
+        lastSavedStringCache[key] = repairedStr;
+        return { data: repairedStr, updatedAt };
+      }
+      return null;
+    }
   } catch (err) {
     console.error(`[Firestore Sync] Error reading cloud document for ${key}:`, err);
     return null;

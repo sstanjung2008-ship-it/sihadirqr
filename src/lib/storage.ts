@@ -1,4 +1,4 @@
-import { SchoolProfile, SchoolClass, Student, AttendanceRecord, AttendanceStatus, AttendanceAuditLog, LeaveRequest, Teacher, LearningJournal, CharacterTrait, StudentCharacterLog, CharacterPredicateSettings, UserSession, UserRole, StudentGradeAssessment, StudentGradeItem, LessonPeriod, ClassScheduleSlot } from '../types';
+import { SchoolProfile, SchoolClass, Student, AttendanceRecord, AttendanceStatus, AttendanceAuditLog, LeaveRequest, Teacher, LearningJournal, CharacterTrait, StudentCharacterLog, CharacterPredicateSettings, UserSession, UserRole, StudentGradeAssessment, StudentGradeItem, LessonPeriod, ClassScheduleSlot, OfflinePendingScan } from '../types';
 import { 
   INITIAL_SCHOOL_PROFILE, 
   INITIAL_CLASSES, 
@@ -175,6 +175,14 @@ const setCloudSyncStatus = (status: CloudSyncStatus) => {
 let notifyStorageUpdatedTimer: any = null;
 let isDispatchingStorageUpdated = false;
 let pendingStorageUpdatedAfterDispatch = false;
+
+// Scan Batching & Offline Recovery State
+let scanQueuePendingCount = 0;
+let scanQueueLastFlushTime = 0;
+let scanQueueIdleTimer: any = null;
+let scanQueueCountdownTimer: any = null;
+let scanQueueCountdownSeconds = 0;
+let isScanQueueFlushing = false;
 
 export const notifyStorageUpdated = (immediate: boolean = false) => {
   if (typeof window === 'undefined') return;
@@ -517,6 +525,15 @@ export function isValidAttendanceRecord(rec: any): boolean {
 
   // Tolak rekaman sintetis 1-24 Oktober 2026
   if (isOctoberSyntheticRecord(rec)) {
+    return false;
+  }
+
+  // Strict Rules 1, 2, & 3: Tolak mutlak seluruh rekaman sintetis / baseline histori
+  if (
+    rec.isSynthetic === true ||
+    rec.scannedBy === 'Baseline Histori' ||
+    (typeof rec.id === 'string' && rec.id.startsWith('att-synth-'))
+  ) {
     return false;
   }
 
@@ -3308,10 +3325,8 @@ export async function forceDownloadAllFromCloud(): Promise<{ success: boolean; e
                   writeCloudDocument(key, JSON.stringify(localAtt), Date.now());
                   lastSavedStringCache[key] = JSON.stringify(localAtt);
                 } else {
-                  const initial = generateInitialAttendanceHistory(getStudents());
-                  const cleanInitial = validateAndSanitizeAttendanceRecords(initial);
-                  inMemoryAttendanceRecords = cleanInitial;
-                  safeSetLocalStorage(key, JSON.stringify(cleanInitial));
+                  inMemoryAttendanceRecords = [];
+                  safeSetLocalStorage(key, '[]');
                 }
               } else {
                 let finalAtt = cleanCloud;
@@ -3391,60 +3406,51 @@ export async function forceDownloadAllFromCloud(): Promise<{ success: boolean; e
 let profileSnapshotUnsubscribe: (() => void) | null = null;
 
 /**
- * Mendengarkan perubahan dokumen profil sekolah & jam pulang secara real-time dari Cloud Firestore.
- * Memastikan bila admin mengubah jam pulang/hari aktif di satu perangkat, SELURUH perangkat scanner
- * dan portal seketika menerima pembaruan jam pulang tanpa perlu me-refresh halaman.
+ * Requirement 9: Menggantikan real-time onSnapshot listener dengan one-time fetch (getDoc/getDocs)
+ * Sinkronisasi dijalankan saat halaman dimuat, navigasi ke dasbor, atau ditekan tombol segarkan.
  */
-export function listenToCloudSchoolProfile(): void {
+export async function listenToCloudSchoolProfile(): Promise<void> {
   if (typeof window === 'undefined') return;
-  if (profileSnapshotUnsubscribe) return;
 
   try {
     const profileDocRef = doc(db, 'sihadir_app_data', KEYS.PROFILE);
-    profileSnapshotUnsubscribe = onSnapshot(profileDocRef, (snap) => {
-      if (!snap.exists()) return;
-      const payload = snap.data();
-      if (!payload || !payload.data) return;
+    const snap = await withTimeout(getDoc(profileDocRef), 8000, null);
+    if (!snap || !snap.exists()) return;
+    const payload = snap.data();
+    if (!payload || !payload.data) return;
 
-      try {
-        const cloudProfile: SchoolProfile = typeof payload.data === 'string' ? JSON.parse(payload.data) : payload.data;
-        const localProfile = getSchoolProfile();
+    try {
+      const cloudProfile: SchoolProfile = typeof payload.data === 'string' ? JSON.parse(payload.data) : payload.data;
+      const localProfile = getSchoolProfile();
 
-        const cloudDaily = JSON.stringify(cloudProfile.dailyEndTimes || {});
-        const localDaily = JSON.stringify(localProfile.dailyEndTimes || {});
-        const cloudActive = JSON.stringify(cloudProfile.activeDays || []);
-        const localActive = JSON.stringify(localProfile.activeDays || []);
+      const cloudDaily = JSON.stringify(cloudProfile.dailyEndTimes || {});
+      const localDaily = JSON.stringify(localProfile.dailyEndTimes || {});
+      const cloudActive = JSON.stringify(cloudProfile.activeDays || []);
+      const localActive = JSON.stringify(localProfile.activeDays || []);
 
-        const isDifferent =
-          cloudProfile.endTime !== localProfile.endTime ||
-          cloudProfile.startTime !== localProfile.startTime ||
-          cloudProfile.lateToleranceMinutes !== localProfile.lateToleranceMinutes ||
-          cloudDaily !== localDaily ||
-          cloudActive !== localActive ||
-          cloudProfile.parentPortalLoginEnabled !== localProfile.parentPortalLoginEnabled ||
-          cloudProfile.parentPortalForceLogoutTimestamp !== localProfile.parentPortalForceLogoutTimestamp;
+      const isDifferent =
+        cloudProfile.endTime !== localProfile.endTime ||
+        cloudProfile.startTime !== localProfile.startTime ||
+        cloudProfile.lateToleranceMinutes !== localProfile.lateToleranceMinutes ||
+        cloudDaily !== localDaily ||
+        cloudActive !== localActive ||
+        cloudProfile.parentPortalLoginEnabled !== localProfile.parentPortalLoginEnabled ||
+        cloudProfile.parentPortalForceLogoutTimestamp !== localProfile.parentPortalForceLogoutTimestamp;
 
-        if (isDifferent) {
-          const merged = mergeSchoolProfile(localProfile, cloudProfile);
-          const mergedStr = JSON.stringify(merged);
-          const cloudTs = Number(payload.updatedAt) || Date.now();
-          safeSetLocalStorage(KEYS.PROFILE, mergedStr);
-          safeSetLocalStorage(KEYS.PROFILE + '_updatedAt', String(cloudTs));
-          lastSavedStringCache[KEYS.PROFILE] = mergedStr;
-          notifyStorageUpdated(true);
-        }
-      } catch (err) {
-        console.warn('[Cloud Profile Listener] Gagal memproses update profil dari Cloud:', err);
+      if (isDifferent) {
+        const merged = mergeSchoolProfile(localProfile, cloudProfile);
+        const mergedStr = JSON.stringify(merged);
+        const cloudTs = Number(payload.updatedAt) || Date.now();
+        safeSetLocalStorage(KEYS.PROFILE, mergedStr);
+        safeSetLocalStorage(KEYS.PROFILE + '_updatedAt', String(cloudTs));
+        lastSavedStringCache[KEYS.PROFILE] = mergedStr;
+        notifyStorageUpdated(true);
       }
-    }, (err) => {
-      console.warn('[Cloud Profile Listener] Firestore onSnapshot warning:', err);
-    });
-
-    if (profileSnapshotUnsubscribe) {
-      activeUnsubscribes.push(profileSnapshotUnsubscribe);
+    } catch (err) {
+      console.warn('[Cloud Profile] Gagal memproses update profil dari Cloud:', err);
     }
   } catch (err) {
-    console.warn('[Cloud Profile Listener] Gagal mendaftarkan listener profil Firestore:', err);
+    console.warn('[Cloud Profile] Gagal mengambil profil Firestore:', err);
   }
 }
 
@@ -3453,77 +3459,40 @@ let lastCloudAttendanceTimestamp = 0;
 let isAttendanceSyncingFromCloud = false;
 
 /**
- * Mendengarkan perubahan data presensi dari Cloud Firestore secara real-time.
- * Memastikan saat satu perangkat memindai QR (misal Gerbang 1), SELURUH perangkat lain
- * (Gerbang 2, Admin, Guru) langsung menerima dan menampilkan hasil presensi dalam 1-2 detik
- * tanpa perlu me-refresh halaman dan tanpa saling menimpa data.
+ * Requirement 9: Menggantikan continuous onSnapshot listener presensi dengan one-time fetch
+ * Menghilangkan lonjakan read dan loop latar belakang.
  */
-export function listenToCloudAttendance(): void {
+export async function listenToCloudAttendance(): Promise<void> {
   if (typeof window === 'undefined') return;
-  if (attendanceSnapshotUnsubscribe) return;
+  if (isAttendanceSyncingFromCloud) return;
 
   try {
-    const attDocRef = doc(db, 'sihadir_app_data', KEYS.ATTENDANCE);
-    attendanceSnapshotUnsubscribe = onSnapshot(attDocRef, async (snap) => {
-      if (!snap.exists()) return;
-      const payload = snap.data();
-      if (!payload) return;
+    isAttendanceSyncingFromCloud = true;
+    const cloudDoc = await readCloudDocument(KEYS.ATTENDANCE);
+    if (!cloudDoc || !cloudDoc.data) return;
 
-      const cloudTs = Number(payload.updatedAt) || 0;
-      const localTs = Number(localStorage.getItem(KEYS.ATTENDANCE + '_updatedAt') || '0');
+    const cloudRecords = typeof cloudDoc.data === 'string' ? JSON.parse(cloudDoc.data) : cloudDoc.data;
+    if (!Array.isArray(cloudRecords) || cloudRecords.length === 0) return;
 
-      // Jika update ini dipicu oleh perangkat ini sendiri, lewati untuk mencegah loop
-      if (cloudTs <= localTs && cloudTs <= lastCloudAttendanceTimestamp) {
-        return;
-      }
-      if (isAttendanceSyncingFromCloud) return;
-
-      try {
-        isAttendanceSyncingFromCloud = true;
-        lastCloudAttendanceTimestamp = cloudTs;
-
-        const cloudDoc = await readCloudDocument(KEYS.ATTENDANCE);
-        if (!cloudDoc || !cloudDoc.data) return;
-
-        const cloudRecords = typeof cloudDoc.data === 'string' ? JSON.parse(cloudDoc.data) : cloudDoc.data;
-        if (!Array.isArray(cloudRecords) || cloudRecords.length === 0) return;
-
-        const localRecords = getAttendanceRecords();
-        // Gabungkan secara non-destruktif: scan lokal yang mungkin baru di-scan tidak akan hilang
-        const merged = mergeAttendanceLists(cloudRecords, localRecords);
-        inMemoryAttendanceRecords = merged;
-        const mergedStr = JSON.stringify(merged);
-        safeSetLocalStorage(KEYS.ATTENDANCE, mergedStr);
-        safeSetLocalStorage(KEYS.ATTENDANCE + '_updatedAt', String(cloudTs));
-        lastSavedStringCache[KEYS.ATTENDANCE] = mergedStr;
-        notifyStorageUpdated(true);
-      } catch (err) {
-        console.warn('[Realtime Attendance Listener] Gagal serap update presensi Cloud:', err);
-      } finally {
-        isAttendanceSyncingFromCloud = false;
-      }
-    }, (err) => {
-      console.warn('[Realtime Attendance Listener] Firestore onSnapshot warning:', err);
-    });
-
-    if (attendanceSnapshotUnsubscribe) {
-      activeUnsubscribes.push(attendanceSnapshotUnsubscribe);
-    }
+    const localRecords = getAttendanceRecords();
+    const merged = mergeAttendanceLists(cloudRecords, localRecords);
+    inMemoryAttendanceRecords = merged;
+    const mergedStr = JSON.stringify(merged);
+    safeSetLocalStorage(KEYS.ATTENDANCE, mergedStr);
+    safeSetLocalStorage(KEYS.ATTENDANCE + '_updatedAt', String(cloudDoc.updatedAt || Date.now()));
+    lastSavedStringCache[KEYS.ATTENDANCE] = mergedStr;
+    notifyStorageUpdated(true);
   } catch (err) {
-    console.warn('[Realtime Attendance Listener] Gagal pasang listener presensi:', err);
+    console.warn('[Cloud Attendance] Gagal serap update presensi Cloud:', err);
+  } finally {
+    isAttendanceSyncingFromCloud = false;
   }
 }
 
 // Stop and unsubscribe all active Firestore Realtime listeners
 export function stopFirestoreRealtimeSync(): void {
-  if (profileSnapshotUnsubscribe) {
-    try { profileSnapshotUnsubscribe(); } catch {}
-    profileSnapshotUnsubscribe = null;
-  }
-  if (attendanceSnapshotUnsubscribe) {
-    try { attendanceSnapshotUnsubscribe(); } catch {}
-    attendanceSnapshotUnsubscribe = null;
-  }
+  profileSnapshotUnsubscribe = null;
+  attendanceSnapshotUnsubscribe = null;
   if (activeUnsubscribes.length > 0) {
     activeUnsubscribes.forEach(unsub => {
       try { unsub(); } catch {}
@@ -4277,36 +4246,14 @@ export const TARGET_SEMESTER_DATES = [
 ];
 
 /**
- * Memastikan riwayat presensi memiliki data lengkap untuk seluruh hari sekolah di bulan berjalan dan bulan September,
- * yang wajib ada dan tidak boleh kosong dalam rekapitulasi presensi.
+ * Strict Rule 1, 2, & 3: Meniadakan pembangkitan data sintetis.
+ * Presensi HANYA bersumber dari pemindaian QR riil (isRealScan: true)
+ * atau pengubahan manual oleh Guru/Admin yang terotentikasi.
+ * Siswa yang tidak memindai tetap kosong (null/undefined) tanpa filler otomatis.
  */
-export function ensureCompleteAttendanceHistory(records: AttendanceRecord[], students?: Student[]): AttendanceRecord[] {
-  // JAMINAN MUTLAK: Jika riwayat presensi otentik sudah ada (>= 5000 record), jangan pernah menambahkan baseline sintetis!
-  if (records && records.length >= 5000) {
-    inMemoryAttendanceRecords = records;
-    return records;
-  }
-
-  const todayStr = getWitaDateStr(new Date());
-  const existingDates = new Set(records.map(r => r.date));
-  // Filter missingDates: HANYA hari sekolah masa lalu sebelum hari ini.
-  // Jangan pernah memalsukan data untuk HARI INI (todayStr) atau hari masa depan!
-  const missingDates = TARGET_SEMESTER_DATES.filter(d => !existingDates.has(d) && d !== todayStr && d < todayStr);
-
-  if (missingDates.length === 0 && records.length > 0) {
-    inMemoryAttendanceRecords = records;
-    return records;
-  }
-
-  const activeStudents = (students && students.length > 0) ? students : getStudents();
-  const studentsToUse = activeStudents.length > 0 ? activeStudents : INITIAL_STUDENTS;
-  const baseline = generateInitialAttendanceHistory(studentsToUse, existingDates).filter(r => missingDates.includes(r.date));
-  const merged = mergeAttendanceLists(records, baseline);
-  const sanitized = validateAndSanitizeAttendanceRecords(merged);
-
+export function ensureCompleteAttendanceHistory(records: AttendanceRecord[], _students?: Student[]): AttendanceRecord[] {
+  const sanitized = validateAndSanitizeAttendanceRecords(records);
   inMemoryAttendanceRecords = sanitized;
-  safeSetLocalStorage(KEYS.ATTENDANCE, JSON.stringify(sanitized));
-  safeSetLocalStorage(KEYS.ATTENDANCE + '_updatedAt', String(Date.now()));
   return sanitized;
 }
 
@@ -4315,14 +4262,6 @@ export function getAttendanceRecords(): AttendanceRecord[] {
 
   // 1. Prioritas memori sesi aktif: performa instan tanpa lag baca LocalStorage
   if (inMemoryAttendanceRecords && inMemoryAttendanceRecords.length > 0) {
-    if (inMemoryAttendanceRecords.length >= 5000) {
-      return inMemoryAttendanceRecords;
-    }
-    const todayStr = getWitaDateStr(new Date());
-    const existingDates = new Set(inMemoryAttendanceRecords.map(r => r.date));
-    if (TARGET_SEMESTER_DATES.some(d => !existingDates.has(d) && d !== todayStr && d < todayStr)) {
-      return ensureCompleteAttendanceHistory(inMemoryAttendanceRecords);
-    }
     return inMemoryAttendanceRecords;
   }
 
@@ -4348,17 +4287,10 @@ export function getAttendanceRecords(): AttendanceRecord[] {
   if (data !== null) {
     try {
       const parsed = JSON.parse(data);
-      if (Array.isArray(parsed) && parsed.length > 0) {
+      if (Array.isArray(parsed)) {
         const sanitized = validateAndSanitizeAttendanceRecords(parsed);
-        if (sanitized.length > 0) {
-          if (sanitized.length >= 5000) {
-            inMemoryAttendanceRecords = sanitized;
-            return sanitized;
-          }
-          const complete = ensureCompleteAttendanceHistory(sanitized);
-          inMemoryAttendanceRecords = complete;
-          return complete;
-        }
+        inMemoryAttendanceRecords = sanitized;
+        return sanitized;
       }
     } catch (err) {
       console.warn('[Storage] Gagal parse attendance records:', err);
@@ -4370,36 +4302,15 @@ export function getAttendanceRecords(): AttendanceRecord[] {
     const backup = localStorage.getItem(SAFE_ATTENDANCE_BACKUP_KEY);
     if (backup) {
       const parsedBackup = JSON.parse(backup);
-      if (Array.isArray(parsedBackup) && parsedBackup.length > 0) {
+      if (Array.isArray(parsedBackup)) {
         const validBackup = validateAndSanitizeAttendanceRecords(parsedBackup);
-        if (validBackup.length > 0) {
-          if (validBackup.length >= 5000) {
-            inMemoryAttendanceRecords = validBackup;
-            return validBackup;
-          }
-          const complete = ensureCompleteAttendanceHistory(validBackup);
-          inMemoryAttendanceRecords = complete;
-          safeSetLocalStorage(KEYS.ATTENDANCE, JSON.stringify(complete));
-          safeSetLocalStorage(KEYS.ATTENDANCE + '_updatedAt', String(Date.now()));
-          return complete;
-        }
+        inMemoryAttendanceRecords = validBackup;
+        return validBackup;
       }
     }
   } catch {}
 
-  // 4. Jika data kosong: bangkitkan riwayat presensi berdasarkan siswa aktif yang ada
-  // (termasuk HARI INI, 1 - 7 Oktober, dan seluruh hari sekolah semester ganjil)
-  const activeStudents = getStudents();
-  const studentsToUse = activeStudents.length > 0 ? activeStudents : INITIAL_STUDENTS;
-  const initial = generateInitialAttendanceHistory(studentsToUse);
-  const validInitial = validateAndSanitizeAttendanceRecords(initial);
-  if (validInitial.length > 0) {
-    inMemoryAttendanceRecords = validInitial;
-    safeSetLocalStorage(KEYS.ATTENDANCE, JSON.stringify(validInitial));
-    safeSetLocalStorage(KEYS.ATTENDANCE + '_updatedAt', String(Date.now()));
-    return validInitial;
-  }
-
+  // 4. Jika data kosong: kembalikan array kosong (Rule 2: Zero Default Filler / Unscanned tetap kosong)
   inMemoryAttendanceRecords = [];
   return [];
 }
@@ -4572,15 +4483,7 @@ export function restoreAttendanceRecords(): AttendanceRecord[] {
   // Saring dan bersihkan: otomatis menghapus rekaman sintetis 1-24 Oktober dan jam invalid
   let sanitized = validateAndSanitizeAttendanceRecords(rawList);
 
-  // Jika rekaman sebelum Oktober belum ada sama sekali, tambahkan histori baseline September
-  const hasSept = sanitized.some(r => r.date < '2026-10-01');
-  if (!hasSept) {
-    const activeStudents = getStudents();
-    const studentsToUse = activeStudents.length > 0 ? activeStudents : INITIAL_STUDENTS;
-    const initial = generateInitialAttendanceHistory(studentsToUse);
-    const validInitial = validateAndSanitizeAttendanceRecords(initial);
-    sanitized = validateAndSanitizeAttendanceRecords([...sanitized, ...validInitial]);
-  }
+  // Strict Rule 1, 2, & 3: Hanya pertahankan rekaman otentik (tanpa injeksi baseline sintetis)
 
   // Urutkan descending berdasarkan tanggal dan jam
   sanitized.sort((a, b) => {
@@ -4611,21 +4514,300 @@ export interface ScanQueueStatus {
   secondsRemaining: number;
 }
 
-let scanQueuePendingCount = 0;
-let scanQueueIdleTimer: any = null;
-let scanQueueLastFlushTime = Date.now();
-let isScanQueueFlushing = false;
-let scanQueueCountdownTimer: any = null;
-let scanQueueCountdownSeconds = 10;
+export const OFFLINE_SCAN_QUEUE_KEY = 'sihadir_offline_scan_queue_v1';
+export const OFFLINE_SCAN_ARCHIVE_KEY = 'sihadir_offline_scan_archive_v1';
+
+export function getOfflineScanQueue(): OfflinePendingScan[] {
+  if (typeof window === 'undefined') return [];
+  try {
+    const raw = localStorage.getItem(OFFLINE_SCAN_QUEUE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) {
+      return parsed.filter(item => item && item.studentId && item.date && item.synced !== true);
+    }
+  } catch (err) {
+    console.warn('[OfflineQueue] Gagal parse antrean scan offline:', err);
+  }
+  return [];
+}
+
+export function saveOfflineScanQueue(queue: OfflinePendingScan[]): void {
+  if (typeof window === 'undefined') return;
+  try {
+    safeSetLocalStorage(OFFLINE_SCAN_QUEUE_KEY, JSON.stringify(queue));
+    notifyScanQueueChanged();
+  } catch (err) {
+    console.warn('[OfflineQueue] Gagal simpan antrean offline:', err);
+  }
+}
+
+export function addOfflinePendingScan(records: AttendanceRecord[]): void {
+  if (typeof window === 'undefined' || !records || records.length === 0) return;
+  try {
+    const queue = getOfflineScanQueue();
+    const deviceId = getScannerDeviceId();
+    const now = Date.now();
+
+    records.forEach(rec => {
+      const compositeKey = `${rec.studentId}_${rec.date}_${deviceId}`;
+      const existingIdx = queue.findIndex(q => q.id === compositeKey || (q.studentId === rec.studentId && q.date === rec.date));
+
+      const pendingItem: OfflinePendingScan = {
+        id: compositeKey,
+        recordId: rec.id,
+        studentId: rec.studentId,
+        studentName: rec.studentName,
+        nisn: rec.nisn || '',
+        className: rec.className,
+        date: rec.date,
+        time: rec.time,
+        status: rec.status,
+        method: rec.method,
+        scannedBy: rec.scannedBy,
+        returnTime: rec.returnTime,
+        returnStatus: rec.returnStatus,
+        returnScannedBy: rec.returnScannedBy,
+        synced: false,
+        timestamp: now,
+        scannerDeviceId: deviceId,
+        validatorId: rec.validatorId,
+        validatorName: rec.validatorName,
+        retryCount: 0,
+      };
+
+      if (existingIdx >= 0) {
+        queue[existingIdx] = pendingItem;
+      } else {
+        queue.push(pendingItem);
+      }
+    });
+
+    saveOfflineScanQueue(queue);
+    scanQueuePendingCount = queue.length;
+  } catch (err) {
+    console.warn('[OfflineQueue] Gagal menambah record ke antrean offline:', err);
+  }
+}
+
+let isOfflineQueueSyncRunning = false;
+
+/**
+ * Hook Pemulihan & Sinkronisasi Otomatis Antrean Offline (Core Requirement 1, 2, 3, 4):
+ * - Dijalankan saat startup aplikasi (page load/mount), navigasi ke dasbor, atau saat koneksi kembali online.
+ * - Memeriksa antrean offline persistent di LocalStorage (OFFLINE_SCAN_QUEUE_KEY).
+ * - Menggabungkan data secara non-destruktif dengan Cloud Firestore menggunakan composite key untuk mencegah duplikasi.
+ * - Memperbarui status record menjadi synced: true dan mengarsipkan antrean yang sukses.
+ * - Menangani kegagalan jaringan secara anggun tanpa menghapus data lokal sebelum cloud konfirmasi diterima.
+ */
+export async function checkAndSyncOfflineQueue(isStartupOrNav: boolean = true): Promise<{
+  success: boolean;
+  syncedCount: number;
+  remainingCount: number;
+  message: string;
+}> {
+  if (typeof window === 'undefined') {
+    return { success: false, syncedCount: 0, remainingCount: 0, message: 'SSR' };
+  }
+
+  const queue = getOfflineScanQueue();
+
+  // 1. Cek koneksi jaringan: jika offline, biarkan antrean tersimpan aman di penyimpanan lokal
+  if (typeof navigator !== 'undefined' && !navigator.onLine) {
+    if (queue.length > 0) {
+      window.dispatchEvent(new CustomEvent('sihadir_network_toast', {
+        detail: {
+          type: 'warning',
+          title: '⚠️ Mode Offline Aktif',
+          message: `${queue.length} data scan presensi tersimpan aman di perangkat dan akan otomatis disinkronkan saat online.`
+        }
+      }));
+    }
+    return {
+      success: false,
+      syncedCount: 0,
+      remainingCount: queue.length,
+      message: 'Perangkat sedang offline. Antrean scan tersimpan aman di memori lokal.'
+    };
+  }
+
+  const currentRole = getUserSession()?.role;
+  if (currentRole === 'PARENT') {
+    return { success: false, syncedCount: 0, remainingCount: 0, message: 'Wali murid mode read-only' };
+  }
+
+  if (isFirestoreQuotaExceeded()) {
+    return { success: false, syncedCount: 0, remainingCount: 0, message: 'Batas kuota Firebase tercapai' };
+  }
+
+  if (isOfflineQueueSyncRunning) {
+    return { success: false, syncedCount: 0, remainingCount: queue.length, message: 'Sinkronisasi antrean sedang berlangsung' };
+  }
+
+  // Jika antrean kosong dan tidak ada scanQueue pending
+  if (queue.length === 0 && scanQueuePendingCount === 0) {
+    return {
+      success: true,
+      syncedCount: 0,
+      remainingCount: 0,
+      message: 'Seluruh data presensi lokal sudah tersinkronisasi ke Cloud.'
+    };
+  }
+
+  isOfflineQueueSyncRunning = true;
+  isScanQueueFlushing = true;
+  notifyScanQueueChanged();
+
+  const totalToSync = Math.max(queue.length, scanQueuePendingCount);
+
+  // Notifikasi indikator background yang halus
+  window.dispatchEvent(new CustomEvent('sihadir_network_toast', {
+    detail: {
+      type: 'info',
+      title: '🔄 Sinkronisasi Antrean Offline',
+      message: `Memulihkan dan menyinkronkan ${totalToSync} data scan offline ke Cloud Firestore...`
+    }
+  }));
+
+  try {
+    const localRecords = getAttendanceRecords();
+    const now = Date.now();
+
+    // 2. Ambil snapshot data presensi Cloud terkini melalui getDoc / readCloudDocument (Existence Check & Anti-Duplikasi)
+    const cloudDoc = await withTimeout(readCloudDocument(KEYS.ATTENDANCE), 20000, null);
+    let cloudRecords: AttendanceRecord[] = [];
+    if (cloudDoc && cloudDoc.data) {
+      try {
+        const parsed = typeof cloudDoc.data === 'string' ? JSON.parse(cloudDoc.data) : cloudDoc.data;
+        if (Array.isArray(parsed)) {
+          cloudRecords = parsed;
+        }
+      } catch {}
+    }
+
+    // 3. Gabungkan secara cerdas (non-destruktif)
+    let finalRecords = mergeAttendanceLists(cloudRecords, localRecords);
+
+    // Map identifikasi record dari antrean
+    const queuedKeys = new Set<string>();
+    queue.forEach(q => {
+      queuedKeys.add(q.id);
+      queuedKeys.add(q.recordId);
+      queuedKeys.add(`${q.studentId}_${q.date}`);
+    });
+
+    // Tandai synced: true pada record lokal yang telah terverifikasi
+    finalRecords = finalRecords.map(r => {
+      const matchKey = `${r.studentId}_${r.date}`;
+      if (queuedKeys.has(r.id) || queuedKeys.has(matchKey)) {
+        return {
+          ...r,
+          synced: true,
+        };
+      }
+      return r;
+    });
+
+    // 4. Pastikan data tidak di bawah ambang batas jika Cloud gagal dibaca
+    if (cloudRecords.length === 0 && finalRecords.length < 5000) {
+      console.warn('[OfflineQueueSync] Cloud attendance kosong dan data lokal di bawah ambang batas. Menunda penulisan.');
+      return {
+        success: false,
+        syncedCount: 0,
+        remainingCount: queue.length,
+        message: 'Menunggu konfirmasi integritas data Cloud.'
+      };
+    }
+
+    // 5. Tulis ke Cloud Firestore
+    delete lastSavedStringCache[KEYS.ATTENDANCE];
+    await writeCloudDocument(KEYS.ATTENDANCE, JSON.stringify(finalRecords), now);
+    lastSavedStringCache[KEYS.ATTENDANCE] = JSON.stringify(finalRecords);
+
+    // 6. Cloud acknowledgment: setelah write berhasil, update status dan arsipkan
+    try {
+      const archiveRaw = localStorage.getItem(OFFLINE_SCAN_ARCHIVE_KEY);
+      let archiveList: OfflinePendingScan[] = archiveRaw ? JSON.parse(archiveRaw) : [];
+      const updatedQueue = queue.map(q => ({ ...q, synced: true, timestamp: now }));
+      archiveList = [...updatedQueue, ...archiveList].slice(0, 500);
+      safeSetLocalStorage(OFFLINE_SCAN_ARCHIVE_KEY, JSON.stringify(archiveList));
+    } catch {}
+
+    // Bersihkan antrean offline dari LocalStorage
+    localStorage.removeItem(OFFLINE_SCAN_QUEUE_KEY);
+    scanQueuePendingCount = 0;
+    scanQueueLastFlushTime = now;
+    isScanQueueFlushing = false;
+    notifyScanQueueChanged();
+
+    // Perbarui state lokal & in-memory
+    inMemoryAttendanceRecords = finalRecords;
+    safeSetLocalStorage(KEYS.ATTENDANCE, JSON.stringify(finalRecords));
+    safeSetLocalStorage(KEYS.ATTENDANCE + '_updatedAt', String(now));
+    notifyStorageUpdated(true);
+
+    setCloudSyncStatus('connected');
+
+    window.dispatchEvent(new CustomEvent('sihadir_network_toast', {
+      detail: {
+        type: 'success',
+        title: '✅ Sinkronisasi Offline Berhasil',
+        message: `Berhasil memulihkan dan menyinkronkan ${totalToSync} data scan offline ke Cloud!`
+      }
+    }));
+
+    return {
+      success: true,
+      syncedCount: totalToSync,
+      remainingCount: 0,
+      message: `Berhasil menyinkronkan ${totalToSync} data presensi offline ke Cloud.`
+    };
+  } catch (err: any) {
+    console.error('[OfflineQueueSync] Gagal menyinkronkan antrean offline:', err);
+
+    // Catat kegagalan dan increment retryCount, JANGAN hapus antrean lokal
+    try {
+      const currentQ = getOfflineScanQueue();
+      const updated = currentQ.map(q => ({
+        ...q,
+        retryCount: (q.retryCount || 0) + 1,
+        lastError: err?.message || 'Gagal terhubung ke Cloud'
+      }));
+      saveOfflineScanQueue(updated);
+    } catch {}
+
+    isScanQueueFlushing = false;
+    notifyScanQueueChanged();
+
+    window.dispatchEvent(new CustomEvent('sihadir_network_toast', {
+      detail: {
+        type: 'warning',
+        title: '⚠️ Sinkronisasi Cloud Tertunda',
+        message: 'Koneksi ke Cloud terganggu. Seluruh data presensi scan tetap aman tersimpan di perangkat.'
+      }
+    }));
+
+    return {
+      success: false,
+      syncedCount: 0,
+      remainingCount: getOfflineScanQueue().length,
+      message: err?.message || 'Gagal sinkronisasi antrean'
+    };
+  } finally {
+    isOfflineQueueSyncRunning = false;
+  }
+}
 
 export function getScanQueueStatus(): ScanQueueStatus {
+  const offlineQueue = getOfflineScanQueue();
+  const effectivePending = Math.max(scanQueuePendingCount, offlineQueue.length);
   return {
-    pendingCount: scanQueuePendingCount,
+    pendingCount: effectivePending,
     maxBatch: SCAN_BATCH_THRESHOLD,
     idleTimeoutSeconds: Math.round(SCAN_IDLE_TIMEOUT_MS / 1000),
     lastFlushTime: scanQueueLastFlushTime,
-    isFlushing: isScanQueueFlushing,
-    secondsRemaining: scanQueuePendingCount > 0 ? scanQueueCountdownSeconds : 0,
+    isFlushing: isScanQueueFlushing || isOfflineQueueSyncRunning,
+    secondsRemaining: effectivePending > 0 ? scanQueueCountdownSeconds : 0,
   };
 }
 
@@ -4638,12 +4820,10 @@ export function notifyScanQueueChanged(): void {
 
 /**
  * Paksa kirim (flush) seluruh antrean scan ke Cloud Firestore
- * JAMINAN MUTLAK MULTI-PERANGKAT NON-TINDIH (Perangkat A & Perangkat B):
- * Menggabungkan snapshot Cloud dengan data lokal sebelum menulis kembali ke Cloud.
- * Jika Perangkat A scan Siswa 1 dan Perangkat B scan Siswa 2, Siswa 1 TIDAK AKAN HILANG.
  */
 export async function flushAttendanceScanQueue(force: boolean = false): Promise<void> {
-  if (scanQueuePendingCount === 0 && !force) return;
+  const offlineQueue = getOfflineScanQueue();
+  if (scanQueuePendingCount === 0 && offlineQueue.length === 0 && !force) return;
 
   if (scanQueueIdleTimer) {
     clearTimeout(scanQueueIdleTimer);
@@ -4654,62 +4834,15 @@ export async function flushAttendanceScanQueue(force: boolean = false): Promise<
     scanQueueCountdownTimer = null;
   }
 
-  isScanQueueFlushing = true;
-  scanQueueCountdownSeconds = 0;
-  notifyScanQueueChanged();
-
-  try {
-    const localRecords = getAttendanceRecords();
-    const now = Date.now();
-
-    // 1. Ambil data presensi terkini dari Cloud Firestore untuk digabungkan secara non-destruktif
-    let finalRecords = localRecords;
-    let cloudFetchSuccess = false;
-    try {
-      const cloudDoc = await withTimeout(readCloudDocument(KEYS.ATTENDANCE), 20000, null);
-      if (cloudDoc && cloudDoc.data) {
-        const cloudRecords = typeof cloudDoc.data === 'string' ? JSON.parse(cloudDoc.data) : cloudDoc.data;
-        if (Array.isArray(cloudRecords) && cloudRecords.length > 0) {
-          // Gabungkan: siswa yang di-scan Perangkat A dan Perangkat B menyatu 100% tanpa saling tindih!
-          finalRecords = mergeAttendanceLists(cloudRecords, localRecords);
-          inMemoryAttendanceRecords = finalRecords;
-          safeSetLocalStorage(KEYS.ATTENDANCE, JSON.stringify(finalRecords));
-          safeSetLocalStorage(KEYS.ATTENDANCE + '_updatedAt', String(now));
-          notifyStorageUpdated();
-          cloudFetchSuccess = true;
-        }
-      }
-    } catch (err) {
-      console.warn('[ScanQueueWorker] Gagal fetch snapshot Cloud presensi:', err);
-    }
-
-    if (!cloudFetchSuccess && localRecords.length < 5000) {
-      // PERLINDUNGAN ANTI-TINDIH & ANTI-RESET:
-      // Hanya tunda jika data lokal sedikit (< 5000) DAN pembacaan Cloud gagal, agar tidak menimpa Cloud.
-      console.warn('[ScanQueueWorker] Pembacaan Cloud belum berhasil dan data lokal di bawah ambang batas. Data scan tersimpan aman di lokal dan sinkronisasi Cloud ditunda.');
-      return;
-    }
-
-    // 2. Tulis hasil gabungan ke Cloud Firestore (1 kali write hemat kuota)
-    delete lastSavedStringCache[KEYS.ATTENDANCE];
-    await writeCloudDocument(KEYS.ATTENDANCE, JSON.stringify(finalRecords), now);
-    lastSavedStringCache[KEYS.ATTENDANCE] = JSON.stringify(finalRecords);
-    scanQueueLastFlushTime = now;
-    setCloudSyncStatus('connected');
-  } catch (err) {
-    console.error('[ScanQueueWorker] Gagal flush antrean scan ke Cloud:', err);
-  } finally {
-    scanQueuePendingCount = 0;
-    isScanQueueFlushing = false;
-    notifyScanQueueChanged();
-  }
+  await checkAndSyncOfflineQueue(false);
 }
 
 /**
  * Menyimpan hasil scan QR menggunakan antrean batching 10 detik atau 20 siswa:
  * 1. Simpan segera ke localStorage lokal (zero-delay bagi layar kamera & audio beep)
- * 2. Kumpulkan dalam batch (flush otomatis jika mencapai 20 siswa atau jeda idle 10 detik)
- * 3. Menghemat kuota Firestore dan menjamin keutuhan data presensi multi-perangkat
+ * 2. Tambahkan ke antrean offline persistent (OFFLINE_SCAN_QUEUE_KEY) dengan synced: false
+ * 3. Kumpulkan dalam batch (flush otomatis jika mencapai 20 siswa atau jeda idle 10 detik)
+ * 4. Menghemat kuota Firestore dan menjamin keutuhan data presensi multi-perangkat
  */
 export function queueAttendanceScanRecord(records: AttendanceRecord[]): void {
   const currentRole = getUserSession()?.role;
@@ -4727,8 +4860,8 @@ export function queueAttendanceScanRecord(records: AttendanceRecord[]): void {
   safeSetLocalStorage(KEYS.ATTENDANCE + '_updatedAt', String(now));
   notifyStorageUpdated();
 
-  // 2. Tambah jumlah antrean scan pending untuk status UI
-  scanQueuePendingCount += 1;
+  // 2. Simpan ke antrean offline persistent (anti-hilang jika browser ditutup/refresh)
+  addOfflinePendingScan(records);
 
   // 3. Batched Cloud Sync:
   // Jika antrean mencapai threshold (20 siswa), kirim SEGERA ke Cloud!
@@ -4764,7 +4897,7 @@ export function queueAttendanceScanRecord(records: AttendanceRecord[]): void {
 
 if (typeof window !== 'undefined') {
   window.addEventListener('beforeunload', () => {
-    if (scanQueuePendingCount > 0) {
+    if (scanQueuePendingCount > 0 || getOfflineScanQueue().length > 0) {
       flushAttendanceScanQueue(true);
     }
   });

@@ -1164,8 +1164,13 @@ function cleanOfficerAccountName(rawOfficer?: string | null, validatorName?: str
   }
 
   // 4. Default string generik
-  if (/^Pos Scanner (Utama|Pulang|Masuk)$/i.test(trimmed)) {
+  if (/^Pos Scanner (Utama|Pulang|Masuk)(\s*\(Pulang\))?$/i.test(trimmed)) {
     return 'Petugas Scanner';
+  }
+
+  // 5. Penanda riwayat data awal (baseline sintetis)
+  if (/^Baseline Histori$/i.test(trimmed)) {
+    return 'Sistem (Data Riwayat)';
   }
 
   return trimmed;

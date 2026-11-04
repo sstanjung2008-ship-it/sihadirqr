@@ -449,13 +449,16 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
       }
 
       const qrConfig = {
-        fps: 14, // Optimized frame rate (14 FPS) for instant detection while preserving CPU & battery
+        fps: 24, // Optimized ultra-fast frame rate (24 FPS) for instant responsiveness without scan lag
         qrbox: (viewfinderWidth: number, viewfinderHeight: number) => {
           const minEdge = Math.min(viewfinderWidth, viewfinderHeight);
           const boxSize = Math.max(220, Math.floor(minEdge * 0.75));
           return { width: boxSize, height: boxSize };
         },
         aspectRatio: 1.0,
+        experimentalFeatures: {
+          useBarCodeDetectorIfSupported: true // Native hardware-accelerated BarcodeDetector API for 0-latency scanning
+        }
       };
 
       try {
@@ -1394,12 +1397,15 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
             </div>
 
             <button
+              type="button"
               onClick={() => setScanNotification(null)}
-              className="p-2 px-3 rounded-xl text-xs font-bold cursor-pointer transition-colors shrink-0 flex items-center gap-1.5 text-white/90 hover:text-white bg-white/10 hover:bg-white/20 border border-white/20"
+              aria-label="Tutup Notifikasi"
+              className="p-2 sm:px-3.5 py-1.5 rounded-xl text-xs font-bold cursor-pointer transition-all shrink-0 flex items-center gap-1.5 text-white bg-black/25 hover:bg-black/40 active:scale-95 border border-white/30 shadow-xs self-start sm:self-center z-20"
               title="Tutup Notifikasi"
             >
-              <span>✕ Tutup</span>
-              <span className="opacity-75 font-mono">({notifSecondsLeft}s)</span>
+              <X className="w-3.5 h-3.5 text-white" />
+              <span className="hidden sm:inline">Tutup</span>
+              <span className="opacity-80 font-mono text-[11px]">({notifSecondsLeft}s)</span>
             </button>
           </div>
         </div>

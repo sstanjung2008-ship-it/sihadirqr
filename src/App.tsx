@@ -76,6 +76,8 @@ import {
   getScannerDeviceId,
   refreshCloudData,
   hasRealEntryPresence,
+  checkAndSyncOfflineQueue,
+  getOfflineScanQueue,
   KEYS
 } from './lib/storage';
 import { ShieldCheck, CheckCircle2, WifiOff, RefreshCw, Wifi, X, Cloud } from 'lucide-react';
@@ -167,6 +169,7 @@ export default function App() {
     // Sinkronisasi Data Real-Time Cloud saat membuka halaman / tab baru
     // Menghapus ketergantungan pada cache lokal usang sehingga tampilan seragam di semua perangkat
     refreshCloudData(false).catch(() => {});
+    checkAndSyncOfflineQueue(true).catch(() => {});
   }, []);
 
   // Hardware/Device & Browser Back Button Handler (popstate)
@@ -478,6 +481,8 @@ export default function App() {
     setInitialSyncState('syncing');
     initFirestoreAppSession(currentRole).then(() => {
       if (isCancelled) return;
+      // Hook Pemulihan Offline & Auto-Sync saat Startup: periksa dan unggah antrean scan offline jika ada
+      checkAndSyncOfflineQueue(true).catch(() => {});
       // Langsung mutasikan seluruh data cloud ke antarmuka aplikasi begitu data selesai diunduh
       refreshDataFromStorage();
       const now = new Date();
@@ -491,6 +496,8 @@ export default function App() {
       }, 4000);
     }).catch(() => {
       if (isCancelled) return;
+      // Tetap periksa antrean offline meskipun startup cloud gagal/offline
+      checkAndSyncOfflineQueue(true).catch(() => {});
       refreshDataFromStorage();
       setInitialSyncState('offline');
       setTimeout(() => {
@@ -518,7 +525,12 @@ export default function App() {
     const handleVisibilityOrFocus = () => {
       if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
         refreshCloudData(false).catch(() => {});
+        checkAndSyncOfflineQueue(true).catch(() => {});
       }
+    };
+
+    const handleOnlineConnection = () => {
+      checkAndSyncOfflineQueue(false).catch(() => {});
     };
 
     window.addEventListener('sihadir_storage_updated', refreshDataFromStorage);
@@ -526,6 +538,7 @@ export default function App() {
     window.addEventListener('sihadir_network_toast', handleNetworkToast);
     window.addEventListener('focus', handleVisibilityOrFocus);
     document.addEventListener('visibilitychange', handleVisibilityOrFocus);
+    window.addEventListener('online', handleOnlineConnection);
 
     return () => {
       isCancelled = true;
@@ -534,6 +547,7 @@ export default function App() {
       window.removeEventListener('sihadir_network_toast', handleNetworkToast);
       window.removeEventListener('focus', handleVisibilityOrFocus);
       document.removeEventListener('visibilitychange', handleVisibilityOrFocus);
+      window.removeEventListener('online', handleOnlineConnection);
     };
   }, [currentRole, refreshDataFromStorage]);
 
@@ -554,15 +568,8 @@ export default function App() {
   }, []);
 
 
-  // Pengecekan berkala setiap 30 detik untuk memastikan data presensi localStorage yang belum tersinkron segera dikirim ke Cloud
-  // Anti-duplikasi: jika data sudah ada di Cloud, lewati penulisan (0 write) untuk melindungi kuota Firebase
-  useEffect(() => {
-    if (currentRole === 'PARENT') return;
-    const cleanup = startAutoAttendanceSync30s();
-    return () => {
-      cleanup();
-    };
-  }, [currentRole]);
+  // Requirement 6: Otomatisasi sinkronisasi Cloud HANYA dipicu saat reload halaman atau navigasi ke Dasbor
+  // Seluruh polling sync loop latar belakang dinonaktifkan untuk mencegah loop dan menghemat kuota Firebase.
 
   // Track latest state references to avoid cascading re-render loops in periodic background intervals
   const attendanceRecordsRef = useRef(attendanceRecords);

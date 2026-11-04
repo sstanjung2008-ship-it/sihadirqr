@@ -70,6 +70,31 @@ export interface AttendanceRecord {
   returnValidatorName?: string; // Nama Guru atau Pos Scanner pulang
   returnScannerDeviceId?: string; // Identitas perangkat scanner pulang (UUID lokal)
   returnValidationTimestamp?: string; // ISO string saat scan pulang divalidasi
+  synced?: boolean; // True jika data telah terkonfirmasi tersimpan di Cloud Firestore
+}
+
+export interface OfflinePendingScan {
+  id: string; // composite key unik: `${studentId}_${date}_${scannerDeviceId}`
+  recordId: string;
+  studentId: string;
+  studentName: string;
+  nisn: string;
+  className: string;
+  date: string;
+  time: string;
+  status: AttendanceStatus;
+  method: 'QR_SCAN' | 'MANUAL' | 'IZIN_APPROVED';
+  scannedBy: string;
+  returnTime?: string;
+  returnStatus?: 'PULANG' | 'PULANG_CEPAT' | 'PULANG_TEPAT' | 'BELUM_PULANG';
+  returnScannedBy?: string;
+  synced: boolean;
+  timestamp: number;
+  scannerDeviceId: string;
+  validatorId?: string;
+  validatorName?: string;
+  retryCount?: number;
+  lastError?: string;
 }
 
 export interface AttendanceAuditLog {

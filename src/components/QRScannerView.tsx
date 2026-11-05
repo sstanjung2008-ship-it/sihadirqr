@@ -298,6 +298,8 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
 
   const html5QrCodeRef = useRef<Html5Qrcode | null>(null);
   const lastScanDebounceRef = useRef<{ code: string; timestamp: number }>({ code: '', timestamp: 0 });
+  // Smart Scan Debounce: Cooldown 3 detik per student ID mencegah scan ganda tanpa freeze kamera
+  const studentCooldownMapRef = useRef<Map<string, number>>(new Map());
   const qrRegionId = "html5qr-code-full-region";
 
   // Check available cameras and configure default
@@ -657,6 +659,12 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
     }
 
     if (matched) {
+      // Smart Scan Debounce: 3-second cooldown per student ID (Mandate 1)
+      const lastStudentScanTime = studentCooldownMapRef.current.get(matched.id) || 0;
+      if (nowMs - lastStudentScanTime < 3000) {
+        return; // Ignore duplicate camera frames within 3s for the same student
+      }
+      studentCooldownMapRef.current.set(matched.id, nowMs);
       processAttendanceForStudent(matched);
     } else {
       // Condition 9: QR Tidak Ditemukan / Belum Terdaftar
@@ -789,10 +797,13 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
         ? 'HADIR'
         : (existingRecord?.status || 'HADIR');
 
-      const defaultMorningTime = startTimeStr || schoolProfile.startTime || '07:00';
-      const finalEntryTime: string = (existingRecord && existingRecord.time && existingRecord.time !== '-' && !existingRecord.time.toLowerCase().includes('belum'))
+      // Mandate 3: Scan Pulang Without Scan Masuk Rule
+      // If student did NOT perform a check-in scan in the morning, but performs a check-out scan in afternoon:
+      // a) The check-in timestamp column (jam masuk) must remain empty/null ('-').
+      // b) The check-in status column (status masuk) must automatically be set to "Hadir" (Present).
+      const finalEntryTime: string = (hasRealEntry && existingRecord && existingRecord.time && existingRecord.time !== '-' && !existingRecord.time.toLowerCase().includes('belum'))
         ? existingRecord.time
-        : defaultMorningTime;
+        : '-';
 
       let finalNotes = cleanNotes;
       if (isEntryUnscannedOrAlpa) {

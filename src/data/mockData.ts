@@ -29,7 +29,7 @@ export const INITIAL_SCHOOL_PROFILE: SchoolProfile = {
   autoCharacterAssessmentEnabled: true,
   autoCharacterPoints: {
     latePoints: 2,
-    alpaPoints: 5,
+    alpaPoints: 6,
     disruptivePoints: 1,
     absentKbmPoints: 2,
     veryActiveKbmPoints: 1,

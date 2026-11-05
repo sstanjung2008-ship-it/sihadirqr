@@ -116,7 +116,7 @@ export const AutoCharacterAssessmentModal: React.FC<AutoCharacterAssessmentModal
   };
   // Configurable parameters with user-specified defaults from schoolProfile
   const [latePoints, setLatePoints] = useState<number>(() => schoolProfile?.autoCharacterPoints?.latePoints ?? 2);
-  const [alpaPoints, setAlpaPoints] = useState<number>(() => schoolProfile?.autoCharacterPoints?.alpaPoints ?? 5);
+  const [alpaPoints, setAlpaPoints] = useState<number>(() => schoolProfile?.autoCharacterPoints?.alpaPoints ?? 6);
   const [disruptivePoints, setDisruptivePoints] = useState<number>(() => schoolProfile?.autoCharacterPoints?.disruptivePoints ?? 1);
   const [absentKbmPoints, setAbsentKbmPoints] = useState<number>(() => schoolProfile?.autoCharacterPoints?.absentKbmPoints ?? 2); // Default 2 poin negatif
   const [veryActiveKbmPoints, setVeryActiveKbmPoints] = useState<number>(() => schoolProfile?.autoCharacterPoints?.veryActiveKbmPoints ?? 1); // Default 1 poin positif
@@ -143,7 +143,7 @@ export const AutoCharacterAssessmentModal: React.FC<AutoCharacterAssessmentModal
   const currentSavedConfig = useMemo(() => {
     return {
       latePoints: schoolProfile?.autoCharacterPoints?.latePoints ?? 2,
-      alpaPoints: schoolProfile?.autoCharacterPoints?.alpaPoints ?? 5,
+      alpaPoints: schoolProfile?.autoCharacterPoints?.alpaPoints ?? 6,
       disruptivePoints: schoolProfile?.autoCharacterPoints?.disruptivePoints ?? 1,
       absentKbmPoints: schoolProfile?.autoCharacterPoints?.absentKbmPoints ?? 2,
       veryActiveKbmPoints: schoolProfile?.autoCharacterPoints?.veryActiveKbmPoints ?? 1,
@@ -177,7 +177,7 @@ export const AutoCharacterAssessmentModal: React.FC<AutoCharacterAssessmentModal
     const newPoints: AutoCharacterPointSettings = {
       ...(schoolProfile?.autoCharacterPoints || {}),
       latePoints: Math.max(1, Math.abs(Number(latePoints)) || 2),
-      alpaPoints: Math.max(1, Math.abs(Number(alpaPoints)) || 5),
+      alpaPoints: Math.max(1, Math.abs(Number(alpaPoints)) || 6),
       disruptivePoints: Math.max(1, Math.abs(Number(disruptivePoints)) || 1),
       absentKbmPoints: Math.max(1, Math.abs(Number(absentKbmPoints)) || 2),
       veryActiveKbmPoints: Math.max(1, Math.abs(Number(veryActiveKbmPoints)) || 1),
@@ -208,7 +208,7 @@ export const AutoCharacterAssessmentModal: React.FC<AutoCharacterAssessmentModal
     const defaultPoints: AutoCharacterPointSettings = {
       ...(schoolProfile?.autoCharacterPoints || {}),
       latePoints: 2,
-      alpaPoints: 5,
+      alpaPoints: 6,
       disruptivePoints: 1,
       absentKbmPoints: 2,
       veryActiveKbmPoints: 1,
@@ -216,7 +216,7 @@ export const AutoCharacterAssessmentModal: React.FC<AutoCharacterAssessmentModal
       unreturnedPoints: 1,
     };
     setLatePoints(2);
-    setAlpaPoints(5);
+    setAlpaPoints(6);
     setDisruptivePoints(1);
     setAbsentKbmPoints(2);
     setVeryActiveKbmPoints(1);
@@ -1064,7 +1064,7 @@ export const AutoCharacterAssessmentModal: React.FC<AutoCharacterAssessmentModal
                   </div>
                   <div className="bg-white/80 p-2 rounded-xl border border-red-300 text-red-950">
                     <p className="font-extrabold text-[10px] text-red-800 uppercase">Siswa Alpa</p>
-                    <p className="font-black text-xs text-red-700 mt-0.5">-5 Poin / Alpa</p>
+                    <p className="font-black text-xs text-red-700 mt-0.5">-{alpaPoints} Poin / Alpa</p>
                     <p className="text-[9px] text-red-600">Tanpa keterangan</p>
                   </div>
                   <div className="bg-white/80 p-2 rounded-xl border border-orange-200 text-orange-950">

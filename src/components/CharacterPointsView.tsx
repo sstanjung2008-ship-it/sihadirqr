@@ -560,9 +560,9 @@ export const CharacterPointsView: React.FC<CharacterPointsViewProps> = ({
       .sort((a, b) => (a.name || '').localeCompare(b.name || '', 'id', { numeric: true, sensitivity: 'base' }));
   }, [students, selectedClassId, deferredSearchQuery, scoreFilterOp, scoreFilterVal, studentScoresMap]);
 
-  // Pagination State for fast, lag-free DOM rendering
+  // Pagination State for fast, lag-free DOM rendering (Maksimal 30 siswa per halaman)
   const [currentPage, setCurrentPage] = useState<number>(1);
-  const [itemsPerPage, setItemsPerPage] = useState<number>(25);
+  const [itemsPerPage, setItemsPerPage] = useState<number>(30);
 
   // Reset page when filters change
   useEffect(() => {
@@ -1367,7 +1367,7 @@ export const CharacterPointsView: React.FC<CharacterPointsViewProps> = ({
               itemsPerPage={itemsPerPage}
               onPageChange={setCurrentPage}
               onItemsPerPageChange={setItemsPerPage}
-              pageSizeOptions={[25, 50, 100]}
+              pageSizeOptions={[30, 50, 100]}
               itemLabel="siswa"
             />
           </div>
@@ -1950,7 +1950,7 @@ export const CharacterPointsView: React.FC<CharacterPointsViewProps> = ({
                                     </span>
                                   </div>
                                   <p className="text-[11px] text-slate-500 mt-0.5">
-                                    {detailStudentScore.alpaDays}x alpa • -5 poin/hari
+                                    {detailStudentScore.alpaDays}x alpa • -6 poin/hari
                                   </p>
                                 </div>
                               </div>

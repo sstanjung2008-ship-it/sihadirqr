@@ -2474,8 +2474,10 @@ export function mergeSingleAttendanceRecord(a: AttendanceRecord, b: AttendanceRe
     // ubah status otomatis menjadi HADIR melalui pemindaian scan pulang.
     if (hasReturnA || hasReturnB) {
       finalStatus = 'HADIR';
-      const candidateTime = (b.time && b.time !== '-' && !b.time.toLowerCase().includes('belum')) ? b.time : ((a.time && a.time !== '-' && !a.time.toLowerCase().includes('belum')) ? a.time : '07:00');
-      finalTime = candidateTime;
+      // Mandate 3: Scan Pulang Without Scan Masuk Rule
+      // If student did NOT perform a check-in scan in the morning, jam masuk remains empty/null ('-')
+      const candidateTime = (b.time && b.time !== '-' && !b.time.toLowerCase().includes('belum')) ? b.time : ((a.time && a.time !== '-' && !a.time.toLowerCase().includes('belum')) ? a.time : '-');
+      finalTime = (hasEntryA || hasEntryB) ? candidateTime : '-';
       finalMethod = 'QR_SCAN';
       finalScannedBy = (b.returnScannedBy || a.returnScannedBy) ? 'Pos Scanner Pulang (Verifikasi Hadir)' : (b.scannedBy || a.scannedBy || 'Pos Scanner Pulang');
       finalNotes = 'Otomatis Hadir melalui pemindaian scan pulang';
@@ -2522,8 +2524,9 @@ export function mergeSingleAttendanceRecord(a: AttendanceRecord, b: AttendanceRe
   const hasValidReturn = !!((returnTime && returnTime !== '-') || returnStatus === 'PULANG' || returnStatus === 'PULANG_TEPAT' || returnStatus === 'PULANG_CEPAT');
   if (hasValidReturn && (finalStatus === 'ALPA' || (finalStatus as string) === 'BELUM_ABSEN')) {
     finalStatus = 'HADIR';
-    if (!finalTime || finalTime === '-') {
-      finalTime = '07:00';
+    // Per Mandate 3: If student did not perform morning entry scan, jam masuk remains '-'
+    if (!hasEntryA && !hasEntryB) {
+      finalTime = '-';
     }
     finalMethod = 'QR_SCAN';
     finalNotes = 'Otomatis Hadir melalui pemindaian scan pulang';
@@ -2574,8 +2577,11 @@ export function mergeSingleAttendanceRecord(a: AttendanceRecord, b: AttendanceRe
     returnValidationTimestamp: (hasReturnB && b.returnValidationTimestamp) ? b.returnValidationTimestamp : (a.returnValidationTimestamp || b.returnValidationTimestamp),
   };
 
-  if ((finalStatus === 'HADIR' || finalStatus === 'TERLAMBAT') && (!merged.time || merged.time === '-')) {
-    merged.time = finalTime && finalTime !== '-' ? finalTime : (finalStatus === 'TERLAMBAT' ? '07:40' : '07:00');
+  // Mandate 3: If student did NOT perform a morning scan, jam masuk remains '-' even if status is HADIR
+  if (finalStatus === 'TERLAMBAT' && (!merged.time || merged.time === '-')) {
+    merged.time = '07:40';
+  } else if (finalStatus === 'HADIR' && (hasEntryA || hasEntryB) && (!merged.time || merged.time === '-')) {
+    merged.time = finalTime && finalTime !== '-' ? finalTime : '07:00';
   }
 
   return merged;
@@ -2736,7 +2742,7 @@ export function mergeSchoolProfile(local: SchoolProfile, cloud: SchoolProfile): 
     autoCharacterPoints: {
       ...(INITIAL_SCHOOL_PROFILE.autoCharacterPoints || {
         latePoints: 2,
-        alpaPoints: 5,
+        alpaPoints: 6,
         disruptivePoints: 1,
         absentKbmPoints: 2,
         veryActiveKbmPoints: 1,
@@ -3814,7 +3820,7 @@ export function getSchoolProfile(): SchoolProfile {
       autoCharacterPoints: parsed.autoCharacterPoints && typeof parsed.autoCharacterPoints === 'object'
         ? {
             latePoints: Number(parsed.autoCharacterPoints.latePoints) || 2,
-            alpaPoints: Number(parsed.autoCharacterPoints.alpaPoints) || 5,
+            alpaPoints: Number(parsed.autoCharacterPoints.alpaPoints) || 6,
             disruptivePoints: Number(parsed.autoCharacterPoints.disruptivePoints) || 1,
             absentKbmPoints: Number(parsed.autoCharacterPoints.absentKbmPoints) || 2,
             veryActiveKbmPoints: Number(parsed.autoCharacterPoints.veryActiveKbmPoints) || 1,
@@ -3825,7 +3831,7 @@ export function getSchoolProfile(): SchoolProfile {
           }
         : (INITIAL_SCHOOL_PROFILE.autoCharacterPoints || {
             latePoints: 2,
-            alpaPoints: 5,
+            alpaPoints: 6,
             disruptivePoints: 1,
             absentKbmPoints: 2,
             veryActiveKbmPoints: 1,
@@ -6379,7 +6385,8 @@ export function computeStudentCharacterSummaryFromData(
 
   const distinctAlpaDates = Array.from(distinctAlpaDatesSet);
   const alpaDays = distinctAlpaDatesSet.size;
-  const alpaPenaltyPoints = alpaDays * 5;
+  // Mandate 4: Alpa Penalty of -6 Character Points per day
+  const alpaPenaltyPoints = alpaDays * 6;
   negativePoints += alpaPenaltyPoints;
 
   const unscannedInDateSet = new Set<string>();

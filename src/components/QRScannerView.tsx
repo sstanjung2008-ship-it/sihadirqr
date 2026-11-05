@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState, useMemo, useCallback } from 'react';
-import { Html5Qrcode } from 'html5-qrcode';
+import { Html5Qrcode, Html5QrcodeSupportedFormats } from 'html5-qrcode';
 import { Student, SchoolProfile, AttendanceRecord, SchoolClass, UserRole } from '../types';
 import { playScanSound } from '../lib/audioBeep';
 import { 
@@ -186,6 +186,15 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
       if (cleanQr) map.set(cleanQr, s);
       const cleanNisn = (s.nisn || '').trim().replace(/^(STUDENT|SISWA|STD|QR|ID)[-_:\s]*/i, '').toLowerCase();
       if (cleanNisn) map.set(cleanNisn, s);
+
+      if (s.nisn) {
+        const cleanDigits = s.nisn.replace(/\D/g, '');
+        if (cleanDigits) map.set(cleanDigits, s);
+      }
+      if (s.nis) {
+        const cleanDigitsNis = s.nis.replace(/\D/g, '');
+        if (cleanDigitsNis) map.set(cleanDigitsNis, s);
+      }
     });
     return map;
   }, [students]);
@@ -426,7 +435,10 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
         throw new Error("Elemen scanner tidak ditemukan di halaman");
       }
 
-      const html5QrCode = new Html5Qrcode(qrRegionId);
+      const html5QrCode = new Html5Qrcode(qrRegionId, {
+        formatsToSupport: [Html5QrcodeSupportedFormats.QR_CODE],
+        verbose: false
+      });
       html5QrCodeRef.current = html5QrCode;
 
       // On mobile phones, default to 'environment' (rear camera).
@@ -437,10 +449,19 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
       const isFront = targetFacing === 'user' || !isMobileDevice;
       setIsMirrorMode(isFront);
 
-      // Preferred camera config:
-      // If on mobile: { facingMode: targetFacing }
-      // If on laptop/PC: prefer deviceId if known, else { facingMode: 'user' }
-      let cameraConfig: any = isMobileDevice ? { facingMode: targetFacing } : { facingMode: 'user' };
+      // Preferred camera config with 720p sweet-spot resolution and continuous focus
+      let cameraConfig: any = isMobileDevice 
+        ? { 
+            facingMode: targetFacing,
+            width: { ideal: 1280 },
+            height: { ideal: 720 },
+            focusMode: 'continuous'
+          } 
+        : { 
+            facingMode: 'user',
+            width: { ideal: 1280 },
+            height: { ideal: 720 }
+          };
 
       if (cameraId && cameraId !== 'environment' && cameraId !== 'user') {
         cameraConfig = { deviceId: cameraId };
@@ -449,10 +470,10 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
       }
 
       const qrConfig = {
-        fps: 24, // Optimized ultra-fast frame rate (24 FPS) for instant responsiveness without scan lag
+        fps: 30, // Ultra-fast 30 FPS rate for instant millisecond detection
         qrbox: (viewfinderWidth: number, viewfinderHeight: number) => {
           const minEdge = Math.min(viewfinderWidth, viewfinderHeight);
-          const boxSize = Math.max(220, Math.floor(minEdge * 0.75));
+          const boxSize = Math.max(220, Math.floor(minEdge * 0.8));
           return { width: boxSize, height: boxSize };
         },
         aspectRatio: 1.0,

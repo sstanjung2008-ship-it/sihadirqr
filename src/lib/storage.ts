@@ -4549,9 +4549,16 @@ export function addOfflinePendingScan(records: AttendanceRecord[]): void {
     const deviceId = getScannerDeviceId();
     const now = Date.now();
 
+    // Fast O(1) deduplication Map for instant camera scanning
+    const map = new Map<string, OfflinePendingScan>();
+    queue.forEach(q => {
+      map.set(`${q.studentId}_${q.date}`, q);
+    });
+
     records.forEach(rec => {
+      if (!rec || !rec.studentId || !rec.date) return;
       const compositeKey = `${rec.studentId}_${rec.date}_${deviceId}`;
-      const existingIdx = queue.findIndex(q => q.id === compositeKey || (q.studentId === rec.studentId && q.date === rec.date));
+      const lookupKey = `${rec.studentId}_${rec.date}`;
 
       const pendingItem: OfflinePendingScan = {
         id: compositeKey,
@@ -4576,15 +4583,13 @@ export function addOfflinePendingScan(records: AttendanceRecord[]): void {
         retryCount: 0,
       };
 
-      if (existingIdx >= 0) {
-        queue[existingIdx] = pendingItem;
-      } else {
-        queue.push(pendingItem);
-      }
+      map.set(lookupKey, pendingItem);
     });
 
-    saveOfflineScanQueue(queue);
-    scanQueuePendingCount = queue.length;
+    const updatedQueue = Array.from(map.values()).slice(-200);
+    saveOfflineScanQueue(updatedQueue);
+    scanQueuePendingCount = updatedQueue.length;
+    notifyScanQueueChanged();
   } catch (err) {
     console.warn('[OfflineQueue] Gagal menambah record ke antrean offline:', err);
   }
@@ -4844,7 +4849,7 @@ export async function flushAttendanceScanQueue(force: boolean = false): Promise<
  * 3. Kumpulkan dalam batch (flush otomatis jika mencapai 20 siswa atau jeda idle 10 detik)
  * 4. Menghemat kuota Firestore dan menjamin keutuhan data presensi multi-perangkat
  */
-export function queueAttendanceScanRecord(records: AttendanceRecord[]): void {
+export function queueAttendanceScanRecord(records: AttendanceRecord[], newlyScannedRecord?: AttendanceRecord): void {
   const currentRole = getUserSession()?.role;
   if (currentRole === 'PARENT') {
     return;
@@ -4860,8 +4865,12 @@ export function queueAttendanceScanRecord(records: AttendanceRecord[]): void {
   safeSetLocalStorage(KEYS.ATTENDANCE + '_updatedAt', String(now));
   notifyStorageUpdated();
 
-  // 2. Simpan ke antrean offline persistent (anti-hilang jika browser ditutup/refresh)
-  addOfflinePendingScan(records);
+  // 2. Simpan hanya record scan baru ke antrean offline persistent (O(1) ultra-fast)
+  const todayStr = getLocalDateString();
+  const itemsToQueue = newlyScannedRecord
+    ? [newlyScannedRecord]
+    : cleanRecords.filter(r => r.synced === false && (r.isRealScan === true || r.date === todayStr)).slice(0, 50);
+  addOfflinePendingScan(itemsToQueue);
 
   // 3. Batched Cloud Sync:
   // Jika antrean mencapai threshold (20 siswa), kirim SEGERA ke Cloud!

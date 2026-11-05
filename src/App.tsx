@@ -1015,7 +1015,7 @@ export default function App() {
 
     // Sinkron hasil scan QR menggunakan antrean batching 10 detik atau 20 siswa
     if (newRecord.method === 'QR_SCAN') {
-      queueAttendanceScanRecord(updated);
+      queueAttendanceScanRecord(updated, newRecord);
     } else {
       saveAttendanceRecords(updated, true);
     }

@@ -4625,7 +4625,7 @@ export async function checkAndSyncOfflineQueue(isStartupOrNav: boolean = true): 
 
   // 1. Cek koneksi jaringan: jika offline, biarkan antrean tersimpan aman di penyimpanan lokal
   if (typeof navigator !== 'undefined' && !navigator.onLine) {
-    if (queue.length > 0) {
+    if (queue.length > 0 && !isStartupOrNav) {
       window.dispatchEvent(new CustomEvent('sihadir_network_toast', {
         detail: {
           type: 'warning',
@@ -4671,14 +4671,8 @@ export async function checkAndSyncOfflineQueue(isStartupOrNav: boolean = true): 
 
   const totalToSync = Math.max(queue.length, scanQueuePendingCount);
 
-  // Notifikasi indikator background yang halus
-  window.dispatchEvent(new CustomEvent('sihadir_network_toast', {
-    detail: {
-      type: 'info',
-      title: '🔄 Sinkronisasi Antrean Offline',
-      message: `Memulihkan dan menyinkronkan ${totalToSync} data scan offline ke Cloud Firestore...`
-    }
-  }));
+  // Proses sinkronisasi antrean berjalan hening (silent) di latar belakang agar tidak mengganggu kamera saat scan
+  console.log(`[OfflineQueueSync] Memulihkan dan menyinkronkan ${totalToSync} data scan offline ke Cloud Firestore...`);
 
   try {
     const localRecords = getAttendanceRecords();
@@ -4759,13 +4753,8 @@ export async function checkAndSyncOfflineQueue(isStartupOrNav: boolean = true): 
 
     setCloudSyncStatus('connected');
 
-    window.dispatchEvent(new CustomEvent('sihadir_network_toast', {
-      detail: {
-        type: 'success',
-        title: '✅ Sinkronisasi Offline Berhasil',
-        message: `Berhasil memulihkan dan menyinkronkan ${totalToSync} data scan offline ke Cloud!`
-      }
-    }));
+    // Sinkronisasi sukses dicatat di console tanpa memunculkan pop-up yang menutupi kamera scanner
+    console.log(`[OfflineQueueSync] Berhasil memulihkan dan menyinkronkan ${totalToSync} data scan offline ke Cloud!`);
 
     return {
       success: true,
@@ -4790,13 +4779,7 @@ export async function checkAndSyncOfflineQueue(isStartupOrNav: boolean = true): 
     isScanQueueFlushing = false;
     notifyScanQueueChanged();
 
-    window.dispatchEvent(new CustomEvent('sihadir_network_toast', {
-      detail: {
-        type: 'warning',
-        title: '⚠️ Sinkronisasi Cloud Tertunda',
-        message: 'Koneksi ke Cloud terganggu. Seluruh data presensi scan tetap aman tersimpan di perangkat.'
-      }
-    }));
+    console.warn('[OfflineQueueSync] Sinkronisasi Cloud tertunda. Data presensi tetap aman tersimpan di perangkat.');
 
     return {
       success: false,
@@ -4830,7 +4813,7 @@ export function notifyScanQueueChanged(): void {
 }
 
 /**
- * Paksa kirim (flush) seluruh antrean scan ke Cloud Firestore
+ * Paksa kirim (flush) seluruh antrean scan ke Cloud Firestore (senyap di latar belakang)
  */
 export async function flushAttendanceScanQueue(force: boolean = false): Promise<void> {
   const offlineQueue = getOfflineScanQueue();
@@ -4845,7 +4828,7 @@ export async function flushAttendanceScanQueue(force: boolean = false): Promise<
     scanQueueCountdownTimer = null;
   }
 
-  await checkAndSyncOfflineQueue(false);
+  await checkAndSyncOfflineQueue(true);
 }
 
 /**

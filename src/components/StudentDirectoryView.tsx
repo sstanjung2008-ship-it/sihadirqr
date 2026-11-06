@@ -382,25 +382,26 @@ export const StudentDirectoryView: React.FC<StudentDirectoryViewProps> = ({
           </p>
         </div>
 
-        <div className="flex items-center gap-2 flex-wrap self-start sm:self-auto">
+        {/* Action Buttons: on mobile stack vertically or wrap cleanly, on desktop display inline */}
+        <div className="flex flex-col sm:flex-row flex-wrap items-stretch sm:items-center gap-2 w-full lg:w-auto">
           {/* Tombol Format Contoh Excel */}
           <button
             onClick={downloadStudentImportTemplate}
-            className="bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 font-bold px-3 py-2.5 rounded-2xl shadow-xs flex items-center gap-1.5 text-xs transition-all cursor-pointer"
+            className="w-full sm:w-auto justify-center bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 font-bold px-3.5 py-2.5 rounded-2xl shadow-xs flex items-center gap-1.5 text-xs transition-all cursor-pointer active:scale-98"
             title="Download Format Contoh File Excel untuk Import Data Siswa"
           >
-            <Download className="w-4 h-4 text-emerald-600" />
-            Format Contoh Excel
+            <Download className="w-4 h-4 text-emerald-600 shrink-0" />
+            <span>Format Contoh Excel</span>
           </button>
 
           {/* Tombol Import Excel Siswa */}
           <button
             onClick={() => setIsImportModalOpen(true)}
-            className="bg-teal-600 hover:bg-teal-700 text-white font-bold px-3.5 py-2.5 rounded-2xl shadow-md flex items-center gap-2 text-xs transition-all cursor-pointer"
+            className="w-full sm:w-auto justify-center bg-teal-600 hover:bg-teal-700 text-white font-bold px-3.5 py-2.5 rounded-2xl shadow-md flex items-center gap-2 text-xs transition-all cursor-pointer active:scale-98"
             title="Import Banyak Data Siswa Sekaligus Menggunakan File Excel / CSV"
           >
-            <FileSpreadsheet className="w-4 h-4" />
-            Import Excel Siswa
+            <FileSpreadsheet className="w-4 h-4 shrink-0" />
+            <span>Import Excel Siswa</span>
           </button>
 
           {/* Tombol Download Data Identitas & Foto Siswa */}
@@ -410,85 +411,91 @@ export const StudentDirectoryView: React.FC<StudentDirectoryViewProps> = ({
               setExportSuccessMessage(null);
               setIsExportIdentityModalOpen(true);
             }}
-            className="bg-violet-600 hover:bg-violet-700 text-white font-bold px-3.5 py-2.5 rounded-2xl shadow-md flex items-center gap-2 text-xs transition-all cursor-pointer hover:shadow-lg hover:shadow-violet-600/20 active:scale-95"
+            className="w-full sm:w-auto justify-center bg-violet-600 hover:bg-violet-700 text-white font-bold px-3.5 py-2.5 rounded-2xl shadow-md flex items-center gap-2 text-xs transition-all cursor-pointer hover:shadow-lg hover:shadow-violet-600/20 active:scale-98"
             title="Download Data Identitas Lengkap Siswa beserta Pas Foto (Buku Induk PDF / Excel)"
           >
-            <FileText className="w-4 h-4" />
-            Download Data Identitas & Foto
+            <FileText className="w-4 h-4 shrink-0" />
+            <span>Download Data Identitas & Foto</span>
           </button>
 
           {/* Tombol Download Kartu Pelajar (1 Halaman / Batch) */}
           <button
             onClick={() => setBatchPrintMode('CARDS')}
-            className="bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 font-bold px-3.5 py-2.5 rounded-2xl shadow-sm flex items-center gap-2 text-xs transition-all cursor-pointer"
+            className="w-full sm:w-auto justify-center bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 font-bold px-3.5 py-2.5 rounded-2xl shadow-sm flex items-center gap-2 text-xs transition-all cursor-pointer active:scale-98"
             title="Download / Cetak Kolektif Kartu Tanda Pelajar (1 Halaman A4)"
           >
-            <GraduationCap className="w-4 h-4 text-indigo-600" />
-            Download Kartu Pelajar
+            <GraduationCap className="w-4 h-4 text-indigo-600 shrink-0" />
+            <span>Download Kartu Pelajar</span>
           </button>
 
           {/* Tombol Download Kartu QR Code (1 Halaman / Batch) */}
           <button
             onClick={() => setBatchPrintMode('QR')}
-            className="bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 font-bold px-3.5 py-2.5 rounded-2xl shadow-sm flex items-center gap-2 text-xs transition-all cursor-pointer"
+            className="w-full sm:w-auto justify-center bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 font-bold px-3.5 py-2.5 rounded-2xl shadow-sm flex items-center gap-2 text-xs transition-all cursor-pointer active:scale-98"
             title="Download / Cetak Kolektif Stiker QR Code Presensi (1 Halaman A4)"
           >
-            <QrCode className="w-4 h-4 text-emerald-600" />
-            Download Kartu QR Code
+            <QrCode className="w-4 h-4 text-emerald-600 shrink-0" />
+            <span>Download Kartu QR Code</span>
           </button>
 
           {/* Tombol Tambah Siswa Baru */}
           <button
             onClick={handleOpenAdd}
-            className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold px-4 py-2.5 rounded-2xl shadow-md flex items-center gap-2 text-xs transition-all cursor-pointer"
+            className="w-full sm:w-auto justify-center bg-indigo-600 hover:bg-indigo-700 text-white font-bold px-4 py-2.5 rounded-2xl shadow-md flex items-center gap-2 text-xs transition-all cursor-pointer active:scale-98"
           >
-            <UserPlus className="w-4 h-4" />
-            Tambah Siswa Baru
+            <UserPlus className="w-4 h-4 shrink-0" />
+            <span>Tambah Siswa Baru</span>
           </button>
         </div>
       </div>
 
-      {/* Filter Bar */}
-      <div className="flex flex-wrap items-center justify-between gap-3 bg-white p-4 rounded-3xl border border-slate-200/80 shadow-sm">
-        <div className="flex flex-wrap items-center gap-3 flex-1">
-          <div className="relative flex-1 min-w-[200px]">
-            <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-2.5" />
-            <input
-              type="text"
-              value={searchQuery}
-              onChange={(e) => {
-                setSearchQuery(e.target.value);
-                setCurrentPage(1);
-              }}
-              placeholder="Cari Nama Siswa, NISN, atau NIS..."
-              className="w-full bg-slate-50 text-slate-800 placeholder-slate-400 text-xs rounded-xl pl-9 pr-3 py-2 border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 font-semibold"
-            />
-          </div>
+      {/* Filter & Action Bar - Tersusun Rapi & Vertikal ke Bawah di Tampilan Mobile */}
+      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 bg-white p-4 rounded-3xl border border-slate-200/80 shadow-sm">
+        {/* Bilah Pencarian Siswa */}
+        <div className="relative w-full lg:flex-1 min-w-[200px]">
+          <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={(e) => {
+              setSearchQuery(e.target.value);
+              setCurrentPage(1);
+            }}
+            placeholder="Cari Nama Siswa, NISN, atau NIS..."
+            className="w-full bg-slate-50 text-slate-800 placeholder-slate-400 text-xs rounded-xl pl-9 pr-3 py-2.5 border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 font-semibold transition-all"
+          />
+        </div>
 
-          <div className="flex items-center gap-2">
-            <span className="text-xs text-slate-500 font-semibold">Kelas:</span>
+        {/* Filter Kelas dan Tombol Aksi - Tersusun Vertikal di Mobile, Horizontal di Desktop */}
+        <div className="flex flex-col sm:flex-row sm:items-center gap-2.5 w-full lg:w-auto">
+          {/* Dropdown Kelas */}
+          <div className="flex items-center gap-2 w-full sm:w-auto">
+            <span className="text-xs text-slate-500 font-semibold shrink-0">Kelas:</span>
             <select
               value={selectedClass}
               onChange={(e) => {
                 setSelectedClass(e.target.value);
                 setCurrentPage(1);
               }}
-              className="bg-slate-50 border border-slate-200 text-slate-800 text-xs rounded-xl px-3 py-2 font-bold focus:ring-2 focus:ring-indigo-500 cursor-pointer"
+              className="w-full sm:w-auto bg-slate-50 border border-slate-200 text-slate-800 text-xs rounded-xl px-3 py-2.5 font-bold focus:ring-2 focus:ring-indigo-500 cursor-pointer"
             >
               <option value="ALL">Semua Kelas ({students.length})</option>
               {sortedClasses.map(c => (
                 <option key={c.id} value={c.name}>{c.name}</option>
               ))}
             </select>
+          </div>
 
+          {/* Tombol Export Excel & Hapus Massal - Rapi Vertikal di Mobile, Horizontal di Layar Luas */}
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 w-full sm:w-auto">
             {/* Tombol Unduh Excel Cepat */}
             <button
               type="button"
               onClick={handleQuickExportExcel}
-              className="bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 font-bold px-3 py-2 rounded-xl text-xs flex items-center gap-1.5 transition-all cursor-pointer shadow-xs shrink-0"
+              className="w-full sm:w-auto justify-center bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 font-bold px-3.5 py-2.5 rounded-xl text-xs flex items-center gap-1.5 transition-all cursor-pointer shadow-xs active:scale-98"
               title="Unduh Data Identitas Siswa (Kelas Terpilih) langsung ke format Excel .xlsx"
             >
-              <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600" />
+              <FileSpreadsheet className="w-4 h-4 text-emerald-600 shrink-0" />
               <span>Export Excel</span>
             </button>
 
@@ -496,10 +503,10 @@ export const StudentDirectoryView: React.FC<StudentDirectoryViewProps> = ({
             <button
               type="button"
               onClick={handleOpenBulkDeleteModal}
-              className="bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 font-bold px-3 py-2 rounded-xl text-xs flex items-center gap-1.5 transition-all cursor-pointer shadow-xs shrink-0"
+              className="w-full sm:w-auto justify-center bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 font-bold px-3.5 py-2.5 rounded-xl text-xs flex items-center gap-1.5 transition-all cursor-pointer shadow-xs active:scale-98"
               title="Hapus data siswa secara massal berdasarkan kelas"
             >
-              <Trash2 className="w-3.5 h-3.5 text-rose-600" />
+              <Trash2 className="w-4 h-4 text-rose-600 shrink-0" />
               <span>Hapus Massal</span>
             </button>
 
@@ -508,10 +515,10 @@ export const StudentDirectoryView: React.FC<StudentDirectoryViewProps> = ({
               <button
                 type="button"
                 onClick={handleCleanDemoStudents}
-                className="bg-amber-500 hover:bg-amber-600 text-white font-extrabold px-3 py-2 rounded-xl text-xs flex items-center gap-1.5 transition-all cursor-pointer shadow-md shadow-amber-500/20 shrink-0 animate-pulse hover:animate-none"
+                className="w-full sm:w-auto justify-center bg-amber-500 hover:bg-amber-600 text-white font-extrabold px-3.5 py-2.5 rounded-xl text-xs flex items-center gap-1.5 transition-all cursor-pointer shadow-md shadow-amber-500/20 shrink-0 animate-pulse hover:animate-none active:scale-98"
                 title="Hapus permanen 12 siswa contoh demo bawaan sistem (foto dan data asli Anda tetap aman 100%)"
               >
-                <Trash2 className="w-3.5 h-3.5" />
+                <Trash2 className="w-4 h-4 shrink-0" />
                 <span>Bersihkan {demoStudentIds.length} Siswa Demo</span>
               </button>
             )}
@@ -600,52 +607,50 @@ export const StudentDirectoryView: React.FC<StudentDirectoryViewProps> = ({
                 </div>
               </div>
 
-              {/* Action Buttons */}
-              <div className="space-y-1.5 pt-3 border-t border-slate-100">
-                <div className="grid grid-cols-2 gap-1.5">
-                  {/* Kartu Pelajar Button */}
+              {/* Action Buttons: Tersusun Rapi tanpa terpotong di Mobile */}
+              <div className="space-y-2 pt-3 border-t border-slate-100">
+                {/* Baris 1: Kartu Pelajar & QR Code */}
+                <div className="grid grid-cols-2 gap-2">
                   <button
                     onClick={() => setSelectedStudentForCard(student)}
-                    className="bg-indigo-50 hover:bg-indigo-100 text-indigo-800 border border-indigo-200 rounded-xl py-2 px-1 text-[11px] font-bold flex items-center justify-center gap-1 transition-colors cursor-pointer"
+                    className="w-full bg-indigo-50 hover:bg-indigo-100 text-indigo-800 border border-indigo-200 rounded-xl py-2 px-2 text-[11px] font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer active:scale-98"
                   >
-                    <GraduationCap className="w-3.5 h-3.5 text-indigo-600" />
-                    Kartu Pelajar
+                    <GraduationCap className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
+                    <span className="truncate">Kartu Pelajar</span>
                   </button>
 
-                  {/* QR Code Sticker Button */}
                   <button
                     onClick={() => setQrCodeStudentModal(student)}
-                    className="bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 rounded-xl py-2 px-1 text-[11px] font-bold flex items-center justify-center gap-1 transition-colors cursor-pointer"
+                    className="w-full bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 rounded-xl py-2 px-2 text-[11px] font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer active:scale-98"
                   >
-                    <QrCode className="w-3.5 h-3.5 text-emerald-600" />
-                    QR Code
+                    <QrCode className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                    <span className="truncate">QR Code</span>
                   </button>
                 </div>
 
-                <div className="grid grid-cols-3 gap-1.5">
-                  {/* Biodata Lengkap & Foto PDF Button */}
+                {/* Baris 2: Biodata & Foto PDF dan Tombol Edit / Hapus */}
+                <div className="flex items-center gap-1.5">
                   <button
                     onClick={() => handleExportSingleStudentBiodata(student)}
                     title="Download Lembar Biodata & Foto Lengkap Siswa (Format Buku Induk PDF)"
-                    className="col-span-2 bg-violet-50 hover:bg-violet-100 text-violet-800 border border-violet-200 rounded-xl py-1.5 px-2 text-[11px] font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+                    className="flex-1 bg-violet-50 hover:bg-violet-100 text-violet-800 border border-violet-200 rounded-xl py-2 px-2.5 text-[11px] font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer active:scale-98 min-w-0"
                   >
-                    <FileText className="w-3.5 h-3.5 text-violet-600" />
-                    Biodata & Foto (PDF)
+                    <FileText className="w-3.5 h-3.5 text-violet-600 shrink-0" />
+                    <span className="truncate">Biodata & Foto (PDF)</span>
                   </button>
 
-                  {/* Edit / Delete Buttons */}
-                  <div className="flex items-center justify-end gap-1">
+                  <div className="flex items-center gap-1 shrink-0">
                     <button
                       onClick={() => handleOpenEdit(student)}
-                      title="Edit Data"
-                      className="p-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 transition-colors cursor-pointer"
+                      title="Edit Data Siswa"
+                      className="p-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 transition-colors cursor-pointer active:scale-95"
                     >
                       <Edit className="w-3.5 h-3.5" />
                     </button>
                     <button
                       onClick={() => setStudentToDelete(student)}
                       title="Hapus Data Siswa"
-                      className="p-1.5 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 transition-colors cursor-pointer"
+                      className="p-2 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 transition-colors cursor-pointer active:scale-95"
                     >
                       <Trash2 className="w-3.5 h-3.5" />
                     </button>

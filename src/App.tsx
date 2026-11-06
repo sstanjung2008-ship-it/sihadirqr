@@ -509,6 +509,16 @@ export default function App() {
 
     const handleNetworkToast = (e: any) => {
       if (e?.detail) {
+        const title = (e.detail.title || '').toLowerCase();
+        // Sembunyikan pop-up notifikasi sinkronisasi antrean agar tidak mengganggu kamera saat scan
+        if (
+          title.includes('sinkronisasi antrean') ||
+          title.includes('sinkronisasi offline') ||
+          title.includes('antrean scan') ||
+          title.includes('sinkronisasi cloud tertunda')
+        ) {
+          return;
+        }
         setNetworkToast(e.detail);
         setTimeout(() => {
           setNetworkToast((prev) => (prev === e.detail ? null : prev));
@@ -2522,8 +2532,8 @@ export default function App() {
         />
       )}
 
-      {/* Floating Auto-Sync & Network Toast Notification */}
-      {networkToast && (
+      {/* Floating Auto-Sync & Network Toast Notification (Disembunyikan saat tab scan aktif agar kamera 100% bebas hambatan) */}
+      {networkToast && activeTab !== 'scan' && (
         <div
           className={`fixed bottom-20 md:bottom-6 right-4 md:right-6 z-50 max-w-sm p-3.5 rounded-2xl shadow-2xl border flex items-start space-x-3 transition-all animate-in fade-in slide-in-from-bottom-5 backdrop-blur-md ${
             networkToast.type === 'success'

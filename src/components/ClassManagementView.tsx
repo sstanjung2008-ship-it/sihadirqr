@@ -2087,7 +2087,7 @@ export const ClassManagementView: React.FC<ClassManagementViewProps> = ({
                   </h3>
                   <p className="text-xs text-slate-400 mt-1">
                     NISN: {selectedStudentCharacterModal.student.nisn || '-'} • Total Poin Bersih:{' '}
-                    <strong className={selectedStudentCharacterModal.netPoints >= 0 ? 'text-emerald-400' : 'text-rose-400'}>
+                    <strong className={selectedStudentCharacterModal.netPoints >= 0 ? 'text-blue-400' : 'text-rose-400'}>
                       {selectedStudentCharacterModal.netPoints > 0 ? `+${selectedStudentCharacterModal.netPoints}` : selectedStudentCharacterModal.netPoints}
                     </strong>
                   </p>
@@ -2110,21 +2110,28 @@ export const ClassManagementView: React.FC<ClassManagementViewProps> = ({
                       key={log.id}
                       className={`p-4 rounded-2xl border space-y-2 ${
                         log.traitType === 'POSITIF'
-                          ? 'bg-emerald-950/20 border-emerald-900/40'
+                          ? 'bg-blue-950/20 border-blue-900/40'
                           : 'bg-rose-950/20 border-rose-900/40'
                       }`}
                     >
-                      <div className="flex items-center justify-between text-xs">
-                        <span className="font-extrabold text-white flex items-center gap-2">
-                          {log.traitType === 'POSITIF' ? (
-                            <TrendingUp className="w-4 h-4 text-emerald-400" />
-                          ) : (
-                            <TrendingDown className="w-4 h-4 text-rose-400" />
+                      <div className="flex items-center justify-between text-xs flex-wrap gap-1.5">
+                        <div className="flex items-center gap-2">
+                          <span className="font-extrabold text-white flex items-center gap-2">
+                            {log.traitType === 'POSITIF' ? (
+                              <TrendingUp className="w-4 h-4 text-blue-400" />
+                            ) : (
+                              <TrendingDown className="w-4 h-4 text-rose-400" />
+                            )}
+                            {log.traitName}
+                          </span>
+                          {(log.isManual || !log.id?.startsWith('synthetic-')) && (
+                            <span className="px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-300 border border-blue-400/30 text-[9px] font-bold">
+                              Catatan Khusus Guru
+                            </span>
                           )}
-                          {log.traitName}
-                        </span>
+                        </div>
                         <span className={`px-2.5 py-0.5 rounded-lg text-xs font-black ${
-                          log.traitType === 'POSITIF' ? 'bg-emerald-500/20 text-emerald-300' : 'bg-rose-500/20 text-rose-300'
+                          log.traitType === 'POSITIF' ? 'bg-blue-500/20 text-blue-300 border border-blue-500/30' : 'bg-rose-500/20 text-rose-300 border border-rose-500/30'
                         }`}>
                           {log.traitType === 'POSITIF' ? `+${log.points}` : `-${log.points}`} Poin
                         </span>

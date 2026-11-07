@@ -4080,6 +4080,9 @@ export function getSchoolProfile(): SchoolProfile {
         : (INITIAL_SCHOOL_PROFILE.parentPortalActiveDays || ['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu', 'Minggu']),
       parentPortalDisabledNotice: parsed.parentPortalDisabledNotice || INITIAL_SCHOOL_PROFILE.parentPortalDisabledNotice || 'Akses login untuk wali murid saat ini sedang dinonaktifkan oleh Administrator Sekolah. Silakan hubungi pihak sekolah atau coba kembali nanti.',
       parentPortalForceLogoutTimestamp: Number(parsed.parentPortalForceLogoutTimestamp) || 0,
+      pointCalculationStartDate: parsed.pointCalculationStartDate || INITIAL_SCHOOL_PROFILE.pointCalculationStartDate || '2026-01-01',
+      pointCalculationPeriodName: parsed.pointCalculationPeriodName || INITIAL_SCHOOL_PROFILE.pointCalculationPeriodName || 'Semester Genap 2025/2026',
+      pointCalculationInitialPoints: 0,
     };
   } catch {
     return INITIAL_SCHOOL_PROFILE;
@@ -6374,6 +6377,11 @@ export type StudentCharacterSummary = {
   kbmAbsentCount: number;
   kbmDisruptiveCount: number;
   generalLogs: StudentCharacterLog[];
+  // Rincian Akumulasi Poin Positif Terintegrasi:
+  routinePositivePoints?: number; // Poin Pembiasaan Karakter Rutin (7 KAIH / Jurnal KBM)
+  specialNotesPositivePoints?: number; // Poin Catatan Perilaku Khusus Siswa (Input Guru)
+  pointCalculationStartDate?: string; // Tanggal Mulai Perhitungan Aktif
+  initialPoints?: number; // Modal awal poin (terkunci 0)
 };
 
 /**
@@ -6563,10 +6571,29 @@ export function computeStudentCharacterSummaryFromData(
   student: { id?: string; nisn?: string; nis?: string; name?: string; className?: string; classId?: string },
   studentRawLogs: StudentCharacterLog[],
   studentAtt: AttendanceRecord[],
-  activeAttendanceDates: string[]
+  activeAttendanceDates: string[],
+  pointCalculationStartDate?: string
 ): StudentCharacterSummary {
+  const startDate = pointCalculationStartDate?.trim();
+
+  // Saring presensi kehadiran berdasarkan tanggal titik awal perhitungan (jika disetel).
+  // Data presensi sebelum tanggal ini tetap tersimpan utuh di DB sebagai arsip riwayat kehadiran.
+  const effectiveStudentAtt = startDate
+    ? (studentAtt || []).filter(r => (r.date || '') >= startDate)
+    : (studentAtt || []);
+
+  const effectiveActiveDates = startDate
+    ? (activeAttendanceDates || []).filter(d => (d || '') >= startDate)
+    : (activeAttendanceDates || []);
+
   // Saring log karakter siswa (kecualikan log auto presensi statis lama agar tidak terjadi duplikasi nilai dengan kalkulasi dinamis presensi)
   const studentLogs = (studentRawLogs || []).filter(l => {
+    // Saring log yang dicatat sebelum tanggal titik awal perhitungan (modal awal 0 dari tanggal efektif)
+    if (startDate) {
+      const logDate = (l.date || l.timestamp || '').slice(0, 10);
+      if (logDate && logDate < startDate) return false;
+    }
+
     // CATATAN MANUAL GURU: WAJIB SELALU DITAMPILKAN DI DETAIL KARAKTER & TIDAK BOLEH DISARING OLEH FILTER OTOMATIS!
     if (isManualCharacterLog(l)) return true;
 
@@ -6608,6 +6635,7 @@ export function computeStudentCharacterSummaryFromData(
   let kbmActiveCount = 0;
   let kbmAbsentCount = 0;
   let kbmDisruptiveCount = 0;
+  let specialNotesPositivePoints = 0;
 
   studentLogs.forEach(l => {
     const pts = Math.abs(l.points || 0);
@@ -6637,19 +6665,23 @@ export function computeStudentCharacterSummaryFromData(
       }
     } else {
       generalLogs.push(l);
+      if (l.traitType === 'POSITIF') {
+        specialNotesPositivePoints += pts;
+      }
     }
   });
 
   const kbmNetPoints = kbmPositivePoints - kbmNegativePoints;
+  const routinePositivePoints = kbmPositivePoints;
 
-  // Rekapitulasi Presensi
+  // Rekapitulasi Presensi dari effectiveStudentAtt
   const distinctOnTimeDatesSet = new Set<string>();
   const distinctLateDatesSet = new Set<string>();
   const distinctAlpaDatesSet = new Set<string>();
   const attByDate = new Map<string, AttendanceRecord>();
 
-  for (let i = 0; i < studentAtt.length; i++) {
-    const r = studentAtt[i];
+  for (let i = 0; i < effectiveStudentAtt.length; i++) {
+    const r = effectiveStudentAtt[i];
     if (!r || !r.date) continue;
     attByDate.set(r.date, r);
     const st = (r.status || '').toUpperCase().trim();
@@ -6681,8 +6713,8 @@ export function computeStudentCharacterSummaryFromData(
   const unscannedInDateSet = new Set<string>();
   const unreturnedDateSet = new Set<string>();
 
-  for (let d = 0; d < activeAttendanceDates.length; d++) {
-    const dateStr = activeAttendanceDates[d];
+  for (let d = 0; d < effectiveActiveDates.length; d++) {
+    const dateStr = effectiveActiveDates[d];
     const rec = attByDate.get(dateStr);
     const rawStatus = rec ? (rec.status || '').toUpperCase().trim() : 'BELUM_ABSEN';
 
@@ -6714,7 +6746,7 @@ export function computeStudentCharacterSummaryFromData(
     }
   }
 
-  // Periksa juga jika ada tanggal presensi individual siswa yang belum ada di activeAttendanceDates
+  // Periksa juga jika ada tanggal presensi individual siswa yang belum ada di effectiveActiveDates
   attByDate.forEach((rec, dateStr) => {
     if (unscannedInDateSet.has(dateStr) && unreturnedDateSet.has(dateStr)) return;
     const rawStatus = (rec.status || '').toUpperCase().trim();
@@ -6789,7 +6821,12 @@ export function computeStudentCharacterSummaryFromData(
     kbmActiveCount,
     kbmAbsentCount,
     kbmDisruptiveCount,
-    generalLogs
+    generalLogs,
+    // Rincian Akumulasi Poin Positif Terintegrasi:
+    routinePositivePoints,
+    specialNotesPositivePoints,
+    pointCalculationStartDate: startDate,
+    initialPoints: 0
   };
 }
 
@@ -6841,7 +6878,7 @@ export function calculateStudentCharacterSummary(
   const kbmFromJournals = extractStudentKbmLogsFromJournals(student, allJournals, studentRawLogs, effectiveProfile);
   const combinedLogs = kbmFromJournals.length > 0 ? deduplicateCharacterLogs([...studentRawLogs, ...kbmFromJournals]) : studentRawLogs;
 
-  return computeStudentCharacterSummaryFromData(student, combinedLogs, studentAtt, activeDates);
+  return computeStudentCharacterSummaryFromData(student, combinedLogs, studentAtt, activeDates, effectiveProfile?.pointCalculationStartDate);
 }
 
 /**
@@ -7023,7 +7060,7 @@ export function calculateBatchStudentCharacterSummaries(
     const kbmFromJournals = extractStudentKbmLogsFromJournals(s, allJournals, studentRawLogs, effectiveProfile);
     const combinedLogs = kbmFromJournals.length > 0 ? deduplicateCharacterLogs([...studentRawLogs, ...kbmFromJournals]) : studentRawLogs;
 
-    const summary = computeStudentCharacterSummaryFromData(s, combinedLogs, studentAtt, activeDates);
+    const summary = computeStudentCharacterSummaryFromData(s, combinedLogs, studentAtt, activeDates, effectiveProfile?.pointCalculationStartDate);
     resultMap.set(s.id, summary);
     if (sId) resultMap.set(sId, summary);
     if (sIdLower) resultMap.set(sIdLower, summary);

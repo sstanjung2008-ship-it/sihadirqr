@@ -104,8 +104,8 @@ export interface AttendanceAuditLog {
   studentName: string;
   className: string;
   date: string;
-  action: 'UPDATE_STATUS' | 'BULK_UPDATE' | 'UPDATE_RETURN' | 'MANUAL_OVERRIDE';
-  fieldChanged: 'status' | 'notes' | 'time' | 'returnStatus' | 'returnTime' | 'multiple';
+  action: 'UPDATE_STATUS' | 'BULK_UPDATE' | 'UPDATE_RETURN' | 'MANUAL_OVERRIDE' | 'UPDATE_POINT_CALCULATION_START_DATE';
+  fieldChanged: 'status' | 'notes' | 'time' | 'returnStatus' | 'returnTime' | 'multiple' | 'pointCalculationStartDate';
   oldValue: any;
   newValue: any;
   reason?: string;
@@ -248,6 +248,10 @@ export interface SchoolProfile {
   parentPortalActiveDays?: string[]; // Pilihan hari operasional izin login orang tua, misal: ['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu', 'Minggu']
   parentPortalDisabledNotice?: string; // Pesan penjelasan ketika login orang tua ditolak / dinonaktifkan
   parentPortalForceLogoutTimestamp?: number; // Timestamp saat admin menekan paksa log off seluruh akun orang tua
+  // Konfigurasi Titik Awal & Periode Perhitungan Poin Karakter / Presensi (Modal Awal 0)
+  pointCalculationStartDate?: string; // Tanggal Mulai Perhitungan (YYYY-MM-DD), data sebelum tanggal ini tersimpan sebagai arsip kehadiran
+  pointCalculationPeriodName?: string; // e.g. "Semester Ganjil 2026/2027"
+  pointCalculationInitialPoints?: number; // Terkunci pada modal awal 0 poin
 }
 
 export interface Teacher {

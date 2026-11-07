@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { SchoolProfile, Teacher, Student, SchoolHoliday } from '../types';
-import { Settings, Save, School, Clock, RotateCcw, CreditCard, CheckCircle2, Upload, Image as ImageIcon, Link, BookOpen, Plus, X, KeyRound, Key, Lock, Unlock, Eye, EyeOff, User, GraduationCap, Search, Check, RefreshCw, Users, ShieldAlert, ShieldCheck, AlertCircle, Calendar, CalendarDays, Trash2, Edit3, Tag, Flag, AlertTriangle, Sparkles, Filter, Cloud, CloudDownload, CloudUpload, FileJson, Download, Volume2, VolumeX, Mic, Headphones, BellRing, UserCheck, Smile, UserX, Play, Square, MessageSquare, Flame, CalendarCheck2, Layers, Power, Ban } from 'lucide-react';
-import { resetToDefaultData, forceUploadAllToCloud, forceDownloadAllFromCloud, getCloudSyncStatus, CloudSyncStatus, downloadDatabaseBackupFile, getLocalDateString, updateParentPortalAccess } from '../lib/storage';
+import { Settings, Save, School, Clock, RotateCcw, CreditCard, CheckCircle2, Upload, Image as ImageIcon, Link, BookOpen, Plus, X, KeyRound, Key, Lock, Unlock, Eye, EyeOff, User, GraduationCap, Search, Check, RefreshCw, Users, ShieldAlert, ShieldCheck, AlertCircle, Calendar, CalendarDays, Trash2, Edit3, Tag, Flag, AlertTriangle, Sparkles, Filter, Cloud, CloudDownload, CloudUpload, FileJson, Download, Volume2, VolumeX, Mic, Headphones, BellRing, UserCheck, Smile, UserX, Play, Square, MessageSquare, Flame, CalendarCheck2, Layers, Power, Ban, Award } from 'lucide-react';
+import { resetToDefaultData, forceUploadAllToCloud, forceDownloadAllFromCloud, getCloudSyncStatus, CloudSyncStatus, downloadDatabaseBackupFile, getLocalDateString, updateParentPortalAccess, saveAttendanceAuditLog } from '../lib/storage';
 import { 
   DEFAULT_TEACHER_SPEECH_TEMPLATE,
   DEFAULT_PARENT_ARRIVAL_MESSAGE,
@@ -87,6 +87,50 @@ export const SchoolSettingsView: React.FC<SchoolSettingsViewProps> = ({
 
   // Parent Portal Access & Schedule Management State
   const [parentPortalFeedback, setParentPortalFeedback] = useState<{ type: 'success' | 'info' | 'warning'; msg: string } | null>(null);
+
+  // Titik Awal Perhitungan Poin Karakter & Presensi (Modal Awal 0)
+  const [showConfirmPointStartDateModal, setShowConfirmPointStartDateModal] = useState<boolean>(false);
+  const [pointStartDateFeedback, setPointStartDateFeedback] = useState<string | null>(null);
+
+  const handleApplyPointCalculationSettings = async () => {
+    try {
+      const updatedProfile: SchoolProfile = {
+        ...formData,
+        pointCalculationStartDate: formData.pointCalculationStartDate || '2026-01-01',
+        pointCalculationPeriodName: formData.pointCalculationPeriodName || 'Semester Genap 2025/2026',
+        pointCalculationInitialPoints: 0,
+      };
+
+      onSaveProfile(updatedProfile);
+      setFormData(updatedProfile);
+
+      // Catat jejak audit ke koleksi audit_logs
+      await saveAttendanceAuditLog({
+        id: `audit-point-start-${Date.now()}`,
+        recordId: 'SETTINGS_POINT_CALCULATION_START_DATE',
+        studentId: 'SYSTEM_SETTINGS',
+        studentName: 'Pengaturan Titik Awal Poin',
+        className: 'Semua Kelas',
+        date: updatedProfile.pointCalculationStartDate || '2026-01-01',
+        action: 'UPDATE_POINT_CALCULATION_START_DATE',
+        fieldChanged: 'pointCalculationStartDate',
+        oldValue: schoolProfile?.pointCalculationStartDate || '2026-01-01',
+        newValue: updatedProfile.pointCalculationStartDate,
+        modifiedByUserId: 'ADMIN_SUPER',
+        modifiedByName: 'Administrator',
+        modifiedByRole: 'ADMIN',
+        reason: `Pengubahan titik awal perhitungan akumulasi poin menjadi ${updatedProfile.pointCalculationStartDate} (${updatedProfile.pointCalculationPeriodName}). Seluruh siswa mulai dari modal awal 0 poin.`,
+        timestamp: new Date().toISOString()
+      });
+
+      setShowConfirmPointStartDateModal(false);
+      setPointStartDateFeedback(`Berhasil menerapkan titik awal perhitungan poin sejak ${updatedProfile.pointCalculationStartDate} dengan modal awal 0!`);
+      setTimeout(() => setPointStartDateFeedback(null), 5000);
+    } catch (err) {
+      console.error('Gagal menerapkan pengaturan titik awal poin:', err);
+      alert('Gagal menyimpan pengaturan titik awal poin.');
+    }
+  };
 
   const navItems = [
     { id: 'section-profil-sekolah', key: 'profil', label: 'Profil Sekolah', icon: School, color: 'text-indigo-600', activeBg: 'bg-indigo-600 text-white shadow-indigo-100' },
@@ -2133,6 +2177,119 @@ export const SchoolSettingsView: React.FC<SchoolSettingsViewProps> = ({
                 </div>
                 <p className="text-[10px] text-slate-500">Pilih semester aktif yang sedang berjalan di sekolah.</p>
               </div>
+            </div>
+          </div>
+
+          {/* ========================================================================= */}
+          {/* Card: Periode & Titik Awal Perhitungan Poin Presensi/Karakter (Modal Awal 0) */}
+          {/* ========================================================================= */}
+          <div className="bg-gradient-to-br from-blue-50/90 via-white to-indigo-50/50 border border-blue-200 rounded-3xl p-5 sm:p-6 space-y-4 shadow-xs">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-blue-100 pb-3">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-2xl bg-blue-600 text-white flex items-center justify-center font-bold shadow-md shadow-blue-500/20 shrink-0">
+                  <Award className="w-5 h-5 text-blue-100" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-sm sm:text-base font-black text-slate-900 tracking-tight">
+                      Periode & Titik Awal Perhitungan Poin (Modal Awal 0)
+                    </h3>
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-blue-100 text-blue-800 border border-blue-200">
+                      Akumulasi Progresif
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    Menentukan tanggal cut-off mulai akumulasi poin kehadiran dan karakter siswa dari modal 0.
+                  </p>
+                </div>
+              </div>
+
+              <span className="text-[11px] font-extrabold text-blue-800 bg-blue-100/70 border border-blue-200 px-3 py-1 rounded-xl self-start sm:self-auto">
+                Modal Awal: 0 Poin
+              </span>
+            </div>
+
+            {/* Banner Informasi Panduan */}
+            <div className="p-3.5 bg-blue-100/60 border border-blue-200 rounded-2xl flex items-start gap-2.5 text-xs text-blue-950 font-medium leading-relaxed">
+              <Sparkles className="w-4 h-4 text-blue-600 shrink-0 mt-0.5" />
+              <div>
+                <span>
+                  Akumulasi poin dimulai dari <strong>0</strong> terhitung sejak tanggal{' '}
+                  <strong className="underline text-blue-900 font-extrabold">{formData.pointCalculationStartDate || '2026-01-01'}</strong>.
+                  Data presensi dan log sebelum tanggal ini tersimpan sebagai arsip kehadiran historis tanpa mempengaruhi saldo periode aktif.
+                </span>
+              </div>
+            </div>
+
+            {pointStartDateFeedback && (
+              <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-2xl flex items-center gap-2 text-xs text-emerald-800 font-bold animate-in fade-in">
+                <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                <span>{pointStartDateFeedback}</span>
+              </div>
+            )}
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-1">
+              {/* Tanggal Mulai Perhitungan */}
+              <div className="space-y-1.5">
+                <label className="block text-xs font-bold text-slate-700 flex items-center gap-1.5">
+                  <Calendar className="w-3.5 h-3.5 text-blue-600" />
+                  <span>Tanggal Mulai Perhitungan:</span>
+                </label>
+                <input
+                  type="date"
+                  value={formData.pointCalculationStartDate || '2026-01-01'}
+                  onChange={(e) => setFormData({ ...formData, pointCalculationStartDate: e.target.value })}
+                  className="w-full bg-white border border-slate-300 text-slate-900 rounded-xl px-3 py-2 text-xs font-mono font-bold focus:ring-2 focus:ring-blue-500 shadow-2xs"
+                />
+                <p className="text-[10px] text-slate-400">Titik awal (cut-off) agregasi skor berjalan.</p>
+              </div>
+
+              {/* Modal Poin Awal Siswa (Terkunci 0) */}
+              <div className="space-y-1.5">
+                <label className="block text-xs font-bold text-slate-700 flex items-center gap-1.5">
+                  <Lock className="w-3.5 h-3.5 text-slate-400" />
+                  <span>Modal Poin Awal Siswa:</span>
+                </label>
+                <div className="relative">
+                  <input
+                    type="text"
+                    readOnly
+                    value="0 Poin / Bintang (Terkunci)"
+                    className="w-full bg-slate-100 border border-slate-300 text-slate-600 rounded-xl px-3 py-2 text-xs font-bold cursor-not-allowed shadow-inner"
+                  />
+                  <span className="absolute right-3 top-2.5 text-[10px] font-extrabold text-blue-600 bg-blue-50 px-1.5 py-0.2 rounded border border-blue-200">
+                    Fix: 0
+                  </span>
+                </div>
+                <p className="text-[10px] text-slate-500">Semua siswa memulai akumulasi poin dari 0 pada tanggal efektif ini.</p>
+              </div>
+
+              {/* Nama Periode / Tahun Ajaran */}
+              <div className="space-y-1.5">
+                <label className="block text-xs font-bold text-slate-700 flex items-center gap-1.5">
+                  <Tag className="w-3.5 h-3.5 text-blue-600" />
+                  <span>Nama Periode / Tahun Ajaran:</span>
+                </label>
+                <input
+                  type="text"
+                  value={formData.pointCalculationPeriodName || 'Semester Genap 2025/2026'}
+                  onChange={(e) => setFormData({ ...formData, pointCalculationPeriodName: e.target.value })}
+                  placeholder="Contoh: Semester Ganjil 2026/2027"
+                  className="w-full bg-white border border-slate-300 text-slate-900 rounded-xl px-3 py-2 text-xs font-bold focus:ring-2 focus:ring-blue-500 shadow-2xs"
+                />
+                <p className="text-[10px] text-slate-400">Label nama periode yang tercantum di kartu rincian & cetak rekap.</p>
+              </div>
+            </div>
+
+            <div className="pt-2 flex justify-end">
+              <button
+                type="button"
+                onClick={() => setShowConfirmPointStartDateModal(true)}
+                className="inline-flex items-center gap-2 px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-extrabold text-xs rounded-xl shadow-md shadow-blue-600/20 transition-all transform active:scale-95 cursor-pointer"
+              >
+                <Save className="w-4 h-4" />
+                <span>Simpan Pengaturan Titik Awal Poin</span>
+              </button>
             </div>
           </div>
 
@@ -4603,6 +4760,57 @@ export const SchoolSettingsView: React.FC<SchoolSettingsViewProps> = ({
               >
                 <Check className="w-3.5 h-3.5" />
                 Ya, Reset Sekarang
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Dialog Konfirmasi Perubahan Titik Awal Perhitungan Poin */}
+      {showConfirmPointStartDateModal && (
+        <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in">
+          <div className="bg-white rounded-3xl max-w-lg w-full p-6 shadow-2xl border border-slate-100 space-y-4">
+            <div className="flex items-center gap-3">
+              <div className="w-12 h-12 rounded-2xl bg-amber-100 text-amber-700 flex items-center justify-center shrink-0">
+                <AlertTriangle className="w-6 h-6 text-amber-600" />
+              </div>
+              <div>
+                <h3 className="text-base font-black text-slate-900">
+                  Konfirmasi Kalkulasi Ulang Poin Siswa
+                </h3>
+                <p className="text-xs text-slate-500">
+                  Peringatan penerapan titik awal akumulasi poin karakter & presensi
+                </p>
+              </div>
+            </div>
+
+            <div className="p-4 bg-amber-50 border border-amber-200 rounded-2xl text-xs text-amber-900 space-y-2 leading-relaxed">
+              <p className="font-bold">
+                Apakah Anda yakin ingin menetapkan tanggal efektif perhitungan poin mulai{' '}
+                <span className="underline font-black">{formData.pointCalculationStartDate || '2026-01-01'}</span> ({formData.pointCalculationPeriodName || 'Periode Berjalan'})?
+              </p>
+              <ul className="list-disc list-inside space-y-1 text-[11px] text-amber-800">
+                <li>Seluruh siswa akan memulai akumulasi poin aktif dari <strong>0 Poin/Bintang</strong>.</li>
+                <li>Data presensi dan evaluasi sebelum tanggal ini tetap tersimpan aman sebagai <strong>arsip historis</strong>.</li>
+                <li>Tindakan ini akan dicatat ke riwayat audit resmi (<code>audit_logs</code>).</li>
+              </ul>
+            </div>
+
+            <div className="flex items-center justify-end gap-2.5 pt-2">
+              <button
+                type="button"
+                onClick={() => setShowConfirmPointStartDateModal(false)}
+                className="px-4 py-2.5 text-xs font-bold text-slate-600 hover:bg-slate-100 rounded-xl transition-colors cursor-pointer"
+              >
+                Batal
+              </button>
+              <button
+                type="button"
+                onClick={handleApplyPointCalculationSettings}
+                className="px-5 py-2.5 text-xs font-extrabold bg-blue-600 hover:bg-blue-700 text-white rounded-xl shadow-lg shadow-blue-600/30 transition-all transform active:scale-95 cursor-pointer flex items-center gap-2"
+              >
+                <Check className="w-4 h-4" />
+                <span>Ya, Terapkan Titik Awal Poin</span>
               </button>
             </div>
           </div>

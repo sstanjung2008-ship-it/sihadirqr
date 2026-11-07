@@ -48,7 +48,8 @@ import {
   Flame,
   VolumeX,
   Layers,
-  GraduationCap
+  GraduationCap,
+  Sparkles
 } from 'lucide-react';
 import { Pagination } from './Pagination';
 
@@ -156,7 +157,7 @@ function groupDatesByMonthAndYear(dateStrings?: string[]): GroupedMonthDates[] {
 
 interface CompactGroupedDatesProps {
   dates?: string[];
-  theme?: 'emerald' | 'rose' | 'red' | 'orange' | 'amber' | 'slate';
+  theme?: 'blue' | 'emerald' | 'rose' | 'red' | 'orange' | 'amber' | 'slate';
 }
 
 const CompactGroupedDates: React.FC<CompactGroupedDatesProps> = ({
@@ -168,6 +169,13 @@ const CompactGroupedDates: React.FC<CompactGroupedDatesProps> = ({
   if (groups.length === 0) return null;
 
   const themeClasses = {
+    blue: {
+      box: 'bg-blue-50/60 border-blue-100/90',
+      icon: 'text-blue-600',
+      label: 'text-blue-950',
+      pill: 'bg-white text-blue-800 border-blue-200/90 hover:bg-blue-100/70',
+      count: 'text-blue-700'
+    },
     emerald: {
       box: 'bg-emerald-50/60 border-emerald-100/90',
       icon: 'text-emerald-600',
@@ -1228,9 +1236,9 @@ export const CharacterPointsView: React.FC<CharacterPointsViewProps> = ({
 
                       {/* Hadir Tepat Waktu */}
                       <td className="p-4 text-center">
-                        <span className="inline-flex flex-col items-center justify-center px-3 py-1 rounded-2xl bg-emerald-50 text-emerald-800 border border-emerald-200 shadow-2xs">
+                        <span className="inline-flex flex-col items-center justify-center px-3 py-1 rounded-2xl bg-blue-50 text-blue-800 border border-blue-200 shadow-2xs">
                           <span className="font-black text-xs">{score.onTimeDays || 0}x Hadir</span>
-                          <span className="text-[10px] font-extrabold text-emerald-600">+{score.onTimeBonusPoints || 0} Poin</span>
+                          <span className="text-[10px] font-extrabold text-blue-600">+{score.onTimeBonusPoints || 0} Poin</span>
                         </span>
                       </td>
 
@@ -1795,16 +1803,16 @@ export const CharacterPointsView: React.FC<CharacterPointsViewProps> = ({
 
               {/* Kotak Ringkasan Akumulasi Poin di Bawah Bagian Rincian Penilaian & Riwayat Karakter */}
               <div className="grid grid-cols-3 gap-2 p-2.5 sm:p-3 bg-white rounded-2xl border border-slate-200 shadow-2xs">
-                {/* 1. Total Poin Positif */}
-                <div className="flex flex-col items-center justify-center p-2 rounded-xl bg-emerald-50/80 border border-emerald-100 text-center">
-                  <span className="text-[10px] sm:text-xs font-bold text-emerald-800 flex items-center gap-1">
-                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                {/* 1. Total Poin Positif (Tema BIRU Konsisten) */}
+                <div className="flex flex-col items-center justify-center p-2 rounded-xl bg-blue-50/80 border border-blue-200 text-center">
+                  <span className="text-[10px] sm:text-xs font-bold text-blue-800 flex items-center gap-1">
+                    <CheckCircle2 className="w-3.5 h-3.5 text-blue-600 shrink-0" />
                     Poin Positif
                   </span>
-                  <span className="font-black text-sm sm:text-lg text-emerald-600 mt-0.5">
+                  <span className="font-black text-sm sm:text-lg text-blue-600 mt-0.5">
                     +{detailStudentScore.positivePoints}
                   </span>
-                  <span className="text-[9px] text-slate-400 font-medium hidden sm:inline">Input guru & presensi</span>
+                  <span className="text-[9px] text-slate-400 font-medium hidden sm:inline">Presensi, KAIH, & Catatan</span>
                 </div>
 
                 {/* 2. Total Poin Negatif */}
@@ -1839,6 +1847,51 @@ export const CharacterPointsView: React.FC<CharacterPointsViewProps> = ({
                 </div>
               </div>
 
+                {/* Banner Informasi Titik Awal Perhitungan Poin */}
+                {schoolProfile?.pointCalculationStartDate && (
+                  <div className="p-3 bg-blue-50/70 border border-blue-200/90 rounded-2xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2.5 text-xs text-blue-900">
+                    <div className="flex items-center gap-2">
+                      <div className="p-1 bg-blue-600 text-white rounded-lg shrink-0">
+                        <Award className="w-3.5 h-3.5" />
+                      </div>
+                      <span className="font-medium">
+                        Akumulasi poin dimulai dari <strong className="font-extrabold text-blue-700">0</strong> terhitung sejak tanggal{' '}
+                        <strong className="font-extrabold text-blue-950">{schoolProfile.pointCalculationStartDate}</strong> ({schoolProfile.pointCalculationPeriodName || 'Periode Berjalan'}). Data presensi dan log sebelum tanggal ini tersimpan sebagai arsip kehadiran.
+                      </span>
+                    </div>
+                    <span className="text-[10px] font-black px-2 py-0.5 bg-blue-100 text-blue-800 rounded-lg shrink-0 border border-blue-200">
+                      Modal Awal 0
+                    </span>
+                  </div>
+                )}
+
+                {/* Sub-Panel Rincian Poin Positif Terintegrasi: Presensi + 7 KAIH + Catatan Perilaku Khusus */}
+                <div className="p-3 bg-slate-50 border border-slate-200 rounded-2xl text-xs space-y-2">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1 text-slate-700 font-bold">
+                    <span className="flex items-center gap-1.5 text-blue-950 font-extrabold">
+                      <Sparkles className="w-3.5 h-3.5 text-blue-600 shrink-0" />
+                      Rincian Akumulasi Poin Positif (+{detailStudentScore.positivePoints} Poin):
+                    </span>
+                    <span className="text-[10px] font-mono text-blue-700 bg-blue-50 px-2 py-0.5 rounded-lg border border-blue-200 font-black self-start sm:self-auto">
+                      +{detailStudentScore.onTimeBonusPoints || 0} Presensi + {detailStudentScore.routinePositivePoints || detailStudentScore.kbmPositivePoints || 0} KAIH + {detailStudentScore.specialNotesPositivePoints || 0} Catatan Khusus
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-[11px]">
+                    <div className="p-2 rounded-xl bg-white border border-blue-100 flex items-center justify-between shadow-2xs">
+                      <span className="text-slate-600 font-medium">Presensi Tepat Waktu:</span>
+                      <strong className="text-blue-600 font-extrabold">+{detailStudentScore.onTimeBonusPoints || 0} Poin</strong>
+                    </div>
+                    <div className="p-2 rounded-xl bg-white border border-blue-100 flex items-center justify-between shadow-2xs">
+                      <span className="text-slate-600 font-medium">Pembiasaan 7 KAIH:</span>
+                      <strong className="text-blue-600 font-extrabold">+{detailStudentScore.routinePositivePoints || detailStudentScore.kbmPositivePoints || 0} Poin</strong>
+                    </div>
+                    <div className="p-2 rounded-xl bg-white border border-blue-100 flex items-center justify-between shadow-2xs">
+                      <span className="text-slate-600 font-medium">Catatan Khusus Guru:</span>
+                      <strong className="text-blue-600 font-extrabold">+{detailStudentScore.specialNotesPositivePoints || 0} Poin</strong>
+                    </div>
+                  </div>
+                </div>
+
               <div className="space-y-4">
                 {/* ========================================================================= */}
                 {/* KELOMPOK SESI 2: REKAPITULASI PRESENSI OTOMATIS */}
@@ -1867,12 +1920,12 @@ export const CharacterPointsView: React.FC<CharacterPointsViewProps> = ({
                     detailStudentScore.unreturnedDays > 0) ? (
 
                       <div className="space-y-2">
-                        {/* 1. Card Akumulasi Hadir Tepat Waktu */}
+                        {/* 1. Card Akumulasi Hadir Tepat Waktu (Tema BIRU Konsisten) */}
                         {detailStudentScore.onTimeDays > 0 && (
-                          <div className="p-3 rounded-2xl border border-emerald-200 bg-white hover:border-emerald-300 shadow-2xs space-y-1.5 transition-all">
+                          <div className="p-3 rounded-2xl border border-blue-200 bg-white hover:border-blue-300 shadow-2xs space-y-1.5 transition-all">
                             <div className="flex items-center justify-between gap-2">
                               <div className="flex items-center gap-2.5 min-w-0">
-                                <div className="p-1.5 sm:p-2 bg-emerald-100 text-emerald-700 rounded-xl shrink-0">
+                                <div className="p-1.5 sm:p-2 bg-blue-100 text-blue-700 rounded-xl shrink-0">
                                   <CheckCircle2 className="w-4 h-4" />
                                 </div>
                                 <div className="min-w-0">
@@ -1880,7 +1933,7 @@ export const CharacterPointsView: React.FC<CharacterPointsViewProps> = ({
                                     <p className="font-bold text-slate-800 text-xs sm:text-sm truncate">
                                       Hadir Tepat Waktu
                                     </p>
-                                    <span className="px-1.5 py-0.2 rounded bg-emerald-50 text-emerald-700 border border-emerald-200 font-extrabold text-[9px] sm:text-[10px]">
+                                    <span className="px-1.5 py-0.2 rounded bg-blue-50 text-blue-700 border border-blue-200 font-extrabold text-[9px] sm:text-[10px]">
                                       Presensi Otomatis
                                     </span>
                                   </div>
@@ -1889,12 +1942,12 @@ export const CharacterPointsView: React.FC<CharacterPointsViewProps> = ({
                                   </p>
                                 </div>
                               </div>
-                              <span className="px-2.5 py-1 bg-emerald-600 text-white font-black text-xs rounded-xl shadow-2xs shrink-0">
+                              <span className="px-2.5 py-1 bg-blue-600 text-white font-black text-xs rounded-xl shadow-2xs shrink-0">
                                 +{detailStudentScore.onTimeBonusPoints} Poin
                               </span>
                             </div>
 
-                            <CompactGroupedDates dates={detailStudentScore.onTimeDates} theme="emerald" />
+                            <CompactGroupedDates dates={detailStudentScore.onTimeDates} theme="blue" />
                           </div>
                         )}
 

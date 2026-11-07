@@ -61,6 +61,9 @@ export const INITIAL_SCHOOL_PROFILE: SchoolProfile = {
   parentPortalActiveDays: ["Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu", "Minggu"],
   parentPortalDisabledNotice: "Akses login untuk wali murid saat ini sedang dinonaktifkan oleh Administrator Sekolah. Silakan hubungi pihak sekolah atau coba kembali nanti.",
   parentPortalForceLogoutTimestamp: 0,
+  pointCalculationStartDate: "2026-01-01",
+  pointCalculationPeriodName: "Semester Genap 2025/2026",
+  pointCalculationInitialPoints: 0,
   activeDays: ["Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu"],
   holidays: [
     {

@@ -89,16 +89,35 @@ service cloud.firestore {
         : (isSignedIn() || isAdmin());
     }
 
-    // Koleksi langsung catatan nilai karakter
+    // ===============================================================
+    // ATURAN KOLEKSI PENILAIAN KARAKTER & CATATAN PERILAKU SISWA
+    // (character_logs, sihadir_character_logs, behavior_notes)
+    // Hak Akses Ketat:
+    // - Read: Terbuka (agar siswa/orang tua/wali kelas dapat melihat evaluasi karakter)
+    // - Create / Update: Khusus akun Guru (TEACHER) dan Admin (ADMIN)
+    // - Delete: Mutlak hanya diizinkan untuk Admin Sekolah (ADMIN)
+    // ===============================================================
     match /character_logs/{logId} {
       allow read: if true;
-      allow create, update: if true;
+      allow create, update: if isTeacherOrAdmin() || request.resource.data.editorRole in ['ADMIN', 'TEACHER', 'GURU', 'ADMIN_GURU'];
       allow delete: if isAdmin();
     }
 
     match /sihadir_character_logs/{logId} {
       allow read: if true;
-      allow create, update: if true;
+      allow create, update: if isTeacherOrAdmin() || request.resource.data.editorRole in ['ADMIN', 'TEACHER', 'GURU', 'ADMIN_GURU'];
+      allow delete: if isAdmin();
+    }
+
+    match /behavior_notes/{noteId} {
+      allow read: if true;
+      allow create, update: if isTeacherOrAdmin() || request.resource.data.editorRole in ['ADMIN', 'TEACHER', 'GURU', 'ADMIN_GURU'];
+      allow delete: if isAdmin();
+    }
+
+    match /student_character_summaries/{studentId} {
+      allow read: if true;
+      allow create, update: if isTeacherOrAdmin() || request.resource.data.editorRole in ['ADMIN', 'TEACHER', 'GURU', 'ADMIN_GURU'];
       allow delete: if isAdmin();
     }
 

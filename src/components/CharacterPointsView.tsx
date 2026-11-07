@@ -16,6 +16,8 @@ import {
   refreshCloudData,
   saveStudentCharacterLogDirectlyToCloud
 } from '../lib/storage';
+import { submitCharacterPointRealtime } from '../lib/characterRealtime';
+import { StudentBehaviorNotesRealtimeSection } from './StudentBehaviorNotesRealtimeSection';
 import { 
   Plus, 
   Search, 
@@ -840,31 +842,26 @@ export const CharacterPointsView: React.FC<CharacterPointsViewProps> = ({
     };
 
     setIsSavingCharacterToCloud(true);
-    try {
-      // 1. Eksekusi Real-time Cloud Write langsung dalam satu write ke Cloud Firestore
-      await saveStudentCharacterLogDirectlyToCloud(newLog);
 
-      // 2. Panggil callback props
-      onAddLog(newLog);
-      setHighlightedLogId(newLog.id);
-      setShowAddModal(false);
+    // 1. Optimistic UI Update (< 50ms): seketika update skor dan catatan di tampilan lokal
+    onAddLog(newLog);
+    setHighlightedLogId(newLog.id);
+    setShowAddModal(false);
+
+    try {
+      // 2. Eksekusi Real-time Cloud Write langsung ke Firestore character_logs & student_character_summaries
+      const res = await submitCharacterPointRealtime(newLog, userSession || null);
 
       const timeStr = now.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }) + ' WITA';
       setCloudSuccessToast({
-        title: '✅ NILAI KARAKTER TERSIMPAN DI CLOUD FIRESTORE!',
-        message: `Penilaian "${selectedTrait.name}" (${selectedTrait.points > 0 ? '+' : ''}${selectedTrait.points} Poin) untuk siswa ${selectedStudent.name} (${selectedStudent.className}) berhasil tersimpan permanen di Cloud Firestore (${timeStr}). Data seragam di seluruh perangkat.`
+        title: res.cloudWritten ? '✅ NILAI KARAKTER TERSIMPAN DI CLOUD FIRESTORE!' : '⚡ TERSINKRONISASI KE ANTREAN',
+        message: res.cloudWritten
+          ? `Penilaian "${selectedTrait.name}" (${selectedTrait.points > 0 ? '+' : ''}${selectedTrait.points} Poin) untuk siswa ${selectedStudent.name} (${selectedStudent.className}) berhasil tersimpan permanen di Cloud Firestore (${timeStr}). Data seragam di seluruh perangkat.`
+          : 'Nilai karakter tersimpan di perangkat lokal dan akan otomatis diunggah ke Cloud Firestore saat online.'
       });
-      setTimeout(() => setCloudSuccessToast(null), 6000);
+      setTimeout(() => setCloudSuccessToast(null), 5000);
     } catch (err: any) {
       console.error('[Character Cloud Write Error]', err);
-      onAddLog(newLog);
-      setHighlightedLogId(newLog.id);
-      setShowAddModal(false);
-      setCloudSuccessToast({
-        title: 'TERSINKRONISASI KE ANTREAN',
-        message: 'Nilai karakter tersimpan di perangkat lokal dan akan disinkronkan ke cloud.'
-      });
-      setTimeout(() => setCloudSuccessToast(null), 4000);
     } finally {
       setIsSavingCharacterToCloud(false);
     }
@@ -2033,167 +2030,19 @@ export const CharacterPointsView: React.FC<CharacterPointsViewProps> = ({
                   </div>
 
                   {/* ========================================================================= */}
-                  {/* KELOMPOK SESI: CATATAN PERILAKU KHUSUS SISWA (INPUT GURU) */}
+                  {/* KELOMPOK SESI: CATATAN PERILAKU KHUSUS SISWA (REAL-TIME CLOUD SYNC) */}
                   {/* ========================================================================= */}
-                  <div className="space-y-2 pt-2 border-t border-slate-200">
-                    <div className="flex items-center justify-between pt-1">
-                      <div className="flex items-center gap-2">
-                        <div className="p-1.5 sm:p-2 bg-gradient-to-br from-indigo-500 to-indigo-700 text-white rounded-xl shadow-xs shrink-0">
-                          <CheckCircle2 className="w-4 h-4" />
-                        </div>
-                        <div>
-                          <h5 className="font-black text-slate-800 text-xs sm:text-sm">
-                            Catatan Perilaku Khusus Siswa (Input Guru)
-                          </h5>
-                          <p className="text-[11px] text-slate-500 font-medium">
-                            Catatan evaluasi karakter dan sikap khusus siswa yang diinput langsung oleh guru
-                          </p>
-                        </div>
-                      </div>
-                      <span className="text-[10px] font-bold text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-md border border-indigo-200">
-                        {studentDetailLogs.length} catatan
-                      </span>
-                    </div>
-
-                    {studentDetailLogs.length > 0 ? (
-                      <div className="space-y-2">
-                        {studentDetailLogs.map((log, idx) => {
-                          const isHighlighted = log.id === highlightedLogId;
-                          return (
-                            <div
-                              key={`${log.id}_gen_${idx}`}
-                              id={`char-log-${log.id}`}
-                              className={`p-3 rounded-2xl border transition-all space-y-2 ${
-                                isHighlighted
-                                  ? 'border-indigo-400 bg-indigo-50/50 ring-2 ring-indigo-500 shadow-sm'
-                                  : 'border-slate-200 bg-white hover:border-slate-300 shadow-2xs'
-                              }`}
-                            >
-                              <div className="flex items-start justify-between gap-2">
-                                <div className="flex items-start gap-2.5 min-w-0">
-                                  <div className="shrink-0 mt-0.5">
-                                    {log.traitType === 'POSITIF' ? (
-                                      <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-xl bg-blue-100 text-blue-700 flex items-center justify-center font-bold">
-                                        <CheckCircle2 className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
-                                      </div>
-                                    ) : (
-                                      <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-xl bg-rose-100 text-rose-700 flex items-center justify-center font-bold">
-                                        <XCircle className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
-                                      </div>
-                                    )}
-                                  </div>
-
-                                  <div className="min-w-0 space-y-0.5">
-                                    <div className="flex items-center gap-1.5 flex-wrap">
-                                      <span className="font-bold text-slate-800 text-xs sm:text-sm">
-                                        {log.traitName}
-                                      </span>
-                                      <span className={`px-2 py-0.2 rounded-md text-[9px] sm:text-[10px] font-black ${
-                                        log.traitType === 'POSITIF' ? 'bg-blue-100 text-blue-800' : 'bg-rose-100 text-rose-800'
-                                      }`}>
-                                        {log.traitType === 'POSITIF' ? `+${log.points}` : `-${log.points}`} Poin
-                                      </span>
-                                      {isManualCharacterLog(log) && (
-                                        <span className="bg-emerald-50 text-emerald-800 border border-emerald-300 text-[9px] font-extrabold px-1.5 py-0.2 rounded inline-flex items-center gap-0.5">
-                                          <ShieldCheck className="w-2.5 h-2.5 text-emerald-600" />
-                                          Input Guru
-                                        </span>
-                                      )}
-                                      {isHighlighted && (
-                                        <span className="bg-indigo-600 text-white text-[9px] font-black px-1.5 py-0.2 rounded-full animate-pulse">
-                                          Terpilih
-                                        </span>
-                                      )}
-                                    </div>
-
-                                    <p className="text-[10px] sm:text-[11px] text-slate-500 flex items-center gap-1.5 flex-wrap">
-                                      <span>Oleh: <strong className="text-slate-700">{log.evaluatorName || 'Guru'}</strong></span>
-                                      <span>•</span>
-                                      <span>{log.timestamp || log.date}</span>
-                                    </p>
-                                  </div>
-                                </div>
-
-                                {/* Action Buttons: Foto Bukti, Tindak Lanjut, Hapus */}
-                                <div className="flex items-center gap-1 shrink-0">
-                                  {log.photoProofUrl && isRealPhotoProof(log.photoProofUrl) && (
-                                    <button
-                                      onClick={() => setPreviewPhotoModalUrl(log.photoProofUrl || null)}
-                                      className="group relative rounded-xl overflow-hidden border border-slate-200 hover:border-indigo-500 transition-all cursor-pointer shrink-0"
-                                      title="Lihat Foto Bukti"
-                                    >
-                                      <img
-                                        src={log.photoProofUrl}
-                                        alt="Bukti"
-                                        loading="lazy"
-                                        className="w-7 h-7 sm:w-8 sm:h-8 object-cover group-hover:scale-105 transition-transform"
-                                      />
-                                    </button>
-                                  )}
-
-                                  <button
-                                    onClick={() => handleOpenFollowUpModal(log)}
-                                    className="px-2 sm:px-2.5 py-1 rounded-xl bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 text-[10px] sm:text-[11px] font-bold transition-all flex items-center gap-1 shrink-0 cursor-pointer shadow-2xs"
-                                    title="Tindak Lanjut"
-                                  >
-                                    <FileText className="w-3 h-3" />
-                                    <span className="hidden sm:inline">{log.followUpNotes ? 'Edit' : 'Tindak Lanjut'}</span>
-                                  </button>
-
-                                  {currentUserRole === 'ADMIN' && (
-                                    <button
-                                      type="button"
-                                      onClick={() => setDeleteConfirmLog(log)}
-                                      className="p-1 sm:p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer shrink-0"
-                                      title="Hapus Catatan (Admin)"
-                                    >
-                                      <Trash2 className="w-3.5 h-3.5" />
-                                    </button>
-                                  )}
-                                </div>
-                              </div>
-
-                              {/* Deskripsi & Catatan Spesifik Perilaku */}
-                              {log.notes && (
-                                <div className="text-[11px] sm:text-xs text-slate-700 bg-slate-50 px-2.5 py-1.5 rounded-xl border border-slate-100 leading-snug font-normal line-clamp-2 hover:line-clamp-none transition-all">
-                                  "{log.notes}"
-                                </div>
-                              )}
-
-                              {/* Catatan Tindak Lanjut jika ada */}
-                              {(log.followUpNotes || log.followUpPhotoUrl) && (
-                                <div className="p-2 sm:p-2.5 rounded-xl bg-amber-50/90 border border-amber-200 text-xs text-amber-950 space-y-1">
-                                  <div className="flex items-center justify-between font-bold text-[10px] text-amber-800">
-                                    <span className="flex items-center gap-1">
-                                      <ShieldCheck className="w-3 h-3 text-amber-600" />
-                                      Tindak Lanjut: {log.followUpBy || 'Guru'}
-                                    </span>
-                                    {log.followUpDate && <span className="font-mono text-[10px]">{log.followUpDate}</span>}
-                                  </div>
-                                  {log.followUpNotes && (
-                                    <p className="text-[11px] text-slate-700 leading-snug line-clamp-2 hover:line-clamp-none">{log.followUpNotes}</p>
-                                  )}
-                                  {log.followUpPhotoUrl && isRealPhotoProof(log.followUpPhotoUrl) && (
-                                    <button
-                                      type="button"
-                                      onClick={() => setPreviewPhotoModalUrl(log.followUpPhotoUrl || null)}
-                                      className="inline-flex items-center gap-1 px-2 py-0.5 bg-white text-amber-900 rounded text-[10px] font-bold border border-amber-300 cursor-pointer shadow-2xs mt-1"
-                                    >
-                                      <FileImage className="w-3 h-3 text-amber-700" /> Lihat Bukti Foto
-                                    </button>
-                                  )}
-                                </div>
-                              )}
-                            </div>
-                          );
-                        })}
-                      </div>
-                    ) : (
-                      <div className="p-3.5 bg-white border border-dashed border-slate-200 rounded-2xl text-center text-xs text-slate-400">
-                        Belum ada catatan perilaku khusus yang diinput langsung oleh guru.
-                      </div>
-                    )}
-                  </div>
+                  <StudentBehaviorNotesRealtimeSection
+                    studentId={detailStudent.id}
+                    studentName={detailStudent.name}
+                    className={detailStudent.className}
+                    fallbackLogs={studentDetailLogs}
+                    onOpenFollowUp={handleOpenFollowUpModal}
+                    onPreviewPhoto={(url) => setPreviewPhotoModalUrl(url)}
+                    onDeleteLog={(log) => setDeleteConfirmLog(log)}
+                    isAdmin={currentUserRole === 'ADMIN'}
+                    highlightedLogId={highlightedLogId}
+                  />
                 </div>
             </div>
 

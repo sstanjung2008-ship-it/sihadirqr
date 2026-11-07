@@ -91,6 +91,24 @@ export const BulkReturnManagementModal: React.FC<BulkReturnManagementModalProps>
 
   const [returnTimeInput, setReturnTimeInput] = useState<string>(getCurrentTimeString());
   const [bulkNotes, setBulkNotes] = useState<string>('Disetujui Admin (Pulang Massal)');
+  const [successBanner, setSuccessBanner] = useState<{ message: string; timestamp: number } | null>(null);
+
+  // Clear success notification when modal is closed
+  useEffect(() => {
+    if (!isOpen) {
+      setSuccessBanner(null);
+    }
+  }, [isOpen]);
+
+  // Auto dismiss success notification after 5 seconds
+  useEffect(() => {
+    if (successBanner) {
+      const timer = setTimeout(() => {
+        setSuccessBanner(null);
+      }, 5000);
+      return () => clearTimeout(timer);
+    }
+  }, [successBanner]);
 
   // Map students for quick access
   const allDateItems = useMemo<BulkReturnItem[]>(() => {
@@ -215,8 +233,11 @@ export const BulkReturnManagementModal: React.FC<BulkReturnManagementModalProps>
       }));
 
       onBulkUpdateReturnStatus(updates);
-      alert(`Berhasil memperbarui status pulang untuk ${updates.length} siswa menjadi ${targetReturnStatus === 'PULANG_CEPAT' ? 'Pulang Cepat' : 'Pulang'} pada jam ${timeToUse}!`);
-      onClose();
+      setSuccessBanner({
+        message: `Berhasil memperbarui status pulang untuk ${updates.length} siswa menjadi ${targetReturnStatus === 'PULANG_CEPAT' ? 'Pulang Cepat' : 'Pulang'} pada jam ${timeToUse}!`,
+        timestamp: Date.now()
+      });
+      setSelectedKeys(new Set());
     } else {
       // RESET_RETURN
       const updates: BulkReturnUpdatePayload[] = selectedItemsToProcess.map(item => ({
@@ -231,8 +252,11 @@ export const BulkReturnManagementModal: React.FC<BulkReturnManagementModalProps>
       }));
 
       onBulkUpdateReturnStatus(updates);
-      alert(`Berhasil mereset status kepulangan ${updates.length} siswa menjadi Belum Pulang!`);
-      onClose();
+      setSuccessBanner({
+        message: `Berhasil mereset status kepulangan ${updates.length} siswa menjadi Belum Pulang!`,
+        timestamp: Date.now()
+      });
+      setSelectedKeys(new Set());
     }
   };
 
@@ -267,6 +291,26 @@ export const BulkReturnManagementModal: React.FC<BulkReturnManagementModalProps>
             <X className="w-6 h-6" />
           </button>
         </div>
+
+        {/* Banner Sukses - Pop up tetap tampil setelah menekan tombol aksi */}
+        {successBanner && (
+          <div className="bg-emerald-600 text-white px-5 py-3.5 flex items-center justify-between shrink-0 shadow-inner animate-in slide-in-from-top-2 duration-200">
+            <div className="flex items-center gap-3">
+              <CheckCircle2 className="w-5 h-5 text-emerald-200 shrink-0" />
+              <span className="text-xs sm:text-sm font-bold tracking-wide">
+                {successBanner.message}
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setSuccessBanner(null)}
+              className="p-1 hover:bg-white/20 rounded-lg transition-colors cursor-pointer text-white/80 hover:text-white"
+              title="Tutup pemberitahuan"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        )}
 
         {/* Action Configuration Bar */}
         <div className="bg-emerald-50/70 border-b border-emerald-100 p-4 sm:p-5 shrink-0 space-y-4">

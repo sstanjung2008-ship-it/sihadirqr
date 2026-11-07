@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { Student, SchoolClass, AttendanceRecord, UserSession } from '../types';
 import { getLocalDateString } from '../lib/storage';
 import { 
@@ -14,7 +14,8 @@ import {
   ShieldCheck, 
   RotateCcw,
   Clock,
-  UserX
+  UserX,
+  CheckCircle2
 } from 'lucide-react';
 
 export interface BulkAlpaItem {
@@ -77,6 +78,24 @@ export const BulkAlpaManagementModal: React.FC<BulkAlpaManagementModalProps> = (
   const [targetStatus, setTargetStatus] = useState<AttendanceRecord['status']>('HADIR');
   const [entryTimeInput, setEntryTimeInput] = useState<string>('07:00');
   const [bulkNotes, setBulkNotes] = useState<string>('Disetujui Admin (Update Massal)');
+  const [successBanner, setSuccessBanner] = useState<{ message: string; timestamp: number } | null>(null);
+
+  // Clear success notification when modal is closed
+  useEffect(() => {
+    if (!isOpen) {
+      setSuccessBanner(null);
+    }
+  }, [isOpen]);
+
+  // Auto dismiss success notification after 5 seconds
+  useEffect(() => {
+    if (successBanner) {
+      const timer = setTimeout(() => {
+        setSuccessBanner(null);
+      }, 5000);
+      return () => clearTimeout(timer);
+    }
+  }, [successBanner]);
 
   const handleTargetStatusChange = (newStat: AttendanceRecord['status']) => {
     setTargetStatus(newStat);
@@ -210,8 +229,11 @@ export const BulkAlpaManagementModal: React.FC<BulkAlpaManagementModalProps> = (
       }
 
       onDeleteRecords(recordIdsToDelete);
-      alert(`Berhasil menghapus/mereset ${recordIdsToDelete.length} rekaman presensi pada tanggal ${selectedDate}!`);
-      onClose();
+      setSuccessBanner({
+        message: `Berhasil menghapus/mereset ${recordIdsToDelete.length} rekaman presensi pada tanggal ${selectedDate}!`,
+        timestamp: Date.now()
+      });
+      setSelectedKeys(new Set());
     } else {
       // CONVERT TO ANOTHER STATUS
       const resolvedEntryTime = (targetStatus === 'HADIR' || targetStatus === 'TERLAMBAT')
@@ -231,8 +253,11 @@ export const BulkAlpaManagementModal: React.FC<BulkAlpaManagementModalProps> = (
       }));
 
       onBulkUpdateStatus(updates);
-      alert(`Berhasil mengubah ${updates.length} data status masuk siswa menjadi ${targetStatus}!`);
-      onClose();
+      setSuccessBanner({
+        message: `Berhasil mengubah ${updates.length} data status masuk siswa menjadi ${targetStatus}!`,
+        timestamp: Date.now()
+      });
+      setSelectedKeys(new Set());
     }
   };
 
@@ -267,6 +292,26 @@ export const BulkAlpaManagementModal: React.FC<BulkAlpaManagementModalProps> = (
             <X className="w-6 h-6" />
           </button>
         </div>
+
+        {/* Banner Sukses - Pop up tetap tampil setelah menekan tombol aksi */}
+        {successBanner && (
+          <div className="bg-emerald-600 text-white px-5 py-3.5 flex items-center justify-between shrink-0 shadow-inner animate-in slide-in-from-top-2 duration-200">
+            <div className="flex items-center gap-3">
+              <CheckCircle2 className="w-5 h-5 text-emerald-200 shrink-0" />
+              <span className="text-xs sm:text-sm font-bold tracking-wide">
+                {successBanner.message}
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setSuccessBanner(null)}
+              className="p-1 hover:bg-white/20 rounded-lg transition-colors cursor-pointer text-white/80 hover:text-white"
+              title="Tutup pemberitahuan"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        )}
 
         {/* Modal Body */}
         <div className="p-4 sm:p-6 overflow-y-auto space-y-5 flex-1 bg-slate-50/50">

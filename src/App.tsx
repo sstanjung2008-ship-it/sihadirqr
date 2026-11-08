@@ -25,6 +25,7 @@ import {
   getSchoolClasses, 
   saveSchoolClasses,
   getAttendanceRecords, 
+  hydrateAttendanceFromIndexedDB,
   saveAttendanceRecords,
   saveAttendanceRecordsLocally,
   queueAttendanceScanRecord,
@@ -479,6 +480,14 @@ export default function App() {
     // 2. Pembacaan Cloud Firestore Seketika: Read 1 kali round-trip cepat saat membuka awal dan refresh halaman
     let isCancelled = false;
     setInitialSyncState('syncing');
+
+    // Hidrasi instan dari IndexedDB (offline-first & bebas batas 5MB)
+    hydrateAttendanceFromIndexedDB().then((idbRecords) => {
+      if (!isCancelled && idbRecords && idbRecords.length > 0) {
+        setAttendanceRecordsState(idbRecords);
+      }
+    }).catch(() => {});
+
     initFirestoreAppSession(currentRole).then(() => {
       if (isCancelled) return;
       // Hook Pemulihan Offline & Auto-Sync saat Startup: periksa dan unggah antrean scan offline jika ada

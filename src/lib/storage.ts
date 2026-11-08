@@ -15,6 +15,7 @@ import {
   INITIAL_CLASS_SCHEDULES
 } from '../data/mockData';
 import { db, doc, setDoc, getDoc, getDocs, collection, deleteDoc, onSnapshot, serverTimestamp, Timestamp, query, where } from './firebase';
+import { idbGet, idbSet } from './idb';
 import firebaseConfigData from '../../firebase-applet-config.json';
 
 // Firebase Server Time Offset Tracker (menjamin pengecekan 16:00 WITA akurat dengan jam server Google Cloud)
@@ -745,12 +746,13 @@ export function cleanAttendanceStorageParts(baseKey: string): void {
 export function safeSetLocalStorage(key: string, value: string): void {
   if (typeof window === 'undefined') return;
 
-  // 1. Jika key adalah ATTENDANCE, simpan selalu di memori sesi aktif
+  // 1. Jika key adalah ATTENDANCE, simpan selalu di memori sesi aktif dan IndexedDB (kebal batas kuota LocalStorage 5MB)
   if (key === KEYS.ATTENDANCE) {
     try {
       const records = JSON.parse(value);
       if (Array.isArray(records)) {
         inMemoryAttendanceRecords = validateAndSanitizeAttendanceRecords(records);
+        idbSet(KEYS.ATTENDANCE, inMemoryAttendanceRecords).catch(() => {});
       }
     } catch {}
   }
@@ -1130,6 +1132,77 @@ export async function fetchTodayIndividualAttendanceFromCloud(targetDate?: strin
     return [];
   }
 }
+
+/**
+ * Mengambil record presensi spesifik per tanggal dari Cloud Firestore koleksi 'attendance_records'
+ * Berguna saat membuka dashboard tanggal tertentu atau saat tanggal tersebut belum tersimpan di perangkat lokal.
+ */
+export async function syncDateAttendanceFromCloud(targetDate: string): Promise<{ success: boolean; count: number; message: string }> {
+  try {
+    const records = await fetchTodayIndividualAttendanceFromCloud(targetDate);
+    if (records.length > 0) {
+      const current = getAttendanceRecords();
+      const merged = validateAndSanitizeAttendanceRecords(mergeAttendanceLists(current, records));
+      inMemoryAttendanceRecords = merged;
+      safeSetLocalStorage(KEYS.ATTENDANCE, JSON.stringify(merged));
+      idbSet(KEYS.ATTENDANCE, merged).catch(() => {});
+      notifyStorageUpdated(true);
+      return { success: true, count: records.length, message: `Berhasil memperbarui ${records.length} data presensi tanggal ${targetDate} dari Cloud Firestore!` };
+    }
+    return { success: true, count: 0, message: `Tidak ada data presensi baru di Cloud untuk tanggal ${targetDate}` };
+  } catch (err: any) {
+    return { success: false, count: 0, message: err?.message || 'Gagal mengambil data presensi' };
+  }
+}
+
+/**
+ * Menarik SELURUH dokumen individual dari koleksi 'attendance_records' di Cloud Firestore (17.000+ data).
+ * Menggabungkannya secara komprehensif ke memori, IndexedDB, dan koleksi agregasi sihadir_attendance_records_v2.
+ */
+export async function pullAllAttendanceFromCloudCollection(): Promise<{ success: boolean; totalRecords: number; newRecordsCount: number; message: string }> {
+  try {
+    setCloudSyncStatus('syncing');
+    const querySnapshot = await getDocs(collection(db, 'attendance_records'));
+    const cloudRecords: AttendanceRecord[] = [];
+    querySnapshot.forEach(docSnap => {
+      const data = docSnap.data();
+      if (data && data.studentId && data.date) {
+        cloudRecords.push(data as AttendanceRecord);
+      }
+    });
+
+    const localCurrent = getAttendanceRecords();
+    const merged = validateAndSanitizeAttendanceRecords(mergeAttendanceLists(localCurrent, cloudRecords));
+    const newRecordsCount = merged.length - localCurrent.length;
+    
+    inMemoryAttendanceRecords = merged;
+    safeSetLocalStorage(KEYS.ATTENDANCE, JSON.stringify(merged));
+    await idbSet(KEYS.ATTENDANCE, merged);
+    
+    // Tulis juga ke agregasi sihadir_attendance_records_v2 agar perangkat lain langsung instan
+    writeCloudDocument(KEYS.ATTENDANCE, JSON.stringify(merged), Date.now()).catch(() => {});
+    
+    setCloudSyncStatus('connected');
+    notifyStorageUpdated(true);
+    
+    return {
+      success: true,
+      totalRecords: merged.length,
+      newRecordsCount: Math.max(0, newRecordsCount),
+      message: `Berhasil memuat ${merged.length.toLocaleString('id-ID')} data presensi dari Cloud Firestore!`,
+    };
+  } catch (err: any) {
+    setCloudSyncStatus('connected');
+    console.warn('[Cloud Pull Error]:', err);
+    return {
+      success: false,
+      totalRecords: getAttendanceRecords().length,
+      newRecordsCount: 0,
+      message: err?.message || 'Gagal memuat data presensi dari Cloud',
+    };
+  }
+}
+
 
 export async function writeCloudDocument(key: string, dataStr: string, timestamp: number): Promise<void> {
   const currentRole = getUserSession()?.role;
@@ -3116,6 +3189,7 @@ export async function smartSyncAndMergeAllWithCloud(isInitialBoot: boolean = fal
     // Pastikan seluruh hari sekolah di bulan berjalan (termasuk 1 - 7 Oktober 2026) selalu terisi lengkap
     finalAtt = ensureCompleteAttendanceHistory(finalAtt, optimizedStudents);
     inMemoryAttendanceRecords = finalAtt;
+    idbSet(KEYS.ATTENDANCE, finalAtt).catch(() => {});
     const attUpdatedAt = Math.max(Number(attCloud?.updatedAt || 0), prevLocalTimestamps[KEYS.ATTENDANCE] || 0, now);
     const attJsonStr = JSON.stringify(finalAtt);
     safeSetLocalStorage(KEYS.ATTENDANCE, attJsonStr);
@@ -3562,6 +3636,8 @@ export async function forceDownloadAllFromCloud(): Promise<{ success: boolean; e
                   finalAtt = validateAndSanitizeAttendanceRecords(mergeAttendanceLists(localAtt, cleanCloud));
                 }
                 const cleanStr = JSON.stringify(finalAtt);
+                inMemoryAttendanceRecords = finalAtt;
+                idbSet(KEYS.ATTENDANCE, finalAtt).catch(() => {});
                 safeSetLocalStorage(key, cleanStr);
                 safeSetLocalStorage(key + '_updatedAt', String(cloudDoc.updatedAt || Date.now()));
               }
@@ -4540,9 +4616,33 @@ export function getAttendanceRecords(): AttendanceRecord[] {
     }
   } catch {}
 
-  // 4. Jika data kosong: kembalikan array kosong (Rule 2: Zero Default Filler / Unscanned tetap kosong)
+  // 4. Jika data kosong di memory/localStorage, picu hidrasi latar belakang dari IndexedDB
+  hydrateAttendanceFromIndexedDB().catch(() => {});
+
   inMemoryAttendanceRecords = [];
   return [];
+}
+
+/**
+ * Membaca cache riwayat presensi dari IndexedDB ke memori aktif
+ * Menjamin 17.000+ data presensi langsung tersedia secara instan saat membuka web app / offline
+ */
+export async function hydrateAttendanceFromIndexedDB(): Promise<AttendanceRecord[]> {
+  if (typeof window === 'undefined') return [];
+  try {
+    const cached = await idbGet<AttendanceRecord[]>(KEYS.ATTENDANCE);
+    if (Array.isArray(cached) && cached.length > 0) {
+      const sanitized = validateAndSanitizeAttendanceRecords(cached);
+      if (!inMemoryAttendanceRecords || sanitized.length > inMemoryAttendanceRecords.length) {
+        inMemoryAttendanceRecords = sanitized;
+        notifyStorageUpdated(true);
+      }
+      return sanitized;
+    }
+  } catch (err) {
+    console.warn('[IDB] Hydration notice:', err);
+  }
+  return inMemoryAttendanceRecords || [];
 }
 
 /**

@@ -186,8 +186,8 @@ export async function submitCharacterPointRealtime(
 
     cloudWritten = true;
 
-    // Sinkronkan juga ke dokumen agregat (KEYS.CHARACTER_LOGS) di latar belakang
-    saveStudentCharacterLogs(updatedLogs, true);
+    // Sinkronkan juga ke dokumen agregat (KEYS.CHARACTER_LOGS) secara asinkron dengan debounce di latar belakang (tidak memblokir input guru)
+    saveStudentCharacterLogs(updatedLogs, false);
 
     return {
       success: true,

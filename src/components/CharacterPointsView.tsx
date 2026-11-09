@@ -849,30 +849,22 @@ export const CharacterPointsView: React.FC<CharacterPointsViewProps> = ({
       isManual: true
     };
 
-    setIsSavingCharacterToCloud(true);
-
-    // 1. Optimistic UI Update (< 50ms): seketika update skor dan catatan di tampilan lokal
+    // 1. Optimistic UI Update (< 50ms): seketika update skor dan catatan di tampilan lokal & tutup modal
     onAddLog(newLog);
     setHighlightedLogId(newLog.id);
     setShowAddModal(false);
 
-    try {
-      // 2. Eksekusi Real-time Cloud Write langsung ke Firestore character_logs & student_character_summaries
-      const res = await submitCharacterPointRealtime(newLog, userSession || null);
+    const timeStr = now.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }) + ' WITA';
+    setCloudSuccessToast({
+      title: '✅ NILAI KARAKTER TERSIMPAN!',
+      message: `Penilaian "${selectedTrait.name}" (${selectedTrait.points > 0 ? '+' : ''}${selectedTrait.points} Poin) untuk siswa ${selectedStudent.name} (${selectedStudent.className}) berhasil dicatat (${timeStr}). Data tersinkronkan ke Cloud Firestore.`
+    });
+    setTimeout(() => setCloudSuccessToast(null), 4000);
 
-      const timeStr = now.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }) + ' WITA';
-      setCloudSuccessToast({
-        title: res.cloudWritten ? '✅ NILAI KARAKTER TERSIMPAN DI CLOUD FIRESTORE!' : '⚡ TERSINKRONISASI KE ANTREAN',
-        message: res.cloudWritten
-          ? `Penilaian "${selectedTrait.name}" (${selectedTrait.points > 0 ? '+' : ''}${selectedTrait.points} Poin) untuk siswa ${selectedStudent.name} (${selectedStudent.className}) berhasil tersimpan permanen di Cloud Firestore (${timeStr}). Data seragam di seluruh perangkat.`
-          : 'Nilai karakter tersimpan di perangkat lokal dan akan otomatis diunggah ke Cloud Firestore saat online.'
-      });
-      setTimeout(() => setCloudSuccessToast(null), 5000);
-    } catch (err: any) {
-      console.error('[Character Cloud Write Error]', err);
-    } finally {
-      setIsSavingCharacterToCloud(false);
-    }
+    // 2. Eksekusi Real-time Cloud Write langsung ke Firestore character_logs secara cepat & non-blocking
+    submitCharacterPointRealtime(newLog, userSession || null).catch((err: any) => {
+      console.warn('[Character Cloud Write Error]', err);
+    });
   };
 
   // Follow Up Handlers

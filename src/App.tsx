@@ -1995,7 +1995,8 @@ export default function App() {
     savePermanentManualCharacterLogs([newLog]);
     setCharacterLogsState(prevLogs => {
       const updated = deduplicateCharacterLogs([newLog, ...prevLogs]);
-      saveStudentCharacterLogs(updated, true);
+      // Gunakan false agar debounced di background, mencegah freezing UI saat input nilai karakter
+      saveStudentCharacterLogs(updated, false);
       return updated;
     });
   };

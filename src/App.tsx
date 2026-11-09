@@ -946,8 +946,8 @@ export default function App() {
     ) && r.date === record.date);
 
     const cleanCandidateId = (record.id && !record.id.startsWith('att-autoalpa-') && !record.id.startsWith('att-synth-'))
-      ? record.id
-      : `att-${record.studentId}-${record.date}`;
+      ? (record.id.startsWith('attendance_') ? record.id : `attendance_${record.studentId}_${record.date}`)
+      : `attendance_${record.studentId}_${record.date}`;
 
     let newRecord: AttendanceRecord = {
       ...record,
@@ -965,7 +965,7 @@ export default function App() {
       if (isExistingSynth) {
         newRecord = {
           ...record,
-          id: `att-${record.studentId}-${record.date}`,
+          id: `attendance_${record.studentId}_${record.date}`,
           notes: (record.notes && !record.notes.includes('Otomatis Alpa')) ? record.notes : '',
           isSynthetic: false,
           isRealScan: true,

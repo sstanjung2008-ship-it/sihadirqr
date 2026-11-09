@@ -128,7 +128,23 @@ export function playScanSound(type: 'SUCCESS' | 'LATE' | 'PULANG' | 'ERROR') {
       osc1.stop(t + 0.32);
       osc2.stop(t + 0.32);
     }
+
+    // Trigger haptic vibration feedback for mobile devices (80ms confirmation pulse)
+    triggerHapticFeedback(type === 'ERROR' ? [100, 50, 100] : [80]);
   } catch (err) {
     console.warn('[Audio Engine] Play scan sound error:', err);
+  }
+}
+
+/**
+ * Picu getaran haptik (Haptic Feedback) peramban untuk respons pemindaian instan
+ */
+export function triggerHapticFeedback(pattern: number[] = [80]): void {
+  if (typeof window !== 'undefined' && typeof navigator !== 'undefined' && 'vibrate' in navigator) {
+    try {
+      navigator.vibrate(pattern);
+    } catch {
+      // Haptics not allowed or unsupported
+    }
   }
 }

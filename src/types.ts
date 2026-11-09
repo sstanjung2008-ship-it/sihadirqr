@@ -73,6 +73,24 @@ export interface AttendanceRecord {
   synced?: boolean; // True jika data telah terkonfirmasi tersimpan di Cloud Firestore
 }
 
+export interface AttendanceQueueItem {
+  id: string; // attendance_${studentId}_${dateString}
+  studentId: string;
+  studentName: string;
+  classId: string;
+  timestamp: number;
+  date: string; // YYYY-MM-DD (WITA)
+  type: 'masuk' | 'pulang';
+  status: 'Hadir' | 'Terlambat';
+  checkInTime?: string | null;
+  checkOutTime?: string | null;
+  syncStatus: 'pending' | 'syncing' | 'synced' | 'error';
+  errorMessage?: string;
+  retryCount: number;
+  createdAt: number; // Unix timestamp ms
+  lastAttemptAt?: number;
+}
+
 export interface OfflinePendingScan {
   id: string; // composite key unik: `${studentId}_${date}_${scannerDeviceId}`
   recordId: string;

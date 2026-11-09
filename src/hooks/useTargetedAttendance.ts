@@ -190,13 +190,22 @@ export function useTargetedAttendance({
       const dStr = targetDate || date;
       if (!studentId || !dStr) return null;
 
-      const docId = `${studentId}_${dStr}`;
+      const deterministicId = `attendance_${studentId}_${dStr}`;
       try {
-        const docRef = doc(db, 'attendance_records', docId);
-        const snap = await getDoc(docRef);
+        let docRef = doc(db, 'attendance_records', deterministicId);
+        let snap = await getDoc(docRef);
+        if (!snap.exists()) {
+          // Fallback ke legacy format docId
+          const legacyDocRef = doc(db, 'attendance_records', `${studentId}_${dStr}`);
+          const legacySnap = await getDoc(legacyDocRef);
+          if (legacySnap.exists()) {
+            snap = legacySnap;
+            docRef = legacyDocRef;
+          }
+        }
 
         if (!isMountedRef.current) return null;
-        setTotalReadsIncurred((prev) => prev + 1); // Tepat 1 read Firestore
+        setTotalReadsIncurred((prev) => prev + 1); // 1 read Firestore
 
         if (snap.exists()) {
           const updated = snap.data() as AttendanceRecord;
@@ -215,7 +224,7 @@ export function useTargetedAttendance({
         }
         return null;
       } catch (err) {
-        console.warn(`[useTargetedAttendance] Single doc fetch notice (${docId}):`, err);
+        console.warn(`[useTargetedAttendance] Single doc fetch notice (${deterministicId}):`, err);
         return null;
       }
     },

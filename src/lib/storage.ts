@@ -1,4 +1,4 @@
-import { SchoolProfile, SchoolClass, Student, AttendanceRecord, AttendanceStatus, AttendanceAuditLog, LeaveRequest, Teacher, LearningJournal, CharacterTrait, StudentCharacterLog, CharacterPredicateSettings, UserSession, UserRole, StudentGradeAssessment, StudentGradeItem, LessonPeriod, ClassScheduleSlot, OfflinePendingScan } from '../types';
+import { SchoolProfile, SchoolClass, Student, AttendanceRecord, AttendanceStatus, AttendanceAuditLog, LeaveRequest, Teacher, LearningJournal, CharacterTrait, StudentCharacterLog, CharacterPredicateSettings, UserSession, UserRole, StudentGradeAssessment, StudentGradeItem, LessonPeriod, ClassScheduleSlot, OfflinePendingScan, AttendanceQueueItem } from '../types';
 import { 
   INITIAL_SCHOOL_PROFILE, 
   INITIAL_CLASSES, 
@@ -15,7 +15,18 @@ import {
   INITIAL_CLASS_SCHEDULES
 } from '../data/mockData';
 import { db, doc, setDoc, getDoc, getDocs, collection, deleteDoc, onSnapshot, serverTimestamp, Timestamp, query, where } from './firebase';
-import { idbGet, idbSet } from './idb';
+import { 
+  idbGet, 
+  idbSet, 
+  getTodayDateKey, 
+  enqueueAttendance, 
+  enqueueAttendanceBatch, 
+  getAttendanceQueue, 
+  getPendingAttendanceQueue, 
+  updateAttendanceQueueItem, 
+  markAttendanceQueueItemSynced, 
+  getAttendanceQueueStats 
+} from './idb';
 import firebaseConfigData from '../../firebase-applet-config.json';
 
 // Firebase Server Time Offset Tracker (menjamin pengecekan 16:00 WITA akurat dengan jam server Google Cloud)
@@ -1060,12 +1071,15 @@ export async function writeIndividualAttendanceRecordsToCloud(records: (Attendan
       continue;
     }
 
-    const docId = `${r.studentId}_${r.date}`;
+    const docId = (typeof r.id === 'string' && r.id.startsWith('attendance_'))
+      ? r.id
+      : `attendance_${r.studentId}_${r.date}`;
 
     // Cek duplicate fingerprint: cegah pengiriman data identik secara berulang ke Firestore
     const fingerprint = getAttendanceRecordFingerprint(r);
     if (recentSyncedRecordFingerprints.get(docId) === fingerprint) {
       successCount++;
+      markAttendanceQueueItemSynced(docId).catch(() => {});
       continue;
     }
 
@@ -1103,9 +1117,16 @@ export async function writeIndividualAttendanceRecordsToCloud(records: (Attendan
     try {
       await setDoc(docRef, payload, { merge: true });
       recentSyncedRecordFingerprints.set(docId, fingerprint);
+      await markAttendanceQueueItemSynced(docId).catch(() => {});
       successCount++;
-    } catch (err) {
+    } catch (err: any) {
       console.warn(`[Firestore] Gagal menyimpan individual record ${docId}:`, err);
+      updateAttendanceQueueItem(docId, {
+        syncStatus: 'error',
+        errorMessage: err?.message || 'Gagal menyimpan ke Firestore',
+        lastAttemptAt: Date.now(),
+        retryCount: (r.retryCount || 0) + 1
+      }).catch(() => {});
     }
   }
   return successCount;
@@ -1598,42 +1619,13 @@ export function exportAllDatabaseToJson(): string {
 /**
  * Safely formats a Date or timestamp or date string into local YYYY-MM-DD (avoiding UTC offset bugs)
  * Mengonversi waktu ke Zona Waktu Sekolah Standar Indonesia (WITA UTC+8)
- * sehingga seluruh perangkat (walaupun setting zona waktu HP/laptop berbeda atau UTC)
+ * menggunakan Intl.DateTimeFormat 'Asia/Makassar' sehingga seluruh perangkat
  * selalu menghasilkan tanggal hari ini yang identik sama persis!
  */
+export { getTodayDateKey };
+
 export function getLocalDateString(dateInput: Date | number | string = new Date()): string {
-  if (typeof dateInput === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(dateInput)) {
-    return dateInput;
-  }
-
-  let d: Date;
-  if (dateInput instanceof Date) {
-    d = dateInput;
-  } else if (typeof dateInput === 'number') {
-    d = new Date(dateInput);
-  } else if (typeof dateInput === 'string') {
-    if (dateInput.includes('T')) {
-      d = new Date(dateInput);
-    } else {
-      d = new Date(dateInput);
-    }
-  } else {
-    d = new Date();
-  }
-
-  if (isNaN(d.getTime())) {
-    d = new Date();
-  }
-
-  // Standar Waktu Sekolah Indonesia (WITA UTC+8):
-  // Menghilangkan bug perbedaan tanggal antara perangkat di pagi hari (06:00 - 08:00)
-  const utc = d.getTime() + (d.getTimezoneOffset() * 60000);
-  const schoolTime = new Date(utc + (3600000 * 8));
-
-  const year = schoolTime.getFullYear();
-  const month = String(schoolTime.getMonth() + 1).padStart(2, '0');
-  const day = String(schoolTime.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
+  return getTodayDateKey(dateInput);
 }
 
 export function downloadDatabaseBackupFile(): void {
@@ -4959,6 +4951,41 @@ export async function checkAndSyncOfflineQueue(isStartupOrNav: boolean = true): 
 
   const queue = getOfflineScanQueue();
 
+  // Integrasi Penyimpanan Primer: ambil antrean pending dari IndexedDB (sihadir_db -> attendance_queue)
+  try {
+    const idbPending = await getPendingAttendanceQueue();
+    if (idbPending && idbPending.length > 0) {
+      const existingKeySet = new Set(queue.map(q => `${q.studentId}_${q.date}`));
+      idbPending.forEach(item => {
+        const key = `${item.studentId}_${item.date}`;
+        if (!existingKeySet.has(key)) {
+          existingKeySet.add(key);
+          queue.push({
+            id: item.id,
+            recordId: item.id,
+            studentId: item.studentId,
+            studentName: item.studentName,
+            nisn: '',
+            className: item.classId,
+            date: item.date,
+            time: item.checkInTime || '-',
+            status: (item.status === 'Terlambat' ? 'TERLAMBAT' : 'HADIR') as AttendanceStatus,
+            method: 'QR_SCAN',
+            scannedBy: 'Pos Scanner Utama',
+            returnTime: item.checkOutTime || undefined,
+            returnStatus: item.checkOutTime ? 'PULANG' : undefined,
+            synced: false,
+            timestamp: item.timestamp,
+            scannerDeviceId: getScannerDeviceId(),
+            retryCount: item.retryCount || 0
+          });
+        }
+      });
+    }
+  } catch (idbErr) {
+    console.warn('[OfflineQueueSync] Baca antrean IndexedDB notice:', idbErr);
+  }
+
   // 1. Cek koneksi jaringan: jika offline, biarkan antrean tersimpan aman di penyimpanan lokal
   if (typeof navigator !== 'undefined' && !navigator.onLine) {
     if (queue.length > 0 && !isStartupOrNav) {
@@ -5192,11 +5219,33 @@ export function queueAttendanceScanRecord(records: AttendanceRecord[], newlyScan
   safeSetLocalStorage(KEYS.ATTENDANCE + '_updatedAt', String(now));
   notifyStorageUpdated();
 
-  // 2. Simpan hanya record scan baru ke antrean offline persistent (O(1) ultra-fast)
+  // 2. Simpan ke IndexedDB primary queue ('attendance_queue') dan antrean offline persistent
   const todayStr = getLocalDateString();
   const itemsToQueue = newlyScannedRecord
     ? [newlyScannedRecord]
     : cleanRecords.filter(r => r.synced === false && (r.isRealScan === true || r.date === todayStr)).slice(0, 50);
+
+  // Tulis ke IndexedDB primer (sihadir_db -> attendance_queue)
+  itemsToQueue.forEach(item => {
+    const isReturn = (item.returnTime && item.returnTime !== '-') || (item.returnStatus && item.returnStatus !== 'BELUM_PULANG');
+    const queueItem: AttendanceQueueItem = {
+      id: (item.id && item.id.startsWith('attendance_')) ? item.id : `attendance_${item.studentId}_${item.date}`,
+      studentId: String(item.studentId),
+      studentName: item.studentName || '',
+      classId: item.className || '',
+      timestamp: item.updatedAt || Date.now(),
+      date: item.date,
+      type: isReturn ? 'pulang' : 'masuk',
+      status: item.status === 'TERLAMBAT' ? 'Terlambat' : 'Hadir',
+      checkInTime: (item.time && item.time !== '-') ? item.time : null,
+      checkOutTime: (item.returnTime && item.returnTime !== '-') ? item.returnTime : null,
+      syncStatus: 'pending',
+      retryCount: 0,
+      createdAt: Date.now()
+    };
+    enqueueAttendance(queueItem).catch(err => console.warn('[IDB Queue] Enqueue err:', err));
+  });
+
   addOfflinePendingScan(itemsToQueue);
 
   // 3. Batched Cloud Sync:

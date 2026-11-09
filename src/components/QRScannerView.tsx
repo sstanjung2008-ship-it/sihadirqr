@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState, useMemo, useCallback } from 'react';
 import { Html5Qrcode, Html5QrcodeSupportedFormats } from 'html5-qrcode';
 import { Student, SchoolProfile, AttendanceRecord, SchoolClass, UserRole } from '../types';
-import { playScanSound } from '../lib/audioBeep';
+import { playScanSound, triggerHapticFeedback } from '../lib/audioBeep';
 import { 
   getSchoolCheckoutTimeForDay,
   getScanQueueStatus,
@@ -606,10 +606,10 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
 
   const handleQrCodeDecoded = (decodedText: string) => {
     const nowMs = Date.now();
-    // Debounce identical rapid camera scans within 2 seconds
+    // Debounce scan identik peramban (1,5 - 2 detik)
     if (
       lastScanDebounceRef.current.code === decodedText &&
-      nowMs - lastScanDebounceRef.current.timestamp < 2000
+      nowMs - lastScanDebounceRef.current.timestamp < 1800
     ) {
       return;
     }
@@ -620,6 +620,7 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
     // Strict Input Validation (Condition 10: Format Payload QR Tidak Valid)
     if (!cleanDecoded || cleanDecoded.length < 2 || cleanDecoded.length > 200) {
       playScanSound('ERROR');
+      triggerHapticFeedback([100, 50, 100]);
       setScanNotification({
         conditionId: 'QR_INVALID_FORMAT',
         categoryBadge: '🔍 Validasi QR',
@@ -659,10 +660,10 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
     }
 
     if (matched) {
-      // Smart Scan Debounce: 3-second cooldown per student ID (Mandate 1)
+      // Debounce Control: software debounce 1,5–2 detik per ID siswa mencegah multi-trigger saat kartu di depan kamera
       const lastStudentScanTime = studentCooldownMapRef.current.get(matched.id) || 0;
-      if (nowMs - lastStudentScanTime < 3000) {
-        return; // Ignore duplicate camera frames within 3s for the same student
+      if (nowMs - lastStudentScanTime < 1800) {
+        return; // Ignore duplicate camera frames within 1.8s for the same student
       }
       studentCooldownMapRef.current.set(matched.id, nowMs);
       processAttendanceForStudent(matched);
@@ -773,11 +774,14 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
       }
 
       playScanSound('PULANG');
+      triggerHapticFeedback([80]);
 
       const returnStatus = 'PULANG';
 
       const isAuthenticId = existingRecord && existingRecord.id && !existingRecord.id.startsWith('att-autoalpa-') && !existingRecord.id.startsWith('att-synth-');
-      const finalId = isAuthenticId ? existingRecord.id : `att-${student.id}-${dateStr}`;
+      const finalId = (isAuthenticId && existingRecord.id.startsWith('attendance_'))
+        ? existingRecord.id
+        : `attendance_${student.id}_${dateStr}`;
       const cleanNotes = (existingRecord?.notes && !existingRecord.notes.includes('Otomatis Alpa')) ? existingRecord.notes : '';
 
       const session = getUserSession();
@@ -970,9 +974,12 @@ export const QRScannerView: React.FC<QRScannerViewProps> = ({
       const isLate = status === 'TERLAMBAT';
 
       playScanSound(isLate ? 'LATE' : 'SUCCESS');
+      triggerHapticFeedback([80]);
 
       const isAuthenticId = existingRecord && existingRecord.id && !existingRecord.id.startsWith('att-autoalpa-') && !existingRecord.id.startsWith('att-synth-');
-      const finalId = isAuthenticId ? existingRecord.id : `att-${student.id}-${dateStr}`;
+      const finalId = (isAuthenticId && existingRecord.id.startsWith('attendance_'))
+        ? existingRecord.id
+        : `attendance_${student.id}_${dateStr}`;
       const cleanNotes = (existingRecord?.notes && !existingRecord.notes.includes('Otomatis Alpa')) ? existingRecord.notes : '';
 
       const session = getUserSession();

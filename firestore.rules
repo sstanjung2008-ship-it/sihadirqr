@@ -43,8 +43,8 @@ service cloud.firestore {
       allow read: if true;
       // Dokumen hanya dapat dibuat oleh sistem atau perangkat scanner
       allow create: if true;
-      // Dilarang diubah oleh sistem otomatis; hanya peran Admin Guru dan Admin yang dapat merubah
-      allow update: if isTeacherOrAdmin();
+      // Diizinkan diupdate oleh guru/admin atau sinkronisasi scan nyata perangkat scanner (misal scan pulang merge)
+      allow update: if isTeacherOrAdmin() || request.resource.data.isRealScan == true || request.resource.data.method in ['QR_SCAN', 'MANUAL'];
       // Dilarang dihapus oleh sistem otomatis; hanya peran Admin yang dapat menghapus
       allow delete: if isAdmin();
     }
@@ -52,7 +52,7 @@ service cloud.firestore {
     match /sihadir_attendance_records/{recordId} {
       allow read: if true;
       allow create: if true;
-      allow update: if isTeacherOrAdmin();
+      allow update: if isTeacherOrAdmin() || request.resource.data.isRealScan == true || request.resource.data.method in ['QR_SCAN', 'MANUAL'];
       allow delete: if isAdmin();
     }
 

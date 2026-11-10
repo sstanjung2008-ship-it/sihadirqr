@@ -45,12 +45,11 @@ export function useStudentBehaviorNotesRealtime(studentId?: string | null): UseS
       where('studentId', '==', cleanStudentId)
     );
 
-    const deletedIds = getDeletedCharacterLogIds();
-
     const unsubscribe = onSnapshot(
       notesQuery,
       (snapshot) => {
         const liveLogs: StudentCharacterLog[] = [];
+        const deletedIds = getDeletedCharacterLogIds();
 
         snapshot.forEach((docSnap) => {
           const data = docSnap.data();

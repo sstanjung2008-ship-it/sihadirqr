@@ -16,7 +16,7 @@ import {
   refreshCloudData,
   saveStudentCharacterLogDirectlyToCloud
 } from '../lib/storage';
-import { submitCharacterPointRealtime } from '../lib/characterRealtime';
+import { submitCharacterPointRealtime, deleteCharacterPointRealtime } from '../lib/characterRealtime';
 import { StudentBehaviorNotesRealtimeSection } from './StudentBehaviorNotesRealtimeSection';
 import { 
   Plus, 
@@ -2307,14 +2307,20 @@ export const CharacterPointsView: React.FC<CharacterPointsViewProps> = ({
               </button>
               <button
                 type="button"
-                onClick={() => {
+                onClick={async () => {
                   if (currentUserRole !== 'ADMIN') {
                     alert('Akses Ditolak: Hanya pengguna terauthentikasi dengan peran Admin yang berwenang menghapus catatan nilai karakter.');
                     setDeleteConfirmLog(null);
                     return;
                   }
-                  onDeleteLog(deleteConfirmLog.id);
+                  const logToDelete = deleteConfirmLog;
                   setDeleteConfirmLog(null);
+                  try {
+                    await deleteCharacterPointRealtime(logToDelete.id, currentUserRole);
+                  } catch (e) {
+                    console.warn('[CharacterPointsView] Direct cloud delete warning:', e);
+                  }
+                  onDeleteLog(logToDelete.id);
                 }}
                 className="px-5 py-2.5 bg-rose-600 hover:bg-rose-700 text-white font-extrabold text-xs rounded-xl shadow-md shadow-rose-600/30 transition-all cursor-pointer"
               >

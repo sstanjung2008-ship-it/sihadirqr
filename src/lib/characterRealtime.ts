@@ -2,19 +2,22 @@ import {
   db, 
   doc, 
   setDoc, 
+  deleteDoc,
   collection, 
   query, 
   where, 
   onSnapshot, 
   serverTimestamp 
 } from './firebase';
-import { StudentCharacterLog, UserSession } from '../types';
+import { StudentCharacterLog, UserSession, UserRole } from '../types';
 import { 
   getStudentCharacterLogs, 
   savePermanentManualCharacterLogs,
   saveStudentCharacterLogs,
   deduplicateCharacterLogs,
   safeSetLocalStorage,
+  markCharacterLogDeleted,
+  deletePermanentManualCharacterLog,
   KEYS
 } from './storage';
 
@@ -213,6 +216,57 @@ export async function submitCharacterPointRealtime(
       message: 'Penilaian karakter tersimpan aman di perangkat lokal dan akan otomatis diunggah ke Cloud Firestore saat online.'
     };
   }
+}
+
+/**
+ * 2. REAL-TIME CHARACTER LOG DELETION (Khusus Role Admin)
+ * - Validasi peran mutlak: Hanya akun ADMIN yang diizinkan menghapus catatan.
+ * - Hapus dokumen langsung dari Cloud Firestore koleksi 'character_logs/{logId}'.
+ * - Tandai ID log di markCharacterLogDeleted dan bersihkan dari cadangan permanen.
+ * - Sinkronkan ke penyimpanan lokal & state aplikasi seketika.
+ */
+export async function deleteCharacterPointRealtime(
+  logId: string,
+  userRole: UserRole
+): Promise<{ success: boolean; message: string }> {
+  if (userRole !== 'ADMIN') {
+    const errorMsg = 'Akses ditolak: Hanya pengguna dengan peran Admin (ADMIN) yang berwenang menghapus catatan perilaku/nilai karakter siswa.';
+    throw new Error(errorMsg);
+  }
+
+  const cleanId = String(logId).trim();
+  if (!cleanId) {
+    return { success: false, message: 'ID catatan karakter tidak valid.' };
+  }
+
+  // 1. Bersihkan dari brankas lokal & tandai ID telah dihapus agar tidak direstorasi
+  markCharacterLogDeleted(cleanId);
+  deletePermanentManualCharacterLog(cleanId);
+
+  // 2. Bersihkan dari state in-memory & penyimpanan lokal
+  const currentLogs = getStudentCharacterLogs();
+  const updatedLogs = currentLogs.filter(l => {
+    if (!l) return false;
+    return l.id?.trim() !== cleanId;
+  });
+  saveStudentCharacterLogs(updatedLogs, true);
+
+  // 3. Hapus dokumen langsung dari Cloud Firestore koleksi 'character_logs/{logId}'
+  let cloudDeleted = false;
+  try {
+    const docRef = doc(db, 'character_logs', cleanId);
+    await deleteDoc(docRef);
+    cloudDeleted = true;
+  } catch (err) {
+    console.warn('[CharacterRealtime] Gagal menghapus dokumen character_logs di Cloud (tertanda dihapus lokal):', err);
+  }
+
+  return {
+    success: true,
+    message: cloudDeleted
+      ? 'Catatan perilaku khusus siswa berhasil dihapus secara permanen dari Cloud Firestore.'
+      : 'Catatan perilaku berhasil dihapus dari perangkat lokal dan akan disinkronkan ke Cloud saat online.'
+  };
 }
 
 // Otomatis pasang listener online untuk sinkronisasi antrean karakter offline

@@ -13,6 +13,7 @@ import {
   Clock,
   Sparkles
 } from 'lucide-react';
+import { getDeletedCharacterLogIds } from '../lib/storage';
 
 interface StudentBehaviorNotesRealtimeSectionProps {
   studentId: string;
@@ -41,11 +42,14 @@ export const StudentBehaviorNotesRealtimeSection: React.FC<StudentBehaviorNotesR
   const { notes: liveNotes, loading, error, isLive } = useStudentBehaviorNotesRealtime(studentId);
 
   // Cloud-First Display: Gunakan data live Firestore jika ada, fallback ke cache lokal jika offline/gagal
-  const displayNotes = (!loading && liveNotes.length > 0)
+  const rawNotes = (!loading && liveNotes.length > 0)
     ? liveNotes
     : (liveNotes.length === 0 && !loading && !error)
       ? []
       : fallbackLogs;
+
+  const deletedIds = getDeletedCharacterLogIds();
+  const displayNotes = rawNotes.filter(n => n && n.id && !deletedIds.has(n.id.trim()));
 
   // Perhitungan Akumulasi & Ringkasan Jumlah Entri (Konsisten dengan Rekapitulasi Presensi & Belum Scan Pulang)
   const totalEntries = displayNotes.length;
@@ -128,14 +132,14 @@ export const StudentBehaviorNotesRealtimeSection: React.FC<StudentBehaviorNotesR
             <div className="min-w-0">
               <div className="flex items-center gap-1.5 flex-wrap">
                 <p className="font-bold text-slate-800 text-xs sm:text-sm truncate">
-                  Akumulasi Catatan Perilaku Khusus Siswa
+                  Total Akumulasi Catatan Perilaku Khusus Siswa
                 </p>
                 <span className="px-1.5 py-0.2 rounded bg-indigo-50 text-indigo-700 border border-indigo-200 font-extrabold text-[9px] sm:text-[10px]">
                   Input Guru (Cloud)
                 </span>
               </div>
               <p className="text-[11px] text-slate-500 mt-0.5">
-                {totalEntries}x entri catatan guru • {positiveCount}x perilaku positif, {negativeCount}x pelanggaran/pembinaan
+                {totalEntries}x entri catatan guru • {positiveCount}x perilaku positif, {negativeCount}x catatan pembinaan/pelanggaran
               </p>
             </div>
           </div>
@@ -172,6 +176,69 @@ export const StudentBehaviorNotesRealtimeSection: React.FC<StudentBehaviorNotesR
           </div>
         </div>
       </div>
+
+      {/* Rincian Kartu Kategori Spesifik: Konsisten dengan Belum Scan Pulang & Hadir Tepat Waktu */}
+      {(positiveCount > 0 || negativeCount > 0) && (
+        <div className="space-y-2">
+          {/* 1. Card Perilaku Positif Siswa (Input Guru) */}
+          {positiveCount > 0 && (
+            <div className="p-3 rounded-2xl border border-blue-200 bg-white hover:border-blue-300 shadow-2xs space-y-1.5 transition-all">
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <div className="p-1.5 sm:p-2 bg-blue-100 text-blue-700 rounded-xl shrink-0">
+                    <CheckCircle2 className="w-4 h-4" />
+                  </div>
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <p className="font-bold text-slate-800 text-xs sm:text-sm truncate">
+                        Perilaku Positif & Apresiasi
+                      </p>
+                      <span className="px-1.5 py-0.2 rounded bg-blue-50 text-blue-700 border border-blue-200 font-extrabold text-[9px] sm:text-[10px]">
+                        Input Guru (Cloud)
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-slate-500 mt-0.5">
+                      {positiveCount}x catatan perilaku baik/prestasi guru • Akumulasi nilai poin bertambah
+                    </p>
+                  </div>
+                </div>
+                <span className="px-2.5 py-1 bg-blue-600 text-white font-black text-xs rounded-xl shadow-2xs shrink-0">
+                  +{totalPositivePoints} Poin
+                </span>
+              </div>
+            </div>
+          )}
+
+          {/* 2. Card Catatan Pembinaan & Pelanggaran Siswa (Input Guru) - Format persis Belum Scan Pulang */}
+          {negativeCount > 0 && (
+            <div className="p-3 rounded-2xl border border-rose-200 bg-white hover:border-rose-300 shadow-2xs space-y-1.5 transition-all">
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <div className="p-1.5 sm:p-2 bg-rose-100 text-rose-700 rounded-xl shrink-0">
+                    <XCircle className="w-4 h-4" />
+                  </div>
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <p className="font-bold text-slate-800 text-xs sm:text-sm truncate">
+                        Catatan Pembinaan & Pelanggaran
+                      </p>
+                      <span className="px-1.5 py-0.2 rounded bg-rose-50 text-rose-700 border border-rose-200 font-extrabold text-[9px] sm:text-[10px]">
+                        Input Guru (Cloud)
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-slate-500 mt-0.5">
+                      {negativeCount}x catatan pembinaan guru • Pengurangan/penalti poin tata tertib
+                    </p>
+                  </div>
+                </div>
+                <span className="px-2.5 py-1 bg-rose-600 text-white font-black text-xs rounded-xl shadow-2xs shrink-0">
+                  -{totalNegativePoints} Poin
+                </span>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Loading Skeleton */}
       {loading && displayNotes.length === 0 && (

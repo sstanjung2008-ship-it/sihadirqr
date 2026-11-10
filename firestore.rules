@@ -100,25 +100,25 @@ service cloud.firestore {
     match /character_logs/{logId} {
       allow read: if true;
       allow create, update: if isTeacherOrAdmin() || request.resource.data.editorRole in ['ADMIN', 'TEACHER', 'GURU', 'ADMIN_GURU'];
-      allow delete: if isAdmin();
+      allow delete: if true;
     }
 
     match /sihadir_character_logs/{logId} {
       allow read: if true;
       allow create, update: if isTeacherOrAdmin() || request.resource.data.editorRole in ['ADMIN', 'TEACHER', 'GURU', 'ADMIN_GURU'];
-      allow delete: if isAdmin();
+      allow delete: if true;
     }
 
     match /behavior_notes/{noteId} {
       allow read: if true;
       allow create, update: if isTeacherOrAdmin() || request.resource.data.editorRole in ['ADMIN', 'TEACHER', 'GURU', 'ADMIN_GURU'];
-      allow delete: if isAdmin();
+      allow delete: if true;
     }
 
     match /student_character_summaries/{studentId} {
       allow read: if true;
       allow create, update: if isTeacherOrAdmin() || request.resource.data.editorRole in ['ADMIN', 'TEACHER', 'GURU', 'ADMIN_GURU'];
-      allow delete: if isAdmin();
+      allow delete: if true;
     }
 
     // ===============================================================

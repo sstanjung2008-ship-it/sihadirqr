@@ -3052,6 +3052,67 @@ export const RecapExportView: React.FC<RecapExportViewProps> = ({
                             </div>
                           </div>
 
+                          {/* Rincian Kartu Kategori Spesifik (Konsisten dengan Belum Scan Pulang & Hadir Tepat Waktu) */}
+                          {(positiveLogs.length > 0 || negativeLogs.length > 0) && (
+                            <div className="space-y-2">
+                              {positiveLogs.length > 0 && (
+                                <div className="p-3 rounded-2xl border border-blue-200 bg-white hover:border-blue-300 shadow-2xs space-y-1.5 transition-all">
+                                  <div className="flex items-center justify-between gap-2">
+                                    <div className="flex items-center gap-2.5 min-w-0">
+                                      <div className="p-1.5 bg-blue-100 text-blue-700 rounded-xl shrink-0">
+                                        <CheckCircle2 className="w-4 h-4" />
+                                      </div>
+                                      <div className="min-w-0">
+                                        <div className="flex items-center gap-1.5 flex-wrap">
+                                          <p className="font-bold text-slate-800 text-xs sm:text-sm truncate">
+                                            Perilaku Positif & Apresiasi
+                                          </p>
+                                          <span className="px-1.5 py-0.2 rounded bg-blue-50 text-blue-700 border border-blue-200 font-extrabold text-[9px] sm:text-[10px]">
+                                            Input Guru (Cloud)
+                                          </span>
+                                        </div>
+                                        <p className="text-[11px] text-slate-500 mt-0.5">
+                                          {positiveLogs.length}x catatan perilaku baik/prestasi guru • Akumulasi nilai poin bertambah
+                                        </p>
+                                      </div>
+                                    </div>
+                                    <span className="px-2.5 py-1 bg-blue-600 text-white font-black text-xs rounded-xl shadow-2xs shrink-0">
+                                      +{totalPositive} Poin
+                                    </span>
+                                  </div>
+                                </div>
+                              )}
+
+                              {negativeLogs.length > 0 && (
+                                <div className="p-3 rounded-2xl border border-rose-200 bg-white hover:border-rose-300 shadow-2xs space-y-1.5 transition-all">
+                                  <div className="flex items-center justify-between gap-2">
+                                    <div className="flex items-center gap-2.5 min-w-0">
+                                      <div className="p-1.5 bg-rose-100 text-rose-700 rounded-xl shrink-0">
+                                        <XCircle className="w-4 h-4" />
+                                      </div>
+                                      <div className="min-w-0">
+                                        <div className="flex items-center gap-1.5 flex-wrap">
+                                          <p className="font-bold text-slate-800 text-xs sm:text-sm truncate">
+                                            Catatan Pembinaan & Pelanggaran
+                                          </p>
+                                          <span className="px-1.5 py-0.2 rounded bg-rose-50 text-rose-700 border border-rose-200 font-extrabold text-[9px] sm:text-[10px]">
+                                            Input Guru (Cloud)
+                                          </span>
+                                        </div>
+                                        <p className="text-[11px] text-slate-500 mt-0.5">
+                                          {negativeLogs.length}x catatan pembinaan guru • Pengurangan/penalti poin tata tertib
+                                        </p>
+                                      </div>
+                                    </div>
+                                    <span className="px-2.5 py-1 bg-rose-600 text-white font-black text-xs rounded-xl shadow-2xs shrink-0">
+                                      -{totalNegative} Poin
+                                    </span>
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          )}
+
                           {allLogs.length > 0 ? (
                             <div className="space-y-2">
                           {allLogs.map((log) => (

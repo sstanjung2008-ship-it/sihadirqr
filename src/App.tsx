@@ -81,6 +81,7 @@ import {
   getOfflineScanQueue,
   KEYS
 } from './lib/storage';
+import { deleteCharacterPointRealtime } from './lib/characterRealtime';
 import { ShieldCheck, CheckCircle2, WifiOff, RefreshCw, Wifi, X, Cloud } from 'lucide-react';
 
 import { Sidebar } from './components/Sidebar';
@@ -2025,7 +2026,7 @@ export default function App() {
     });
   };
 
-  const handleDeleteCharacterLog = (logId: string) => {
+  const handleDeleteCharacterLog = async (logId: string) => {
     if (!logId) return;
     if (currentRole !== 'ADMIN') {
       alert('Akses Ditolak: Hanya pengguna terauthentikasi dengan peran Admin yang berwenang menghapus catatan nilai karakter.');
@@ -2033,6 +2034,11 @@ export default function App() {
     }
     const targetId = logId.trim();
     const targetLog = characterLogs.find(l => l?.id?.trim() === targetId);
+
+    // Hapus dari Firestore 'character_logs' & brankas lokal
+    deleteCharacterPointRealtime(targetId, currentRole).catch((err) => {
+      console.warn('[handleDeleteCharacterLog] Error deleting character point from cloud:', err);
+    });
 
     deletePermanentManualCharacterLog(targetId);
     markCharacterLogDeleted(targetId);
@@ -2052,6 +2058,7 @@ export default function App() {
         if (cleanId) {
           markCharacterLogDeleted(cleanId);
           deletePermanentManualCharacterLog(cleanId);
+          deleteCharacterPointRealtime(cleanId, currentRole).catch(() => {});
         }
         return false;
       }
@@ -2070,8 +2077,10 @@ export default function App() {
     }
     const idSet = new Set(logIds.map(id => id.trim()));
     logIds.forEach(id => {
-      deletePermanentManualCharacterLog(id);
-      markCharacterLogDeleted(id);
+      const cleanId = id.trim();
+      deleteCharacterPointRealtime(cleanId, currentRole).catch(() => {});
+      deletePermanentManualCharacterLog(cleanId);
+      markCharacterLogDeleted(cleanId);
     });
     const updated = characterLogs.filter(l => !idSet.has(l.id?.trim()));
     setCharacterLogsState(updated);

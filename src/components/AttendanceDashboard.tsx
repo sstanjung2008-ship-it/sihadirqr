@@ -1594,13 +1594,21 @@ export const AttendanceDashboard: React.FC<AttendanceDashboardProps> = ({
               {(currentRole === 'ADMIN' || currentRole === 'TEACHER') && (
                 <button
                   type="button"
-                  onClick={handleManualCloudRefresh}
-                  disabled={isRefreshingCloud}
-                  className="bg-white hover:bg-sky-50 text-sky-700 hover:text-sky-900 border border-sky-300 hover:border-sky-400 font-extrabold px-3 py-1.5 rounded-xl text-xs flex items-center gap-1.5 transition-all cursor-pointer shadow-2xs active:scale-95 shrink-0 disabled:opacity-60"
-                  title="Segarkan data scan hadir & pulang terbaru dari Cloud Firestore"
+                  onClick={currentRole === 'ADMIN' ? handleManualCloudRefresh : undefined}
+                  disabled={isRefreshingCloud || currentRole === 'TEACHER'}
+                  className={`border font-extrabold px-3 py-1.5 rounded-xl text-xs flex items-center gap-1.5 transition-all shadow-2xs shrink-0 ${
+                    currentRole === 'ADMIN'
+                      ? 'bg-white hover:bg-sky-50 text-sky-700 hover:text-sky-900 border-sky-300 hover:border-sky-400 cursor-pointer active:scale-95 disabled:opacity-60'
+                      : 'bg-slate-50 text-slate-500 border-slate-200 opacity-80 cursor-not-allowed'
+                  }`}
+                  title={
+                    currentRole === 'ADMIN'
+                      ? "Segarkan data scan hadir & pulang terbaru dari Cloud Firestore"
+                      : "Sinkronisasi berjalan otomatis di latar belakang (Sinkronisasi manual khusus Akun Admin)"
+                  }
                 >
-                  <RefreshCw className={`w-3.5 h-3.5 text-sky-600 ${isRefreshingCloud ? 'animate-spin' : ''}`} />
-                  <span>{isRefreshingCloud ? 'Menyinkronkan...' : 'Segarkan Cloud'}</span>
+                  <RefreshCw className={`w-3.5 h-3.5 ${currentRole === 'ADMIN' ? 'text-sky-600' : 'text-slate-400'} ${isRefreshingCloud ? 'animate-spin' : ''}`} />
+                  <span>{isRefreshingCloud ? 'Menyinkronkan...' : currentRole === 'TEACHER' ? 'Sinkron Otomatis' : 'Segarkan Cloud'}</span>
                   <span className="text-[10px] font-mono font-medium text-slate-400 hidden sm:inline">
                     ({lastRefreshedAt})
                   </span>

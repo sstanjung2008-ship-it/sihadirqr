@@ -1733,13 +1733,23 @@ export const CharacterPointsView: React.FC<CharacterPointsViewProps> = ({
               <div className="flex items-center gap-2 shrink-0 self-end sm:self-center">
                 <button
                   type="button"
-                  onClick={handleManualCloudRefresh}
-                  disabled={isRefreshingCloud}
-                  className="px-2.5 sm:px-3 py-1.5 bg-white/10 hover:bg-white/20 active:scale-95 text-white font-bold text-xs rounded-xl transition-all flex items-center gap-1.5 shadow-sm cursor-pointer disabled:opacity-50 border border-white/20"
-                  title="Segarkan data presensi & karakter terbaru langsung dari Cloud Firestore"
+                  onClick={currentUserRole === 'ADMIN' ? handleManualCloudRefresh : undefined}
+                  disabled={isRefreshingCloud || currentUserRole === 'TEACHER'}
+                  className={`px-2.5 sm:px-3 py-1.5 text-white font-bold text-xs rounded-xl transition-all flex items-center gap-1.5 shadow-sm border ${
+                    currentUserRole === 'ADMIN'
+                      ? 'bg-white/10 hover:bg-white/20 active:scale-95 cursor-pointer border-white/20 disabled:opacity-50'
+                      : 'bg-white/5 border-white/10 opacity-75 cursor-not-allowed'
+                  }`}
+                  title={
+                    currentUserRole === 'ADMIN'
+                      ? "Segarkan data presensi & karakter terbaru langsung dari Cloud Firestore"
+                      : "Sinkronisasi Cloud berjalan otomatis di latar belakang (Sinkronisasi manual khusus Akun Admin)"
+                  }
                 >
                   <RefreshCw className={`w-3.5 h-3.5 text-sky-300 ${isRefreshingCloud ? 'animate-spin' : ''}`} />
-                  <span className="hidden sm:inline">{isRefreshingCloud ? 'Sinkron...' : 'Sinkron Cloud'}</span>
+                  <span className="hidden sm:inline">
+                    {isRefreshingCloud ? 'Sinkron...' : currentUserRole === 'TEACHER' ? 'Sinkron Otomatis' : 'Sinkron Cloud'}
+                  </span>
                 </button>
 
                 <button

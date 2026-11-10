@@ -4823,6 +4823,7 @@ export const SchoolSettingsView: React.FC<SchoolSettingsViewProps> = ({
         onClose={() => setShowMultiSyncModal(false)}
         currentStudentCount={students.length}
         syncStatus={cloudStatus}
+        currentRole="ADMIN"
       />
 
     </div>

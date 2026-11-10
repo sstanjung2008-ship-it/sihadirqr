@@ -445,18 +445,18 @@ export const Sidebar: React.FC<SidebarProps> = ({
           ) : currentRole === 'TEACHER' ? (
             /* Khusus Role Guru: Tampilan Waktu di Bawah Tampilan Cloud Live */
             <div className="flex flex-col items-center gap-1 shrink-0 min-w-[76px]">
-              {/* Cloud Sync Quick Button on top */}
+              {/* Cloud Sync Status Indicator for Teacher (Visual ada, klik dinonaktifkan, sinkronisasi background tetap berjalan) */}
               <button
                 type="button"
-                onClick={() => setShowSyncModal(true)}
-                className={`flex items-center justify-center gap-1 px-2 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer shadow-xs active:scale-95 w-full ${
+                disabled={true}
+                className={`flex items-center justify-center gap-1 px-2 py-1 rounded-lg text-xs font-bold transition-all shadow-xs w-full cursor-not-allowed opacity-90 ${
                   syncStatus === 'connected'
-                    ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-400/40 hover:bg-emerald-500/30'
+                    ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-400/40'
                     : syncStatus === 'syncing'
                     ? 'bg-amber-500/20 text-amber-300 border border-amber-400/40 animate-pulse'
-                    : 'bg-sky-500/20 text-sky-300 border border-sky-400/40 hover:bg-sky-500/30'
+                    : 'bg-sky-500/20 text-sky-300 border border-sky-400/40'
                 }`}
-                title="Sinkronisasi Cloud & Multi-Perangkat (Upload/Tarik Data)"
+                title="Sinkronisasi Cloud berjalan otomatis di latar belakang (Sinkronisasi manual khusus Akun Admin)"
               >
                 {syncStatus === 'syncing' ? (
                   <RefreshCw className="w-3 h-3 animate-spin text-amber-300" />
@@ -780,9 +780,18 @@ export const Sidebar: React.FC<SidebarProps> = ({
           ) : (
             <button
               type="button"
-              onClick={() => setShowSyncModal(true)}
-              className="w-full flex items-center justify-between text-[11px] bg-sky-950/60 hover:bg-sky-900/70 border border-sky-700/60 p-2 rounded-xl text-sky-200 transition-all cursor-pointer text-left shadow-xs group"
-              title="Klik untuk menyamakan dan menyinkronkan data antar-perangkat (Upload / Tarik Data Cloud)"
+              disabled={currentRole === 'TEACHER'}
+              onClick={currentRole === 'ADMIN' ? () => setShowSyncModal(true) : undefined}
+              className={`w-full flex items-center justify-between text-[11px] bg-sky-950/60 border border-sky-700/60 p-2 rounded-xl text-sky-200 transition-all text-left shadow-xs ${
+                currentRole === 'ADMIN'
+                  ? 'hover:bg-sky-900/70 cursor-pointer group'
+                  : 'opacity-90 cursor-not-allowed'
+              }`}
+              title={
+                currentRole === 'ADMIN'
+                  ? 'Klik untuk menyamakan dan menyinkronkan data antar-perangkat (Upload / Tarik Data Cloud)'
+                  : 'Sinkronisasi Cloud berjalan otomatis di latar belakang (Sinkronisasi manual khusus Akun Admin)'
+              }
             >
               <div className="flex items-center space-x-2 truncate mr-1.5">
                 {syncStatus === 'syncing' ? (
@@ -799,12 +808,16 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 ) : (
                   <Cloud className="w-3.5 h-3.5 text-slate-400 shrink-0" />
                 )}
-                <span className="font-bold text-[11px] text-sky-100 group-hover:text-white transition-colors truncate">
+                <span className={`font-bold text-[11px] text-sky-100 truncate ${currentRole === 'ADMIN' ? 'group-hover:text-white transition-colors' : ''}`}>
                   {syncStatus === 'connected' ? 'Cloud: Hemat Kuota' : syncStatus === 'quota_exceeded' ? 'Cloud: Kuota Habis' : syncStatus === 'syncing' ? 'Menyinkronkan...' : 'Database: Offline'}
                 </span>
               </div>
-              <span className={`text-[10px] font-extrabold px-1.5 py-0.5 rounded-md border transition-colors shrink-0 ${syncStatus === 'quota_exceeded' ? 'text-amber-300 bg-amber-950/80 border-amber-700 group-hover:bg-amber-600 group-hover:text-white' : 'text-sky-300 bg-sky-900/80 border-sky-600 group-hover:bg-sky-600 group-hover:text-white'}`}>
-                {syncStatus === 'quota_exceeded' ? 'File ↗' : 'Sinkron ↗'}
+              <span className={`text-[10px] font-extrabold px-1.5 py-0.5 rounded-md border transition-colors shrink-0 ${
+                syncStatus === 'quota_exceeded' 
+                  ? 'text-amber-300 bg-amber-950/80 border-amber-700' 
+                  : 'text-sky-300 bg-sky-900/80 border-sky-600'
+              } ${currentRole === 'ADMIN' ? 'group-hover:bg-sky-600 group-hover:text-white' : ''}`}>
+                {currentRole === 'TEACHER' ? 'Sinkron (Auto)' : syncStatus === 'quota_exceeded' ? 'File ↗' : 'Sinkron ↗'}
               </span>
             </button>
           )}
@@ -818,6 +831,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         onClose={() => setShowSyncModal(false)}
         currentStudentCount={currentStudentCount}
         syncStatus={syncStatus}
+        currentRole={currentRole}
       />
 
       {/* Notification Center Modal for Teachers and Parents */}

@@ -32,12 +32,14 @@ import {
   getAttendanceRecords,
   getStudents
 } from '../lib/storage';
+import { UserRole } from '../types';
 
 interface MultiDeviceSyncModalProps {
   isOpen: boolean;
   onClose: () => void;
   currentStudentCount: number;
   syncStatus: CloudSyncStatus;
+  currentRole?: UserRole;
 }
 
 export const MultiDeviceSyncModal: React.FC<MultiDeviceSyncModalProps> = ({
@@ -45,6 +47,7 @@ export const MultiDeviceSyncModal: React.FC<MultiDeviceSyncModalProps> = ({
   onClose,
   currentStudentCount,
   syncStatus,
+  currentRole,
 }) => {
   const [isLoading, setIsLoading] = useState(false);
   const [feedback, setFeedback] = useState<{ type: 'success' | 'error' | 'info'; message: string } | null>(null);
@@ -357,12 +360,30 @@ export const MultiDeviceSyncModal: React.FC<MultiDeviceSyncModalProps> = ({
                 </p>
               </div>
 
+              {/* Notice khusus Akun Guru */}
+              {currentRole === 'TEACHER' && (
+                <div className="bg-amber-950/40 border border-amber-700/50 rounded-2xl p-3.5 text-xs text-amber-200 space-y-1">
+                  <div className="flex items-center gap-2 font-bold text-amber-300">
+                    <ShieldCheck className="w-4 h-4 text-amber-400" />
+                    <span>Mode Akun Guru: Sinkronisasi Otomatis</span>
+                  </div>
+                  <p className="text-[11px] text-amber-200/90 leading-relaxed">
+                    Tombol sinkronisasi manual dinonaktifkan untuk Akun Guru guna mencegah konflik data antar-perangkat. Seluruh proses sinkronisasi data tetap berjalan secara otomatis di latar belakang.
+                  </p>
+                </div>
+              )}
+
               <div className="space-y-2.5">
                 <button
                   type="button"
-                  disabled={isLoading}
-                  onClick={handleSmartSync}
-                  className="w-full bg-gradient-to-r from-sky-500 to-indigo-600 hover:from-sky-400 hover:to-indigo-500 text-white font-extrabold py-3.5 px-4 rounded-2xl flex items-center justify-center gap-2.5 transition-all cursor-pointer shadow-lg shadow-sky-950 disabled:opacity-50 text-sm"
+                  disabled={isLoading || currentRole === 'TEACHER'}
+                  onClick={currentRole !== 'TEACHER' ? handleSmartSync : undefined}
+                  className={`w-full bg-gradient-to-r from-sky-500 to-indigo-600 text-white font-extrabold py-3.5 px-4 rounded-2xl flex items-center justify-center gap-2.5 transition-all shadow-lg shadow-sky-950 text-sm ${
+                    currentRole === 'TEACHER'
+                      ? 'opacity-60 cursor-not-allowed hover:from-sky-500 hover:to-indigo-600'
+                      : 'hover:from-sky-400 hover:to-indigo-500 cursor-pointer disabled:opacity-50'
+                  }`}
+                  title={currentRole === 'TEACHER' ? "Sinkronisasi berjalan otomatis di latar belakang (Manual khusus Admin)" : "Samakan & Gabungkan Data ke Seluruh Perangkat"}
                 >
                   {isLoading ? (
                     <RefreshCw className="w-5 h-5 animate-spin" />
@@ -375,9 +396,14 @@ export const MultiDeviceSyncModal: React.FC<MultiDeviceSyncModalProps> = ({
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-1">
                   <button
                     type="button"
-                    disabled={isLoading}
-                    onClick={handleForceUpload}
-                    className="bg-slate-800 hover:bg-slate-700 border border-slate-700 text-sky-300 font-bold py-2.5 px-3 rounded-xl flex items-center justify-center gap-2 transition-all cursor-pointer text-xs disabled:opacity-50"
+                    disabled={isLoading || currentRole === 'TEACHER'}
+                    onClick={currentRole !== 'TEACHER' ? handleForceUpload : undefined}
+                    className={`bg-slate-800 border border-slate-700 text-sky-300 font-bold py-2.5 px-3 rounded-xl flex items-center justify-center gap-2 transition-all text-xs ${
+                      currentRole === 'TEACHER'
+                        ? 'opacity-60 cursor-not-allowed'
+                        : 'hover:bg-slate-700 cursor-pointer disabled:opacity-50'
+                    }`}
+                    title={currentRole === 'TEACHER' ? "Sinkronisasi manual khusus Admin" : "Upload Data Perangkat Ini"}
                   >
                     <CloudUpload className="w-4 h-4 text-sky-400" />
                     Upload Data Perangkat Ini
@@ -385,9 +411,14 @@ export const MultiDeviceSyncModal: React.FC<MultiDeviceSyncModalProps> = ({
 
                   <button
                     type="button"
-                    disabled={isLoading}
-                    onClick={handleForceDownload}
-                    className="bg-slate-800 hover:bg-slate-700 border border-slate-700 text-emerald-300 font-bold py-2.5 px-3 rounded-xl flex items-center justify-center gap-2 transition-all cursor-pointer text-xs disabled:opacity-50"
+                    disabled={isLoading || currentRole === 'TEACHER'}
+                    onClick={currentRole !== 'TEACHER' ? handleForceDownload : undefined}
+                    className={`bg-slate-800 border border-slate-700 text-emerald-300 font-bold py-2.5 px-3 rounded-xl flex items-center justify-center gap-2 transition-all text-xs ${
+                      currentRole === 'TEACHER'
+                        ? 'opacity-60 cursor-not-allowed'
+                        : 'hover:bg-slate-700 cursor-pointer disabled:opacity-50'
+                    }`}
+                    title={currentRole === 'TEACHER' ? "Sinkronisasi manual khusus Admin" : "Tarik Data Terbanyak Cloud"}
                   >
                     <CloudDownload className="w-4 h-4 text-emerald-400" />
                     Tarik Data Terbanyak Cloud
@@ -398,9 +429,14 @@ export const MultiDeviceSyncModal: React.FC<MultiDeviceSyncModalProps> = ({
                 <div className="pt-2 border-t border-slate-800/80">
                   <button
                     type="button"
-                    disabled={isLoading}
-                    onClick={handleComprehensiveRestore}
-                    className="w-full bg-gradient-to-r from-amber-600/90 to-orange-600/90 hover:from-amber-600 hover:to-orange-600 text-white font-extrabold py-3 px-4 rounded-xl flex items-center justify-center gap-2 transition-all cursor-pointer text-xs shadow-md disabled:opacity-50"
+                    disabled={isLoading || currentRole === 'TEACHER'}
+                    onClick={currentRole !== 'TEACHER' ? handleComprehensiveRestore : undefined}
+                    className={`w-full bg-gradient-to-r from-amber-600/90 to-orange-600/90 text-white font-extrabold py-3 px-4 rounded-xl flex items-center justify-center gap-2 transition-all text-xs shadow-md ${
+                      currentRole === 'TEACHER'
+                        ? 'opacity-60 cursor-not-allowed'
+                        : 'hover:from-amber-600 hover:to-orange-600 cursor-pointer disabled:opacity-50'
+                    }`}
+                    title={currentRole === 'TEACHER' ? "Pemulihan manual khusus Admin" : "Pulihkan Semua Data Sekolah"}
                   >
                     <RotateCcw className="w-4 h-4 text-amber-200" />
                     <span>Pulihkan Semua Data Sekolah (Presensi, Karakter, Jurnal & Nilai)</span>

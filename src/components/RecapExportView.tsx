@@ -49,6 +49,7 @@ import {
   BookOpen, 
   Award, 
   UserCheck, 
+  ShieldCheck,
   Sparkles, 
   Layers, 
   GraduationCap, 
@@ -935,18 +936,26 @@ export const RecapExportView: React.FC<RecapExportViewProps> = ({
           </p>
         </div>
 
-        {/* Action Buttons: Segarkan Cloud (Khusus Admin), Unduh Excel, Unduh PDF */}
+        {/* Action Buttons: Segarkan Cloud, Unduh Excel, Unduh PDF */}
         <div className="flex flex-wrap items-center gap-2.5 shrink-0">
-          {currentRole === 'ADMIN' && (
+          {(currentRole === 'ADMIN' || currentRole === 'TEACHER') && (
             <button
               type="button"
-              onClick={handleManualCloudRefresh}
-              disabled={isRefreshingCloud}
-              className="bg-white/10 hover:bg-white/20 border border-white/20 text-white font-extrabold px-3.5 py-3 rounded-2xl shadow-sm flex items-center gap-2 text-xs transition-all transform active:scale-95 cursor-pointer disabled:opacity-60 backdrop-blur-xs"
-              title="Sinkronkan data presensi & nilai terbaru dari Cloud Firestore sebelum mengunduh laporan"
+              onClick={currentRole === 'ADMIN' ? handleManualCloudRefresh : undefined}
+              disabled={isRefreshingCloud || currentRole === 'TEACHER'}
+              className={`border font-extrabold px-3.5 py-3 rounded-2xl shadow-sm flex items-center gap-2 text-xs transition-all backdrop-blur-xs ${
+                currentRole === 'ADMIN'
+                  ? 'bg-white/10 hover:bg-white/20 border-white/20 text-white transform active:scale-95 cursor-pointer disabled:opacity-60'
+                  : 'bg-white/5 border-white/10 text-white/70 opacity-75 cursor-not-allowed'
+              }`}
+              title={
+                currentRole === 'ADMIN'
+                  ? "Sinkronkan data presensi & nilai terbaru dari Cloud Firestore sebelum mengunduh laporan"
+                  : "Sinkronisasi data berjalan otomatis di latar belakang (Sinkronisasi manual khusus Akun Admin)"
+              }
             >
               <RefreshCw className={`w-4 h-4 text-sky-300 ${isRefreshingCloud ? 'animate-spin' : ''}`} />
-              <span>{isRefreshingCloud ? 'Menyinkronkan...' : 'Segarkan Cloud'}</span>
+              <span>{isRefreshingCloud ? 'Menyinkronkan...' : currentRole === 'TEACHER' ? 'Sinkron Otomatis' : 'Segarkan Cloud'}</span>
               <span className="text-[10px] font-mono text-indigo-200 hidden sm:inline">
                 ({lastRefreshedAt})
               </span>
@@ -2978,19 +2987,73 @@ export const RecapExportView: React.FC<RecapExportViewProps> = ({
                 return (
                   <div className="space-y-4">
                     {/* Catatan Perilaku Khusus Siswa (Input Guru) */}
-                    <div className="space-y-2 pt-1">
-                      <div className="flex items-center justify-between">
-                        <span className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
-                          <CheckCircle2 className="w-3.5 h-3.5 text-indigo-600" />
-                          Catatan Perilaku Khusus Siswa (Input Guru)
-                        </span>
-                        <span className="text-[10px] font-bold text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-md border border-indigo-200">
-                          {allLogs.length} Catatan
-                        </span>
-                      </div>
+                    {(() => {
+                      const positiveLogs = allLogs.filter(l => l.traitType === 'POSITIF');
+                      const negativeLogs = allLogs.filter(l => l.traitType === 'NEGATIF');
+                      const totalPositive = positiveLogs.reduce((acc, l) => acc + (Number(l.points) || 0), 0);
+                      const totalNegative = negativeLogs.reduce((acc, l) => acc + Math.abs(Number(l.points) || 0), 0);
+                      const netPoints = totalPositive - totalNegative;
 
-                      {allLogs.length > 0 ? (
-                        <div className="space-y-2">
+                      return (
+                        <div className="space-y-2.5 pt-1">
+                          <div className="flex items-center justify-between">
+                            <span className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
+                              <CheckCircle2 className="w-3.5 h-3.5 text-indigo-600" />
+                              Catatan Perilaku Khusus Siswa (Input Guru)
+                            </span>
+                            <div className="flex items-center gap-1.5">
+                              <span className="text-[10px] font-black text-indigo-700 bg-indigo-50 px-2.5 py-0.5 rounded-lg border border-indigo-200">
+                                {allLogs.length} Catatan
+                              </span>
+                              <span className={`text-[10px] font-black px-2 py-0.5 rounded-lg shadow-2xs ${
+                                netPoints > 0 ? 'bg-blue-600 text-white' : netPoints < 0 ? 'bg-rose-600 text-white' : 'bg-slate-700 text-white'
+                              }`}>
+                                {netPoints > 0 ? `+${netPoints}` : netPoints} Poin
+                              </span>
+                            </div>
+                          </div>
+
+                          {/* Card Ringkasan & Penghitung Total Entri */}
+                          <div className="p-3 rounded-2xl border border-indigo-200 bg-white hover:border-indigo-300 shadow-2xs space-y-2 transition-all">
+                            <div className="flex items-center justify-between gap-2">
+                              <div className="flex items-center gap-2 min-w-0">
+                                <div className="p-1.5 bg-indigo-100 text-indigo-700 rounded-xl shrink-0">
+                                  <ShieldCheck className="w-4 h-4" />
+                                </div>
+                                <div className="min-w-0">
+                                  <p className="font-bold text-slate-800 text-xs truncate">
+                                    Total Catatan Perilaku Khusus Siswa
+                                  </p>
+                                  <p className="text-[11px] text-slate-500 mt-0.5">
+                                    {allLogs.length}x entri catatan guru • {positiveLogs.length}x perilaku positif, {negativeLogs.length}x catatan pembinaan
+                                  </p>
+                                </div>
+                              </div>
+                              <span className={`px-2.5 py-1 font-black text-xs rounded-xl shadow-2xs shrink-0 ${
+                                netPoints > 0 ? 'bg-blue-600 text-white' : netPoints < 0 ? 'bg-rose-600 text-white' : 'bg-slate-700 text-white'
+                              }`}>
+                                {netPoints > 0 ? `+${netPoints}` : netPoints} Poin
+                              </span>
+                            </div>
+
+                            <div className="grid grid-cols-3 gap-2 pt-1 border-t border-slate-100 text-[10px]">
+                              <div className="p-1.5 rounded-xl bg-slate-50 border border-slate-200/80 flex items-center justify-between">
+                                <span className="text-slate-600 font-medium">Total:</span>
+                                <strong className="text-slate-800 font-black">{allLogs.length} Catatan</strong>
+                              </div>
+                              <div className="p-1.5 rounded-xl bg-blue-50/80 border border-blue-200 flex items-center justify-between">
+                                <span className="text-blue-800 font-medium">Positif:</span>
+                                <strong className="text-blue-700 font-black">+{totalPositive} Poin ({positiveLogs.length}x)</strong>
+                              </div>
+                              <div className="p-1.5 rounded-xl bg-rose-50/80 border border-rose-200 flex items-center justify-between">
+                                <span className="text-rose-800 font-medium">Negatif:</span>
+                                <strong className="text-rose-700 font-black">-{totalNegative} Poin ({negativeLogs.length}x)</strong>
+                              </div>
+                            </div>
+                          </div>
+
+                          {allLogs.length > 0 ? (
+                            <div className="space-y-2">
                           {allLogs.map((log) => (
                             <div
                               key={log.id}
@@ -3038,10 +3101,12 @@ export const RecapExportView: React.FC<RecapExportViewProps> = ({
                         </div>
                       )}
                     </div>
-                  </div>
-                );
-              })()}
-            </div>
+                  );
+                })()}
+              </div>
+            );
+          })()}
+        </div>
 
             {/* Modal Footer */}
             <div className="p-4 bg-slate-50 border-t border-slate-200 flex flex-col sm:flex-row justify-between items-center gap-3 shrink-0">

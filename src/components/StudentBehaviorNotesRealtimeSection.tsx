@@ -47,6 +47,16 @@ export const StudentBehaviorNotesRealtimeSection: React.FC<StudentBehaviorNotesR
       ? []
       : fallbackLogs;
 
+  // Perhitungan Akumulasi & Ringkasan Jumlah Entri (Konsisten dengan Rekapitulasi Presensi & Belum Scan Pulang)
+  const totalEntries = displayNotes.length;
+  const positiveNotes = displayNotes.filter(n => n.traitType === 'POSITIF');
+  const negativeNotes = displayNotes.filter(n => n.traitType === 'NEGATIF');
+  const positiveCount = positiveNotes.length;
+  const negativeCount = negativeNotes.length;
+  const totalPositivePoints = positiveNotes.reduce((acc, n) => acc + (Number(n.points) || 0), 0);
+  const totalNegativePoints = negativeNotes.reduce((acc, n) => acc + Math.abs(Number(n.points) || 0), 0);
+  const netPoints = totalPositivePoints - totalNegativePoints;
+
   const isRealPhotoProof = (url?: string) => {
     if (!url) return false;
     return url.startsWith('data:image/') || url.startsWith('http://') || url.startsWith('https://');
@@ -54,7 +64,7 @@ export const StudentBehaviorNotesRealtimeSection: React.FC<StudentBehaviorNotesR
 
   return (
     <div className="space-y-3 pt-3 border-t border-slate-200">
-      {/* Header Bar dengan Live Sync Indicator */}
+      {/* Header Bar dengan Live Sync Indicator & Ringkasan Poin */}
       <div className="flex items-center justify-between pt-1">
         <div className="flex items-center gap-2.5">
           <div className="p-1.5 sm:p-2 bg-gradient-to-br from-indigo-500 to-indigo-700 text-white rounded-xl shadow-xs shrink-0">
@@ -89,9 +99,78 @@ export const StudentBehaviorNotesRealtimeSection: React.FC<StudentBehaviorNotesR
           </div>
         </div>
 
-        <span className="text-[10px] font-bold text-indigo-700 bg-indigo-50 px-2.5 py-1 rounded-lg border border-indigo-200 shadow-2xs">
-          {displayNotes.length} catatan
-        </span>
+        <div className="flex items-center gap-1.5 shrink-0">
+          <span className="text-[10px] sm:text-[11px] font-black text-indigo-700 bg-indigo-50 px-2.5 py-1 rounded-xl border border-indigo-200 shadow-2xs">
+            {totalEntries} Catatan
+          </span>
+          <span className={`text-[10px] sm:text-[11px] font-black px-2.5 py-1 rounded-xl shadow-2xs border ${
+            netPoints > 0 
+              ? 'bg-blue-600 text-white border-blue-500' 
+              : netPoints < 0 
+                ? 'bg-rose-600 text-white border-rose-500' 
+                : 'bg-slate-700 text-white border-slate-600'
+          }`}>
+            {netPoints > 0 ? `+${netPoints}` : netPoints} Poin
+          </span>
+        </div>
+      </div>
+
+      {/* ========================================================================= */}
+      {/* KARTU PENGHITUNG TOTAL & RINGKASAN JUMLAH ENTRI CATATAN PERILAKU */}
+      {/* (KONSISTEN DENGAN REKAPITULASI PRESENSI & BELUM SCAN PULANG) */}
+      {/* ========================================================================= */}
+      <div className="p-3 sm:p-3.5 rounded-2xl border border-indigo-200 bg-white hover:border-indigo-300 shadow-2xs space-y-2.5 transition-all">
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <div className="p-1.5 sm:p-2 bg-indigo-100 text-indigo-700 rounded-xl shrink-0">
+              <ShieldCheck className="w-4 h-4" />
+            </div>
+            <div className="min-w-0">
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <p className="font-bold text-slate-800 text-xs sm:text-sm truncate">
+                  Akumulasi Catatan Perilaku Khusus Siswa
+                </p>
+                <span className="px-1.5 py-0.2 rounded bg-indigo-50 text-indigo-700 border border-indigo-200 font-extrabold text-[9px] sm:text-[10px]">
+                  Input Guru (Cloud)
+                </span>
+              </div>
+              <p className="text-[11px] text-slate-500 mt-0.5">
+                {totalEntries}x entri catatan guru • {positiveCount}x perilaku positif, {negativeCount}x pelanggaran/pembinaan
+              </p>
+            </div>
+          </div>
+          <span className={`px-2.5 py-1 font-black text-xs rounded-xl shadow-2xs shrink-0 ${
+            netPoints > 0
+              ? 'bg-blue-600 text-white'
+              : netPoints < 0
+                ? 'bg-rose-600 text-white'
+                : 'bg-slate-700 text-white'
+          }`}>
+            {netPoints > 0 ? `+${netPoints}` : netPoints} Poin
+          </span>
+        </div>
+
+        {/* 3 Kotak Indikator Mini Sub-Counter (Konsisten dengan panel rincian) */}
+        <div className="grid grid-cols-3 gap-2 pt-1 border-t border-slate-100 text-[10px] sm:text-[11px]">
+          <div className="p-2 rounded-xl bg-slate-50 border border-slate-200/80 flex flex-col sm:flex-row sm:items-center justify-between gap-0.5 shadow-2xs">
+            <span className="text-slate-600 font-medium">Total Entri:</span>
+            <strong className="text-slate-800 font-black">{totalEntries} Catatan</strong>
+          </div>
+          <div className="p-2 rounded-xl bg-blue-50/80 border border-blue-200 flex flex-col sm:flex-row sm:items-center justify-between gap-0.5 shadow-2xs">
+            <span className="text-blue-800 font-medium flex items-center gap-1">
+              <CheckCircle2 className="w-3 h-3 text-blue-600 shrink-0" />
+              Positif:
+            </span>
+            <strong className="text-blue-700 font-black">+{totalPositivePoints} Poin ({positiveCount}x)</strong>
+          </div>
+          <div className="p-2 rounded-xl bg-rose-50/80 border border-rose-200 flex flex-col sm:flex-row sm:items-center justify-between gap-0.5 shadow-2xs">
+            <span className="text-rose-800 font-medium flex items-center gap-1">
+              <XCircle className="w-3 h-3 text-rose-600 shrink-0" />
+              Negatif:
+            </span>
+            <strong className="text-rose-700 font-black">-{totalNegativePoints} Poin ({negativeCount}x)</strong>
+          </div>
+        </div>
       </div>
 
       {/* Loading Skeleton */}

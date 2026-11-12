@@ -14,7 +14,7 @@ import {
   INITIAL_LESSON_PERIODS,
   INITIAL_CLASS_SCHEDULES
 } from '../data/mockData';
-import { db, doc, setDoc, getDoc, getDocs, collection, deleteDoc, onSnapshot, serverTimestamp, Timestamp, query, where } from './firebase';
+import { db, doc, setDoc, getDoc, getDocs, collection, deleteDoc, onSnapshot, serverTimestamp, Timestamp, query, where, writeBatch } from './firebase';
 import { 
   idbGet, 
   idbSet, 
@@ -1043,8 +1043,43 @@ export function compactAttendanceRecords(records: AttendanceRecord[]): any[] {
  * - Eksekusi ultra-cepat (~30ms) tanpa perlu download/upload file raksasa 7.5 MB
  * - Menggunakan { merge: true } sehingga scan masuk (pagi) dan scan pulang (siang) menyatu sempurna tanpa saling menimpa
  */
-// In-memory cache fingerprint untuk mencegah pengiriman data presensi duplikat ke Firestore
+// Cache fingerprint persisten di localStorage untuk mencegah penulisan ulang data identik ke Firestore
+const FINGERPRINTS_STORAGE_KEY = 'sihadir_synced_fingerprints_v1';
 const recentSyncedRecordFingerprints = new Map<string, string>();
+
+function loadSyncedFingerprints(): void {
+  if (typeof window === 'undefined') return;
+  try {
+    const raw = localStorage.getItem(FINGERPRINTS_STORAGE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (typeof parsed === 'object' && parsed !== null) {
+        Object.entries(parsed).forEach(([k, v]) => {
+          if (typeof v === 'string') {
+            recentSyncedRecordFingerprints.set(k, v);
+          }
+        });
+      }
+    }
+  } catch (e) {
+    console.warn('[Storage] Gagal memuat synced fingerprints:', e);
+  }
+}
+
+function persistSyncedFingerprints(): void {
+  if (typeof window === 'undefined') return;
+  try {
+    // Batasi maksimum 1500 fingerprint terkini agar hemat memori localStorage
+    const entries = Array.from(recentSyncedRecordFingerprints.entries()).slice(-1500);
+    const obj = Object.fromEntries(entries);
+    safeSetLocalStorage(FINGERPRINTS_STORAGE_KEY, JSON.stringify(obj));
+  } catch (e) {
+    console.warn('[Storage] Gagal menyimpan synced fingerprints:', e);
+  }
+}
+
+// Inisialisasi awal saat modul dimuat
+loadSyncedFingerprints();
 
 export function getAttendanceRecordFingerprint(r: any): string {
   const time = r.time && r.time !== '-' ? String(r.time).trim() : '-';
@@ -1060,7 +1095,10 @@ export async function writeIndividualAttendanceRecordsToCloud(records: (Attendan
   if (!records || records.length === 0) return 0;
   if (isFirestoreQuotaExceeded()) return 0;
 
+  // 1. Saring dan siapkan hanya record yang benar-benar baru atau berbeda dari cloud
+  const toWrite: { docId: string; docRef: any; payload: any; fingerprint: string; raw: any }[] = [];
   let successCount = 0;
+
   for (const r of records) {
     if (!r.studentId || !r.date) continue;
     const hasScanMasuk = r.time && r.time !== '-' && r.time.trim() !== '' && !r.time.toLowerCase().includes('belum');
@@ -1075,7 +1113,7 @@ export async function writeIndividualAttendanceRecordsToCloud(records: (Attendan
       ? r.id
       : `attendance_${r.studentId}_${r.date}`;
 
-    // Cek duplicate fingerprint: cegah pengiriman data identik secara berulang ke Firestore
+    // Cek duplicate fingerprint yang persisten: JANGAN kirim jika data identik sudah pernah ditulis
     const fingerprint = getAttendanceRecordFingerprint(r);
     if (recentSyncedRecordFingerprints.get(docId) === fingerprint) {
       successCount++;
@@ -1114,21 +1152,56 @@ export async function writeIndividualAttendanceRecordsToCloud(records: (Attendan
     if (r.notes) payload.notes = r.notes;
     if (r.scannerDeviceId) payload.scannerDeviceId = r.scannerDeviceId;
 
+    toWrite.push({ docId, docRef, payload, fingerprint, raw: r });
+  }
+
+  if (toWrite.length === 0) {
+    return successCount;
+  }
+
+  // 2. Tulis menggunakan writeBatch atomik per 400 dokumen (Batas aman Firestore 500)
+  // Ini memangkas roundtrip jaringan dan memastikan konsumsi write terkonsolidasi
+  const BATCH_SIZE = 400;
+  for (let i = 0; i < toWrite.length; i += BATCH_SIZE) {
+    const chunk = toWrite.slice(i, i + BATCH_SIZE);
+    const batch = writeBatch(db);
+
+    chunk.forEach(item => {
+      batch.set(item.docRef, item.payload, { merge: true });
+    });
+
     try {
-      await setDoc(docRef, payload, { merge: true });
-      recentSyncedRecordFingerprints.set(docId, fingerprint);
-      await markAttendanceQueueItemSynced(docId).catch(() => {});
-      successCount++;
-    } catch (err: any) {
-      console.warn(`[Firestore] Gagal menyimpan individual record ${docId}:`, err);
-      updateAttendanceQueueItem(docId, {
-        syncStatus: 'error',
-        errorMessage: err?.message || 'Gagal menyimpan ke Firestore',
-        lastAttemptAt: Date.now(),
-        retryCount: (r.retryCount || 0) + 1
-      }).catch(() => {});
+      await batch.commit();
+      chunk.forEach(item => {
+        recentSyncedRecordFingerprints.set(item.docId, item.fingerprint);
+        markAttendanceQueueItemSynced(item.docId).catch(() => {});
+        incrementDailyWrites();
+      });
+      persistSyncedFingerprints();
+      successCount += chunk.length;
+    } catch (batchErr: any) {
+      console.warn(`[Firestore writeBatch] Gagal komit batch (${chunk.length} items), beralih ke fallback individual:`, batchErr);
+      for (const item of chunk) {
+        try {
+          await setDoc(item.docRef, item.payload, { merge: true });
+          recentSyncedRecordFingerprints.set(item.docId, item.fingerprint);
+          await markAttendanceQueueItemSynced(item.docId).catch(() => {});
+          incrementDailyWrites();
+          successCount++;
+        } catch (individualErr: any) {
+          console.warn(`[Firestore] Gagal fallback simpan individual ${item.docId}:`, individualErr);
+          updateAttendanceQueueItem(item.docId, {
+            syncStatus: 'error',
+            errorMessage: individualErr?.message || 'Gagal menyimpan ke Firestore',
+            lastAttemptAt: Date.now(),
+            retryCount: (item.raw.retryCount || 0) + 1
+          }).catch(() => {});
+        }
+      }
+      persistSyncedFingerprints();
     }
   }
+
   return successCount;
 }
 
@@ -4825,7 +4898,7 @@ export function restoreAttendanceRecords(): AttendanceRecord[] {
 // Batching 10 detik atau 20 siswa: hemat kuota Firebase dan anti-tindih multi-perangkat
 // =========================================================================
 export const SCAN_BATCH_THRESHOLD = 20; // Flush ke cloud setiap 20 siswa
-export const SCAN_IDLE_TIMEOUT_MS = 10000; // Flush ke cloud jika 10 detik tanpa scan baru (idle countdown)
+export const SCAN_IDLE_TIMEOUT_MS = 20000; // Flush ke cloud jika 20 detik tanpa scan baru (idle countdown hemat kuota)
 
 export interface ScanQueueStatus {
   pendingCount: number;
@@ -5046,24 +5119,9 @@ export async function checkAndSyncOfflineQueue(isStartupOrNav: boolean = true): 
     const directSyncCount = await writeIndividualAttendanceRecordsToCloud(queue);
     console.log(`[OfflineQueueSync] Berhasil menyimpan ${directSyncCount}/${queue.length} scan langsung ke koleksi Firestore attendance_records.`);
 
-    // 2. Ambil snapshot data presensi Cloud terkini melalui getDoc / readCloudDocument (Existence Check & Anti-Duplikasi)
-    let cloudRecords: AttendanceRecord[] = [];
-    try {
-      const cloudDoc = await withTimeout(readCloudDocument(KEYS.ATTENDANCE), 15000, null);
-      if (cloudDoc && cloudDoc.data) {
-        const parsed = typeof cloudDoc.data === 'string' ? JSON.parse(cloudDoc.data) : cloudDoc.data;
-        if (Array.isArray(parsed)) {
-          cloudRecords = parsed;
-        }
-      }
-    } catch (e) {
-      console.warn('[OfflineQueueSync] Timeout membaca monolithic attendance cloud, fallback ke individual storage:', e);
-    }
-
-    // 3. Gabungkan secara cerdas (non-destruktif)
-    let finalRecords = mergeAttendanceLists(cloudRecords, localRecords);
-
-    // Map identifikasi record dari antrean
+    // 2. Tandai synced: true pada data lokal yang telah terverifikasi ke Cloud Firestore
+    // HEMAT KUOTA READ & WRITE: Melewati pembacaan dan penulisan dokumen chunk raksasa pada setiap flush antrean!
+    // Data individual sudah tersimpan dengan aman dan cepat di koleksi 'attendance_records'.
     const queuedKeys = new Set<string>();
     queue.forEach(q => {
       queuedKeys.add(q.id);
@@ -5071,8 +5129,7 @@ export async function checkAndSyncOfflineQueue(isStartupOrNav: boolean = true): 
       queuedKeys.add(`${q.studentId}_${q.date}`);
     });
 
-    // Tandai synced: true pada record lokal yang telah terverifikasi
-    finalRecords = finalRecords.map(r => {
+    const finalRecords = localRecords.map(r => {
       const matchKey = `${r.studentId}_${r.date}`;
       if (queuedKeys.has(r.id) || queuedKeys.has(matchKey)) {
         return {
@@ -5082,15 +5139,6 @@ export async function checkAndSyncOfflineQueue(isStartupOrNav: boolean = true): 
       }
       return r;
     });
-
-    // 4. Perbarui dokumen agregat di latar belakang jika data lengkap
-    if (finalRecords.length >= 5000) {
-      delete lastSavedStringCache[KEYS.ATTENDANCE];
-      writeCloudDocument(KEYS.ATTENDANCE, JSON.stringify(finalRecords), now).catch(err => {
-        console.warn('[OfflineQueueSync] Latar belakang penulisan agregat attendance tertunda:', err);
-      });
-      lastSavedStringCache[KEYS.ATTENDANCE] = JSON.stringify(finalRecords);
-    }
 
     // 5. Cloud acknowledgment: setelah write individual berhasil atau queue kosong, update status dan arsipkan
     if (directSyncCount > 0 || queue.length === 0) {
@@ -5284,9 +5332,12 @@ export function queueAttendanceScanRecord(records: AttendanceRecord[], newlyScan
 // ATTENDANCE BUFFERING & PERIODIC BATCH SYNC WORKER
 // =========================================================================
 let periodicBufferTimer: any = null;
+let lastPeriodicSyncAttemptAt = 0;
+let periodicSyncFailureCount = 0;
 
 /**
  * Memulai timer periodik untuk mengirimkan data buffer presensi secara berkala dalam batch ke Firestore
+ * Dilengkapi dengan Exponential Backoff untuk mencegah infinite retry loop saat terjadi gangguan jaringan
  */
 export function startPeriodicBufferSync(): void {
   if (typeof window === 'undefined' || periodicBufferTimer) return;
@@ -5295,11 +5346,26 @@ export function startPeriodicBufferSync(): void {
     const queue = getOfflineScanQueue();
     if (queue.length > 0 && !isScanQueueFlushing && !isOfflineQueueSyncRunning) {
       if (typeof navigator !== 'undefined' && navigator.onLine) {
+        // Terapkan exponential backoff jika terjadi kegagalan sinkronisasi berulang
+        // (15s, 30s, 60s, hingga 120s) untuk mencegah lonjakan penulisan & request loop
+        const backoffDelay = Math.min(120000, 15000 * Math.pow(1.5, Math.min(periodicSyncFailureCount, 5)));
+        const now = Date.now();
+        if (now - lastPeriodicSyncAttemptAt < backoffDelay) {
+          return;
+        }
+        lastPeriodicSyncAttemptAt = now;
+
         console.log(`[AttendanceBuffer] Periodic timer: flushing ${queue.length} buffered scans in batch to Firestore...`);
-        await flushAttendanceScanQueue(true);
+        try {
+          await flushAttendanceScanQueue(true);
+          periodicSyncFailureCount = 0;
+        } catch (syncErr) {
+          periodicSyncFailureCount++;
+          console.warn(`[AttendanceBuffer] Gagal sync berkala (percobaan ke-${periodicSyncFailureCount}):`, syncErr);
+        }
       }
     }
-  }, SCAN_IDLE_TIMEOUT_MS);
+  }, 15000); // Cek setiap 15 detik alih-alih 10 detik agresif
 }
 
 export function stopPeriodicBufferSync(): void {

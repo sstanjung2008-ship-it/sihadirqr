@@ -7,7 +7,8 @@ import {
   query, 
   where, 
   onSnapshot, 
-  serverTimestamp 
+  serverTimestamp,
+  writeBatch
 } from './firebase';
 import { StudentCharacterLog, UserSession, UserRole } from '../types';
 import { 
@@ -171,11 +172,10 @@ export async function submitCharacterPointRealtime(
     if (log.followUpBy) logPayload.followUpBy = log.followUpBy;
     if (log.followUpDate) logPayload.followUpDate = log.followUpDate;
 
-    // Tulis dokumen catatan karakter langsung ke koleksi 'character_logs/{logId}'
-    await setDoc(docRef, logPayload, { merge: true });
-
-    // Tulis ringkasan penilaian karakter siswa secara atomik
-    await setDoc(summaryRef, {
+    // Tulis dokumen catatan karakter dan ringkasan siswa dalam 1 batch commit atomik
+    const batch = writeBatch(db);
+    batch.set(docRef, logPayload, { merge: true });
+    batch.set(summaryRef, {
       studentId: cleanStudentId,
       studentName: log.studentName,
       className: log.className,
@@ -186,6 +186,7 @@ export async function submitCharacterPointRealtime(
       editorRole: userRole,
       updatedAt: now,
     }, { merge: true });
+    await batch.commit();
 
     cloudWritten = true;
 

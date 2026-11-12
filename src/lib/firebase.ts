@@ -17,7 +17,8 @@ import {
   orderBy,
   DocumentReference,
   QueryDocumentSnapshot,
-  DocumentData
+  DocumentData,
+  writeBatch
 } from 'firebase/firestore';
 import firebaseConfigData from '../../firebase-applet-config.json';
 
@@ -38,6 +39,6 @@ export const db = firebaseConfigData.firestoreDatabaseId && firebaseConfigData.f
   ? getFirestore(app, firebaseConfigData.firestoreDatabaseId)
   : getFirestore(app);
 
-export { doc, setDoc, getDoc, getDocs, collection, deleteDoc, onSnapshot, serverTimestamp, Timestamp, query, where, limit, startAfter, orderBy };
+export { doc, setDoc, getDoc, getDocs, collection, deleteDoc, onSnapshot, serverTimestamp, Timestamp, query, where, limit, startAfter, orderBy, writeBatch };
 export type { DocumentReference, QueryDocumentSnapshot, DocumentData };
 

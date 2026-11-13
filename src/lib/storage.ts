@@ -319,7 +319,7 @@ if (typeof window !== 'undefined') {
 
 // Cadangan proteksi biaya Google Cloud Firestore
 const DAILY_WRITES_KEY = 'sihadir_daily_cloud_writes_v1';
-const MAX_SAFE_DAILY_WRITES_PER_DEVICE = 3500;
+const MAX_SAFE_DAILY_WRITES_PER_DEVICE = 1500;
 
 export function getDailyWritesInfo(): { date: string; count: number } {
   if (typeof window === 'undefined') return { date: '', count: 0 };
@@ -333,12 +333,13 @@ export function getDailyWritesInfo(): { date: string; count: number } {
   return { date: getLocalDateString(), count: 0 };
 }
 
-export function incrementDailyWrites(): number {
+export function incrementDailyWrites(delta: number = 1): number {
   if (typeof window === 'undefined') return 0;
   try {
     const today = getLocalDateString();
     const info = getDailyWritesInfo();
-    const newCount = (info.date === today ? info.count : 0) + 1;
+    const safeDelta = Math.max(1, Math.floor(delta));
+    const newCount = (info.date === today ? info.count : 0) + safeDelta;
     localStorage.setItem(DAILY_WRITES_KEY, JSON.stringify({ date: today, count: newCount }));
     return newCount;
   } catch {
@@ -1006,8 +1007,11 @@ async function performSingleDocWrite(key: string, dataStr: string, timestamp: nu
     }
   }
 
-  // Hitung penulisan harian untuk perlindungan tagihan Google Cloud Blaze
-  incrementDailyWrites();
+  // Hitung jumlah dokumen chunk yang benar-benar ditulis ke Firestore
+  const writtenDocsCount = totalLength <= FIRESTORE_MAX_CHUNK_SIZE
+    ? 1
+    : Math.ceil(totalLength / FIRESTORE_MAX_CHUNK_SIZE);
+  incrementDailyWrites(writtenDocsCount);
 }
 
 export function compactAttendanceRecords(records: AttendanceRecord[]): any[] {
@@ -1069,8 +1073,8 @@ function loadSyncedFingerprints(): void {
 function persistSyncedFingerprints(): void {
   if (typeof window === 'undefined') return;
   try {
-    // Batasi maksimum 1500 fingerprint terkini agar hemat memori localStorage
-    const entries = Array.from(recentSyncedRecordFingerprints.entries()).slice(-1500);
+    // Batasi maksimum 4000 fingerprint terkini agar hemat memori localStorage
+    const entries = Array.from(recentSyncedRecordFingerprints.entries()).slice(-4000);
     const obj = Object.fromEntries(entries);
     safeSetLocalStorage(FINGERPRINTS_STORAGE_KEY, JSON.stringify(obj));
   } catch (e) {
@@ -1091,16 +1095,19 @@ export function getAttendanceRecordFingerprint(r: any): string {
   return `${status}|${time}|${returnTime}|${returnStatus}|${notes}|${method}`;
 }
 
+const inFlightIndividualIds = new Set<string>();
+
 export async function writeIndividualAttendanceRecordsToCloud(records: (AttendanceRecord | any)[]): Promise<number> {
   if (!records || records.length === 0) return 0;
   if (isFirestoreQuotaExceeded()) return 0;
 
-  // 1. Saring dan siapkan hanya record yang benar-benar baru atau berbeda dari cloud
+  // 1. Saring, deduplikasi per docId, dan siapkan hanya record baru/berubah
   const toWrite: { docId: string; docRef: any; payload: any; fingerprint: string; raw: any }[] = [];
+  const seenDocIds = new Set<string>();
   let successCount = 0;
 
   for (const r of records) {
-    if (!r.studentId || !r.date) continue;
+    if (!r || !r.studentId || !r.date) continue;
     const hasScanMasuk = r.time && r.time !== '-' && r.time.trim() !== '' && !r.time.toLowerCase().includes('belum');
     const hasScanPulang = (r.returnTime && r.returnTime !== '-' && r.returnTime.trim() !== '') || (r.returnStatus && r.returnStatus !== 'BELUM_PULANG');
     const isRealOrManual = r.isRealScan || r.method === 'QR_SCAN' || r.method === 'MANUAL' || r.method === 'QR_CODE' || r.status === 'SAKIT' || r.status === 'IZIN' || r.status === 'ALPA';
@@ -1113,7 +1120,13 @@ export async function writeIndividualAttendanceRecordsToCloud(records: (Attendan
       ? r.id
       : `attendance_${r.studentId}_${r.date}`;
 
-    // Cek duplicate fingerprint yang persisten: JANGAN kirim jika data identik sudah pernah ditulis
+    // Cegah duplikasi docId dalam 1 batch yang sama & cegah race condition antar panggilan paralel
+    if (seenDocIds.has(docId) || inFlightIndividualIds.has(docId)) {
+      continue;
+    }
+    seenDocIds.add(docId);
+
+    // Cek duplicate fingerprint persisten: lewati 100% (0 write) jika data identik sudah tersinkron
     const fingerprint = getAttendanceRecordFingerprint(r);
     if (recentSyncedRecordFingerprints.get(docId) === fingerprint) {
       successCount++;
@@ -1122,7 +1135,6 @@ export async function writeIndividualAttendanceRecordsToCloud(records: (Attendan
     }
 
     const docRef = doc(db, 'attendance_records', docId);
-
     const payload: any = {
       id: docId,
       studentId: String(r.studentId),
@@ -1159,47 +1171,61 @@ export async function writeIndividualAttendanceRecordsToCloud(records: (Attendan
     return successCount;
   }
 
-  // 2. Tulis menggunakan writeBatch atomik per 400 dokumen (Batas aman Firestore 500)
-  // Ini memangkas roundtrip jaringan dan memastikan konsumsi write terkonsolidasi
-  const BATCH_SIZE = 400;
-  for (let i = 0; i < toWrite.length; i += BATCH_SIZE) {
-    const chunk = toWrite.slice(i, i + BATCH_SIZE);
-    const batch = writeBatch(db);
+  toWrite.forEach(item => inFlightIndividualIds.add(item.docId));
 
-    chunk.forEach(item => {
-      batch.set(item.docRef, item.payload, { merge: true });
-    });
-
-    try {
-      await batch.commit();
-      chunk.forEach(item => {
-        recentSyncedRecordFingerprints.set(item.docId, item.fingerprint);
-        markAttendanceQueueItemSynced(item.docId).catch(() => {});
-        incrementDailyWrites();
-      });
-      persistSyncedFingerprints();
-      successCount += chunk.length;
-    } catch (batchErr: any) {
-      console.warn(`[Firestore writeBatch] Gagal komit batch (${chunk.length} items), beralih ke fallback individual:`, batchErr);
-      for (const item of chunk) {
-        try {
-          await setDoc(item.docRef, item.payload, { merge: true });
-          recentSyncedRecordFingerprints.set(item.docId, item.fingerprint);
-          await markAttendanceQueueItemSynced(item.docId).catch(() => {});
-          incrementDailyWrites();
-          successCount++;
-        } catch (individualErr: any) {
-          console.warn(`[Firestore] Gagal fallback simpan individual ${item.docId}:`, individualErr);
-          updateAttendanceQueueItem(item.docId, {
-            syncStatus: 'error',
-            errorMessage: individualErr?.message || 'Gagal menyimpan ke Firestore',
-            lastAttemptAt: Date.now(),
-            retryCount: (item.raw.retryCount || 0) + 1
-          }).catch(() => {});
-        }
+  try {
+    // 2. Tulis menggunakan writeBatch atomik per 400 dokumen (Batas aman Firestore 500)
+    const BATCH_SIZE = 400;
+    for (let i = 0; i < toWrite.length; i += BATCH_SIZE) {
+      if (isFirestoreQuotaExceeded()) {
+        console.warn('[Firestore Safety Cap] Menghentikan batch write karena batas aman harian tercapai.');
+        break;
       }
-      persistSyncedFingerprints();
+
+      const chunk = toWrite.slice(i, i + BATCH_SIZE);
+      const batch = writeBatch(db);
+      chunk.forEach(item => {
+        batch.set(item.docRef, item.payload, { merge: true });
+      });
+
+      try {
+        await batch.commit();
+        chunk.forEach(item => {
+          recentSyncedRecordFingerprints.set(item.docId, item.fingerprint);
+          markAttendanceQueueItemSynced(item.docId).catch(() => {});
+        });
+        incrementDailyWrites(chunk.length);
+        persistSyncedFingerprints();
+        successCount += chunk.length;
+      } catch (batchErr: any) {
+        handleFirestoreError(batchErr);
+        if (isFirestoreQuotaExceeded()) break;
+
+        console.warn(`[Firestore writeBatch] Gagal komit batch (${chunk.length} items), fallback individual:`, batchErr);
+        for (const item of chunk) {
+          if (isFirestoreQuotaExceeded()) break;
+          try {
+            await setDoc(item.docRef, item.payload, { merge: true });
+            recentSyncedRecordFingerprints.set(item.docId, item.fingerprint);
+            await markAttendanceQueueItemSynced(item.docId).catch(() => {});
+            incrementDailyWrites(1);
+            successCount++;
+          } catch (individualErr: any) {
+            handleFirestoreError(individualErr);
+            updateAttendanceQueueItem(item.docId, {
+              syncStatus: 'error',
+              errorMessage: individualErr?.message || 'Gagal menyimpan ke Firestore',
+              lastAttemptAt: Date.now(),
+              retryCount: (item.raw.retryCount || 0) + 1
+            }).catch(() => {});
+            if (isFirestoreQuotaExceeded()) break;
+          }
+        }
+        persistSyncedFingerprints();
+      }
     }
+  } finally {
+    toWrite.forEach(item => inFlightIndividualIds.delete(item.docId));
   }
 
   return successCount;
@@ -1298,11 +1324,43 @@ export async function pullAllAttendanceFromCloudCollection(): Promise<{ success:
 }
 
 
+const DOC_HASHES_STORAGE_KEY = 'sihadir_cloud_doc_hashes_v1';
+
+function computeFastHash(str: string): string {
+  let hash = 2166136261;
+  for (let i = 0; i < str.length; i++) {
+    hash ^= str.charCodeAt(i);
+    hash += (hash << 1) + (hash << 4) + (hash << 7) + (hash << 8) + (hash << 24);
+  }
+  return `${str.length}_${(hash >>> 0).toString(36)}`;
+}
+
+function getPersistedDocHash(key: string): string | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = localStorage.getItem(DOC_HASHES_STORAGE_KEY);
+    if (!raw) return null;
+    const map = JSON.parse(raw);
+    return typeof map?.[key] === 'string' ? map[key] : null;
+  } catch {
+    return null;
+  }
+}
+
+function setPersistedDocHash(key: string, hash: string): void {
+  if (typeof window === 'undefined') return;
+  try {
+    const raw = localStorage.getItem(DOC_HASHES_STORAGE_KEY);
+    const map = raw ? JSON.parse(raw) : {};
+    map[key] = hash;
+    safeSetLocalStorage(DOC_HASHES_STORAGE_KEY, JSON.stringify(map));
+  } catch {}
+}
+
 export async function writeCloudDocument(key: string, dataStr: string, timestamp: number): Promise<void> {
   const currentRole = getUserSession()?.role;
   // PENGHEMAT KUOTA UTAMA:
-  // Tamu belum login atau HP Orang Tua (PARENT) dilarang keras menulis data apa pun ke Cloud Firestore,
-  // KECUALI dokumen permohonan izin (KEYS.LEAVES), ganti kata sandi siswa (KEYS.STUDENTS), atau input nilai karakter, presensi, jurnal KBM, dan nilai siswa.
+  // Tamu belum login atau HP Orang Tua (PARENT) dilarang keras menulis data masif ke Cloud Firestore
   if (!currentRole && key !== KEYS.PROFILE && key !== KEYS.LEAVES && key !== KEYS.CHARACTER_LOGS && key !== KEYS.ATTENDANCE && key !== KEYS.LEARNING_JOURNALS && key !== KEYS.GRADES) {
     return;
   }
@@ -1319,15 +1377,19 @@ export async function writeCloudDocument(key: string, dataStr: string, timestamp
     try {
       const parsed = JSON.parse(dataStr);
       if (Array.isArray(parsed)) {
-        // PERLINDUNGAN ABSOLUT & SINKRONISASI CERDAS MULTI-DEVICE:
-        // Selalu sinkronkan scan individual aktif langsung ke koleksi 'attendance_records'
-        writeIndividualAttendanceRecordsToCloud(parsed).catch(err => {
-          console.warn('[Storage] Gagal sync individual scan to attendance_records:', err);
-        });
+        // Hanya sinkronkan record aktif hari ini atau yang belum tersinkron (cegah bom write 17.000+ riwayat lama)
+        const todayStr = getLocalDateString();
+        const activeRecordsToSync = parsed.filter(
+          (r: any) => r && (r.date === todayStr || r.synced === false)
+        );
+        if (activeRecordsToSync.length > 0) {
+          writeIndividualAttendanceRecordsToCloud(activeRecordsToSync).catch(err => {
+            console.warn('[Storage] Gagal sync individual scan to attendance_records:', err);
+          });
+        }
 
         let targetToSave = parsed;
         if (parsed.length < 5000) {
-          console.log(`[DATA MERGE GUARD] Penulisan attendance parsial (${parsed.length} record). Melakukan penggabungan cerdas dengan data induk Cloud agar tidak terjadi overwrite/reset ke nol...`);
           try {
             const cloudDoc = await readCloudDocument(KEYS.ATTENDANCE);
             let cloudRecords: AttendanceRecord[] = [];
@@ -1350,15 +1412,23 @@ export async function writeCloudDocument(key: string, dataStr: string, timestamp
     } catch {}
   }
 
-  // If currently in a brief backoff window due to client queue pressure, wait briefly
+  // Anti-Duplicate / Anti-Loop Guard (aman saat toggle & tahan terhadap refresh halaman via hash persisten)
+  const payloadHash = computeFastHash(sanitizedDataStr);
+  if (
+    lastSavedStringCache[key] === sanitizedDataStr ||
+    (lastSavedStringCache[key] === undefined && getPersistedDocHash(key) === payloadHash)
+  ) {
+    lastSavedStringCache[key] = sanitizedDataStr;
+    return;
+  }
+
   if (Date.now() < writeBackoffUntil) {
     const waitMs = Math.min(writeBackoffUntil - Date.now(), 3000);
     await new Promise((r) => setTimeout(r, waitMs));
     if (isFirestoreQuotaExceeded()) return;
   }
 
-  // If a write for this key is already running, coalesce:
-  // Update the pending payload and return. The running loop will commit this latest version.
+  // Coalescing: jika key yang sama sedang menulis, simpan versi terbaru saja (tanpa memicu write paralel ganda)
   if (inFlightKeys.has(key)) {
     pendingWritesByKey.set(key, { dataStr: sanitizedDataStr, timestamp });
     return;
@@ -1369,14 +1439,24 @@ export async function writeCloudDocument(key: string, dataStr: string, timestamp
     let currentPayload: { dataStr: string; timestamp: number } | undefined = { dataStr: sanitizedDataStr, timestamp };
     let writeLoopCount = 0;
 
-    while (currentPayload && writeLoopCount < 10) {
+    // Batasi maksimal 3 iterasi coalescing per siklus untuk mencegah write loop tak terbatas
+    while (currentPayload && writeLoopCount < 3) {
       writeLoopCount++;
       if (isFirestoreQuotaExceeded()) break;
+
+      const currentHash = computeFastHash(currentPayload.dataStr);
+      if (
+        currentPayload.dataStr === lastSavedStringCache[key] ||
+        (lastSavedStringCache[key] === undefined && getPersistedDocHash(key) === currentHash)
+      ) {
+        break;
+      }
 
       const releaseSlot = await acquireFirestoreWriteSlot();
       try {
         await performSingleDocWrite(key, currentPayload.dataStr, currentPayload.timestamp);
         lastSavedStringCache[key] = currentPayload.dataStr;
+        setPersistedDocHash(key, currentHash);
       } catch (err) {
         handleFirestoreError(err);
         break;
@@ -1384,10 +1464,10 @@ export async function writeCloudDocument(key: string, dataStr: string, timestamp
         releaseSlot();
       }
 
-      // Check if another write request arrived for this key while writing
       if (pendingWritesByKey.has(key)) {
-        currentPayload = pendingWritesByKey.get(key);
+        const nextPayload = pendingWritesByKey.get(key);
         pendingWritesByKey.delete(key);
+        currentPayload = (nextPayload && nextPayload.dataStr !== lastSavedStringCache[key]) ? nextPayload : undefined;
       } else {
         currentPayload = undefined;
       }
@@ -1465,6 +1545,7 @@ export async function readCloudDocument(key: string): Promise<{ data: string; up
     if (!isChunked) {
       const dataStr = typeof payload.data === 'string' ? payload.data : JSON.stringify(payload.data || '');
       lastSavedStringCache[key] = dataStr;
+      setPersistedDocHash(key, computeFastHash(dataStr));
       return { data: dataStr, updatedAt };
     }
 
@@ -1498,6 +1579,7 @@ export async function readCloudDocument(key: string): Promise<{ data: string; up
     try {
       JSON.parse(fullDataStr);
       lastSavedStringCache[key] = fullDataStr;
+      setPersistedDocHash(key, computeFastHash(fullDataStr));
       return { data: fullDataStr, updatedAt };
     } catch {
       console.warn(`[Firestore Sync] Direct JSON.parse gagal pada ${key} chunked. Menjalankan pemulihan jahitan chunk otomatis...`);
@@ -1505,6 +1587,7 @@ export async function readCloudDocument(key: string): Promise<{ data: string; up
       if (recovered && recovered.length > 0) {
         const repairedStr = JSON.stringify(recovered);
         lastSavedStringCache[key] = repairedStr;
+        setPersistedDocHash(key, computeFastHash(repairedStr));
         return { data: repairedStr, updatedAt };
       }
       return null;
@@ -1550,6 +1633,7 @@ export async function readAllCloudDocumentsFast(): Promise<Map<string, CloudDocR
             const dataStr = typeof payload.data === 'string' ? payload.data : JSON.stringify(payload.data || '');
             resultMap.set(key, { data: dataStr, updatedAt });
             lastSavedStringCache[key] = dataStr;
+            setPersistedDocHash(key, computeFastHash(dataStr));
           } else {
             // Rakit kembali chunk untuk dokumen besar (seperti STUDENTS dan CHARACTER_LOGS)
             const totalChunks = Number(payload.totalChunks);
@@ -1572,6 +1656,7 @@ export async function readAllCloudDocumentsFast(): Promise<Map<string, CloudDocR
             const fullDataStr = (payload.data || '') + otherChunks.join('');
             resultMap.set(key, { data: fullDataStr, updatedAt });
             lastSavedStringCache[key] = fullDataStr;
+            setPersistedDocHash(key, computeFastHash(fullDataStr));
           }
         }
       } catch {}
@@ -3240,12 +3325,22 @@ export async function smartSyncAndMergeAllWithCloud(isInitialBoot: boolean = fal
       }
     }
 
-    // Ambil juga pembaruan scan presensi aktif hari ini langsung dari koleksi 'attendance_records'
+    // Ambil pembaruan scan presensi aktif hari ini dari koleksi 'attendance_records'
+    // HEMAT KUOTA READ: Jika akun Orang Tua (PARENT), cukup baca 1 dokumen anaknya (1 read, bukan 425+ reads!)
     const todayStr = getLocalDateString();
+    const sessionForRead = getUserSession();
     try {
-      const todayDirectScans = await fetchTodayIndividualAttendanceFromCloud(todayStr);
-      if (todayDirectScans.length > 0) {
-        finalAtt = validateAndSanitizeAttendanceRecords(mergeAttendanceLists(finalAtt, todayDirectScans));
+      if (sessionForRead?.role === 'PARENT' && sessionForRead?.studentId) {
+        const childDocId = `attendance_${sessionForRead.studentId}_${todayStr}`;
+        const childSnap = await withTimeout(getDoc(doc(db, 'attendance_records', childDocId)), 5000, null);
+        if (childSnap && childSnap.exists() && childSnap.data()) {
+          finalAtt = validateAndSanitizeAttendanceRecords(mergeAttendanceLists(finalAtt, [childSnap.data() as AttendanceRecord]));
+        }
+      } else {
+        const todayDirectScans = await fetchTodayIndividualAttendanceFromCloud(todayStr);
+        if (todayDirectScans.length > 0) {
+          finalAtt = validateAndSanitizeAttendanceRecords(mergeAttendanceLists(finalAtt, todayDirectScans));
+        }
       }
     } catch (e) {
       console.warn('[Sync] Direct attendance query notice:', e);
@@ -3278,7 +3373,7 @@ export async function smartSyncAndMergeAllWithCloud(isInitialBoot: boolean = fal
         return false;
       });
 
-    const needsCloudSave = finalAtt.length >= 5000 && (
+    const needsCloudSave = !isInitialBoot && finalAtt.length >= 5000 && (
       finalAtt.length > cloudAtt.length ||
       !attCloud?.data ||
       hasNewOrUpdatedScansToday
@@ -3288,8 +3383,8 @@ export async function smartSyncAndMergeAllWithCloud(isInitialBoot: boolean = fal
       writeCloudDocument(KEYS.ATTENDANCE, attJsonStr, attUpdatedAt);
     }
 
-    // Pastikan seluruh scan nyata hari ini terunggah ke koleksi individual 'attendance_records'
-    if (localTodayRealScans.length > 0) {
+    // HEMAT KUOTA WRITE: Saat pembacaan awal/refresh (isInitialBoot === true), jangan menulis ulang seluruh scan hari ini!
+    if (!isInitialBoot && localTodayRealScans.length > 0) {
       writeIndividualAttendanceRecordsToCloud(localTodayRealScans).catch(() => {});
     }
 
@@ -3344,8 +3439,9 @@ export async function smartSyncAndMergeAllWithCloud(isInitialBoot: boolean = fal
         safeSetLocalStorage(key, jsonStr);
         safeSetLocalStorage(key + '_updatedAt', String(Math.max(cloudTs, prevTs, now)));
 
-        // Jika terdapat log lokal/manual yang belum ada di Cloud, segera unggah ke Cloud
-        if (cleanMerged.length > rawCloud.length) {
+        // HEMAT KUOTA WRITE: Hanya unggah ulang ke Cloud saat sinkronisasi penuh manual (!isInitialBoot),
+        // bukan setiap kali membuka tab atau me-refresh aplikasi
+        if (!isInitialBoot && cleanMerged.length > rawCloud.length) {
           writeCloudDocument(key, jsonStr, now);
         }
         return jsonStr;
@@ -4003,6 +4099,7 @@ export async function initialLoadSyncFromCloud(role?: UserRole): Promise<{ succe
       setCloudSyncStatus('syncing');
       // Seluruh role (Admin, Guru, Pos Scanner, maupun Wali Murid) membaca data terbaru langsung dari Cloud dalam 1 request cepat
       const res = await smartSyncAndMergeAllWithCloud(true);
+      lastRefreshCloudTime = Date.now();
       setCloudSyncStatus('connected');
       notifyStorageUpdated(true);
       return { success: res.success, message: res.message };
@@ -4018,22 +4115,62 @@ export async function initialLoadSyncFromCloud(role?: UserRole): Promise<{ succe
   return ongoingInitialSyncPromise;
 }
 
+let lastRefreshCloudTime = 0;
+let ongoingRefreshCloudPromise: Promise<{ success: boolean; message: string; lastSyncTime: string; attendanceCount: number }> | null = null;
+const AUTO_REFRESH_COOLDOWN_MS = 5 * 60 * 1000; // Cooldown 5 menit untuk auto-refresh saat pindah tab/fokus
+
 /**
- * Fungsi eksplisit untuk tombol "Segarkan Data" / "Sync Cloud" di UI
- * Membaca snapshot Cloud terbaru secara on-demand (1 kali read)
+ * Fungsi untuk tombol "Segarkan Data" / "Sync Cloud" di UI & auto-refresh dengan cooldown hemat kuota
+ * - Jika force === false (pindah tab / window focus), jalankan maksimal 1 kali tiap 5 menit (0 Read di dalam cooldown!)
+ * - Jika force === true (klik tombol manual), jalankan langsung (deduplikasi 3 detik jika double-click)
  */
 export async function refreshCloudData(force: boolean = true): Promise<{ success: boolean; message: string; lastSyncTime: string; attendanceCount: number }> {
-  const res = await smartSyncAndMergeAllWithCloud(true);
-  notifyStorageUpdated(true);
-  const now = new Date();
-  const timeStr = now.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
-  const count = getAttendanceRecords().length;
-  return {
-    success: res.success,
-    message: res.message,
-    lastSyncTime: timeStr,
-    attendanceCount: count,
-  };
+  const nowMs = Date.now();
+
+  if (ongoingRefreshCloudPromise) {
+    return ongoingRefreshCloudPromise;
+  }
+
+  if (!force && lastRefreshCloudTime > 0 && (nowMs - lastRefreshCloudTime) < AUTO_REFRESH_COOLDOWN_MS) {
+    const timeStr = new Date(lastRefreshCloudTime).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
+    return {
+      success: true,
+      message: 'Menggunakan cache lokal terbaru (hemat kuota Firestore).',
+      lastSyncTime: timeStr,
+      attendanceCount: getAttendanceRecords().length,
+    };
+  }
+
+  if (force && lastRefreshCloudTime > 0 && (nowMs - lastRefreshCloudTime) < 3000) {
+    const timeStr = new Date(lastRefreshCloudTime).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
+    return {
+      success: true,
+      message: 'Data baru saja disegarkan.',
+      lastSyncTime: timeStr,
+      attendanceCount: getAttendanceRecords().length,
+    };
+  }
+
+  ongoingRefreshCloudPromise = (async () => {
+    try {
+      const res = await smartSyncAndMergeAllWithCloud(true);
+      lastRefreshCloudTime = Date.now();
+      notifyStorageUpdated(true);
+      const now = new Date();
+      const timeStr = now.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
+      const count = getAttendanceRecords().length;
+      return {
+        success: res.success,
+        message: res.message,
+        lastSyncTime: timeStr,
+        attendanceCount: count,
+      };
+    } finally {
+      ongoingRefreshCloudPromise = null;
+    }
+  })();
+
+  return ongoingRefreshCloudPromise;
 }
 
 let isNetworkListenersRegistered = false;

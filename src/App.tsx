@@ -542,8 +542,12 @@ export default function App() {
       }
     };
 
+    let lastFocusTriggerAt = 0;
     const handleVisibilityOrFocus = () => {
       if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
+        const now = Date.now();
+        if (now - lastFocusTriggerAt < 5000) return;
+        lastFocusTriggerAt = now;
         refreshCloudData(false).catch(() => {});
         checkAndSyncOfflineQueue(true).catch(() => {});
       }

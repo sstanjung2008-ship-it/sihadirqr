@@ -1,4 +1,4 @@
-import { SchoolProfile, SchoolClass, Student, AttendanceRecord, AttendanceStatus, AttendanceAuditLog, LeaveRequest, Teacher, LearningJournal, CharacterTrait, StudentCharacterLog, CharacterPredicateSettings, UserSession, UserRole, StudentGradeAssessment, StudentGradeItem, LessonPeriod, ClassScheduleSlot, OfflinePendingScan, AttendanceQueueItem } from '../types';
+import { SchoolProfile, SchoolClass, Student, AttendanceRecord, AttendanceStatus, AttendanceAuditLog, LeaveRequest, Teacher, LearningJournal, CharacterTrait, StudentCharacterLog, CharacterPredicateSettings, UserSession, UserRole, StudentGradeAssessment, StudentGradeItem, OfflinePendingScan, AttendanceQueueItem } from '../types';
 import { 
   INITIAL_SCHOOL_PROFILE, 
   INITIAL_CLASSES, 
@@ -10,9 +10,7 @@ import {
   INITIAL_TEACHERS,
   INITIAL_CHARACTER_TRAITS,
   INITIAL_STUDENT_CHARACTER_LOGS,
-  INITIAL_LEARNING_JOURNALS,
-  INITIAL_LESSON_PERIODS,
-  INITIAL_CLASS_SCHEDULES
+  INITIAL_LEARNING_JOURNALS
 } from '../data/mockData';
 import { db, doc, setDoc, getDoc, getDocs, collection, deleteDoc, onSnapshot, serverTimestamp, Timestamp, query, where, writeBatch } from './firebase';
 import { 
@@ -54,8 +52,6 @@ export const KEYS = {
   CHARACTER_LOGS: 'sihadir_character_logs_v2',
   CHARACTER_PREDICATES: 'sihadir_character_predicates_v2',
   GRADES: 'sihadir_student_grades_v2',
-  PERIODS: 'sihadir_lesson_periods_v2',
-  SCHEDULES: 'sihadir_class_schedules_v2',
   SESSION: 'sihadir_user_session_v2',
 };
 
@@ -1616,8 +1612,7 @@ export async function readAllCloudDocumentsFast(): Promise<Map<string, CloudDocR
   const FAST_METADATA_KEYS = [
     KEYS.PROFILE, KEYS.CLASSES, KEYS.TEACHERS, KEYS.STUDENTS,
     KEYS.LEAVES, KEYS.CHARACTER_TRAITS, KEYS.CHARACTER_LOGS,
-    KEYS.CHARACTER_PREDICATES, KEYS.GRADES, KEYS.PERIODS,
-    KEYS.SCHEDULES, KEYS.LEARNING_JOURNALS
+    KEYS.CHARACTER_PREDICATES, KEYS.GRADES, KEYS.LEARNING_JOURNALS
   ];
 
   try {
@@ -1741,8 +1736,8 @@ export function syncToCloud(key: string, data: any, instant: boolean = false, ex
     }
   };
 
-  // If instant or critical school settings/metadata (PROFILE, CLASSES, TEACHERS, SCHEDULES), push immediately without delay
-  if (instant || key === KEYS.PROFILE || key === KEYS.CLASSES || key === KEYS.TEACHERS || key === KEYS.SCHEDULES || key === KEYS.PERIODS || dataStr === '[]') {
+  // If instant or critical school settings/metadata (PROFILE, CLASSES, TEACHERS), push immediately without delay
+  if (instant || key === KEYS.PROFILE || key === KEYS.CLASSES || key === KEYS.TEACHERS || dataStr === '[]') {
     doWrite();
   } else {
     // Smart debounce (600ms) to coalesce rapid typing/edits and save Cloud Firestore writes
@@ -1768,8 +1763,6 @@ export function exportAllDatabaseToJson(): string {
     characterLogs: getStudentCharacterLogs(),
     characterPredicates: getCharacterPredicateSettings(),
     grades: getStudentGradeAssessments(),
-    periods: getLessonPeriods(),
-    schedules: getClassSchedules(),
   };
   return JSON.stringify(backupObject, null, 2);
 }
@@ -1829,8 +1822,6 @@ export function importAllDatabaseFromJson(jsonString: string): { success: boolea
     if (data.characterLogs) setKey(KEYS.CHARACTER_LOGS, data.characterLogs);
     if (data.characterPredicates) setKey(KEYS.CHARACTER_PREDICATES, data.characterPredicates);
     if (data.grades) setKey(KEYS.GRADES, data.grades);
-    if (data.periods) setKey(KEYS.PERIODS, data.periods);
-    if (data.schedules) setKey(KEYS.SCHEDULES, data.schedules);
 
     const totalStudents = (data.students && Array.isArray(data.students)) ? data.students.length : getStudents().length;
 
@@ -3206,8 +3197,6 @@ export async function smartSyncAndMergeAllWithCloud(isInitialBoot: boolean = fal
     const logsCloud = cloudDocsMap.get(KEYS.CHARACTER_LOGS);
     const predicatesCloud = cloudDocsMap.get(KEYS.CHARACTER_PREDICATES);
     const gradesCloud = cloudDocsMap.get(KEYS.GRADES);
-    const periodsCloud = cloudDocsMap.get(KEYS.PERIODS);
-    const schedulesCloud = cloudDocsMap.get(KEYS.SCHEDULES);
 
     const now = Date.now();
 
@@ -3216,7 +3205,7 @@ export async function smartSyncAndMergeAllWithCloud(isInitialBoot: boolean = fal
       KEYS.PROFILE, KEYS.STUDENTS, KEYS.CLASSES, KEYS.TEACHERS,
       KEYS.ATTENDANCE, KEYS.LEAVES, KEYS.LEARNING_JOURNALS,
       KEYS.CHARACTER_TRAITS, KEYS.CHARACTER_LOGS, KEYS.CHARACTER_PREDICATES,
-      KEYS.GRADES, KEYS.PERIODS, KEYS.SCHEDULES
+      KEYS.GRADES
     ];
     const prevLocalTimestamps: Record<string, number> = {};
     ALL_SYNC_KEYS.forEach(k => {
@@ -3483,8 +3472,6 @@ export async function smartSyncAndMergeAllWithCloud(isInitialBoot: boolean = fal
     const traitsJsonStr = mergeAndStoreGeneric(KEYS.CHARACTER_TRAITS, traitsCloud, getCharacterTraits);
     const logsJsonStr = mergeAndStoreGeneric(KEYS.CHARACTER_LOGS, logsCloud, getStudentCharacterLogs);
     const gradesJsonStr = mergeAndStoreGeneric(KEYS.GRADES, gradesCloud, getStudentGradeAssessments);
-    const periodsJsonStr = mergeAndStoreGeneric(KEYS.PERIODS, periodsCloud, getLessonPeriods);
-    const schedulesJsonStr = mergeAndStoreGeneric(KEYS.SCHEDULES, schedulesCloud, getClassSchedules);
 
     let cloudPredicates = null;
     if (predicatesCloud && predicatesCloud.data) {
@@ -3511,8 +3498,6 @@ export async function smartSyncAndMergeAllWithCloud(isInitialBoot: boolean = fal
     lastSavedStringCache[KEYS.CHARACTER_LOGS] = logsJsonStr;
     lastSavedStringCache[KEYS.CHARACTER_PREDICATES] = predicatesJsonStr;
     lastSavedStringCache[KEYS.GRADES] = gradesJsonStr;
-    lastSavedStringCache[KEYS.PERIODS] = periodsJsonStr;
-    lastSavedStringCache[KEYS.SCHEDULES] = schedulesJsonStr;
 
     notifyStorageUpdated(true);
 
@@ -3553,8 +3538,6 @@ export async function smartSyncAndMergeAllWithCloud(isInitialBoot: boolean = fal
       pushIfChanged(KEYS.CHARACTER_LOGS, logsJsonStr, logsCloud);
       pushIfChanged(KEYS.CHARACTER_PREDICATES, predicatesJsonStr, predicatesCloud);
       pushIfChanged(KEYS.GRADES, gradesJsonStr, gradesCloud);
-      pushIfChanged(KEYS.PERIODS, periodsJsonStr, periodsCloud);
-      pushIfChanged(KEYS.SCHEDULES, schedulesJsonStr, schedulesCloud);
 
       if (writePromises.length > 0) {
         await Promise.allSettled(writePromises);
@@ -3644,8 +3627,6 @@ export async function forceUploadAllToCloud(): Promise<{ success: boolean; error
       KEYS.CHARACTER_LOGS,
       KEYS.CHARACTER_PREDICATES,
       KEYS.GRADES,
-      KEYS.PERIODS,
-      KEYS.SCHEDULES,
     ];
 
     const now = Date.now();
@@ -3712,8 +3693,6 @@ export async function forceDownloadAllFromCloud(): Promise<{ success: boolean; e
       KEYS.CHARACTER_LOGS,
       KEYS.CHARACTER_PREDICATES,
       KEYS.GRADES,
-      KEYS.PERIODS,
-      KEYS.SCHEDULES,
     ];
 
     const cloudDocsMap = await readAllCloudDocumentsFast();
@@ -7903,121 +7882,6 @@ export function saveUserSession(session: UserSession | null): void {
   notifyStorageUpdated();
 }
 
-// Lesson Periods (JP) Storage
-export function getLessonPeriods(): LessonPeriod[] {
-  const data = localStorage.getItem(KEYS.PERIODS);
-  if (data === null) {
-    safeSetLocalStorage(KEYS.PERIODS, JSON.stringify(INITIAL_LESSON_PERIODS));
-    safeSetLocalStorage(KEYS.PERIODS + '_updatedAt', '1');
-    return INITIAL_LESSON_PERIODS;
-  }
-  try {
-    const parsed = JSON.parse(data);
-    return Array.isArray(parsed) && parsed.length > 0 ? parsed : INITIAL_LESSON_PERIODS;
-  } catch {
-    return INITIAL_LESSON_PERIODS;
-  }
-}
-
-export function saveLessonPeriods(periods: LessonPeriod[]): void {
-  const now = Date.now();
-  const dataStr = JSON.stringify(periods);
-  safeSetLocalStorage(KEYS.PERIODS, dataStr);
-  safeSetLocalStorage(KEYS.PERIODS + '_updatedAt', String(now));
-  notifyStorageUpdated();
-  syncToCloud(KEYS.PERIODS, periods, true, now);
-}
-
-// Class Schedules Storage
-export function getClassSchedules(): ClassScheduleSlot[] {
-  const data = localStorage.getItem(KEYS.SCHEDULES);
-  if (data === null) {
-    safeSetLocalStorage(KEYS.SCHEDULES, JSON.stringify(INITIAL_CLASS_SCHEDULES));
-    safeSetLocalStorage(KEYS.SCHEDULES + '_updatedAt', '1');
-    return INITIAL_CLASS_SCHEDULES;
-  }
-  try {
-    const parsed = JSON.parse(data);
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return INITIAL_CLASS_SCHEDULES;
-  }
-}
-
-export function saveClassSchedules(schedules: ClassScheduleSlot[]): void {
-  const now = Date.now();
-  const dataStr = JSON.stringify(schedules);
-  safeSetLocalStorage(KEYS.SCHEDULES, dataStr);
-  safeSetLocalStorage(KEYS.SCHEDULES + '_updatedAt', String(now));
-  notifyStorageUpdated();
-  syncToCloud(KEYS.SCHEDULES, schedules, true, now);
-}
-
-export function saveSingleClassScheduleSlot(slot: ClassScheduleSlot): void {
-  const current = getClassSchedules();
-  const existingIdx = current.findIndex(s => s.id === slot.id);
-  let updated: ClassScheduleSlot[];
-  if (existingIdx >= 0) {
-    updated = [...current];
-    updated[existingIdx] = slot;
-  } else {
-    // If there's an existing slot for same classId, day, and periodNumber, replace it
-    const sameSlotIdx = current.findIndex(s => s.classId === slot.classId && s.day === slot.day && s.periodNumber === slot.periodNumber);
-    if (sameSlotIdx >= 0) {
-      updated = [...current];
-      updated[sameSlotIdx] = slot;
-    } else {
-      updated = [...current, slot];
-    }
-  }
-  saveClassSchedules(updated);
-}
-
-export function deleteClassScheduleSlot(slotId: string): void {
-  const current = getClassSchedules();
-  const updated = current.filter(s => s.id !== slotId);
-  saveClassSchedules(updated);
-}
-
-export function clearClassSchedules(classId?: string): void {
-  const current = getClassSchedules();
-  const updated = classId ? current.filter(s => s.classId !== classId) : [];
-  saveClassSchedules(updated);
-}
-
-export function copyClassSchedule(sourceClassId: string, targetClassId: string, targetClassName: string, overwrite: boolean = true): void {
-  const current = getClassSchedules();
-  const sourceSlots = current.filter(s => s.classId === sourceClassId);
-  
-  let updated: ClassScheduleSlot[];
-  if (overwrite) {
-    updated = current.filter(s => s.classId !== targetClassId);
-  } else {
-    updated = [...current];
-  }
-
-  const newSlots: ClassScheduleSlot[] = sourceSlots.map((s, idx) => ({
-    ...s,
-    id: `sch-${targetClassId}-${s.day.toLowerCase().slice(0, 3)}-${s.periodNumber}-${Date.now()}-${idx}`,
-    classId: targetClassId,
-    className: targetClassName,
-  }));
-
-  if (!overwrite) {
-    // Filter out conflicts if not overwriting
-    newSlots.forEach(ns => {
-      const exists = updated.some(u => u.classId === targetClassId && u.day === ns.day && u.periodNumber === ns.periodNumber);
-      if (!exists) {
-        updated.push(ns);
-      }
-    });
-  } else {
-    updated.push(...newSlots);
-  }
-
-  saveClassSchedules(updated);
-}
-
 export function resetToDefaultData(): void {
   localStorage.clear();
   const now = Date.now();
@@ -8031,8 +7895,6 @@ export function resetToDefaultData(): void {
   getCharacterTraits();
   getStudentCharacterLogs();
   getCharacterPredicateSettings();
-  getLessonPeriods();
-  getClassSchedules();
   notifyStorageUpdated();
 }
 

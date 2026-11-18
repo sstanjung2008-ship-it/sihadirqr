@@ -26,7 +26,6 @@ import {
   Cloud,
   CloudCheck,
   RefreshCw,
-  CalendarDays,
   UserCircle
 } from 'lucide-react';
 import { getCloudSyncStatus, CloudSyncStatus, getStudents, getLeaveRequests, getAttendanceRecords, getTeachers, getStudentCharacterLogs, getSchoolClasses, getLocalDateString, refreshParentChildAttendance } from '../lib/storage';
@@ -301,7 +300,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
     if (currentRole === 'PARENT') {
       return [
         { id: 'dashboard', label: 'Kehadiran Anak', icon: UserCheck, desc: 'Status absensi putra/putri' },
-        { id: 'schedule', label: 'Jadwal Pelajaran', icon: CalendarDays, desc: 'Jadwal belajar putra/putri' },
         { id: 'discipline_rules', label: 'Tata Tertib', icon: Scale, desc: 'Aturan & poin karakter sekolah' },
         { id: 'leaves', label: 'Izin / Sakit', icon: FileText, desc: 'Ajukan permohonan izin/sakit', badge: unreadLeavesCount },
         { id: 'account', label: 'Akun', icon: UserCircle, desc: 'Lihat Kartu Pelajar & Ganti Password' },
@@ -311,7 +309,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
       return [
         { id: 'dashboard', label: 'Absensi Hari Ini', icon: UserCheck, desc: 'Dashboard presensi kelas' },
         { id: 'scanner', label: 'Scan QR Presensi', icon: ScanLine, desc: 'Scan QR manual siswa' },
-        { id: 'schedule', label: 'Jadwal Pelajaran', icon: CalendarDays, desc: 'Jadwal KBM & jam mengajar' },
         { id: 'learning', label: 'Fitur Pembelajaran', icon: BookOpen, desc: 'Jurnal KBM & keaktifan siswa' },
         { id: 'character_points', label: 'Nilai Karakter', icon: Award, desc: 'Poin & bukti foto karakter' },
         { id: 'analytics', label: 'Analitik & AI', icon: Sparkles, desc: 'Laporan AI & grafik tren' },
@@ -325,7 +322,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
     return [
       { id: 'dashboard', label: 'Dasbor Presensi', icon: BarChart3, desc: 'Ringkasan & statistik utama' },
       { id: 'scanner', label: 'Pos Scan QR', icon: ScanLine, desc: 'Pemindai barcode/QR harian' },
-      { id: 'schedule', label: 'Jadwal Pelajaran', icon: CalendarDays, desc: 'Sesi JP, guru & mapel per kelas' },
       { id: 'learning', label: 'Jurnal Pembelajaran', icon: BookOpen, desc: 'Rekap KBM & keaktifan kelas' },
       { id: 'character_input', label: 'Input Karakter Siswa', icon: Sparkles, desc: 'Master data & bobot karakter (+/-)' },
       { id: 'character_points', label: 'Nilai Karakter', icon: Award, desc: 'Poin & bukti foto karakter' },

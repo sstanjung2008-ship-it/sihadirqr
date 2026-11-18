@@ -13,8 +13,6 @@ import {
   StudentCharacterLog,
   CharacterPredicateSettings,
   UserSession,
-  LessonPeriod,
-  ClassScheduleSlot,
   StudentGradeAssessment
 } from './types';
 import { 
@@ -49,10 +47,6 @@ import {
   deduplicateCharacterLogs,
   getCharacterPredicateSettings,
   saveCharacterPredicateSettings,
-  getLessonPeriods,
-  saveLessonPeriods,
-  getClassSchedules,
-  saveClassSchedules,
   getStudentGradeAssessments,
   saveStudentGradeAssessments,
   getUserSession,
@@ -91,7 +85,6 @@ import { ParentBottomNav } from './components/ParentBottomNav';
 import { TeacherBottomNav } from './components/TeacherBottomNav';
 import { LoginView } from './components/LoginView';
 import { PWAInstallBanner } from './components/PWAInstallBanner';
-import { KbmVoiceReminderBanner } from './components/KbmVoiceReminderBanner';
 
 // Code-splitting via React.lazy untuk pemuatan awal aplikasi yang super ringan & cepat
 const QRScannerView = React.lazy(() => import('./components/QRScannerView').then(m => ({ default: m.QRScannerView })));
@@ -106,7 +99,6 @@ const LearningJournalView = React.lazy(() => import('./components/LearningJourna
 const DisciplineRulesView = React.lazy(() => import('./components/DisciplineRulesView').then(m => ({ default: m.DisciplineRulesView })));
 const CharacterInputView = React.lazy(() => import('./components/CharacterInputView').then(m => ({ default: m.CharacterInputView })));
 const CharacterPointsView = React.lazy(() => import('./components/CharacterPointsView').then(m => ({ default: m.CharacterPointsView })));
-const ScheduleManagementView = React.lazy(() => import('./components/ScheduleManagementView').then(m => ({ default: m.ScheduleManagementView })));
 const ParentAccountView = React.lazy(() => import('./components/ParentAccountView').then(m => ({ default: m.ParentAccountView })));
 const TeacherAccountView = React.lazy(() => import('./components/TeacherAccountView').then(m => ({ default: m.TeacherAccountView })));
 
@@ -117,14 +109,9 @@ const ViewLoadingFallback: React.FC = () => (
     <p className="text-[11px] text-slate-400 mt-0.5">Menyiapkan modul dan data komponen</p>
   </div>
 );
-import { 
-  KbmReminderInfo, 
-  playTeacherKbmVoiceReminder, 
-  isKbmVoiceReminderEnabled 
-} from './lib/kbmVoiceReminder';
 
 const VALID_TABS = [
-  'scanner', 'dashboard', 'schedule', 'analytics', 'learning',
+  'scanner', 'dashboard', 'analytics', 'learning',
   'teachers', 'students', 'classes', 'leaves', 'account', 'idcard',
   'discipline_rules', 'character_input', 'character_points', 'recap', 'settings'
 ];
@@ -281,8 +268,6 @@ export default function App() {
   const [traits, setTraitsState] = useState<CharacterTrait[]>(getCharacterTraits());
   const [characterLogs, setCharacterLogsState] = useState<StudentCharacterLog[]>(getStudentCharacterLogs());
   const [predicateSettings, setPredicateSettingsState] = useState<CharacterPredicateSettings>(getCharacterPredicateSettings());
-  const [periods, setPeriodsState] = useState<LessonPeriod[]>(getLessonPeriods());
-  const [schedules, setSchedulesState] = useState<ClassScheduleSlot[]>(getClassSchedules());
   const [grades, setGradesState] = useState<StudentGradeAssessment[]>(() => getStudentGradeAssessments());
 
   // Parent Child Identification (Strictly Bound to Logged-in NISN, studentId, or username)
@@ -411,10 +396,6 @@ export default function App() {
   // Effective child ID passed down to views
   const effectiveChildId = (currentRole === 'PARENT' && parentStudent) ? parentStudent.id : (selectedChildId || students[0]?.id || '');
 
-  // Active KBM Voice Reminder Popup
-  const [activeVoiceReminder, setActiveVoiceReminder] = useState<KbmReminderInfo | null>(null);
-  const triggeredVoiceReminderKeysRef = useRef<Set<string>>(new Set());
-
   // Automatic Network / Auto-Sync Toast notification state
   const [networkToast, setNetworkToast] = useState<{
     type: 'info' | 'success' | 'warning' | 'error';
@@ -445,8 +426,6 @@ export default function App() {
     setTraitsState(getCharacterTraits());
     setCharacterLogsState(getStudentCharacterLogs());
     setPredicateSettingsState(getCharacterPredicateSettings());
-    setPeriodsState(getLessonPeriods());
-    setSchedulesState(getClassSchedules());
     setGradesState(getStudentGradeAssessments());
     const activeStoredSession = getUserSession();
     if (activeStoredSession && activeStoredSession.isLoggedIn) {
@@ -643,201 +622,6 @@ export default function App() {
       return repaired;
     });
   }, []);
-
-  // -------------------------------------------------------------
-  // Real-Time AI Voice Reminder for Teachers with Active KBM Slots
-  // STRICT RULE: Suara notifikasi jadwal HANYA muncul pada akun yang sesuai dengan akun nama login pada jadwal pelajaran
-  // -------------------------------------------------------------
-  useEffect(() => {
-    const checkAndTriggerKbmVoiceReminder = () => {
-      // If voice reminder is globally disabled in schoolProfile, do nothing
-      if (schoolProfile.aiVoiceTeacherReminderEnabled === false) return;
-      if (!isKbmVoiceReminderEnabled()) return;
-
-      // 1. Must be strictly logged in as TEACHER role
-      if (currentRole !== 'TEACHER') return;
-      if (!userSession || !userSession.isLoggedIn) return;
-
-      // 2. Identify the logged-in teacher credentials
-      const loggedTeacherId = currentTeacher?.id || userSession.teacherId || '';
-      const loggedTeacherNip = currentTeacher?.nip || userSession.nipOrNisn || '';
-      const loggedTeacherName = currentTeacher?.name || userSession.displayName || '';
-      const loggedUsername = userSession.username || '';
-
-      if (!loggedTeacherId && !loggedTeacherNip && !loggedTeacherName) return;
-
-      const cleanStr = (s?: string) => (s || '').replace(/[\.,\s\-_]/g, '').toLowerCase();
-      const normalizeAcademicName = (name?: string) => {
-        if (!name) return '';
-        return name
-          .toLowerCase()
-          .replace(/\b(dr|dra|drs|h|hj|prof|ir|s\.pd|m\.pd|s\.kom|m\.kom|s\.ag|m\.ag|s\.si|m\.si|s\.e|m\.m|s\.sos|m\.sos|s\.t|m\.t|b\.sc|m\.sc|gr|lc)\b/gi, '')
-          .replace(/[\.,\s\-_]/g, '');
-      };
-
-      const now = new Date();
-      const dayNames = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
-      const currentDayName = dayNames[now.getDay()];
-
-      // 3. Check active school day
-      const activeDays = schoolProfile.activeDays || ['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
-      if (!activeDays.includes(currentDayName)) return;
-
-      // 4. Check holiday
-      const year = now.getFullYear();
-      const month = String(now.getMonth() + 1).padStart(2, '0');
-      const day = String(now.getDate()).padStart(2, '0');
-      const dateStr = getLocalDateString(now);
-
-      const holidays = schoolProfile.holidays || [];
-      const isTodayHoliday = holidays.some(h => {
-        if (h.endDate) {
-          return dateStr >= h.date && dateStr <= h.endDate;
-        }
-        return h.date === dateStr;
-      });
-      if (isTodayHoliday) return;
-
-      // 5. Periods for today
-      const daySpecificPeriods = periods.filter(p => p.day === currentDayName || p.daySpecific === currentDayName);
-      const todayPeriods = (daySpecificPeriods.length > 0 
-        ? daySpecificPeriods 
-        : periods.filter(p => !p.day || p.day === 'SEMUA')
-      ).filter(p => p.type === 'KBM');
-
-      if (todayPeriods.length === 0) return;
-
-      const currentMinutes = now.getHours() * 60 + now.getMinutes();
-      const todaySchedules = schedules.filter(s => s.day === currentDayName);
-      if (todaySchedules.length === 0) return;
-
-      todayPeriods.forEach(period => {
-        if (!period.startTime) return;
-        const [pH, pM] = period.startTime.split(':').map(Number);
-        if (isNaN(pH) || isNaN(pM)) return;
-
-        const periodStartMinutes = pH * 60 + pM;
-
-        // Trigger window: right at start time (within first 2 minutes of the period)
-        if (currentMinutes >= periodStartMinutes && currentMinutes <= periodStartMinutes + 2) {
-          const matchingSlots = todaySchedules.filter(s => s.periodNumber === period.periodNumber);
-
-          matchingSlots.forEach(slot => {
-            if (!slot.teacherId && !slot.teacherName) return;
-
-            // STRICT FILTER: Match slot only to currently logged in teacher
-            let isMySlot = false;
-
-            // Match A: ID
-            if (loggedTeacherId && slot.teacherId && slot.teacherId === loggedTeacherId) {
-              isMySlot = true;
-            }
-
-            // Match B: NIP
-            if (!isMySlot && loggedTeacherNip && slot.teacherNip && cleanStr(slot.teacherNip) === cleanStr(loggedTeacherNip)) {
-              isMySlot = true;
-            }
-
-            // Match C: Exact or cleaned Name / Academic title match
-            if (!isMySlot && slot.teacherName && loggedTeacherName) {
-              const cleanSlotName = cleanStr(slot.teacherName);
-              const cleanLoggedName = cleanStr(loggedTeacherName);
-              if (cleanSlotName === cleanLoggedName) {
-                isMySlot = true;
-              } else {
-                const normSlot = normalizeAcademicName(slot.teacherName);
-                const normLogged = normalizeAcademicName(loggedTeacherName);
-                if (normSlot && normLogged && (normSlot === normLogged || normSlot.includes(normLogged) || normLogged.includes(normSlot))) {
-                  isMySlot = true;
-                }
-              }
-            }
-
-            // Match D: Master teacher record link
-            if (!isMySlot && slot.teacherId) {
-              const masterTeacher = teachers.find(t => t.id === slot.teacherId);
-              if (masterTeacher) {
-                if (loggedTeacherId && masterTeacher.id === loggedTeacherId) isMySlot = true;
-                if (loggedTeacherNip && cleanStr(masterTeacher.nip) === cleanStr(loggedTeacherNip)) isMySlot = true;
-                if (loggedTeacherName && (
-                  cleanStr(masterTeacher.name) === cleanStr(loggedTeacherName) ||
-                  normalizeAcademicName(masterTeacher.name) === normalizeAcademicName(loggedTeacherName)
-                )) {
-                  isMySlot = true;
-                }
-                if (loggedUsername && (
-                  cleanStr(masterTeacher.nip) === cleanStr(loggedUsername) ||
-                  cleanStr(masterTeacher.phone) === cleanStr(loggedUsername)
-                )) {
-                  isMySlot = true;
-                }
-              }
-            }
-
-            // If this schedule slot does not belong to the logged-in teacher account, SKIP!
-            if (!isMySlot) return;
-
-            const voiceKey = `voice-kbm-${dateStr}-${slot.id || `${slot.classId}-${slot.periodNumber}-${slot.teacherId}`}-${period.startTime}`;
-            if (triggeredVoiceReminderKeysRef.current.has(voiceKey)) return;
-
-            triggeredVoiceReminderKeysRef.current.add(voiceKey);
-
-            // Calculate consecutive JP count for this teaching session block (bounded at max 15 JP)
-            let consecutiveJp = 1;
-            let nextPeriodNum = slot.periodNumber + 1;
-            while (
-              consecutiveJp < 15 &&
-              todaySchedules.some(s => 
-                s.periodNumber === nextPeriodNum && 
-                s.classId === slot.classId && 
-                ((slot.teacherId && s.teacherId === slot.teacherId) || (slot.teacherName && s.teacherName === slot.teacherName)) && 
-                s.subject === slot.subject
-              )
-            ) {
-              consecutiveJp++;
-              nextPeriodNum++;
-            }
-
-            // Determine final end time of the block
-            const lastPeriodInBlock = todayPeriods.find(p => p.periodNumber === slot.periodNumber + consecutiveJp - 1);
-            const finalEndTime = lastPeriodInBlock?.endTime || period.endTime;
-
-            const reminderInfo: KbmReminderInfo = {
-              teacherName: slot.teacherName || loggedTeacherName || 'Bapak/Ibu Guru',
-              subject: slot.subject,
-              className: slot.className,
-              room: slot.room,
-              periodNumber: slot.periodNumber,
-              jpCount: consecutiveJp,
-              startTime: period.startTime,
-              endTime: finalEndTime,
-              slotId: slot.id
-            };
-
-            // Play Chime + Female AI Speech: Menyebutkan nama guru, kelas, mata pelajaran, dan jumlah JP
-            playTeacherKbmVoiceReminder(reminderInfo);
-
-            // Pop up interactive banner
-            setActiveVoiceReminder(reminderInfo);
-          });
-        }
-      });
-    };
-
-    checkAndTriggerKbmVoiceReminder();
-    const interval = setInterval(checkAndTriggerKbmVoiceReminder, 12000);
-    return () => clearInterval(interval);
-  }, [
-    currentRole,
-    userSession,
-    currentTeacher,
-    teachers,
-    schoolProfile.activeDays,
-    schoolProfile.holidays,
-    schoolProfile.aiVoiceTeacherReminderEnabled,
-    periods,
-    schedules
-  ]);
 
   // Update session role changes
   const handleRoleChange = (role: UserRole) => {
@@ -2102,18 +1886,6 @@ export default function App() {
     saveSchoolProfile(profile);
   };
 
-  // Schedule & Period Handlers
-  const handleSavePeriods = (newPeriods: LessonPeriod[]) => {
-    setPeriodsState(newPeriods);
-    saveLessonPeriods(newPeriods);
-  };
-
-  const handleSaveSchedules = (newSchedules: ClassScheduleSlot[]) => {
-    setSchedulesState(newSchedules);
-    saveClassSchedules(newSchedules);
-  };
-
-
   const unreadLeavesCount = leaveRequests.filter(r => r.status === 'PENDING').length;
 
   if (!userSession || !userSession.isLoggedIn) {
@@ -2284,20 +2056,6 @@ export default function App() {
               schoolProfile={schoolProfile}
               unreadLeavesCount={leaveRequests.filter(l => l.status === 'PENDING').length}
               onRestoreAttendance={handleRestoreAttendance}
-            />
-          )}
-
-          {activeTab === 'schedule' && (
-            <ScheduleManagementView
-              schoolProfile={schoolProfile}
-              classes={classes}
-              teachers={teachers}
-              periods={periods}
-              schedules={schedules}
-              onSavePeriods={handleSavePeriods}
-              onSaveSchedules={handleSaveSchedules}
-              currentRole={currentRole}
-              userSession={userSession}
             />
           )}
 
@@ -2524,16 +2282,6 @@ export default function App() {
           </React.Suspense>
         </main>
       </div>
-
-      {/* Floating KBM Voice Reminder Alert Banner */}
-      <KbmVoiceReminderBanner
-        reminder={activeVoiceReminder}
-        onDismiss={() => setActiveVoiceReminder(null)}
-        onOpenJournal={() => {
-          handleTabChange('learning');
-          setActiveVoiceReminder(null);
-        }}
-      />
 
       {/* Mobile Glass Bottom Navigation Bar for Parent Role */}
       {currentRole === 'PARENT' && (

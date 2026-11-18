@@ -34,7 +34,6 @@ import {
   Calendar,
   X,
   GraduationCap,
-  CalendarDays,
   UserCircle,
   ShieldCheck,
   QrCode,
@@ -769,7 +768,7 @@ export const AttendanceDashboard: React.FC<AttendanceDashboardProps> = ({
                       {schoolProfile?.name || 'Sistem Kehadiran Digital'}
                     </h1>
                     <p className="text-xs text-slate-500 font-medium">
-                      Monitoring kehadiran, jadwal KBM, nilai karakter & komunikasi sekolah secara real-time.
+                      Monitoring kehadiran, nilai karakter & komunikasi sekolah secara real-time.
                     </p>
                   </div>
                 </div>
@@ -814,7 +813,7 @@ export const AttendanceDashboard: React.FC<AttendanceDashboardProps> = ({
                 <span className="text-[11px] text-slate-400 font-medium hidden sm:inline">Pilih menu untuk membuka halaman</span>
               </div>
 
-              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 sm:gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4">
                 {/* ITEM 1: DASHBOR */}
                 <button
                   type="button"
@@ -837,29 +836,7 @@ export const AttendanceDashboard: React.FC<AttendanceDashboardProps> = ({
                   </div>
                 </button>
 
-                {/* ITEM 2: JADWAL PELAJARAN */}
-                <button
-                  type="button"
-                  onClick={() => onNavigateTab?.('schedule')}
-                  className="group relative overflow-hidden rounded-3xl p-4 text-left backdrop-blur-xl bg-white/75 hover:bg-white/95 border border-indigo-200/80 hover:border-indigo-400 shadow-sm hover:shadow-md transition-all duration-200 cursor-pointer flex flex-col justify-between min-h-[120px]"
-                >
-                  <div className="flex items-center justify-between">
-                    <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-indigo-500 to-blue-600 text-white flex items-center justify-center shadow-md shadow-indigo-500/20 group-hover:scale-105 transition-transform">
-                      <CalendarDays className="w-5 h-5" />
-                    </div>
-                    <ArrowRight className="w-4 h-4 text-slate-300 group-hover:text-indigo-600 group-hover:translate-x-0.5 transition-all" />
-                  </div>
-                  <div className="mt-3">
-                    <p className="text-xs font-black text-slate-900 group-hover:text-indigo-700 transition-colors">
-                      Jadwal
-                    </p>
-                    <p className="text-[10px] text-slate-500 font-medium line-clamp-1 mt-0.5">
-                      Jadwal KBM & Guru Mapel
-                    </p>
-                  </div>
-                </button>
-
-                {/* ITEM 3: PENGAJUAN IZIN / SAKIT */}
+                {/* ITEM 2: PENGAJUAN IZIN / SAKIT */}
                 <button
                   type="button"
                   onClick={() => onNavigateTab?.('leaves')}

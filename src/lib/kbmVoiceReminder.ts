@@ -1,17 +1,5 @@
-// Suara AI & Notifikasi Peran (Guru & Orang Tua)
+// Suara AI & Notifikasi Peran (Orang Tua & BK)
 // Memadukan Nada Lonceng Harmonis (Web Audio API) + Suara AI Bahasa Indonesia Alami (Web Speech API)
-
-export interface KbmReminderInfo {
-  teacherName: string;
-  subject: string;
-  className: string;
-  room?: string;
-  periodNumber: number;
-  jpCount?: number;
-  startTime: string;
-  endTime?: string;
-  slotId?: string;
-}
 
 export interface ParentNotificationParams {
   studentName: string;
@@ -23,18 +11,11 @@ export interface ParentNotificationParams {
 
 export type ParentAttendanceType = 'ARRIVAL' | 'LATE' | 'ABSENT' | 'DEPARTURE';
 
-const STORAGE_KEY_TEACHER_VOICE_ENABLED = 'sihadir_kbm_voice_reminder_enabled';
 const STORAGE_KEY_PARENT_VOICE_ENABLED = 'sihadir_parent_voice_enabled';
 
 // ==========================================
-// DEFAULT TEMPLATES - GURU & ORANG TUA
+// DEFAULT TEMPLATES - ORANG TUA
 // ==========================================
-
-export const DEFAULT_TEACHER_SPEECH_TEMPLATE = 
-  "Pemberitahuan kepada [TeacherName]. Anda memiliki jadwal mengajar mata pelajaran [Subject] di [ClassName] [PeriodLabel]. Selamat menjalankan tugas di [SchoolName], terima kasih.";
-
-export const DEFAULT_TEACHER_TEXT_TEMPLATE = 
-  "PENGINGAT MENGAJAR: Yth. Bpk/Ibu [TeacherName], mengingatkan bahwa jadwal mengajar mata pelajaran [Subject] di Kelas [ClassName] ([Room]) akan dimulai pada pukul [Time] WITA ([PeriodLabel]). Selamat menjalankan KBM!";
 
 // Default Pesan Teks Notifikasi Orang Tua
 export const DEFAULT_PARENT_ARRIVAL_MESSAGE = 
@@ -62,49 +43,9 @@ export const DEFAULT_PARENT_VOICE_DEPARTURE =
 export const DEFAULT_PARENT_VOICE_ABSENT = 
   "Peringatan kehadiran sekolah. Kepada Bapak atau Ibu [ParentName], siswa [StudentName] dari kelas [ClassName] tercatat belum melakukan absensi di sekolah hingga pukul [Time]. Mohon konfirmasi.";
 
-export const DEFAULT_SPEECH_TEXT = "Pemberitahuan, Anda memiliki jadwal mengajar saat ini. Selamat menjalankan tugas, terima kasih.";
-
 // ==========================================
 // STRING INTERPOLATION & GENERATORS
 // ==========================================
-
-/**
- * Buat kalimat suara AI alami untuk jadwal KBM Guru
- */
-export function generateKbmSpeechText(info?: KbmReminderInfo, customTemplate?: string, schoolName?: string): string {
-  if (!info) {
-    return DEFAULT_SPEECH_TEXT;
-  }
-
-  const rawName = info.teacherName?.trim() || 'Guru Pengampu';
-  const hasGreeting = /^(bapak|ibu|bpk|dr|dra|drs|ustadz|ustadzah)\b/i.test(rawName);
-  const teacherGreeting = hasGreeting ? rawName : `Bapak atau Ibu ${rawName}`;
-
-  const classText = info.className.toLowerCase().startsWith('kelas') 
-    ? info.className 
-    : `Kelas ${info.className}`;
-
-  const jpNumber = info.jpCount && info.jpCount > 0 ? info.jpCount : 1;
-  const jpText = `sebanyak ${jpNumber} Jam Pelajaran`;
-  const subjectText = info.subject?.trim() || 'Mata Pelajaran';
-  const roomText = info.room?.trim() || 'Ruang Kelas';
-  const timeText = info.startTime || '07:30';
-  const periodText = `Jam Ke-${info.periodNumber || 1}`;
-
-  if (customTemplate && customTemplate.trim()) {
-    return customTemplate
-      .replace(/\[TeacherName\]/g, teacherGreeting)
-      .replace(/\[Subject\]/g, subjectText)
-      .replace(/\[ClassName\]/g, classText)
-      .replace(/\[Room\]/g, roomText)
-      .replace(/\[Time\]/g, timeText)
-      .replace(/\[PeriodLabel\]/g, jpText)
-      .replace(/\[Period\]/g, periodText)
-      .replace(/\[SchoolName\]/g, schoolName || 'Sekolah');
-  }
-
-  return `Pemberitahuan kepada ${teacherGreeting}. Anda memiliki jadwal mengajar mata pelajaran ${subjectText} di ${classText} ${jpText}. Selamat menjalankan tugas di ${schoolName || 'sekolah'}, terima kasih.`;
-}
 
 /**
  * Buat kalimat suara AI atau pesan teks untuk notifikasi kehadiran Orang Tua
@@ -150,17 +91,6 @@ export function generateParentNotificationContent(
 // ==========================================
 // STATUS STORAGE CONTROLS
 // ==========================================
-
-export function isKbmVoiceReminderEnabled(): boolean {
-  if (typeof window === 'undefined') return true;
-  const stored = localStorage.getItem(STORAGE_KEY_TEACHER_VOICE_ENABLED);
-  return stored !== null ? stored === 'true' : true;
-}
-
-export function setKbmVoiceReminderEnabled(enabled: boolean): void {
-  if (typeof window === 'undefined') return;
-  localStorage.setItem(STORAGE_KEY_TEACHER_VOICE_ENABLED, enabled ? 'true' : 'false');
-}
 
 export function isParentVoiceEnabled(): boolean {
   if (typeof window === 'undefined') return true;
@@ -275,11 +205,6 @@ export function playAudioChime(type: 'TEACHER' | 'SUCCESS' | 'WARNING' | 'ALERT'
   });
 }
 
-// Backward compatibility helper
-export function playKbmChime(): Promise<void> {
-  return playAudioChime('TEACHER');
-}
-
 // Chime Nada Suara Notifikasi Penilaian Karakter untuk Guru BK
 export function playBkNotificationChime(): Promise<void> {
   return playAudioChime('BK_NOTIFICATION');
@@ -319,7 +244,7 @@ export function getIndonesianFemaleVoice(): SpeechSynthesisVoice | null {
 }
 
 export function speakKbmVoice(
-  text: string = DEFAULT_SPEECH_TEXT,
+  text: string = '',
   options?: { pitch?: number; rate?: number }
 ): Promise<void> {
   return new Promise((resolve) => {
@@ -362,26 +287,8 @@ export function speakKbmVoice(
 }
 
 // ==========================================
-// PLAYERS & SIMULATORS (GURU & ORANG TUA)
+// PLAYERS & SIMULATORS (ORANG TUA)
 // ==========================================
-
-export async function playTeacherKbmVoiceReminder(
-  info?: KbmReminderInfo,
-  customText?: string
-): Promise<void> {
-  if (!isKbmVoiceReminderEnabled()) {
-    return;
-  }
-
-  const speechText = customText || generateKbmSpeechText(info);
-
-  try {
-    await playAudioChime('TEACHER');
-    await speakKbmVoice(speechText);
-  } catch (err) {
-    console.error('Failed to play KBM voice reminder:', err);
-  }
-}
 
 export async function playParentVoiceNotification(
   type: ParentAttendanceType,
@@ -406,22 +313,6 @@ export async function playParentVoiceNotification(
   } catch (err) {
     console.error('Failed to play parent voice notification:', err);
   }
-}
-
-export async function testKbmVoiceReminder(customTemplate?: string, teacherInfo?: KbmReminderInfo): Promise<void> {
-  const sampleInfo: KbmReminderInfo = teacherInfo || {
-    teacherName: "Ahmad Fauzi, S.Pd",
-    subject: "Matematika",
-    className: "7A",
-    room: "R.01",
-    periodNumber: 1,
-    jpCount: 2,
-    startTime: "07:30",
-    endTime: "09:00"
-  };
-
-  const text = generateKbmSpeechText(sampleInfo, customTemplate);
-  await playTeacherKbmVoiceReminder(sampleInfo, text);
 }
 
 export async function testParentVoiceNotification(

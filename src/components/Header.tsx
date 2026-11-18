@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { UserRole, SchoolProfile } from '../types';
 import { 
   QrCode, 
@@ -15,15 +15,8 @@ import {
   BarChart3,
   Clock,
   UserCircle,
-  Sparkles,
-  Volume2,
-  VolumeX
+  Sparkles
 } from 'lucide-react';
-import { 
-  isKbmVoiceReminderEnabled, 
-  setKbmVoiceReminderEnabled, 
-  testKbmVoiceReminder 
-} from '../lib/kbmVoiceReminder';
 
 interface HeaderProps {
   currentRole: UserRole;
@@ -43,8 +36,6 @@ export const Header: React.FC<HeaderProps> = ({
   unreadLeavesCount,
 }) => {
   const [timeStr, setTimeStr] = React.useState('');
-  const [voiceEnabled, setVoiceEnabled] = useState(isKbmVoiceReminderEnabled());
-  const [isPlayingTest, setIsPlayingTest] = useState(false);
 
   React.useEffect(() => {
     const updateTime = () => {
@@ -55,18 +46,6 @@ export const Header: React.FC<HeaderProps> = ({
     const interval = setInterval(updateTime, 1000);
     return () => clearInterval(interval);
   }, []);
-
-  const handleTestVoice = async () => {
-    setIsPlayingTest(true);
-    await testKbmVoiceReminder();
-    setIsPlayingTest(false);
-  };
-
-  const handleToggleVoice = () => {
-    const nextState = !voiceEnabled;
-    setVoiceEnabled(nextState);
-    setKbmVoiceReminderEnabled(nextState);
-  };
 
   // Filter tabs based on active role
   const getNavTabs = () => {
@@ -150,20 +129,6 @@ export const Header: React.FC<HeaderProps> = ({
 
         {/* Status Indicator & Role Switcher */}
         <div className="flex items-center space-x-2.5">
-          {/* KBM Voice Reminder Quick Button */}
-          <button
-            onClick={handleTestVoice}
-            disabled={isPlayingTest}
-            title="Klik untuk menguji nada & Suara AI Pengingat KBM perempuan"
-            className="flex items-center gap-1.5 bg-indigo-800 hover:bg-indigo-900 border border-indigo-500/40 text-indigo-100 hover:text-white px-2.5 py-1.5 rounded-xl text-xs font-semibold transition cursor-pointer shadow-inner disabled:opacity-50"
-          >
-            <Volume2 className={`w-3.5 h-3.5 text-amber-300 ${isPlayingTest ? 'animate-pulse' : ''}`} />
-            <span className="hidden md:inline">
-              {isPlayingTest ? 'Memutar Suara...' : 'Suara KBM AI'}
-            </span>
-            <span className="w-2 h-2 rounded-full bg-emerald-400" />
-          </button>
-
           <div className="flex items-center bg-indigo-800/90 rounded-xl p-1 border border-indigo-500/30">
             <span className="text-xs text-indigo-200 font-medium px-2 hidden sm:inline">Role:</span>
             <select

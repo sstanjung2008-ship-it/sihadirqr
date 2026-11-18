@@ -1,9 +1,8 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { SchoolProfile, Teacher, Student, SchoolHoliday } from '../types';
-import { Settings, Save, School, Clock, RotateCcw, CreditCard, CheckCircle2, Upload, Image as ImageIcon, Link, BookOpen, Plus, X, KeyRound, Key, Lock, Unlock, Eye, EyeOff, User, GraduationCap, Search, Check, RefreshCw, Users, ShieldAlert, ShieldCheck, AlertCircle, Calendar, CalendarDays, Trash2, Edit3, Tag, Flag, AlertTriangle, Sparkles, Filter, Cloud, CloudDownload, CloudUpload, FileJson, Download, Volume2, VolumeX, Mic, Headphones, BellRing, UserCheck, Smile, UserX, Play, Square, MessageSquare, Flame, CalendarCheck2, Layers, Power, Ban, Award } from 'lucide-react';
+import { Settings, Save, School, Clock, RotateCcw, CreditCard, CheckCircle2, Upload, Image as ImageIcon, Link, BookOpen, Plus, X, KeyRound, Key, Lock, Unlock, Eye, EyeOff, User, GraduationCap, Search, Check, RefreshCw, Users, ShieldAlert, ShieldCheck, AlertCircle, Calendar, CalendarDays, Trash2, Edit3, Tag, Flag, AlertTriangle, Sparkles, Filter, Cloud, CloudDownload, CloudUpload, FileJson, Download, Volume2, VolumeX, Mic, Headphones, UserCheck, Smile, UserX, Play, Square, MessageSquare, Flame, CalendarCheck2, Layers, Power, Ban, Award } from 'lucide-react';
 import { resetToDefaultData, forceUploadAllToCloud, forceDownloadAllFromCloud, getCloudSyncStatus, CloudSyncStatus, downloadDatabaseBackupFile, getLocalDateString, updateParentPortalAccess, saveAttendanceAuditLog } from '../lib/storage';
 import { 
-  DEFAULT_TEACHER_SPEECH_TEMPLATE,
   DEFAULT_PARENT_ARRIVAL_MESSAGE,
   DEFAULT_PARENT_LATE_MESSAGE,
   DEFAULT_PARENT_DEPARTURE_MESSAGE,
@@ -12,15 +11,10 @@ import {
   DEFAULT_PARENT_VOICE_LATE,
   DEFAULT_PARENT_VOICE_DEPARTURE,
   DEFAULT_PARENT_VOICE_ABSENT,
-  testKbmVoiceReminder,
   testParentVoiceNotification,
-  playTeacherKbmVoiceReminder,
   playParentVoiceNotification,
-  isKbmVoiceReminderEnabled,
-  setKbmVoiceReminderEnabled,
   isParentVoiceEnabled,
   setParentVoiceEnabled,
-  generateKbmSpeechText,
   generateParentNotificationContent,
   ParentAttendanceType
 } from '../lib/kbmVoiceReminder';
@@ -376,53 +370,6 @@ export const SchoolSettingsView: React.FC<SchoolSettingsViewProps> = ({
 
   // Toast / Feedback Notice saat Template di-Reset
   const [templateResetToast, setTemplateResetToast] = useState<string | null>(null);
-
-  // Uji Coba Suara AI Pengingat Jadwal KBM Guru
-  const [selectedTestTeacherId, setSelectedTestTeacherId] = useState<string>('');
-  const [isTestingTeacherVoice, setIsTestingTeacherVoice] = useState<boolean>(false);
-  const [testTeacherVoicePlayingText, setTestTeacherVoicePlayingText] = useState<string | null>(null);
-
-  const handleTestTeacherVoice = async () => {
-    const teacher = sortedTeachers.find(t => t.id === selectedTestTeacherId) || sortedTeachers[0];
-    if (!teacher) {
-      setTemplateResetToast('Belum ada data guru yang terdaftar di sistem untuk diuji coba.');
-      setTimeout(() => setTemplateResetToast(null), 3500);
-      return;
-    }
-
-    setIsTestingTeacherVoice(true);
-    const template = formData.aiVoiceTemplateTeacherReminder || DEFAULT_TEACHER_SPEECH_TEMPLATE;
-    const info = {
-      teacherName: teacher.name,
-      subject: teacher.subject1 || 'Mata Pelajaran',
-      className: teacher.homeroomClassName || 'Kelas 7A',
-      room: 'Ruang Kelas',
-      periodNumber: 1,
-      jpCount: 2,
-      startTime: formData.startTime || '07:30',
-      endTime: '09:00'
-    };
-    
-    const speechText = generateKbmSpeechText(info, template, formData.name);
-    setTestTeacherVoicePlayingText(speechText);
-
-    try {
-      await testKbmVoiceReminder(template, info);
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setIsTestingTeacherVoice(false);
-    }
-  };
-
-  const handleResetTeacherVoiceTemplate = () => {
-    setFormData(prev => ({
-      ...prev,
-      aiVoiceTemplateTeacherReminder: DEFAULT_TEACHER_SPEECH_TEMPLATE
-    }));
-    setTemplateResetToast('Format Suara AI & Pengingat Jadwal Guru berhasil dikembalikan ke format awal.');
-    setTimeout(() => setTemplateResetToast(null), 3500);
-  };
 
   // Uji Coba & Manajemen Suara AI / Notifikasi Orang Tua
   const [selectedTestStudentId, setSelectedTestStudentId] = useState<string>('');
@@ -1478,7 +1425,7 @@ export const SchoolSettingsView: React.FC<SchoolSettingsViewProps> = ({
             <div className="bg-white/80 border border-indigo-100 rounded-xl p-2.5 text-[11px] text-slate-600 flex items-start gap-2">
               <span className="font-bold text-indigo-700 shrink-0">ℹ️ Info Bekerja Aturan:</span>
               <span>
-                Pada hari non-aktif (seperti <strong>{ALL_WEEK_DAYS.filter(d => !currentActiveDays.includes(d)).join(', ') || 'tidak ada'}</strong>), scanner presensi ditutup dan jam KBM tidak dijadwalkan.
+                Pada hari non-aktif (seperti <strong>{ALL_WEEK_DAYS.filter(d => !currentActiveDays.includes(d)).join(', ') || 'tidak ada'}</strong>), scanner presensi ditutup.
               </span>
             </div>
           </div>
@@ -2803,7 +2750,7 @@ export const SchoolSettingsView: React.FC<SchoolSettingsViewProps> = ({
                   </span>
                 </div>
                 <p className="text-xs text-slate-500 mt-1 leading-relaxed">
-                  Kelola notifikasi suara pintar berbasis AI untuk pengingat jadwal mengajar Guru serta pengumuman kehadiran presensi siswa.
+                  Kelola notifikasi suara pintar berbasis AI untuk pengumuman kehadiran presensi siswa.
                 </p>
               </div>
             </div>
@@ -2824,186 +2771,7 @@ export const SchoolSettingsView: React.FC<SchoolSettingsViewProps> = ({
           )}
 
           {/* ======================================================== */}
-          {/* SUB-BAGIAN 1: PENGINGAT SUARA AI JADWAL KBM GURU         */}
-          {/* ======================================================== */}
-          <div className="bg-gradient-to-br from-violet-50/70 via-white to-indigo-50/40 border border-violet-200/80 rounded-3xl p-5 sm:p-6 space-y-5">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-violet-100 pb-4">
-              <div className="flex items-center gap-3">
-                <div className="w-9 h-9 rounded-xl bg-violet-600 text-white flex items-center justify-center font-bold shadow-xs">
-                  <BellRing className="w-4 h-4" />
-                </div>
-                <div>
-                  <h3 className="text-sm font-extrabold text-slate-900">
-                    1. Pengingat Jadwal Mengajar Guru (Suara AI KBM)
-                  </h3>
-                  <p className="text-xs text-slate-500">
-                    Memadukan lonceng harmonis 4-akord dan Suara AI alami untuk mengingatkan guru saat jam mengajar dimulai.
-                  </p>
-                </div>
-              </div>
-
-              {/* Master Toggle Suara AI Guru */}
-              <label className="relative inline-flex items-center cursor-pointer select-none self-start sm:self-auto">
-                <input
-                  type="checkbox"
-                  checked={formData.aiVoiceTeacherReminderEnabled ?? formData.waTeacherReminderEnabled ?? true}
-                  onChange={(e) => {
-                    const val = e.target.checked;
-                    setFormData({
-                      ...formData,
-                      aiVoiceTeacherReminderEnabled: val,
-                      waTeacherReminderEnabled: val
-                    });
-                    setKbmVoiceReminderEnabled(val);
-                  }}
-                  className="sr-only peer"
-                />
-                <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-violet-600"></div>
-                <span className="ml-2.5 text-xs font-bold text-slate-800">
-                  {(formData.aiVoiceTeacherReminderEnabled ?? formData.waTeacherReminderEnabled ?? true) ? '🔊 Suara AI Aktif' : '🔇 Dinonaktifkan'}
-                </span>
-              </label>
-            </div>
-
-            {/* Setting: Waktu Pengingat Menit Sebelum */}
-            <div className="grid grid-cols-1 sm:grid-cols-12 gap-4 items-center bg-white border border-violet-100/80 rounded-2xl p-4 shadow-2xs">
-              <div className="sm:col-span-8">
-                <label className="block text-xs font-bold text-slate-800">
-                  Waktu Pemutaran Pengingat Suara AI
-                </label>
-                <p className="text-[11px] text-slate-500 mt-0.5">
-                  Tentukan kapan nada lonceng dan panggilan Suara AI dibunyikan sebelum jam mengajar dimulai.
-                </p>
-              </div>
-              <div className="sm:col-span-4">
-                <select
-                  value={formData.aiVoiceTeacherReminderMinutesBefore ?? formData.waTeacherReminderMinutesBefore ?? 0}
-                  onChange={(e) => setFormData({
-                    ...formData,
-                    aiVoiceTeacherReminderMinutesBefore: Number(e.target.value),
-                    waTeacherReminderMinutesBefore: Number(e.target.value)
-                  })}
-                  className="w-full text-xs font-bold bg-violet-50/50 border border-violet-200 rounded-xl px-3 py-2.5 text-violet-900 focus:ring-2 focus:ring-violet-500 focus:outline-none"
-                >
-                  <option value={0}>⏰ Tepat Saat Jam KBM Dimulai (0 Menit)</option>
-                  <option value={3}>⏳ 3 Menit Sebelum KBM Dimulai</option>
-                  <option value={5}>⏳ 5 Menit Sebelum KBM Dimulai</option>
-                  <option value={10}>⏳ 10 Menit Sebelum KBM Dimulai</option>
-                </select>
-              </div>
-            </div>
-
-            {/* Format Kalimat Suara AI Pengingat Guru */}
-            <div className="space-y-2 bg-white border border-violet-100/80 rounded-2xl p-4 shadow-2xs">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                <label className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
-                  <MessageSquare className="w-3.5 h-3.5 text-violet-600" />
-                  Format Kalimat Suara AI & Pesan Pengingat Guru:
-                </label>
-                <button
-                  type="button"
-                  onClick={handleResetTeacherVoiceTemplate}
-                  className="text-[11px] text-violet-600 hover:text-violet-800 font-bold underline flex items-center gap-1 cursor-pointer self-start sm:self-auto"
-                >
-                  <RotateCcw className="w-3 h-3" />
-                  Kembalikan Format Default
-                </button>
-              </div>
-
-              <textarea
-                rows={3}
-                value={formData.aiVoiceTemplateTeacherReminder ?? DEFAULT_TEACHER_SPEECH_TEMPLATE}
-                onChange={(e) => setFormData({
-                  ...formData,
-                  aiVoiceTemplateTeacherReminder: e.target.value
-                })}
-                placeholder="Contoh: Pemberitahuan kepada [TeacherName]. Anda memiliki jadwal mengajar mata pelajaran [Subject] di [ClassName] [PeriodLabel]..."
-                className="w-full text-xs bg-slate-50 border border-slate-200 rounded-xl p-3 text-slate-800 focus:bg-white focus:ring-2 focus:ring-violet-500 focus:outline-none font-mono leading-relaxed"
-              />
-
-              {/* Dynamic Variable Chips */}
-              <div className="pt-1 flex flex-wrap items-center gap-1.5 text-[11px]">
-                <span className="text-slate-500 font-bold">Variabel Tersedia:</span>
-                {['[TeacherName]', '[Subject]', '[ClassName]', '[Room]', '[Time]', '[PeriodLabel]', '[SchoolName]'].map((v) => (
-                  <span
-                    key={v}
-                    onClick={() => {
-                      const cur = formData.aiVoiceTemplateTeacherReminder ?? DEFAULT_TEACHER_SPEECH_TEMPLATE;
-                      setFormData({
-                        ...formData,
-                        aiVoiceTemplateTeacherReminder: `${cur} ${v}`
-                      });
-                    }}
-                    className="bg-violet-100/70 hover:bg-violet-200 text-violet-800 border border-violet-300/60 font-mono font-bold px-2 py-0.5 rounded-md cursor-pointer transition shadow-2xs"
-                    title={`Klik untuk menyisipkan ${v}`}
-                  >
-                    {v}
-                  </span>
-                ))}
-              </div>
-            </div>
-
-            {/* Interactive Live Testing Sandbox for Teacher AI Voice */}
-            <div className="bg-gradient-to-r from-violet-600 to-indigo-700 text-white rounded-2xl p-4 sm:p-5 shadow-sm space-y-3">
-              <div className="flex items-center justify-between gap-2 flex-wrap">
-                <div className="flex items-center gap-2">
-                  <Headphones className="w-4 h-4 text-violet-200" />
-                  <span className="text-xs font-bold uppercase tracking-wider text-violet-200">
-                    Live Testing Suara AI Pengingat Guru
-                  </span>
-                </div>
-                <span className="text-[11px] bg-white/10 px-2.5 py-0.5 rounded-full font-medium">
-                  Lonceng Harmonis + Suara Wanita
-                </span>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-12 gap-3 items-center">
-                <div className="sm:col-span-8">
-                  <label className="block text-[11px] text-violet-200 font-medium mb-1">
-                    Pilih Guru untuk Simulasi Pengingat KBM:
-                  </label>
-                  <select
-                    value={selectedTestTeacherId || (sortedTeachers[0]?.id || '')}
-                    onChange={(e) => setSelectedTestTeacherId(e.target.value)}
-                    className="w-full text-xs font-bold bg-white text-slate-900 border border-violet-300 rounded-xl px-3 py-2.5 focus:ring-2 focus:ring-white focus:outline-none"
-                  >
-                    {sortedTeachers.map((t, idx) => (
-                      <option key={`test-teacher-${t.id || 'tch'}-${idx}`} value={t.id}>
-                        {t.name} — ({t.subject1 || 'Mata Pelajaran'})
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <div className="sm:col-span-4 flex items-end">
-                  <button
-                    type="button"
-                    onClick={handleTestTeacherVoice}
-                    disabled={isTestingTeacherVoice}
-                    className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-white text-violet-900 hover:bg-violet-50 font-black rounded-xl text-xs transition shadow-md cursor-pointer disabled:opacity-75 disabled:cursor-not-allowed mt-4 sm:mt-0"
-                  >
-                    <Volume2 className={`w-4 h-4 text-violet-600 ${isTestingTeacherVoice ? 'animate-pulse text-amber-500' : ''}`} />
-                    <span>{isTestingTeacherVoice ? 'Memutar Suara AI...' : 'Uji Coba Suara AI Guru'}</span>
-                  </button>
-                </div>
-              </div>
-
-              {testTeacherVoicePlayingText && (
-                <div className="bg-black/25 border border-white/20 rounded-xl p-3 text-xs space-y-1 mt-2">
-                  <p className="text-[11px] text-violet-200 font-bold flex items-center gap-1">
-                    <Volume2 className="w-3 h-3 animate-pulse" />
-                    Kalimat yang Diucapkan AI:
-                  </p>
-                  <p className="italic text-white leading-relaxed font-sans">
-                    "{testTeacherVoicePlayingText}"
-                  </p>
-                </div>
-              )}
-            </div>
-          </div>
-
-          {/* ======================================================== */}
-          {/* SUB-BAGIAN 2: NOTIFIKASI & SUARA AI UNTUK ROLE ORANG TUA */}
+          {/* NOTIFIKASI & SUARA AI UNTUK ROLE ORANG TUA               */}
           {/* ======================================================== */}
           <div className="bg-gradient-to-br from-emerald-50/70 via-white to-teal-50/40 border border-emerald-200/80 rounded-3xl p-5 sm:p-6 space-y-5">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-emerald-100 pb-4">
@@ -3013,7 +2781,7 @@ export const SchoolSettingsView: React.FC<SchoolSettingsViewProps> = ({
                 </div>
                 <div>
                   <h3 className="text-sm font-extrabold text-slate-900">
-                    2. Suara AI Pengumuman Presensi Kehadiran Siswa
+                    Suara AI Pengumuman Presensi Kehadiran Siswa
                   </h3>
                   <p className="text-xs text-slate-500">
                     Konfigurasi kalimat pengumuman Suara AI saat presensi kehadiran Datang Tepat Waktu, Terlambat, Belum Absen/Alpa, dan Pulang Sekolah.
@@ -3497,7 +3265,7 @@ export const SchoolSettingsView: React.FC<SchoolSettingsViewProps> = ({
                 </div>
                 <p className="text-xs text-slate-600 leading-relaxed">
                   {formData.parentPortalLoginEnabled !== false
-                    ? 'Saat ini tombol dalam posisi AKTIF. Wali murid dapat melakukan login dengan NISN anak untuk melihat riwayat kehadiran, rekap nilai karakter, jadwal pelajaran, dan mengajukan surat izin/sakit.'
+                    ? 'Saat ini tombol dalam posisi AKTIF. Wali murid dapat melakukan login dengan NISN anak untuk melihat riwayat kehadiran, rekap nilai karakter, dan mengajukan surat izin/sakit.'
                     : 'Saat ini tombol dalam posisi NON-AKTIF. Seluruh akun wali murid yang sedang membuka aplikasi telah di-log off secara otomatis dan upaya login orang tua akan ditolak. Akun Admin Utama dan Guru tetap diizinkan login dan masuk normal.'}
                 </p>
               </div>

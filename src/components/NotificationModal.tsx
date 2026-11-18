@@ -4,7 +4,6 @@ import {
   X, 
   CheckCircle2, 
   Clock, 
-  Calendar, 
   AlertCircle, 
   BookOpen, 
   Award, 
@@ -24,8 +23,6 @@ import {
   LeaveRequest, 
   LearningJournal, 
   StudentCharacterLog, 
-  ClassScheduleSlot, 
-  LessonPeriod,
   Student,
   SchoolClass
 } from '../types';
@@ -34,8 +31,6 @@ import {
   getLeaveRequests, 
   getStudentCharacterLogs, 
   getLearningJournals, 
-  getClassSchedules, 
-  getLessonPeriods, 
   getStudents,
   getSchoolClasses,
   getTeachers,
@@ -45,7 +40,7 @@ import { playBkNotificationChime } from '../lib/kbmVoiceReminder';
 
 export interface AppNotification {
   id: string;
-  category: 'attendance' | 'leave' | 'journal' | 'character' | 'schedule' | 'bk' | 'wali_kelas';
+  category: 'attendance' | 'leave' | 'journal' | 'character' | 'bk' | 'wali_kelas';
   title: string;
   description: string;
   timestamp: string; // ISO or readable
@@ -53,7 +48,7 @@ export interface AppNotification {
   isUnread: boolean;
   targetTab: string;
   badgeColor: string;
-  icon: 'attendance' | 'leave' | 'journal' | 'character' | 'schedule' | 'bk' | 'wali_kelas';
+  icon: 'attendance' | 'leave' | 'journal' | 'character' | 'bk' | 'wali_kelas';
   studentId?: string;
   studentName?: string;
   characterLogId?: string;
@@ -171,16 +166,12 @@ export const NotificationModal: React.FC<NotificationModalProps> = ({
   const notifications = useMemo<AppNotification[]>(() => {
     const list: AppNotification[] = [];
     const todayStr = getLocalDateString();
-    const dayNames = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
-    const currentDayName = dayNames[new Date().getDay()];
 
     const students = getStudents();
     const attendanceRecords = getAttendanceRecords();
     const leaveRequests = getLeaveRequests();
     const journals = getLearningJournals();
     const characterLogs = getStudentCharacterLogs();
-    const schedules = getClassSchedules();
-    const periods = getLessonPeriods();
     const classes = getSchoolClasses();
 
     if (currentRole === 'PARENT') {
@@ -371,30 +362,6 @@ export const NotificationModal: React.FC<NotificationModalProps> = ({
         });
       });
 
-      // D. Today's Teaching Schedule Reminders (Teacher only)
-      if (currentRole === 'TEACHER') {
-        const mySchedulesToday = schedules.filter(s => {
-          const matchDay = (s.day?.toLowerCase() === currentDayName.toLowerCase()) || (s.day?.toUpperCase() === 'SEMUA');
-          const matchTeacher = s.teacherName?.toLowerCase() === teacherName.toLowerCase() || s.teacherId === userSession?.teacherId;
-          return matchDay && matchTeacher;
-        });
-
-        if (mySchedulesToday.length > 0) {
-          list.push({
-            id: `sched-${currentDayName}-${todayStr}`,
-            category: 'schedule',
-            title: `Jadwal Mengajar Hari Ini (${currentDayName})`,
-            description: `Anda memiliki ${mySchedulesToday.length} sesi mengajar hari ini: ${mySchedulesToday.map(s => `${s.className} (${s.subject})`).join(', ')}.`,
-            timestamp: todayStr,
-            timeLabel: 'Hari ini',
-            isUnread: false,
-            targetTab: 'journal',
-            badgeColor: 'bg-purple-100 text-purple-800 border-purple-300',
-            icon: 'schedule'
-          });
-        }
-      }
-
       // F. If not BK teacher and not homeroom teacher, show general recent character logs in school
       if (!isTeacherBk && !isHomeroomTeacher) {
         const recentLogs = characterLogs
@@ -509,8 +476,6 @@ export const NotificationModal: React.FC<NotificationModalProps> = ({
         return <BookOpen className="w-5 h-5 text-sky-600" />;
       case 'character':
         return <Award className="w-5 h-5 text-rose-600" />;
-      case 'schedule':
-        return <Calendar className="w-5 h-5 text-purple-600" />;
       default:
         return <Bell className="w-5 h-5 text-slate-600" />;
     }

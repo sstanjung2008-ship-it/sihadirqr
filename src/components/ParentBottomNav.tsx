@@ -1,5 +1,5 @@
 import React from 'react';
-import { Home, CalendarDays, FileText, UserCircle } from 'lucide-react';
+import { Home, FileText, UserCircle } from 'lucide-react';
 
 interface ParentBottomNavProps {
   activeTab: string;
@@ -18,12 +18,6 @@ export const ParentBottomNav: React.FC<ParentBottomNavProps> = React.memo(({
       label: 'Beranda',
       icon: Home,
       glowColor: 'from-emerald-500 to-teal-600',
-    },
-    {
-      id: 'schedule',
-      label: 'Jadwal',
-      icon: CalendarDays,
-      glowColor: 'from-indigo-500 to-blue-600',
     },
     {
       id: 'leaves',
